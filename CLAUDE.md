@@ -17,9 +17,10 @@ its leaves + this API. The API aggregates **only its own host's** leaves; cross-
 > root `tks/CLAUDE.md` still tags kgsm-api "superseded"; that refers to `legacy/`. The
 > live project is `src/Api/`, built per `PLAN.md`.
 
-**Status:** M0 (skeleton + runtime/stack decision) and **M1·a** (hosts — monitor scrape +
-§4·b capabilities) are `built` & self-validated (`scripts/smoke.sh` 12/12, degrade + happy
-path); M1·b–M8 are `planned`. Trust `PLAN.md`'s per-milestone status, not assumptions.
+**Status:** M0 (skeleton + runtime/stack decision), **M1·a** (hosts — monitor scrape + §4·b
+capabilities) and **M1·b** (servers — the kgsm-lib domain+run-state ⋈ monitor metrics join, the
+honest `Server` DTO) are `built` & self-validated (`scripts/smoke.sh` 18/18, degrade + happy
+path); M2–M8 are `planned`. Trust `PLAN.md`'s per-milestone status, not assumptions.
 
 ## Read first (sources of truth)
 
@@ -43,10 +44,15 @@ dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --self-contained -p:Pu
 ```
 
 `scripts/smoke.sh` is the **stand-in for the frontend** until the SPA can reach a host —
-it asserts every M0 contract over `curl`. Knobs: `SMOKE_PORT`, `SMOKE_SKIP_BUILD=1`,
-`SMOKE_DB`. **Runtime config lives in `appsettings.json`** — the documented schema + defaults
-for every `KGSM_API_*` key (host identity, the monitor/watchdog/assistant endpoints, bind
-`KGSM_API_URLS`, `KGSM_API_DB`, `KGSM_API_CORS_ORIGINS`). Each is **overridable by an env var
+it asserts every M0/M1 contract over `curl` (18/18). It runs two phases: Phase A degrade (no
+monitor, live kgsm) and Phase B an **embedded stub monitor** (a unix socket serving a canned
+`Snapshot`) that makes the host happy path + the M1·b servers-join present-branch deterministic
+with no external monitor. Knobs: `SMOKE_PORT`, `SMOKE_SKIP_BUILD=1`, `SMOKE_DB`, `SMOKE_KGSM_PATH`
+(the engine on another host), `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A).
+**Runtime config lives in `appsettings.json`** — the documented schema + defaults
+for every `KGSM_API_*` key (host identity, the **kgsm engine path/socket**, the
+monitor/watchdog/assistant endpoints, bind `KGSM_API_URLS`, `KGSM_API_DB`,
+`KGSM_API_CORS_ORIGINS`). Each is **overridable by an env var
 of the same name** (env wins — that's how the systemd unit and smoke configure a host); a
 blank leaf endpoint reports its capability `absent`. There is **no test project yet**
 (`tests/Api.Tests/` is planned — see `PLAN.md §7`); smoke is the current gate.
@@ -76,7 +82,12 @@ exactly one correct access path:
 - **Engine** (instances, run-state, config, lifecycle commands) → **only via `kgsm-lib`**
   (`TheKrystalShip.KGSM`, the single C#↔engine chokepoint; it reaches the watchdog via
   `IWatchdogClient`). **Never shell out to `kgsm.sh` or open the watchdog socket directly.**
-  Added in M1 (local feed: `/home/heisen/local-nuget`, currently 1.6.0).
+  Added in M1 (local feed: `/home/heisen/local-nuget`, currently 1.6.0). Wired at **M1·b** for
+  `GET /servers` (`IInstanceService.GetAll` + `GetAllStatuses(fast:true)`). kgsm-lib is **base,
+  not a leaf**: provisioned-by-default at `KGSM_API_KGSM_PATH` (`/usr/bin/kgsm`); an empty path is
+  a surfaced misconfiguration (empty `/servers` + a one-time log), not a §4·b capability. The
+  process-based `IInstanceService` is transient → resolved per-request from the provider; the kgsm
+  event socket (`KGSM_API_KGSM_SOCKET`) is only a registration formality until the M5 event consumer.
 - **Monitor** (host + per-instance metrics) → **scrape its unix socket**
   (`/run/kgsm-monitor.sock`, `GET /metrics`) directly — that's the monitor's neutral public
   output; reuse the watchdog client's `SocketsHttpHandler.ConnectCallback` pattern (done in

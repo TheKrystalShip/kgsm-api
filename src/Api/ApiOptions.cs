@@ -11,9 +11,15 @@ namespace TheKrystalShip.Api;
 /// A leaf's <c>*Provisioned</c> flag is derived from whether its endpoint is configured:
 /// a non-empty path/URL means the capability is declared on this host, an empty one means
 /// it is absent (the §4·b capability renders <c>absent</c>, not a broken <c>down</c>). The
-/// defaults provision the engine-side leaves (monitor, watchdog) at their standard sockets;
-/// the assistant is opt-in. (True host-registration provisioning arrives with the host
-/// registry later; config is the honest stand-in.)
+/// defaults provision the engine-side pieces (the kgsm engine, monitor, watchdog) at their
+/// standard install paths; the assistant is opt-in. (True host-registration provisioning
+/// arrives with the host registry later; config is the honest stand-in.)
+/// <para>
+/// The kgsm engine is <strong>base, not a leaf</strong> — the api is meaningless without
+/// the host's kgsm — so it is provisioned-by-default at its packaged path. Blanking
+/// <see cref="KgsmPath"/> is a misconfiguration the api surfaces (an empty <c>/servers</c>
+/// plus a loud log), never a normal "capability absent" — there is no §4·b engine capability.
+/// </para>
 /// </remarks>
 public sealed class ApiOptions
 {
@@ -39,9 +45,29 @@ public sealed class ApiOptions
     /// </summary>
     public required string AssistantBaseUrl { get; init; }
 
+    /// <summary>
+    /// Path to the host's <c>kgsm.sh</c> entrypoint — the single C#↔engine chokepoint kgsm-lib
+    /// shells (instances, run-state). Default: the AUR-packaged symlink <c>/usr/bin/kgsm</c>.
+    /// Empty ⇒ the engine is not configured (a misconfiguration: <c>/servers</c> is empty + logged).
+    /// </summary>
+    public required string KgsmPath { get; init; }
+
+    /// <summary>
+    /// Path to the kgsm event socket. A <em>registration formality</em> for M1·b — kgsm-lib's
+    /// <c>IInstanceService</c> is process-based (it shells <see cref="KgsmPath"/>); only the
+    /// event consumer (M5) opens this socket. Default: <c>/usr/share/kgsm/kgsm.sock</c>.
+    /// </summary>
+    public required string KgsmSocketPath { get; init; }
+
     public bool MetricsProvisioned => !string.IsNullOrWhiteSpace(MonitorSocketPath);
     public bool WatchdogProvisioned => !string.IsNullOrWhiteSpace(WatchdogSocketPath);
     public bool AssistantProvisioned => !string.IsNullOrWhiteSpace(AssistantBaseUrl);
+
+    /// <summary>
+    /// Whether the kgsm engine is configured (a non-empty <see cref="KgsmPath"/>). Unlike a leaf
+    /// capability, the engine is assumed present — <c>false</c> is a surfaced misconfiguration.
+    /// </summary>
+    public bool KgsmProvisioned => !string.IsNullOrWhiteSpace(KgsmPath);
 
     public static ApiOptions FromConfiguration(IConfiguration configuration)
     {
@@ -58,6 +84,8 @@ public sealed class ApiOptions
             MonitorSocketPath = Defaulted(configuration["KGSM_API_MONITOR_SOCKET"], "/run/kgsm-monitor.sock"),
             WatchdogSocketPath = Defaulted(configuration["KGSM_API_WATCHDOG_SOCKET"], "/run/kgsm-watchdog/control.sock"),
             AssistantBaseUrl = Defaulted(configuration["KGSM_API_ASSISTANT_URL"], ""),
+            KgsmPath = Defaulted(configuration["KGSM_API_KGSM_PATH"], "/usr/bin/kgsm"),
+            KgsmSocketPath = Defaulted(configuration["KGSM_API_KGSM_SOCKET"], "/usr/share/kgsm/kgsm.sock"),
         };
     }
 

@@ -55,6 +55,16 @@ public class Startup(IConfiguration configuration)
         if (apiOptions.WatchdogProvisioned)
             services.AddKgsmWatchdogClient(apiOptions.WatchdogSocketPath);
 
+        // M1·b — the servers join. kgsm-lib is the engine chokepoint (base, not a leaf): registered
+        // when the engine is provisioned (it is, by default, at the packaged path). IInstanceService
+        // is process-based — it shells KgsmPath — so the socket arg is only a registration formality
+        // here (the event consumer that opens it lands at M5); the kgsm-lib singletons are lazy, so a
+        // non-existent socket never blocks startup. The ServerAggregator resolves IInstanceService
+        // per-request and degrades to an empty list (logged once) if the engine is unconfigured.
+        if (apiOptions.KgsmProvisioned)
+            services.AddKgsmServices(apiOptions.KgsmPath, apiOptions.KgsmSocketPath);
+        services.AddSingleton<ServerAggregator>();
+
         // Error contract over the default ProblemDetails body. AddProblemDetails is
         // registered only to satisfy UseExceptionHandler's startup guard — ApiExceptionHandler
         // always handles, so the ProblemDetails fallback never fires.

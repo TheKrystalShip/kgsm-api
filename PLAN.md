@@ -21,12 +21,15 @@
 `built` = exists & verified · `partial` = exists, incomplete · `planned` =
 designed, not built · `open` = not yet decided.
 
-**Today:** M0 `partial` and **M1·a `partial`** (backend built & self-validated; frontend
-gate pending). The skeleton (controllers + EF Core, **JIT**; §8) and the first leaf wiring
-— `GET /hosts` + `/hosts/{id}` scraped from kgsm-monitor with the §4·b capability block —
-are built and `scripts/smoke.sh` is **12/12** (8 M0 + 4 M1·a), proven both ways: degrade
-path (no monitor → metrics `down`, capacity `null`) and happy path (live monitor → real
-host capacity + a real `operational` watchdog probe). The superseded .NET 9 attempt is
+**Today:** M0 `partial`, **M1·a `partial`** and **M1·b `partial`** (backend built &
+self-validated; frontend gate pending). The skeleton (controllers + EF Core, **JIT**; §8),
+the first leaf wiring — `GET /hosts` + `/hosts/{id}` scraped from kgsm-monitor with the §4·b
+capability block — and now **the join `GET /servers` + `/servers/{id}`** (kgsm-lib domain +
+run-state ⋈ monitor per-instance metrics, the honest `Server` DTO frozen in §6) are built and
+`scripts/smoke.sh` is **18/18** (8 M0 + 4 M1·a + 6 M1·b), proven both ways: degrade path
+(no monitor → host metrics `down`/capacity `null`, every server `metrics:null`) and happy path
+(live/stub monitor → real host capacity, a real `operational` watchdog probe, and the servers
+join's present-branch carried through by id). The superseded .NET 9 attempt is
 parked in `legacy/` for harvest (keystone O4). Pending: the live frontend handshake + venue.
 The two read-side inputs it aggregates are `built` and ready: kgsm-lib 1.6.0 (domain +
 run-state façade + `IWatchdogClient`) and kgsm-monitor (host + per-instance metrics over
@@ -189,14 +192,33 @@ wiring* lands first.
   divergences from the §4·a/§4·b examples (capacity is nullable; `info.intervalMs` ms not
   `interval_s` s; `since`/`transport` omitted).
 
-**M1·b — Servers (the join).**
+**M1·b — Servers (the join).**  ·  `partial` (backend built & self-validated 2026-06-14; frontend gate pending)
 - **Goal:** join domain + status (kgsm-lib) with per-instance metrics (monitor).
-- **Wires:** adds kgsm-lib (embedded, `GetAllStatuses` + `GetAll`); join on instance id
-  (verified: monitor `ServerMetrics.Id` == the kgsm instance name == the lib dict key).
+- **Wires:** adds kgsm-lib (embedded, `GetAllStatuses(fast:true)` + `GetAll`); join on instance id
+  (lib-side `instance name == dict key` is live-proven; the monitor-side `ServerMetrics.Id == instance
+  name` is **by contract** — `Snapshot.cs`: "Id = stable instance name" — and stub-asserted, not yet
+  observed from a live monitor row, see the §8 honesty boundary).
 - **Scope:** `GET /servers`, `/servers/{id}`. **Honest DTO:** status tri-state from
   `Reading<T>` (`running` / `stopped` / `unknown`); metrics `cpuPctCore` (**preserved
   unit** — % of one core, can exceed 100), `memBytes`, nullable `io*`, `pids`, or **null**
   when the monitor is absent; every server carries `hostId` (this host).
+- **Built (2026-06-14):** `ServerDto` (the frozen §6 shape), `ServerAggregator` (the join — roster
+  from `GetAll`, run-state/version from `GetAllStatuses(fast:true)`, metrics by id from the monitor
+  snapshot; the two blocking kgsm-lib spawns run on the thread pool concurrently with the async
+  scrape), `ServersController`. kgsm-lib is **engine/base, not a leaf**: provisioned-by-default at
+  the AUR-packaged `KGSM_API_KGSM_PATH` (`/usr/bin/kgsm`); an unconfigured engine degrades to an
+  empty list + a one-time log (no §4·b "engine" capability). `IInstanceService` (transient) is
+  resolved per-request from the provider. `blueprint` is the clean id (strips the unified-blueprint
+  `.bp.yaml`, not just the last extension). Status/metrics are independent: a stopped server with no
+  monitor row is `status:"stopped", metrics:null`, never inferred from the other.
+- **Self-validated:** `scripts/smoke.sh` → **18/18** (8 M0 + 4 M1·a + 6 M1·b). Phase A (no monitor,
+  live dev kgsm): honest DTO shape + every server `metrics:null` + the `{unknown}` 404 envelope —
+  proves the domain read, the status mapping, and the null branch live. Phase B (embedded stub monitor
+  serving a canned `Snapshot` with a per-server row keyed to the real instance): the **join's
+  present-branch** — `cpuPctCore`>100 and a null `ioWriteBps` carried through verbatim, keyed by id —
+  plus the host happy path made deterministic. Live domain read off this host: `factorio-test`
+  (`native`, blueprint `factorio`, version `2.0.76`, `stopped`). The non-null join is **stub-proven**
+  (no running instance to scrape on this box), the domain read + null branch are **live-proven**.
 - **Depends:** M0, M1·a.
 - **Risk:** **the honest-DTO negotiation.** The v0.3 `Server` example asks for
   `cpu`(0–100), `ram.max`, `players`, `ip` — none honestly sourceable today; building
@@ -352,7 +374,7 @@ for the external surface and this doc for the backend's honest realization of it
 | Error envelope `{ error:{ code, message, details? } }` | M0 | `architecture.html §6` — **frozen, self-validated (500+404); browser fetch pending** |
 | Base path `/api/v1` (path-versioned, additive-only) | M0 | `architecture.html §6` — **frozen** |
 | JSON conventions: camelCase · ISO-8601 UTC `Z` · opaque ids | M0 | `architecture.html §6` — **frozen; camelCase + `Z` via shared JSON options (MVC + HTTP), verified** |
-| `Server` DTO (honest realization) | **M1·b** | reconcile vs §3 example; preserve `cpuPctCore`, null the unsourceable |
+| `Server` DTO (honest realization) | **M1·b** | `architecture.html §3` — **frozen 2026-06-14.** `{ id, name, blueprint, status, version?, runtime, hostId, metrics? }`; `metrics:{ cpuPctCore, memBytes, ioReadBps?, ioWriteBps?, pids }` or **`null`**. Stable keys, explicit nulls. **Divergences from the §3 example (the negotiated honest-vs-aspirational contract):** `status` is `running\|stopped\|unknown` (from `Reading<InstanceRuntimeStatus>`), NOT `online\|offline\|updating\|crashed\|installing` (transitional states need the M3 job tracker + crash detection); `metrics.cpuPctCore` is **% of one core (can exceed 100)**, not `cpu` 0–100; `memBytes` replaces `ram{used,max}` (no honest memory limit); **omitted as unsourceable**: `players`, `ip`, `ram.max`, `updatedAt` (no state-change tracking until M2), and the curated `game` display name (we emit the real `blueprint` id — metadata curation deferred, never guessed). Join key: instance id (`monitor ServerMetrics.Id` == kgsm instance name == lib dict key). `/servers/{id}` == the list element shape (full detail later). |
 | `Host` DTO + capacity (`cpuPct`/`mem`/`disks`) | M1·a | `architecture.html §4·a` — **frozen 2026-06-14.** `{ id, label, status:"online", cpuPct, mem{used,total} GiB, disks[]{mount,used,total} GiB, capabilities }`. **Divergence (record for the gate):** capacity (`cpuPct`/`mem`/`disks`) is **nullable** — `null` when metrics ≠ operational (the §4·a example always shows numbers). `/hosts/{id}` currently == the list shape; §244's sensors/network/processes are deferred. |
 | Capability record `{ provisioned, status, since?, message?, info? }` | M1·a | `architecture.html §4·b` — **frozen 2026-06-14.** status ∈ `operational|degraded|down|unknown`; `provisioned:false` → client-derived `absent`. M1·a emits `operational`/`down` (+ `absent`); `degraded`/`unknown` arrive with the M2 stream. **Divergences:** `info` keys are camelCase and **`info.intervalMs` (ms) replaces the example's `info.interval_s` (seconds)** — a name *and* unit change, faithful to the monitor's native field; `since`/`last_sample_at` **omitted** (no status-change tracking until M2); `transport` **omitted** (REST now, not `"sse"`). |
 | Monitor `/metrics` wire shape (`Snapshot` graph) | M1·a | **shared package** `TheKrystalShip.KGSM.Monitor.Contracts` — the DTO graph + source-gen camelCase JSON, built in kgsm-monitor and consumed here so the contract is solid at build time. **Drift rule:** any contract change MUST bump the package `Version` and the api's `<PackageReference>` (a same-version repack is silently served stale from the NuGet cache). |
@@ -487,3 +509,67 @@ auto-maps client-error results. Fixed with `SuppressMapClientErrors=true` so 4xx
 capacity is nullable, `info.intervalMs` (ms) replaces `interval_s` (s), `since`/`transport`
 are omitted, and `/hosts/{id}` == the list shape (sensors/network/processes deferred). Agree
 these before the store swap.
+
+### M1·b — 2026-06-14 · servers (the join: kgsm-lib ⋈ monitor) self-validated; frontend gate PENDING
+**Status:** the project's central join is built and verified (the honest `Server` DTO; domain +
+run-state from kgsm-lib joined with per-instance metrics from the monitor, keyed on instance id);
+the collaborative gate (frontend swaps `serversStore` mock → real) is deferred with M0/M1·a's.
+Not marked "frontend validated."
+
+**The honest `Server` DTO (frozen in §6).** This is the project's most important contract
+conversation, and the divergence from the aspirational `architecture.html §3` example *is* the
+contract: `status` is `running|stopped|unknown` (from `Reading<InstanceRuntimeStatus>` — measured
+bool → running/stopped, any non-measured/missing reading → `unknown`), never the aspirational
+`online|offline|updating|crashed|installing` (those transitional states need the M3 job tracker +
+crash detection that don't exist). Metrics keep the monitor's native units — `cpuPctCore` (% of one
+core, **can exceed 100**), `memBytes`, nullable `io*` — nested under a `metrics` block that is
+**`null`** when no per-server sample exists (monitor absent/unreachable, or the server simply isn't
+running). Omitted as unsourceable (fabrication is what scrapped the old api): `players`, `cpu` 0–100,
+`ram.max`, `ip`, `updatedAt`, and the curated `game` display name — we emit the real `blueprint` id
+(the clean `<name>` from the unified `<name>.bp.yaml`), metadata curation deferred and never guessed.
+Keys are always present with explicit nulls so the SPA binds a stable shape.
+
+**Wiring.** kgsm-lib is **engine/base, not a leaf** (keystone §4): the api co-locates with a kgsm,
+so it is provisioned-by-default at the AUR-packaged path (`KGSM_API_KGSM_PATH=/usr/bin/kgsm`); an
+unconfigured engine is a *misconfiguration* surfaced as an empty `/servers` + a one-time log, NOT a
+§4·b "engine" capability (there is none). `IInstanceService` is process-based (it shells `kgsm.sh`),
+so the kgsm event socket (`KGSM_API_KGSM_SOCKET`) is only a registration formality here — the event
+consumer that opens it lands at M5; the kgsm-lib singletons are lazy, so a non-existent socket never
+blocks startup. `IInstanceService` is transient, resolved per-request from the provider (the same
+optional-resolve pattern `HostAggregator` uses for the watchdog client). The two blocking kgsm-lib
+spawns (`GetAll`, `GetAllStatuses(fast:true)`) run on the thread pool concurrently with the async
+monitor scrape. `fast:true` skips the slow per-instance update-check (Version.Latest goes null — not
+emitted anyway); `Version.Current` is still reported.
+
+**Self-validated:** `scripts/smoke.sh` → **18/18** (8 M0 + 4 M1·a + 6 M1·b), two phases.
+*Phase A* (no monitor, live dev kgsm at `/home/heisen/tks/kgsm/kgsm.sh`): the honest DTO shape
+(stable keys, valid `status`/`runtime` enums, this host's `hostId`), every server `metrics:null`
+(degrade honesty — never a fabricated zero), and the `{unknown}` 404 `{error}` envelope. Live read
+off this host: one instance `factorio-test` (`native`, blueprint `factorio`, version `2.0.76`,
+`stopped`) — so Phase A live-proves the **domain read, the status mapping, and the null branch**.
+*Phase B* (an embedded stub monitor — a unix socket serving a canned `Snapshot` with one
+per-server row keyed to the real instance): the **join's present-branch** — a `cpuPctCore` >100 and
+a null `ioWriteBps` carried through *verbatim*, keyed by id, on both the list and `{id}` paths — plus
+the host happy path (metrics `operational` + capacity present) now deterministic with no external
+monitor. **Honesty boundary recorded:** the non-null join is **stub-proven** (this box has no running
+instance to scrape a real cgroup/proc row from); the domain read and the null branch are **live-proven**.
+
+**Found at the gate:** `Instance.Blueprint` (`Path.GetFileNameWithoutExtension`) yields `"factorio.bp"`
+for a unified `factorio.bp.yaml`, and the status path's `Configuration.Blueprint` is `"factorio.bp.yaml"`
+— neither is the clean game id. The DTO strips the compound `.bp.yaml`/`.bp.yml` suffix deliberately to
+get `"factorio"`. Frozen as the wire value for `blueprint`.
+
+**Coverage honesty (what is NOT exercised):** (1) the join key's **monitor side** (`ServerMetrics.Id`
+== instance name) is contract-asserted + stub-asserted, never observed from a live monitor row — the
+non-null join awaits a *running* instance + the redeployed monitor (its 1.3.0 build isn't redeployed,
+keystone). (2) The `status:"unknown"` arm is **code-path-only**: this host's one instance is a measured
+`stopped`, so nothing produces a non-measured `Reading` to map to `unknown` in the live run (the smoke
+asserts `status ∈ {running,stopped,unknown}` but only hits `stopped`). (3) The kgsm-lib spawns are
+bounded by the lib's own `ProcessRunner` (the `Default` 30s tier kills the process tree on overrun →
+failure → our caught empty list), so a hung `kgsm.sh` degrades rather than stalling `/servers` forever
+— no api-side process timeout is added (the engine is base; trusted host until M4).
+
+**Owed to the frontend at the gate:** **not a clean backing-flip** — the server cards must render
+`cpuPctCore` (not `cpu` 0–100) and `memBytes` (not `ram{used,max}`), drop `players`/`ip`/`updatedAt`,
+read `blueprint` instead of a curated `game` name, and handle `status:"unknown"` and `metrics:null`
+as first-class. Agree these renderings before the store swap.

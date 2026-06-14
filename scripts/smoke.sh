@@ -8,17 +8,23 @@
 #   M1·a (§4·a/§4·b): GET /hosts + /hosts/{id} (this host's capacity + capability block),
 #   the 404 envelope on an unknown host, and the honesty coupling — metrics 'operational'
 #   iff capacity is present, 'down' iff capacity is null (never a fabricated number).
+#   M1·b (§3): GET /servers + /servers/{id} (kgsm-lib domain+run-state ⋈ monitor metrics) —
+#   the honest Server DTO, the 404 envelope, and the per-server metrics<->presence coupling.
 #
-# The M1·a checks run deterministically with NO monitor (the degrade path: metrics down,
-# capacity null, watchdog/assistant absent). Point them at live leaves to prove the happy
-# path: SMOKE_MONITOR_SOCKET=<sock> (metrics operational + real capacity), SMOKE_WATCHDOG_SOCKET=<sock>.
-# What this CANNOT prove is a real browser preflight (CORS is browser-enforced) or an
-# actual SPA fetch — those wait on frontend access.
+# Two phases. Phase A runs deterministically with NO monitor (the degrade path: host metrics
+# down + capacity null; every server metrics:null). Phase B starts an EMBEDDED stub monitor
+# (a unix socket serving a canned Snapshot with a per-server row keyed to a real instance) and
+# restarts the API at it — proving the happy path: host capacity present + the servers JOIN's
+# present-branch (metrics carried through, keyed by id). The stub makes both deterministic with
+# no external monitor; SMOKE_MONITOR_SOCKET still overrides Phase A's monitor if you want a live one.
+# What this CANNOT prove is a real browser preflight (CORS is browser-enforced) or an actual SPA
+# fetch — those wait on frontend access.
 #
-# Usage:  scripts/smoke.sh                 # build + run all checks
+# Usage:  scripts/smoke.sh                 # build + run all checks (both phases)
 #         SMOKE_PORT=9001 scripts/smoke.sh
 #         SMOKE_SKIP_BUILD=1 scripts/smoke.sh   # reuse the existing Release build
-#         SMOKE_MONITOR_SOCKET=/run/kgsm-monitor.sock scripts/smoke.sh   # prove happy path
+#         SMOKE_KGSM_PATH=/path/to/kgsm.sh scripts/smoke.sh   # engine on another host
+#         SMOKE_MONITOR_SOCKET=/run/kgsm-monitor.sock scripts/smoke.sh   # live monitor in Phase A
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,6 +38,14 @@ HOST_ID="${SMOKE_HOST_ID:-smoke-host}"
 MON_SOCK="${SMOKE_MONITOR_SOCKET:-/tmp/kgsm-api-smoke-nomonitor.sock}"  # absent by default
 WD_SOCK="${SMOKE_WATCHDOG_SOCKET:-}"                                    # empty -> watchdog absent
 
+# M1·b engine wiring. kgsm-lib is base, not a leaf: point it at the canonical dev checkout so
+# GET /servers reads a real roster. Override with SMOKE_KGSM_PATH on another host.
+KGSM_PATH="${SMOKE_KGSM_PATH:-/home/heisen/tks/kgsm/kgsm.sh}"
+# Unix socket for the embedded stub monitor (Phase B — proves the join's present-branch).
+STUB_SOCK="/tmp/kgsm-api-smoke-stub-monitor.sock"; rm -f "$STUB_SOCK"
+# Canned per-server metric values the stub serves; the join must carry these through verbatim.
+STUB_CPU=142.5; STUB_MEM=3422552064; STUB_IO_READ=4096; STUB_PIDS=12  # ioWrite is null (nullable passthrough)
+
 pass=0; fail=0
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
 bad() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fail=$((fail+1)); }
@@ -44,19 +58,26 @@ if [[ "${SMOKE_SKIP_BUILD:-0}" != "1" || ! -f "$DLL" ]]; then
 fi
 [[ -f "$DLL" ]] || { echo "assembly missing: $DLL"; exit 2; }
 
-# --- run -------------------------------------------------------------------
-echo "==> Starting API on ${BASE}"
-KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" \
-KGSM_API_HOST_ID="$HOST_ID" KGSM_API_MONITOR_SOCKET="$MON_SOCK" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" \
-  dotnet "$DLL" >/tmp/kgsm-api-smoke.log 2>&1 &
-SRV=$!
-cleanup() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
+# --- lifecycle helpers ------------------------------------------------------
+PIDS=()
+cleanup() {
+  for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
+  for p in "${PIDS[@]:-}"; do wait "$p" 2>/dev/null; done
+  rm -f "$STUB_SOCK" 2>/dev/null
+}
 trap cleanup EXIT
 
-for _ in $(seq 1 80); do
-  curl -fsS "${BASE}/healthz" >/dev/null 2>&1 && break
-  sleep 0.1
-done
+# start_api MONITOR_SOCKET — launch the API with the given monitor socket; wait for /healthz.
+start_api() {
+  KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" \
+  KGSM_API_HOST_ID="$HOST_ID" KGSM_API_MONITOR_SOCKET="$1" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" \
+  KGSM_API_KGSM_PATH="$KGSM_PATH" \
+    dotnet "$DLL" >/tmp/kgsm-api-smoke.log 2>&1 &
+  SRV=$!; PIDS+=("$SRV")
+  for _ in $(seq 1 80); do curl -fsS "${BASE}/healthz" >/dev/null 2>&1 && return 0; sleep 0.1; done
+  return 1
+}
+stop_api() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
 
 # req METHOD PATH [extra curl args...] -> sets $CODE and $BODY
 req() {
@@ -64,6 +85,10 @@ req() {
   curl -s -X "$method" -o /tmp/kgsm-api-smoke.body -w '%{http_code}' "$@" "${BASE}${path}" > /tmp/kgsm-api-smoke.code
   CODE="$(cat /tmp/kgsm-api-smoke.code)"; BODY="$(cat /tmp/kgsm-api-smoke.body)"
 }
+
+# --- Phase A: no monitor (degrade path) ------------------------------------
+echo "==> Phase A — Starting API on ${BASE} (no monitor; kgsm=${KGSM_PATH})"
+start_api "$MON_SOCK" || { echo "API never became healthy; log:"; tail -20 /tmp/kgsm-api-smoke.log; exit 2; }
 
 echo "==> Checks"
 
@@ -157,6 +182,133 @@ sys.exit(0 if ((m=='operational' and present) or (m!='operational' and absent)) 
   STATUS="$(python3 -c "import json;print(json.load(open('/tmp/kgsm-api-smoke.body'))['capabilities']['metrics']['status'])" 2>/dev/null)"
   ok "metrics '${STATUS}' ↔ capacity coupling (honest unknown, never fabricated)"
 else bad "capacity/metrics coupling violated (body=$BODY)"; fi
+
+# --- M1·b: servers (kgsm-lib domain+run-state ⋈ monitor metrics) -----------
+echo "==> M1·b server checks — Phase A degrade (no monitor; kgsm=${KGSM_PATH})"
+
+# 13. GET /servers — honest DTO shape: stable keys, valid status/runtime enums, this host's id.
+req GET /api/v1/servers
+if [[ "$CODE" == 200 ]] && EXP="$HOST_ID" python3 -c "
+import json,os,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+if not (isinstance(d,list) and len(d)>=1): sys.exit(2)   # empty roster -> can't prove a real read
+keys={'id','name','blueprint','status','version','runtime','hostId','metrics'}
+for s in d:
+    if set(s)!=keys: sys.exit(3)
+    if s['status'] not in ('running','stopped','unknown'): sys.exit(4)
+    if s['runtime'] not in ('native','container'): sys.exit(5)
+    if s['hostId']!=os.environ['EXP']: sys.exit(6)
+sys.exit(0)
+" 2>/dev/null; then
+  N="$(python3 -c "import json;print(len(json.load(open('/tmp/kgsm-api-smoke.body'))))" 2>/dev/null)"
+  ok "/servers 200 + honest DTO shape (n=${N})"
+else bad "/servers shape (code=$CODE body=$BODY) [empty roster? set SMOKE_KGSM_PATH]"; fi
+
+# The join in Phase B keys on a real instance id; capture the first one from the roster.
+FIRST_ID="$(python3 -c "import json;d=json.load(open('/tmp/kgsm-api-smoke.body'));print(d[0]['id'] if d else '')" 2>/dev/null)"
+
+# 14. Degrade honesty: with no monitor, EVERY server's metrics is null (not a fabricated zero).
+req GET /api/v1/servers
+if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if all(s['metrics'] is None for s in d) else 1)
+" 2>/dev/null; then
+  ok "/servers metrics:null with no monitor (honest unknown, never fabricated)"
+else bad "/servers metrics not null under degrade (body=$BODY)"; fi
+
+# 15. GET /servers/{unknown} — OUR 404 envelope, not framework ProblemDetails.
+req GET /api/v1/servers/does-not-exist
+[[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
+  && ok "/servers/{unknown} 404 → {error:{code:not_found}}" || bad "/servers unknown 404 envelope (code=$CODE body=$BODY)"
+
+stop_api
+
+# --- Phase B: embedded stub monitor → host happy path + the servers JOIN present-branch ----
+echo "==> M1·b server checks — Phase B join (stub monitor at ${STUB_SOCK})"
+
+if [[ -z "$FIRST_ID" ]]; then
+  echo "  (skipping Phase B: empty roster — no instance id to key the join on; set SMOKE_KGSM_PATH)"
+else
+  # A tiny unix-socket HTTP stub that serves a canned monitor Snapshot (camelCase, matching
+  # TheKrystalShip.KGSM.Monitor.Contracts) with ONE per-server row keyed to $FIRST_ID. cpuPctCore
+  # is >100 (% of one core, can exceed 100) and ioWriteBps is null — both exercise honest passthrough.
+  STUB_PY="/tmp/kgsm-api-smoke-stub.py"
+  cat > "$STUB_PY" <<'PYEOF'
+import socket, os, json, sys
+sock_path = sys.argv[1]
+sid = os.environ.get('SNAP_ID', 'x')
+snap = {
+  "ts": 1718400000000, "intervalMs": 1000, "hostname": "smoke-stub", "uptimeSec": 12345,
+  "cpu": {"totalPct": 12.5, "perCore": [10.0, 15.0], "load": {"one": 0.4, "five": 0.5, "fifteen": 0.6}},
+  "mem": {"totalKb": 32768000, "availableKb": 16384000, "usedKb": 16384000, "usedPct": 50.0, "swapTotalKb": 0, "swapUsedKb": 0},
+  "disk": {"mounts": [{"mount": "/", "fs": "ext4", "totalBytes": 500000000000, "usedBytes": 250000000000, "usedPct": 50.0}], "io": {"readBps": 1000, "writeBps": 2000}},
+  "net": {"ifaces": [{"name": "eth0", "rxBps": 100, "txBps": 200, "rxPps": 1, "txPps": 2}]},
+  "servers": [{"id": sid, "name": sid, "kind": "native",
+               "cpuPctCore": float(os.environ['SNAP_CPU']), "memBytes": int(os.environ['SNAP_MEM']),
+               "ioReadBps": int(os.environ['SNAP_IOREAD']), "ioWriteBps": None, "pids": int(os.environ['SNAP_PIDS'])}],
+}
+body = json.dumps(snap).encode()
+resp = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body
+try: os.unlink(sock_path)
+except FileNotFoundError: pass
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.bind(sock_path); s.listen(16)
+while True:
+    try: conn, _ = s.accept()
+    except OSError: break
+    try:
+        conn.recv(65536); conn.sendall(resp)
+    except OSError: pass
+    finally: conn.close()
+PYEOF
+
+  echo "  starting stub monitor (join keyed to '${FIRST_ID}')"
+  SNAP_ID="$FIRST_ID" SNAP_CPU="$STUB_CPU" SNAP_MEM="$STUB_MEM" SNAP_IOREAD="$STUB_IO_READ" SNAP_PIDS="$STUB_PIDS" \
+    python3 "$STUB_PY" "$STUB_SOCK" >/tmp/kgsm-api-smoke-stub.log 2>&1 &
+  PIDS+=("$!")
+  for _ in $(seq 1 40); do [[ -S "$STUB_SOCK" ]] && break; sleep 0.1; done
+  start_api "$STUB_SOCK" || { echo "API never healthy (Phase B); log:"; tail -20 /tmp/kgsm-api-smoke.log; exit 2; }
+
+  # 16. Host happy path, now deterministic: metrics operational + capacity present (M1·a, via stub).
+  req GET "/api/v1/hosts/${HOST_ID}"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if (d['capabilities']['metrics']['status']=='operational'
+               and d['cpuPct'] is not None and d['mem'] is not None and d['disks'] is not None) else 1)
+" 2>/dev/null; then
+    ok "host metrics operational + capacity present (stub snapshot)"
+  else bad "host happy-path capacity (code=$CODE body=$BODY)"; fi
+
+  # 17. The JOIN present-branch (detail path): the monitor row is carried through VERBATIM, keyed by id.
+  req GET "/api/v1/servers/${FIRST_ID}"
+  if [[ "$CODE" == 200 ]] && \
+     CPU="$STUB_CPU" MEM="$STUB_MEM" IOREAD="$STUB_IO_READ" PIDS_E="$STUB_PIDS" python3 -c "
+import json,os,sys
+m=json.load(open('/tmp/kgsm-api-smoke.body')).get('metrics')
+if m is None: sys.exit(1)
+sys.exit(0 if (abs(m['cpuPctCore']-float(os.environ['CPU']))<1e-6
+               and m['memBytes']==int(os.environ['MEM'])
+               and m['ioReadBps']==int(os.environ['IOREAD'])
+               and m['ioWriteBps'] is None
+               and m['pids']==int(os.environ['PIDS_E'])) else 2)
+" 2>/dev/null; then
+    ok "/servers/{id} JOIN present-branch (cpuPctCore>100 + null ioWrite carried through, keyed by id)"
+  else bad "/servers/{id} join present-branch (code=$CODE body=$BODY)"; fi
+
+  # 18. Server-side metrics<->presence coupling on the LIST path: the joined server has metrics.
+  req GET /api/v1/servers
+  if [[ "$CODE" == 200 ]] && ID="$FIRST_ID" python3 -c "
+import json,os,sys
+s=next((x for x in json.load(open('/tmp/kgsm-api-smoke.body')) if x['id']==os.environ['ID']), None)
+sys.exit(0 if (s is not None and s['metrics'] is not None) else 1)
+" 2>/dev/null; then
+    ok "/servers metrics present ↔ monitor operational (server-side coupling)"
+  else bad "/servers list join coupling (body=$BODY)"; fi
+
+  stop_api
+fi
 
 echo
 echo "==> ${pass} passed, ${fail} failed"
