@@ -44,9 +44,12 @@ dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --self-contained -p:Pu
 
 `scripts/smoke.sh` is the **stand-in for the frontend** until the SPA can reach a host —
 it asserts every M0 contract over `curl`. Knobs: `SMOKE_PORT`, `SMOKE_SKIP_BUILD=1`,
-`SMOKE_DB`. Runtime env: `KGSM_API_URLS` (bind), `KGSM_API_DB` (SQLite path),
-`KGSM_API_CORS_ORIGINS` (comma list; unset ⇒ any-origin dev mode). There is **no test
-project yet** (`tests/Api.Tests/` is planned — see `PLAN.md §7`); smoke is the current gate.
+`SMOKE_DB`. **Runtime config lives in `appsettings.json`** — the documented schema + defaults
+for every `KGSM_API_*` key (host identity, the monitor/watchdog/assistant endpoints, bind
+`KGSM_API_URLS`, `KGSM_API_DB`, `KGSM_API_CORS_ORIGINS`). Each is **overridable by an env var
+of the same name** (env wins — that's how the systemd unit and smoke configure a host); a
+blank leaf endpoint reports its capability `absent`. There is **no test project yet**
+(`tests/Api.Tests/` is planned — see `PLAN.md §7`); smoke is the current gate.
 
 ## The stack decision — do NOT undo it
 

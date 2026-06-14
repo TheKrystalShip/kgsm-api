@@ -167,8 +167,9 @@ wiring* lands first.
   maps 1:1 to §4·a `cpuPct`, `mem{used,total}`, `disks[]`) + the §4·b capabilities block
   (probe monitor / watchdog `IsReadyAsync` / assistant HTTP → `provisioned·operational·
   down·absent`). No kgsm-lib join yet.
-- **Built (2026-06-14):** `ApiOptions` (env config: host identity + leaf endpoints;
-  provisioning derived from whether each endpoint is configured), `MonitorClient`
+- **Built (2026-06-14):** `ApiOptions` (config via `IConfiguration`: host identity + leaf
+  endpoints, every key documented in `appsettings.json` and overridable by a same-named env
+  var; provisioning derived from whether each endpoint is configured), `MonitorClient`
   (cached-latest scrape, bounded ≤1s, fails closed to `null`), `HostAggregator` (one
   scrape → coherent capacity + metrics capability; watchdog/assistant probed concurrently,
   each bounded to 2s so a hung leaf never stalls `/hosts`), `HostsController`. The assistant
@@ -384,7 +385,7 @@ kgsm-api/
     Infrastructure/           # [M0] ApiExceptionHandler (IExceptionHandler→500 envelope), ApiErrors (envelope writer); auth handlers [M4]
     Json/                     # [M0] ApiJson (shared options config) + Iso8601UtcConverter
     Data/                     # [M0] AppDbContext (+ Probe de-risk) → [M4] Session → [M5] AuditEntry; Migrations/ from M5
-    ApiOptions.cs             # [M1·a] env config consolidation (host id/label, monitor/watchdog sockets, assistant url; *Provisioned derived from config) — built
+    ApiOptions.cs             # [M1·a] config consolidation via IConfiguration (host id/label, monitor/watchdog sockets, assistant url; keys documented in appsettings.json, env-overridable; *Provisioned derived from config) — built
     Services/
       Leaves/                 # [M1·a] MonitorClient (cached-latest ConnectCallback scrape; deserialize via shared Monitor.Contracts) + AssistantClient (typed HttpClient subclass; liveness ProbeAsync now, grows tools/capabilities/SSE relay at M7) · [M3] watchdog via kgsm-lib
       Aggregation/            # [M1·a] HostAggregator (capacity + §4·b capabilities; bounded concurrent leaf probes) → [M1·b] lib status ⋈ monitor metrics

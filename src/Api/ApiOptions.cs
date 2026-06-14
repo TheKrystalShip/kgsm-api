@@ -1,9 +1,11 @@
 namespace TheKrystalShip.Api;
 
 /// <summary>
-/// Consolidated environment configuration for the api (introduced at M1, replacing the
-/// inline env reads of M0). All values come from environment variables (systemd-friendly),
-/// resolved once at startup via <see cref="FromConfiguration"/> and registered as a singleton.
+/// Consolidated configuration for the api (introduced at M1, replacing the inline env reads
+/// of M0). Values are read through <see cref="IConfiguration"/>, so each key is documented
+/// in <c>appsettings.json</c> (the schema + defaults) and overridable by an environment
+/// variable of the same name (systemd-friendly). Resolved once at startup via
+/// <see cref="FromConfiguration"/> and registered as a singleton.
 /// </summary>
 /// <remarks>
 /// A leaf's <c>*Provisioned</c> flag is derived from whether its endpoint is configured:
