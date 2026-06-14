@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <RootNamespace>TheKrystalShip.Api</RootNamespace>
+    <AssemblyName>kgsm-api</AssemblyName>
+
+    <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
+         it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
+         See docs/m0-aot-spike-findings.md and PLAN.md §8 for the decision record.
+         Deploy is self-contained (publish with -r linux-x64 and the self-contained flag),
+         so the per-host "drop-in, no runtime install" story still holds — just a larger
+         artifact than the AOT binary would have been. ReadyToRun enabled at publish time. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.5" />
+
+    <!-- The single C#<->engine chokepoint: instances, run-state and the watchdog
+         client (IWatchdogClient) used for the M1 capability probe. Never shell kgsm.sh. -->
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.6.0" />
+
+    <!-- The shared GET /metrics wire contract (Snapshot graph + source-gen camelCase
+         JSON), built in kgsm-monitor. We deserialize the monitor scrape into these exact
+         types with the same JSON context, so the contract is solid at build time and
+         cannot drift between the monitor (producer) and this api (consumer). -->
+    <PackageReference Include="TheKrystalShip.KGSM.Monitor.Contracts" Version="1.0.0" />
+  </ItemGroup>
+
+</Project>
