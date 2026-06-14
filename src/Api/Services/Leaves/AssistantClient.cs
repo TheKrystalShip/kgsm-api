@@ -47,12 +47,13 @@ public sealed class AssistantClient : HttpClient
     public bool IsProvisioned { get; }
 
     /// <summary>
-    /// Provisional liveness probe for the §4·b assistant capability: any HTTP response means the
-    /// assistant process is reachable. Returns <c>false</c> on timeout, unreachable, or any error
-    /// — it never throws, and never blocks longer than <see cref="ProbeTimeout"/>. The real
-    /// readiness/health contract is defined with the SSE relay at M7.
+    /// Liveness probe for the §4·b assistant capability: <c>GET /health</c>, a 2xx means the assistant
+    /// is up and able to provide its capability (the canonical signal polled frequently by
+    /// <c>LeafHealthMonitor</c>). Returns <c>false</c> on timeout, unreachable, or non-2xx — it never
+    /// throws, and never blocks longer than <see cref="ProbeTimeout"/>. The assistant already serves
+    /// <c>/health</c> (the ecosystem-standard path); the SSE turn relay still lands at M7.
     /// </summary>
-    public async Task<bool> ProbeAsync(CancellationToken ct)
+    public async Task<bool> CheckHealthAsync(CancellationToken ct)
     {
         if (!IsProvisioned)
             return false;
@@ -63,20 +64,20 @@ public sealed class AssistantClient : HttpClient
         timed.CancelAfter(ProbeTimeout);
         try
         {
-            // Headers-only: we only need "did it respond", not the body.
-            using HttpResponseMessage _ = await this
-                .GetAsync("", HttpCompletionOption.ResponseHeadersRead, timed.Token)
+            // Headers-only: we only need the status, not the body.
+            using HttpResponseMessage resp = await this
+                .GetAsync("/health", HttpCompletionOption.ResponseHeadersRead, timed.Token)
                 .ConfigureAwait(false);
-            return true;
+            return resp.IsSuccessStatusCode;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            _logger.LogDebug("assistant probe timed out after {Timeout}", ProbeTimeout);
+            _logger.LogDebug("assistant /health probe timed out after {Timeout}", ProbeTimeout);
             return false;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "assistant probe failed");
+            _logger.LogDebug(ex, "assistant /health probe failed");
             return false;
         }
     }

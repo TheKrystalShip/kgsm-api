@@ -116,9 +116,10 @@ public sealed class ServerAggregator
                     : runtimeStatus.Version.Current;
             }
 
-            // Metrics only when the monitor produced a row for this id; otherwise honest null.
+            // Metrics only when the monitor produced a row for this id; otherwise honest null. The shared
+            // MetricsMapping is what keeps this byte-identical to the M2 servers/{id}/metrics tick.
             ServerMetricsDto? metrics = metricsById.TryGetValue(id, out Snap.ServerMetrics? m)
-                ? new ServerMetricsDto(Math.Round(m.CpuPctCore, 1), m.MemBytes, m.IoReadBps, m.IoWriteBps, m.Pids)
+                ? MetricsMapping.ToServerMetrics(m)
                 : null;
 
             servers.Add(new Server(

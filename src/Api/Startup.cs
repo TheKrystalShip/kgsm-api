@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Infrastructure;
 using TheKrystalShip.Api.Json;
+using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Extensions;
@@ -65,6 +66,19 @@ public class Startup(IConfiguration configuration)
             services.AddKgsmServices(apiOptions.KgsmPath, apiOptions.KgsmSocketPath);
         services.AddSingleton<ServerAggregator>();
 
+        // M2 — realtime. The hub is the per-host connection registry + fan-out; the three pumps poll
+        // their sources (neither the monitor nor kgsm-lib pushes) and publish only while subscribed, so
+        // an idle stream costs nothing. The /stream WebSocket endpoint lives in StreamController.
+        services.AddSingleton<StreamHub>();
+        services.AddHostedService<MetricsPump>();        // ~1s monitor scrape -> servers/{id}/metrics + hosts/{id}/metrics
+        services.AddHostedService<DomainPump>();         // ~3s domain join diff -> servers (status/roster)
+        // The leaf health monitor is ALWAYS-ON (not gated on subscribers): it polls each provisioned
+        // leaf's /health every ~2s as the canonical liveness signal, serves the cached capability block
+        // to GET /hosts (HostAggregator reads it), and publishes hosts/{id}/capabilities flips. It is one
+        // instance exposed as both a singleton (the readable cache) and a hosted service (the poll loop).
+        services.AddSingleton<LeafHealthMonitor>();
+        services.AddHostedService(sp => sp.GetRequiredService<LeafHealthMonitor>());
+
         // Error contract over the default ProblemDetails body. AddProblemDetails is
         // registered only to satisfy UseExceptionHandler's startup guard — ApiExceptionHandler
         // always handles, so the ProblemDetails fallback never fires.
@@ -103,6 +117,9 @@ public class Startup(IConfiguration configuration)
             };
             await ApiErrors.WriteAsync(http, http.Response.StatusCode, code, message);
         });
+
+        // Enable WebSocket upgrades before routing so the /api/v1/stream endpoint (M2) can accept them.
+        app.UseWebSockets();
 
         app.UseRouting();
         app.UseCors(CorsPolicy);

@@ -18,9 +18,11 @@ its leaves + this API. The API aggregates **only its own host's** leaves; cross-
 > live project is `src/Api/`, built per `PLAN.md`.
 
 **Status:** M0 (skeleton + runtime/stack decision), **M1·a** (hosts — monitor scrape + §4·b
-capabilities) and **M1·b** (servers — the kgsm-lib domain+run-state ⋈ monitor metrics join, the
-honest `Server` DTO) are `built` & self-validated (`scripts/smoke.sh` 18/18, degrade + happy
-path); M2–M8 are `planned`. Trust `PLAN.md`'s per-milestone status, not assumptions.
+capabilities), **M1·b** (servers — the kgsm-lib domain+run-state ⋈ monitor metrics join, the
+honest `Server` DTO) and **M2** (realtime — the `GET /api/v1/stream` WebSocket + the always-on
+leaf-health capability model) are `built` & self-validated (`scripts/smoke.sh` 25/25, degrade +
+happy path + a kill→restart degrade→recover cycle); M3–M8 are `planned`. Trust `PLAN.md`'s
+per-milestone status, not assumptions.
 
 ## Read first (sources of truth)
 
@@ -44,11 +46,15 @@ dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --self-contained -p:Pu
 ```
 
 `scripts/smoke.sh` is the **stand-in for the frontend** until the SPA can reach a host —
-it asserts every M0/M1 contract over `curl` (18/18). It runs two phases: Phase A degrade (no
-monitor, live kgsm) and Phase B an **embedded stub monitor** (a unix socket serving a canned
-`Snapshot`) that makes the host happy path + the M1·b servers-join present-branch deterministic
-with no external monitor. Knobs: `SMOKE_PORT`, `SMOKE_SKIP_BUILD=1`, `SMOKE_DB`, `SMOKE_KGSM_PATH`
-(the engine on another host), `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A).
+it asserts every M0/M1/M2 contract (25/25). It runs two phases: Phase A degrade (no monitor,
+live kgsm) and Phase B an **embedded stub monitor** (a unix socket serving a canned `Snapshot`)
+that makes the host happy path + the M1·b servers-join present-branch deterministic with no
+external monitor. **M2** is covered by an embedded **stdlib RFC6455 WebSocket client** (no
+`websocat`/`wscat`/`websockets` dependency) that subscribes, reads honest ticks, and — killing
+**then restarting** the stub monitor mid-stream — proves the degrade→recover capability lifecycle
+(down flip + tick silence, then operational flip + ticks resume, `provisioned:true` throughout).
+Knobs: `SMOKE_PORT`, `SMOKE_SKIP_BUILD=1`, `SMOKE_DB`, `SMOKE_KGSM_PATH` (the engine on another
+host), `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A).
 **Runtime config lives in `appsettings.json`** — the documented schema + defaults
 for every `KGSM_API_*` key (host identity, the **kgsm engine path/socket**, the
 monitor/watchdog/assistant endpoints, bind `KGSM_API_URLS`, `KGSM_API_DB`,
@@ -91,17 +97,34 @@ exactly one correct access path:
 - **Monitor** (host + per-instance metrics) → **scrape its unix socket**
   (`/run/kgsm-monitor.sock`, `GET /metrics`) directly — that's the monitor's neutral public
   output; reuse the watchdog client's `SocketsHttpHandler.ConnectCallback` pattern (done in
-  `Services/Leaves/MonitorClient.cs`, M1·a). The snapshot is deserialized into the **shared
+  `Services/Leaves/MonitorClient.cs`, M1·a). M2 added `CheckHealthAsync` (`GET /health`) as the
+  liveness signal, **separate from the data scrape** (a warming monitor is operational with no
+  frame yet). The snapshot is deserialized into the **shared
   `TheKrystalShip.KGSM.Monitor.Contracts`** package (the `Snapshot` graph + its source-gen
   camelCase JSON context), built in the kgsm-monitor repo — so producer and consumer share
   ONE build-time contract. **Never re-declare a local copy of the monitor DTOs.** Drift rule:
   any contract change bumps the package `Version` AND this project's `<PackageReference>` —
   a same-version repack is served stale from the NuGet cache (`id+version` keyed).
 - **Assistant** → the typed **`Services/Leaves/AssistantClient.cs`** (a dedicated
-  `HttpClient` subclass, not raw HTTP in the aggregator). M1·a uses it only for a liveness
-  `ProbeAsync` (the §4·b capability); it is the home the tool catalog, capability discovery,
+  `HttpClient` subclass, not raw HTTP in the aggregator). It exposes a liveness `CheckHealthAsync`
+  (`GET /health`, M2) for the §4·b capability; it is the home the tool catalog, capability discovery,
   and the **HTTP/SSE** turn relay (M7) grow into. Probe self-bounds via a linked token — leave
   the client's `Timeout` at default so future slower calls aren't capped by the probe budget.
+
+**Leaf health & the capability model (M2).** Capability **availability** is owned by the always-on
+**`Services/Leaves/LeafHealthMonitor.cs`**, which polls each *provisioned* leaf's health every ~2s
+(monitor + assistant `GET /health`; watchdog `IsReadyAsync` via kgsm-lib — never a direct socket).
+It is the **single source** feeding both the REST `GET /hosts` capability block (`HostAggregator`
+reads its cached `Current`) and the M2 `hosts/{id}/capabilities` stream (it publishes flips). Two
+axes, never conflated: **`provisioned`** (the capability *set*) is fixed at startup from config and
+**never flips at runtime** — it is what the frontend negotiates at connect; **`status`** is the live
+availability. A leaf failing flips only `status` (operational→down→operational) with
+`provisioned:true` — "temporarily unavailable, still there", **never** "lost"; never invent a softer
+status nor suppress the down flip. `since` = when *this api* observed the flip.
+**⚠ Uniform `/health` is wired ahead of upstream:** the api targets `/health` on every HTTP leaf, but
+the monitor's current build serves `/healthz` (assistant already serves `/health`) — so against an
+un-updated monitor the metrics capability reads `down` until upstream renames/adds `/health` (PLAN.md
+§8). This is the accepted, explicit state, not a bug.
 
 **Degrade gracefully:** a missing/down leaf removes only its capability (the §4·b
 capabilities block makes this first-class), never a 500. The API must run with any subset

@@ -100,6 +100,39 @@ public sealed class MonitorClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// Liveness probe for the metrics capability: <c>GET /health</c> over the same unix socket. A 2xx
+    /// means the monitor process is up and serving — the canonical "is this leaf able to provide its
+    /// capability" signal (polled frequently by <c>LeafHealthMonitor</c>), deliberately decoupled from
+    /// whether <c>/metrics</c> has produced a frame yet (a warming monitor is operational with no data,
+    /// not down). Returns <c>false</c> on unprovisioned, unreachable, slow, or non-2xx — never throws.
+    /// </summary>
+    /// <remarks>
+    /// Targets the ecosystem-standard <c>/health</c> path (uniform across leaves). The monitor's current
+    /// build serves <c>/healthz</c>; <c>/health</c> is to be added/renamed upstream — see PLAN.md §6.
+    /// </remarks>
+    public async Task<bool> CheckHealthAsync(CancellationToken ct)
+    {
+        if (_http is null)
+            return false; // unprovisioned: capability is absent, not down.
+
+        try
+        {
+            using HttpResponseMessage resp = await _http.GetAsync("/health", ct).ConfigureAwait(false);
+            return resp.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("monitor /health probe timed out after {Timeout}", ScrapeTimeout);
+            return false;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "monitor /health probe failed");
+            return false;
+        }
+    }
+
     private bool IsFresh() =>
         _hasFetched && Environment.TickCount64 - _lastFetchTicks < CacheTtl.TotalMilliseconds;
 

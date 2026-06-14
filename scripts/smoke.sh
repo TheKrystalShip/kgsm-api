@@ -10,15 +10,22 @@
 #   iff capacity is present, 'down' iff capacity is null (never a fabricated number).
 #   M1·b (§3): GET /servers + /servers/{id} (kgsm-lib domain+run-state ⋈ monitor metrics) —
 #   the honest Server DTO, the 404 envelope, and the per-server metrics<->presence coupling.
+#   M2 (§3·b/§3·j): GET /api/v1/stream WebSocket — the { topic, type, data } envelope, subscribe,
+#   per-server + host metric ticks carried through honestly, the servers topic staying quiet under
+#   the metric firehose, and the capability lifecycle: kill the monitor -> metric ticks fall silent +
+#   a capabilities patch reports metrics 'down' (provisioned:true — never "lost"); restart it ->
+#   metrics flips back 'operational' + ticks resume. Degrade AND recover gracefully, capability set fixed.
 #
 # Two phases. Phase A runs deterministically with NO monitor (the degrade path: host metrics
 # down + capacity null; every server metrics:null). Phase B starts an EMBEDDED stub monitor
 # (a unix socket serving a canned Snapshot with a per-server row keyed to a real instance) and
 # restarts the API at it — proving the happy path: host capacity present + the servers JOIN's
-# present-branch (metrics carried through, keyed by id). The stub makes both deterministic with
-# no external monitor; SMOKE_MONITOR_SOCKET still overrides Phase A's monitor if you want a live one.
+# present-branch (metrics carried through, keyed by id). It then opens a WebSocket and, mid-stream,
+# KILLS then RESTARTS the stub to prove the monitor-down/up capability lifecycle. The stub makes all of this deterministic
+# with no external monitor; SMOKE_MONITOR_SOCKET still overrides Phase A's monitor if you want a live one.
 # What this CANNOT prove is a real browser preflight (CORS is browser-enforced) or an actual SPA
-# fetch — those wait on frontend access.
+# fetch — those wait on frontend access. The WebSocket client is a ~70-line stdlib Python RFC6455
+# client (no websocat/wscat/websockets dependency, none of which are guaranteed on a host).
 #
 # Usage:  scripts/smoke.sh                 # build + run all checks (both phases)
 #         SMOKE_PORT=9001 scripts/smoke.sh
@@ -45,6 +52,9 @@ KGSM_PATH="${SMOKE_KGSM_PATH:-/home/heisen/tks/kgsm/kgsm.sh}"
 STUB_SOCK="/tmp/kgsm-api-smoke-stub-monitor.sock"; rm -f "$STUB_SOCK"
 # Canned per-server metric values the stub serves; the join must carry these through verbatim.
 STUB_CPU=142.5; STUB_MEM=3422552064; STUB_IO_READ=4096; STUB_PIDS=12  # ioWrite is null (nullable passthrough)
+# M2 realtime: the stdlib WebSocket client + where it logs the frames it receives.
+WS_PY="/tmp/kgsm-api-smoke-ws.py"
+WS_LOG="/tmp/kgsm-api-smoke-ws.log"
 
 pass=0; fail=0
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
@@ -79,6 +89,20 @@ start_api() {
 }
 stop_api() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
 
+# wait_caps_warm — block until the always-on LeafHealthMonitor has finished its first /health poll, so
+# the §4·b capability statuses have left their cold 'unknown' (makes the capability assertions deterministic).
+wait_caps_warm() {
+  for _ in $(seq 1 50); do
+    if curl -fsS "${BASE}/api/v1/hosts/${HOST_ID}" -o /tmp/kgsm-api-smoke.body 2>/dev/null && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if d['capabilities']['metrics']['status']!='unknown' else 1)
+" 2>/dev/null; then return 0; fi
+    sleep 0.1
+  done
+  return 1
+}
+
 # req METHOD PATH [extra curl args...] -> sets $CODE and $BODY
 req() {
   local method="$1" path="$2"; shift 2
@@ -89,6 +113,7 @@ req() {
 # --- Phase A: no monitor (degrade path) ------------------------------------
 echo "==> Phase A — Starting API on ${BASE} (no monitor; kgsm=${KGSM_PATH})"
 start_api "$MON_SOCK" || { echo "API never became healthy; log:"; tail -20 /tmp/kgsm-api-smoke.log; exit 2; }
+wait_caps_warm || echo "  (warn: capability status still 'unknown' after warm-wait)"
 
 echo "==> Checks"
 
@@ -168,19 +193,21 @@ req GET /api/v1/hosts/does-not-exist
 [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
   && ok "/hosts/{unknown} 404 → {error:{code:not_found}}" || bad "/hosts unknown 404 envelope (code=$CODE body=$BODY)"
 
-# 12. The honesty invariant: metrics status <-> capacity coupling. operational <=> capacity
-#     present (real numbers); down/absent <=> capacity null. Never a fabricated default.
+# 12. The honesty invariant, now that status comes from /health and capacity from /metrics (two
+#     independent sources): capacity present REQUIRES operational; a non-operational metrics capability
+#     REQUIRES null capacity. operational may have null capacity (monitor up but warming, no frame yet) —
+#     never a fabricated number, and never run-state inferred from frame-presence (metric-presence ≠ status).
 req GET "/api/v1/hosts/${HOST_ID}"
 if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 m=d['capabilities']['metrics']['status']
 present = d['cpuPct'] is not None and d['mem'] is not None and d['disks'] is not None
-absent  = d['cpuPct'] is None and d['mem'] is None and d['disks'] is None
-sys.exit(0 if ((m=='operational' and present) or (m!='operational' and absent)) else 1)
+# present ⇒ operational  (equivalently: not-operational ⇒ capacity null)
+sys.exit(0 if (m=='operational' or not present) else 1)
 " 2>/dev/null; then
   STATUS="$(python3 -c "import json;print(json.load(open('/tmp/kgsm-api-smoke.body'))['capabilities']['metrics']['status'])" 2>/dev/null)"
-  ok "metrics '${STATUS}' ↔ capacity coupling (honest unknown, never fabricated)"
+  ok "metrics '${STATUS}' ↔ capacity coupling (present⇒operational; honest, never fabricated)"
 else bad "capacity/metrics coupling violated (body=$BODY)"; fi
 
 # --- M1·b: servers (kgsm-lib domain+run-state ⋈ monitor metrics) -----------
@@ -266,9 +293,10 @@ PYEOF
   echo "  starting stub monitor (join keyed to '${FIRST_ID}')"
   SNAP_ID="$FIRST_ID" SNAP_CPU="$STUB_CPU" SNAP_MEM="$STUB_MEM" SNAP_IOREAD="$STUB_IO_READ" SNAP_PIDS="$STUB_PIDS" \
     python3 "$STUB_PY" "$STUB_SOCK" >/tmp/kgsm-api-smoke-stub.log 2>&1 &
-  PIDS+=("$!")
+  STUB_PID=$!; PIDS+=("$STUB_PID")
   for _ in $(seq 1 40); do [[ -S "$STUB_SOCK" ]] && break; sleep 0.1; done
   start_api "$STUB_SOCK" || { echo "API never healthy (Phase B); log:"; tail -20 /tmp/kgsm-api-smoke.log; exit 2; }
+  wait_caps_warm || echo "  (warn: capability status still 'unknown' after warm-wait)"
 
   # 16. Host happy path, now deterministic: metrics operational + capacity present (M1·a, via stub).
   req GET "/api/v1/hosts/${HOST_ID}"
@@ -306,6 +334,192 @@ sys.exit(0 if (s is not None and s['metrics'] is not None) else 1)
 " 2>/dev/null; then
     ok "/servers metrics present ↔ monitor operational (server-side coupling)"
   else bad "/servers list join coupling (body=$BODY)"; fi
+
+  # --- M2 realtime: the /api/v1/stream WebSocket -----------------------------
+  echo "==> M2 realtime checks — WebSocket /api/v1/stream (stub up, then killed mid-stream)"
+
+  # 19. A plain (non-upgrade) GET on the stream endpoint is a client error -> OUR 400 envelope.
+  req GET /api/v1/stream
+  [[ "$CODE" == 400 ]] && grep -q '"code":"bad_request"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
+    && ok "/stream non-WS GET 400 → {error:{code:bad_request}}" || bad "/stream non-WS 400 envelope (code=$CODE body=$BODY)"
+
+  # A stdlib RFC6455 client: handshake, send one subscribe, log every received text frame as a
+  # {"t":<rel-sec>,"msg":{topic,type,data}} line. Masks client frames; ignores pings; runs DURATION secs.
+  cat > "$WS_PY" <<'PYEOF'
+import socket, os, sys, json, base64, struct, time
+host, port, dur = "127.0.0.1", int(sys.argv[1]), float(sys.argv[2])
+topics = json.loads(sys.argv[3])
+key = base64.b64encode(os.urandom(16)).decode()
+req = (f"GET /api/v1/stream HTTP/1.1\r\nHost: {host}:{port}\r\n"
+       "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+       f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n")
+s = socket.create_connection((host, port), timeout=5)
+s.sendall(req.encode())
+resp = b""
+while b"\r\n\r\n" not in resp:
+    chunk = s.recv(4096)
+    if not chunk:
+        print(json.dumps({"err": "handshake-eof"})); sys.exit(3)
+    resp += chunk
+head, _, rest = resp.partition(b"\r\n\r\n")
+if b" 101 " not in head.split(b"\r\n", 1)[0]:
+    print(json.dumps({"err": "no-101", "head": head[:80].decode("latin1")})); sys.exit(3)
+buf = bytearray(rest)
+
+def send_text(txt):
+    data = txt.encode(); mask = os.urandom(4); n = len(data); hdr = bytearray([0x81])
+    if n < 126: hdr.append(0x80 | n)
+    elif n < 65536: hdr.append(0x80 | 126); hdr += struct.pack(">H", n)
+    else: hdr.append(0x80 | 127); hdr += struct.pack(">Q", n)
+    hdr += mask
+    s.sendall(bytes(hdr) + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
+
+send_text(json.dumps({"type": "subscribe", "topics": topics}))
+s.settimeout(0.5)
+deadline = time.monotonic() + dur
+
+def read_exact(n):
+    while len(buf) < n:
+        try: chunk = s.recv(4096)
+        except socket.timeout:
+            if time.monotonic() > deadline: return None
+            continue
+        if not chunk: return None
+        buf.extend(chunk)
+    out = bytes(buf[:n]); del buf[:n]; return out
+
+while time.monotonic() < deadline:
+    h = read_exact(2)
+    if h is None: break
+    op = h[0] & 0x0f; ln = h[1] & 0x7f
+    if ln == 126:
+        e = read_exact(2)
+        if e is None: break
+        ln = struct.unpack(">H", e)[0]
+    elif ln == 127:
+        e = read_exact(8)
+        if e is None: break
+        ln = struct.unpack(">Q", e)[0]
+    payload = read_exact(ln) if ln else b""
+    if payload is None: break
+    if op == 0x8: break        # close
+    if op == 0x9: continue     # ping (no pong needed in this short window)
+    if op == 0x1:
+        try: msg = json.loads(payload.decode())
+        except Exception: continue
+        print(json.dumps({"t": round(time.monotonic(), 3), "msg": msg}), flush=True)
+try: s.close()
+except OSError: pass
+PYEOF
+
+  WS_TOPICS="$(I="$FIRST_ID" H="$HOST_ID" python3 -c "import json,os;print(json.dumps(['servers/'+os.environ['I']+'/metrics','hosts/'+os.environ['H']+'/metrics','hosts/'+os.environ['H']+'/capabilities','servers']))")"
+  : > "$WS_LOG"
+  echo "  opening WebSocket (subscribing: servers, servers/${FIRST_ID}/metrics, hosts/${HOST_ID}/metrics, hosts/${HOST_ID}/capabilities)"
+  python3 "$WS_PY" "$PORT" 20 "$WS_TOPICS" >"$WS_LOG" 2>/tmp/kgsm-api-smoke-ws.err &
+  WS_CLIENT_PID=$!; PIDS+=("$WS_CLIENT_PID")
+  sleep 5                                              # metric ticks flow + capability state is operational
+  echo "  killing stub monitor mid-stream (degrade: down flip + tick silence)"
+  kill "$STUB_PID" 2>/dev/null; wait "$STUB_PID" 2>/dev/null
+  sleep 7                                              # let the down flip emit + the outage silence settle
+  echo "  restarting stub monitor (recover: operational flip + ticks resume)"
+  SNAP_ID="$FIRST_ID" SNAP_CPU="$STUB_CPU" SNAP_MEM="$STUB_MEM" SNAP_IOREAD="$STUB_IO_READ" SNAP_PIDS="$STUB_PIDS" \
+    python3 "$STUB_PY" "$STUB_SOCK" >>/tmp/kgsm-api-smoke-stub.log 2>&1 &
+  STUB_PID=$!; PIDS+=("$STUB_PID")
+  wait "$WS_CLIENT_PID" 2>/dev/null                    # client runs out its window through the recovery
+
+  # 20. Per-server metric ticks arrive on servers/{id}/metrics carrying the stub values VERBATIM.
+  if I="$FIRST_ID" CPU="$STUB_CPU" MEM="$STUB_MEM" LOG="$WS_LOG" python3 -c "
+import json,os,sys
+topic='servers/'+os.environ['I']+'/metrics'
+ticks=[r['msg'] for r in (json.loads(l) for l in open(os.environ['LOG']) if l.strip()) if 'msg' in r
+       and r['msg'].get('topic')==topic and r['msg'].get('type')=='metrics.tick']
+if len(ticks)<2: sys.exit(1)
+for m in ticks:
+    d=m.get('data') or {}
+    if not (abs(d.get('cpuPctCore',-1)-float(os.environ['CPU']))<1e-6
+            and d.get('memBytes')==int(os.environ['MEM']) and d.get('ioWriteBps') is None): sys.exit(2)
+sys.exit(0)
+" 2>/dev/null; then
+    ok "WS metrics.tick on servers/{id}/metrics (cpuPctCore>100 + null ioWrite carried verbatim, ≥2 ticks)"
+  else bad "WS per-server metric ticks (see $WS_LOG)"; fi
+
+  # 21. Host capacity ticks arrive on hosts/{id}/metrics with real (non-null) capacity.
+  if H="$HOST_ID" LOG="$WS_LOG" python3 -c "
+import json,os,sys
+topic='hosts/'+os.environ['H']+'/metrics'
+ticks=[r['msg'] for r in (json.loads(l) for l in open(os.environ['LOG']) if l.strip()) if 'msg' in r
+       and r['msg'].get('topic')==topic and r['msg'].get('type')=='host.metrics']
+if not ticks: sys.exit(1)
+d=ticks[0].get('data') or {}
+sys.exit(0 if (d.get('cpuPct') is not None and d.get('mem') and d.get('disks')) else 2)
+" 2>/dev/null; then
+    ok "WS host.metrics on hosts/{id}/metrics (capacity present)"
+  else bad "WS host metric ticks (see $WS_LOG)"; fi
+
+  # 22. The servers topic carries STATUS/ROSTER only — NOT the 1s metric firehose. With status stable,
+  #     ZERO server.patch must arrive even though many metric ticks did (the frozen §6 topic split).
+  if LOG="$WS_LOG" python3 -c "
+import json,os,sys
+rows=[json.loads(l) for l in open(os.environ['LOG']) if l.strip()]
+patches=[r for r in rows if 'msg' in r and r['msg'].get('topic')=='servers'
+         and r['msg'].get('type') in ('server.patch','server.removed')]
+ticks=[r for r in rows if 'msg' in r and r['msg'].get('type')=='metrics.tick']
+sys.exit(0 if (len(ticks)>=2 and len(patches)==0) else 1)
+" 2>/dev/null; then
+    ok "WS servers topic quiet under the metric firehose (status/roster only, no metric double-stream)"
+  else bad "WS servers topic emitted unexpectedly (see $WS_LOG)"; fi
+
+  # 23. DEGRADE flip: after the monitor dies, a capabilities.patch reports metrics 'down' — and keeps
+  #     provisioned:true. The capability is "temporarily unavailable, still there", never "lost".
+  if H="$HOST_ID" LOG="$WS_LOG" python3 -c "
+import json,os,sys
+topic='hosts/'+os.environ['H']+'/capabilities'
+downs=[((r['msg'].get('data') or {}).get('metrics') or {}) for r in
+       (json.loads(l) for l in open(os.environ['LOG']) if l.strip())
+       if 'msg' in r and r['msg'].get('topic')==topic and r['msg'].get('type')=='capabilities.patch'
+       and ((r['msg'].get('data') or {}).get('metrics') or {}).get('status')=='down']
+sys.exit(0 if (downs and all(m.get('provisioned') is True for m in downs)) else 1)
+" 2>/dev/null; then
+    ok "WS capabilities.patch metrics 'down' + provisioned:true (degrade — capability never 'lost')"
+  else bad "WS degrade flip not observed / provisioned flipped (see $WS_LOG)"; fi
+
+  # 24. ...and the metric ticks CEASE during the outage — silence, never a replayed stale frame. The
+  #     window starts past the monitor's ~1s cache grace and ends before the restart, so it is fully
+  #     within the dead period.
+  if H="$HOST_ID" LOG="$WS_LOG" python3 -c "
+import json,os,sys
+rows=[json.loads(l) for l in open(os.environ['LOG']) if l.strip()]
+topic='hosts/'+os.environ['H']+'/capabilities'
+down_t=[r['t'] for r in rows if 'msg' in r and r['msg'].get('topic')==topic
+        and ((r['msg'].get('data') or {}).get('metrics') or {}).get('status')=='down']
+tick_t=[r['t'] for r in rows if 'msg' in r and r['msg'].get('type')=='metrics.tick']
+if not down_t: sys.exit(1)
+d=min(down_t); lo,hi=d+1.5,d+3.5
+sys.exit(0 if not any(lo<=t<=hi for t in tick_t) else 2)
+" 2>/dev/null; then
+    ok "WS metric ticks fall silent during the outage (no stale replay)"
+  else bad "WS metric ticks continued during outage (see $WS_LOG)"; fi
+
+  # 25. RECOVER flip: after the monitor returns, a capabilities.patch flips metrics back to operational
+  #     (provisioned:true on EVERY patch throughout), and the metric ticks resume past the recovery.
+  if I="$FIRST_ID" H="$HOST_ID" LOG="$WS_LOG" python3 -c "
+import json,os,sys
+rows=[json.loads(l) for l in open(os.environ['LOG']) if l.strip()]
+ctopic='hosts/'+os.environ['H']+'/capabilities'
+caps=[(r['t'], (r['msg'].get('data') or {}).get('metrics') or {}) for r in rows if 'msg' in r
+      and r['msg'].get('topic')==ctopic and r['msg'].get('type')=='capabilities.patch']
+if any(m.get('provisioned') is not True for _,m in caps): sys.exit(3)   # never broadcast a lost capability
+downs=[t for t,m in caps if m.get('status')=='down']
+ups  =[t for t,m in caps if m.get('status')=='operational']
+if not downs or not ups: sys.exit(1)
+u=min(t for t in ups if t>min(downs)) if any(t>min(downs) for t in ups) else None
+if u is None: sys.exit(2)                                              # operational must follow a down
+mt='servers/'+os.environ['I']+'/metrics'
+tick_t=[r['t'] for r in rows if 'msg' in r and r['msg'].get('topic')==mt and r['msg'].get('type')=='metrics.tick']
+sys.exit(0 if any(t>u for t in tick_t) else 4)                         # ticks resume past the recovery
+" 2>/dev/null; then
+    ok "WS recovery: metrics flips back operational (provisioned:true throughout) + ticks resume"
+  else bad "WS recovery flip / resume not observed (see $WS_LOG)"; fi
 
   stop_api
 fi
