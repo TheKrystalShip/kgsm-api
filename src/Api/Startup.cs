@@ -50,6 +50,7 @@ public class Startup(IConfiguration configuration)
         ApiOptions apiOptions = ApiOptions.FromConfiguration(configuration);
         services.AddSingleton(apiOptions);
         services.AddSingleton<MonitorClient>();
+        services.AddSingleton<AssistantClient>();
         services.AddSingleton<HostAggregator>();
         if (apiOptions.WatchdogProvisioned)
             services.AddKgsmWatchdogClient(apiOptions.WatchdogSocketPath);

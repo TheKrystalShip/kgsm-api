@@ -171,7 +171,10 @@ wiring* lands first.
   provisioning derived from whether each endpoint is configured), `MonitorClient`
   (cached-latest scrape, bounded ≤1s, fails closed to `null`), `HostAggregator` (one
   scrape → coherent capacity + metrics capability; watchdog/assistant probed concurrently,
-  each bounded to 2s so a hung leaf never stalls `/hosts`), `HostsController`. Honest
+  each bounded to 2s so a hung leaf never stalls `/hosts`), `HostsController`. The assistant
+  capability is probed through a dedicated typed `AssistantClient : HttpClient` (its liveness
+  probe self-bounds to 2s via a linked token, leaving the client's own `Timeout` free for the
+  slower tool/capability/SSE calls it grows at M7). Honest
   mapping: capacity is **null when metrics ≠ operational** (KiB→GiB and bytes→GiB
   conversions; `cpuPct` passed through). Capability provisioning is config-driven (empty
   endpoint → `absent`); identity is config-driven (default machine name), never the
@@ -383,7 +386,7 @@ kgsm-api/
     Data/                     # [M0] AppDbContext (+ Probe de-risk) → [M4] Session → [M5] AuditEntry; Migrations/ from M5
     ApiOptions.cs             # [M1·a] env config consolidation (host id/label, monitor/watchdog sockets, assistant url; *Provisioned derived from config) — built
     Services/
-      Leaves/                 # [M1·a] MonitorClient (cached-latest ConnectCallback scrape; deserialize via shared Monitor.Contracts) · [M3] watchdog via kgsm-lib · [M7] AssistantClient
+      Leaves/                 # [M1·a] MonitorClient (cached-latest ConnectCallback scrape; deserialize via shared Monitor.Contracts) + AssistantClient (typed HttpClient subclass; liveness ProbeAsync now, grows tools/capabilities/SSE relay at M7) · [M3] watchdog via kgsm-lib
       Aggregation/            # [M1·a] HostAggregator (capacity + §4·b capabilities; bounded concurrent leaf probes) → [M1·b] lib status ⋈ monitor metrics
       Realtime/               # [M2] /stream hub, topic push pumps
       Commands/               # [M3] gate + job tracker + verify

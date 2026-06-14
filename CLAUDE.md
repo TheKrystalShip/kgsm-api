@@ -83,7 +83,11 @@ exactly one correct access path:
   ONE build-time contract. **Never re-declare a local copy of the monitor DTOs.** Drift rule:
   any contract change bumps the package `Version` AND this project's `<PackageReference>` —
   a same-version repack is served stale from the NuGet cache (`id+version` keyed).
-- **Assistant** (turn stream) → relay its **HTTP/SSE** surface. M7.
+- **Assistant** → the typed **`Services/Leaves/AssistantClient.cs`** (a dedicated
+  `HttpClient` subclass, not raw HTTP in the aggregator). M1·a uses it only for a liveness
+  `ProbeAsync` (the §4·b capability); it is the home the tool catalog, capability discovery,
+  and the **HTTP/SSE** turn relay (M7) grow into. Probe self-bounds via a linked token — leave
+  the client's `Timeout` at default so future slower calls aren't capped by the probe budget.
 
 **Degrade gracefully:** a missing/down leaf removes only its capability (the §4·b
 capabilities block makes this first-class), never a 500. The API must run with any subset

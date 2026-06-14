@@ -16,31 +16,31 @@ namespace TheKrystalShip.Api.Services.Aggregation;
 /// request (the degrade-gracefully invariant). No join with kgsm-lib domain data yet; that is
 /// M1·b (<c>GET /servers</c>).
 /// </summary>
-public sealed class HostAggregator : IDisposable
+public sealed class HostAggregator
 {
     // Per-leaf probe budget. Independent of the watchdog client's own (150s) timeout, which is
     // sized for command drains — we never inherit it for a liveness probe on the /hosts path.
+    // (The assistant client self-bounds its own probe to the same budget.)
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
 
     private readonly ApiOptions _options;
     private readonly MonitorClient _monitor;
+    private readonly AssistantClient _assistant;
     private readonly IServiceProvider _services;
     private readonly ILogger<HostAggregator> _logger;
-    private readonly HttpClient? _assistant;
 
     public HostAggregator(
         ApiOptions options,
         MonitorClient monitor,
+        AssistantClient assistant,
         IServiceProvider services,
         ILogger<HostAggregator> logger)
     {
         _options = options;
         _monitor = monitor;
+        _assistant = assistant;
         _services = services;
         _logger = logger;
-
-        if (options.AssistantProvisioned && Uri.TryCreate(options.AssistantBaseUrl, UriKind.Absolute, out Uri? baseUri))
-            _assistant = new HttpClient { BaseAddress = baseUri, Timeout = ProbeTimeout };
     }
 
     /// <summary>Build the single host this api serves.</summary>
@@ -116,28 +116,15 @@ public sealed class HostAggregator : IDisposable
 
     private async Task<Capability> ProbeAssistantAsync(CancellationToken ct)
     {
-        if (!_options.AssistantProvisioned || _assistant is null)
+        // Provisioning, the liveness probe, and its timeout/error handling all live in the typed
+        // AssistantClient; here we only map reachable → operational, declared-but-unreachable →
+        // down, undeclared → absent.
+        if (!_assistant.IsProvisioned)
             return Capability.Absent;
 
-        // Provisional liveness probe: any HTTP response means the assistant process is
-        // reachable. The real readiness/health contract is defined with the SSE relay at M7.
-        using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timed.CancelAfter(ProbeTimeout);
-        try
-        {
-            using HttpResponseMessage _ = await _assistant.GetAsync("", timed.Token).ConfigureAwait(false);
-            return new Capability(Provisioned: true, Status: CapabilityStatus.Operational);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            _logger.LogDebug("assistant probe timed out after {Timeout}", ProbeTimeout);
-            return Capability.Down(message: "Assistant probe timed out.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "assistant probe failed");
-            return Capability.Down(message: "Assistant unreachable.");
-        }
+        return await _assistant.ProbeAsync(ct).ConfigureAwait(false)
+            ? new Capability(Provisioned: true, Status: CapabilityStatus.Operational)
+            : Capability.Down(message: "Assistant unreachable.");
     }
 
     private static IReadOnlyList<DiskCapacity> MapDisks(Snap.MountUsage[] mounts)
@@ -151,6 +138,4 @@ public sealed class HostAggregator : IDisposable
     private static double KibToGib(long kib) => Math.Round(kib / 1048576.0, 2);
 
     private static double BytesToGib(long bytes) => Math.Round(bytes / 1073741824.0, 2);
-
-    public void Dispose() => _assistant?.Dispose();
 }
