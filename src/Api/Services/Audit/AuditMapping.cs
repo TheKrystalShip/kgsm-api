@@ -1,0 +1,145 @@
+using System.Text.Json;
+using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Data;
+using TheKrystalShip.KGSM.Events;
+
+namespace TheKrystalShip.Api.Services.Audit;
+
+/// <summary>
+/// An audit row to append — the internal input to <see cref="AuditService.AppendAsync"/>. Carries the
+/// already-resolved provenance (<see cref="Actor"/>/<see cref="Origin"/>) and the mapped action; the
+/// service assigns the public id, persists, and pushes the <c>audit.append</c> frame.
+/// </summary>
+public sealed record AuditWrite(
+    DateTimeOffset Ts,
+    string? Origin,
+    AuditActor Actor,
+    string Action,
+    string Severity,
+    AuditTarget? Target,
+    string? ServerId,
+    string? HostId,
+    string Summary,
+    IReadOnlyDictionary<string, string>? Meta);
+
+/// <summary>
+/// Pure mapping between the audit wire DTO (<see cref="AuditRecord"/>), the EF row
+/// (<see cref="AuditEntry"/>), the <see cref="AuditWrite"/> input, and the kgsm event stream. No I/O —
+/// all of it is unit-testable in isolation (the fidelity of the kgsm-event → action mapping + the
+/// flat-actor-string round-trip is the M5 correctness risk the plan calls out).
+/// </summary>
+public static class AuditMapping
+{
+    /// <summary>
+    /// Parse the kgsm event's flat <c>Actor</c> string into the structured <see cref="AuditActor"/>.
+    /// The convention is <c>provider:name</c> (e.g. <c>discord:haru</c>, the command path stamps this);
+    /// <see cref="AuditActor.Kind"/> is <em>derived</em> from the provider — Discord identities are
+    /// humans (<c>user</c>), an <c>api</c> identity is a <c>token</c>, <c>system</c> is autonomous.
+    /// A bare string with no prefix is kgsm's OS-user fallback (a human on the local host →
+    /// <c>user</c>/<c>system</c>), and the literal <c>system</c> is an autonomous action. An
+    /// unrecognized provider keeps the name but leaves <see cref="AuditActor.Provider"/> null rather
+    /// than coerce it to an enum value (never fabricate).
+    /// </summary>
+    public static AuditActor ParseActor(string? flat)
+    {
+        flat = flat?.Trim();
+        if (string.IsNullOrEmpty(flat))
+            // No actor at all — kgsm always falls back to an OS user or "system", so this is defensive.
+            return new AuditActor(ActorKind.System, "system", ActorProvider.System);
+
+        int colon = flat.IndexOf(':');
+        if (colon > 0 && colon < flat.Length - 1)
+        {
+            string provider = flat[..colon].ToLowerInvariant();
+            string name = flat[(colon + 1)..];
+            return provider switch
+            {
+                ActorProvider.Discord => new AuditActor(ActorKind.User, name, ActorProvider.Discord),
+                ActorProvider.Api => new AuditActor(ActorKind.Token, name, ActorProvider.Api),
+                ActorProvider.System => new AuditActor(ActorKind.System, name, ActorProvider.System),
+                // A named provider we don't recognize: keep the name, but don't invent a provider.
+                _ => new AuditActor(ActorKind.User, name, null),
+            };
+        }
+
+        // No provider prefix: the literal "system" is an autonomous action; anything else is the
+        // engine's OS-user fallback — a human on the local host (identity source = the system).
+        return string.Equals(flat, "system", StringComparison.OrdinalIgnoreCase)
+            ? new AuditActor(ActorKind.System, "system", ActorProvider.System)
+            : new AuditActor(ActorKind.User, flat, ActorProvider.System);
+    }
+
+    /// <summary>An event/declared origin, normalized to the closed set or <see langword="null"/> (a
+    /// surface we don't recognize, or none declared, is honest-unknown — never fabricated).</summary>
+    public static string? NormalizeOrigin(string? origin)
+    {
+        origin = origin?.Trim().ToLowerInvariant();
+        return AuditOrigin.IsKnown(origin) ? origin : null;
+    }
+
+    /// <summary>Build the <see cref="AuditWrite"/> for a kgsm server-lifecycle event — provenance off
+    /// the envelope (<c>Actor</c>/<c>Origin</c>/<c>Timestamp</c>), target/scope off the instance name.</summary>
+    public static AuditWrite FromServerEvent(
+        EventDataBase data,
+        string action,
+        string severity,
+        string summaryVerb,
+        string hostId,
+        IReadOnlyDictionary<string, string>? meta = null)
+    {
+        string instance = string.IsNullOrEmpty(data.InstanceName) ? "" : data.InstanceName;
+        return new AuditWrite(
+            // ts from the event when present; else when we recorded it (pre-enrichment kgsm only).
+            Ts: data.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(data.Origin),
+            Actor: ParseActor(data.Actor),
+            Action: action,
+            Severity: severity,
+            Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
+            ServerId: instance,
+            HostId: hostId,
+            Summary: $"{summaryVerb} {instance}",
+            Meta: meta);
+    }
+
+    /// <summary>Map a persisted row to its wire record (deserializing the <c>meta</c> JSON blob).</summary>
+    public static AuditRecord ToRecord(AuditEntry e)
+    {
+        IReadOnlyDictionary<string, string>? meta = null;
+        if (!string.IsNullOrEmpty(e.Meta))
+        {
+            try { meta = JsonSerializer.Deserialize<Dictionary<string, string>>(e.Meta); }
+            catch (JsonException) { meta = null; }
+        }
+
+        AuditTarget? target = e.TargetKind is null
+            ? null
+            : new AuditTarget(e.TargetKind, e.TargetId ?? "", e.TargetName);
+
+        return new AuditRecord(
+            e.Id, e.Ts, e.Origin,
+            new AuditActor(e.ActorKind, e.ActorName, e.ActorProvider),
+            e.Action, e.Severity, target, e.ServerId, e.HostId, e.Summary, meta);
+    }
+
+    /// <summary>Map an <see cref="AuditWrite"/> + its assigned public id to the EF row (serializing
+    /// <c>meta</c> to a JSON blob).</summary>
+    public static AuditEntry ToEntity(AuditWrite w, string id) => new()
+    {
+        Id = id,
+        Ts = w.Ts,
+        Origin = w.Origin,
+        ActorKind = w.Actor.Kind,
+        ActorName = w.Actor.Name,
+        ActorProvider = w.Actor.Provider,
+        Action = w.Action,
+        Severity = w.Severity,
+        TargetKind = w.Target?.Kind,
+        TargetId = w.Target?.Id,
+        TargetName = w.Target?.Name,
+        ServerId = w.ServerId,
+        HostId = w.HostId,
+        Summary = w.Summary,
+        Meta = w.Meta is null || w.Meta.Count == 0 ? null : JsonSerializer.Serialize(w.Meta),
+    };
+}

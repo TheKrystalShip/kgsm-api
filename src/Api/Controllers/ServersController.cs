@@ -68,6 +68,15 @@ public sealed class ServersController(
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "unknown or missing verb; expected one of: start, stop, restart");
 
+        // Provenance to stamp on the engine command (M5) so the resulting kgsm event — and the audit row
+        // the consumer writes from it — records the driving surface. Caller-declared, validated against
+        // the closed client set; absent => "api" (literally true). "system" is reserved for autonomous
+        // engine actions and is rejected here. Independent of the actor (the bearer identity below).
+        string origin = body?.Origin?.Trim().ToLowerInvariant() is { Length: > 0 } o ? o : AuditOrigin.Api;
+        if (!AuditOrigin.IsCallerDeclarable(origin))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "unknown origin; expected one of: ui, assistant, discord, api");
+
         // Resolve the server + its real observed status (honest 404 on an unknown id).
         IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct);
         Server? server = servers.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.Ordinal));
@@ -91,7 +100,9 @@ public sealed class ServersController(
                     : "a command is already in flight for this server");
         }
 
-        runner.Start(job);
+        // actor = the bearer identity (discord:<username>), or null → kgsm's own OS-user fallback.
+        string? actor = AuditPrincipal.ActorString(User);
+        runner.Start(job, actor, origin);
         return StatusCode(StatusCodes.Status202Accepted, new CommandAccepted(job));
     }
 

@@ -21,8 +21,11 @@
 `built` = exists & verified · `partial` = exists, incomplete · `planned` =
 designed, not built · `open` = not yet decided.
 
-**Today:** M0 `partial`, **M1·a/M1·b `partial`**, **M2 `partial`**, **M3 `partial`** and now **M4·a `partial`**
-(backend built & self-validated; frontend gate pending). The skeleton (controllers + EF Core, **JIT**; §8),
+**Today:** M0 `partial`, **M1·a/M1·b `partial`**, **M2 `partial`**, **M3 `partial`**, **M4·a/M4·b `partial`**
+and now **M5 `partial`** (backend built & self-validated; frontend gate pending). M5 = the append-only audit
+log: kgsm events → audit rows via kgsm-lib's `IEventService`, the command path stamping actor+origin so the
+engine echo carries provenance (no double-write), `GET /audit` (keyset) + the `audit` WS topic; SQLite via
+`EnsureCreated` (no EF migration — dev authority). The skeleton (controllers + EF Core, **JIT**; §8),
 the first leaf wiring — `GET /hosts` + `/hosts/{id}` scraped from kgsm-monitor with the §4·b
 capability block — **the join `GET /servers` + `/servers/{id}`** (kgsm-lib domain +
 run-state ⋈ monitor per-instance metrics, the honest `Server` DTO frozen in §6), and now **the
@@ -350,22 +353,47 @@ wiring* lands first.
   `KGSM_API_AUTH_SIGNING_KEY` on any real host (dev ran ephemeral — tokens die on restart).
 - **Risk:** the security boundary itself.
 
-### M5 — Audit log + SQLite (the event-persistence consumer)  ·  `planned`  ←  *resolves keystone O3*
+### M5 — Audit log + SQLite (the event-persistence consumer)  ·  `partial` (backend built & self-validated 2026-06-15; frontend gate pending)  ←  *resolves keystone O3*
 - **Goal:** the durable, append-only action record — **persistence downstream of the
   stateless engine**, exactly where O3 says it belongs (a consumer, never KGSM).
-- **Wires:** **kgsm event socket** (kgsm-lib `EventService`); the `Actor` enrichment
-  shipped in kgsm-lib 1.6.0 feeds the audit `actor`.
+- **Wires:** **kgsm event socket** (kgsm-lib `IEventService` — the chokepoint, never a raw socket);
+  the `Actor`/`Timestamp`/**`Origin`** enrichment shipped in kgsm-lib 1.6.0/**1.8.0** feeds the audit
+  `actor`/`ts`/`origin`. (This milestone bumped the api's kgsm-lib ref **1.6.0 → 1.8.0**, also picking up
+  1.7.0's watchdog `/health` switch.)
+- **Built (2026-06-15):** `Data/AuditEntry` (the §3·d schema, `origin` nullable) + `AppDbContext`
+  (table `audit`, unique id + the four `(col, rowid DESC)` scope indexes); `Contracts/AuditDto`
+  (`AuditRecord`/`AuditPage` + the closed `action`/`severity`/`origin`/kind/provider vocabularies);
+  `Services/Audit/` — `AuditMapping` (flat-actor `provider:name` → `{kind,name,provider}` parse with
+  kind derived from provider, origin normalization, event→write, entity↔record), `AuditService` (the
+  single serialized writer — own DI scope per write, `EnsureCreated`, publishes `audit.append`),
+  `AuditQueries` (keyset page + filters), `KgsmAuditConsumer` (the `IHostedService` that subscribes to
+  kgsm lifecycle events → audit rows; degrades gracefully if the engine/socket is absent);
+  `AuditController` (`GET /audit`, viewer). Command-path **provenance stamping**: `ServersController`
+  → `CommandRunner` → `ILifecycleService.Start/Stop/Restart(serverId, actor, origin)` (actor from the
+  bearer, origin caller-declared) — **no double-write** (kgsm owns `server.*`; the API records the
+  event echo). `AuthController` writes `auth.login`/`auth.logout` directly (no kgsm event).
 - **Scope:** subscribe to kgsm lifecycle events → map to the closed dotted `action`
-  vocabulary (`server.*`, `config.change`, `network.ports.open`, …) → append via EF Core
-  to the audit table (`architecture.html §3·d` schema, keyset pagination on `rowid`) →
-  `GET /audit` + `audit` WS topic. M3 commands and M4 auth also write audit entries.
-  First milestone to add an EF migration (the M0 `Probe` probe is replaced by the real
-  schema here / at M4). **⚠ Start migrations from a clean DB:** M0's `_dbcheck` uses
-  `EnsureCreated` (no `__EFMigrationsHistory`), so a DB it created conflicts with
-  `ef database update` — drop the dev DB when the first migration lands.
-- **Depends:** M3 (commands to record), M4 (actor identity), event enrichment (`built`).
-- **Risk:** append-only immutability discipline; EF migration hygiene; fidelity of the
-  kgsm-event → action mapping.
+  vocabulary → append via EF Core to the audit table (`architecture.html §3·d` schema, keyset
+  pagination on `rowid`) → `GET /audit` + `audit` WS topic (`audit.append`). M3 commands are audited
+  via the event echo (provenance stamped, not double-written); M4 auth writes directly. **No EF
+  migration** — the schema is `EnsureCreated` (greenfield/dev authority; **user directive 2026-06-15**:
+  no migrations in dev, wipe the DB on a schema change). The M0 `Probe` table is **removed** (replaced
+  by `AuditEntry`); `_dbcheck` is now a read round-trip (the append-only table must not be probe-written).
+- **Self-validated:** `scripts/smoke.sh` → **33/33** (+2 M5: `GET /audit` empty `{data:[],nextCursor:null}`
+  page + the cursor/limit/severity/serverId/actor filters; the no-token sweep now includes `/audit` → 401);
+  **`tests/Api.Tests` → 59/59** (+the M5 `AuditMappingTests` actor round-trip / event-map / meta round-trip
+  + `AuditTests` keyset order/pagination/filters, the viewer gate, the `auth.login` write end-to-end, and
+  the `audit` WS `audit.append` delivery). Release build **0-warning**.
+- **Depends:** M3 (commands to record), M4 (actor identity), event enrichment + the 1.8.0 lifecycle
+  provenance hook (`built`).
+- **Risk:** append-only immutability discipline; fidelity of the kgsm-event → action mapping (tested via
+  the round-trip); the no-double-write provenance contract.
+- **Coverage honesty (the live half, like M3's mutation happy path):** the **event-sourced append from a
+  real kgsm event** is `tests/`-proven (mapping + the service/WS path with a seeded write) but the live
+  socket round-trip (a real `kgsm start` → an `instance_started` event → an audit row with the stamped
+  provenance) is a **trusted-host live-validate**, owed once exercised against the dev kgsm. It needs the
+  api's `KGSM_API_KGSM_SOCKET` bound first **and** that path listed in kgsm's `config_event_socket_filenames`
+  (the multi-listener model) — events emitted while the api isn't listening are not backfilled.
 - **Frontend gate:** `auditStore` prepends on `audit.append`; filters map to indexed columns.
 
 ### M6 — Alerts (condition-mirror) + ports  ·  `planned`
@@ -457,7 +485,7 @@ for the external surface and this doc for the backend's honest realization of it
 | WS stream envelope + topic/type vocabulary | **M2** | `architecture.html §3·b/§3·j` — **frozen 2026-06-15.** Endpoint `GET /api/v1/stream` (WebSocket; **unauthenticated until M4** — a pre-auth *read* surface, less severe than M3's mutation but flagged). **Inbound:** `{ type: "subscribe"\|"unsubscribe", topics: [...] }`; unknown command type ignored; unknown/future topics accepted silently (forward-compat for `jobs` M3 / `audit` M5 / `alerts` / `console`); **no ack or error-frame protocol yet.** **Outbound:** `{ topic, type, data }`, patch-only (the client `hydrate(REST) + applyPatch(WS)`; **no snapshot on subscribe** — §3·j re-hydrates via REST on (re)connect). **Topics (M1-backable subset):** `servers` · `servers/{id}/metrics` · `hosts/{id}/metrics` · `hosts/{id}/capabilities`. **Message types** (only `server.patch` is doc-given; the rest are ours, negotiated like the M1·b DTO — all centralized in `Realtime/StreamProtocol.cs`, never inline strings): `server.patch` (data = the **frozen M1·b `Server`**, NOT the §3·b example's `{status:"online", players}`; carries the full element incl. a **point-in-time `metrics` block that may lag** the dedicated `servers/{id}/metrics` tick — merge by id), `server.removed` (`{ id }` tombstone), `metrics.tick` (`ServerMetricsDto`), `host.metrics` (`HostMetricsDto` = the capacity portion of the `Host` view; `net`/`temp` omitted, never fabricated), `capabilities.patch` (`HostCapabilities`). **`servers` carries status/roster only — NOT the 1s metric firehose** (resource ticks live on `servers/{id}/metrics`; a deliberate divergence from §3·b's "resource deltas" wording, smoke-proven the `servers` topic stays quiet under ticking metrics). **Honesty:** monitor-down → metric topics go **silent** (never a replayed stale frame) and `hosts/{id}/capabilities` flips metrics `down` — that flip is what explains the silence. **Capability availability is driven by the always-on `LeafHealthMonitor`** (frequent `/health` polls, the single source feeding both this stream and the REST `GET /hosts`), which stamps `since` on each flip — see the Capability-record row. The `capabilities.patch` keeps `provisioned:true` through a down→up cycle: degrade **and** recover gracefully, capability never "lost". |
 | Command verbs + `job` shape + `command.verified` | **M3** | `architecture.html §5·d` — **frozen 2026-06-15.** **Endpoint** `POST /servers/{id}/commands` body `{ verb }` → `202` + `{ job }`; closed, server-defined verb set **`start`·`stop`·`restart`** (**`update` deferred** from the first cut — long-running + version-changing, settles on a version re-check not a run-state one). **Errors:** unknown/missing verb → `400 bad_request`; unknown server → `404 not_found`; an obvious no-op against the real status (start-when-running / stop-when-stopped) or a command already in flight for that server → `409 conflict`. **`job`** = `{ id, serverId, verb, state, createdAt, settledAt?, error? }` (opaque `job_…` id; ISO-8601 UTC `Z` times; `error` set only on `failed`, the engine's real detail — never a fabricated success). **Divergence (honest-vs-aspirational, the same negotiated call as the M1·b DTO):** `job.state` is the **job's own** lifecycle `queued→running→succeeded\|failed`, NOT the §5·d example's server-shaped `state:"running"` — the affected server's authoritative/optimistic status rides the `servers` topic via `server.patch`, and the client derives the optimistic display from the verb (the same topic-separation discipline as the metric topics). **WS:** the `jobs` topic carries a single **`job.patch`** (the full `job` on every transition, coalesced by job id — patch-only, exactly like `server.patch`). **Gate (state guards):** minimal/honest — only the obvious no-ops; the engine (kgsm→watchdog/Docker) owns everything subtler, surfacing an impossible transition as the job's `failed` + its error (the API never fabricates admissibility kgsm does not enforce; `unknown` status never blocks). **Verify** (the §5·d `command.verified` for the direct write path): on settle, a fresh run-state read → an explicit `server.patch`. **Permissions** gate at M4; jobs are **in-memory** (SQLite + audit at M5). The propose/confirm half of §5·d (`command.proposed` over SSE) is the assistant flow (M7), not M3. |
 | Auth session + tiers + 401/403/login_required | **M4·a** | `architecture.html §3·f` — **frozen 2026-06-15 (M4·a).** **Bearer = stateless JWT** (HMAC; access ~15 min + refresh 8h cap; no session table). Endpoints `/auth/discord/start` (302→authorize), `/auth/discord/callback` (`{ verdict:"ok"\|"denied", tier, token, refresh?, userId }`), `/auth/session/refresh` (refresh bearer → `{ token }`), `/auth/session` (`{ user:{ id, username, display, avatarUrl? }, scopes }` or `401`), `/auth/logout` (`204`). Tiers `admin·operator·viewer·none` resolved from the guild role via the **bot token** (`GET /guilds/{guild}/members/{user}` — the only path to roles; the `identify guilds` user scopes don't carry them). `401` (no/invalid/expired bearer) recoverable; `403` (`none`/insufficient tier) terminal. **Divergences (the negotiated honest-vs-aspirational call, like the M1·b DTO / M3 job.state):** (1) camelCase `userId` (not the §3·f example's snake_case `user_id`) — one casing across the surface; (2) `GET /auth/session` returns the **login-time profile snapshot** embedded in the token, NOT a fresh live Discord fetch — the §3·f "fetched live" can't hold once the Discord token is discarded (which §3·f also requires), so snapshot is the honest realization; (3) role re-check happens only at a full bounce (≤ the 8h cap), not on refresh (refresh skips Discord); (4) `/auth/session/refresh` takes the refresh token in the `Authorization: Bearer` header (the `{host}` body is accepted but not required) — a per-host-API simplification of the §3·f `{host}`-body shape. **WS:** the `/stream` bearer rides `?access_token=` (a handshake can't set a header). **Tier gating:** viewer = reads + stream, operator = + the command `POST`, admin = diagnostics (`_throw`/`_dbcheck`) + reserved (settings/install/audit-config, M5/M8). **Secure-by-default:** an authorization `FallbackPolicy` requires an authenticated caller on any endpoint without explicit `[Authorize]`/`[AllowAnonymous]`; only `/health` + `/api/v1` opt out (the SPA's pre-login reachability probes). **CSRF (added M4·b):** `/auth/discord/start` sets a one-time HttpOnly `state` cookie (stateless double-submit; `SameSite=Lax`, `Secure` only under https); `/auth/discord/callback` returns `400 invalid_state` on a missing/mismatched state before any Discord exchange. **M4·b — LIVE-VALIDATED 2026-06-15:** the real Discord exchange + bot-token role lookup resolved an admin login end-to-end (§8); login endpoints `503` only until the Discord app/bot-token/guild/role-map are configured. |
-| Audit record + closed `action` vocabulary + SQLite schema | M5 | `architecture.html §3·d` |
+| Audit record + closed `action` vocabulary + SQLite schema | **M5** | `architecture.html §3·d` — **frozen 2026-06-15.** **Endpoint** `GET /api/v1/audit?cursor=&limit=50&severity=&serverId=&actor=` → `{ data, nextCursor }`, **newest first**, keyset on the opaque `rowid` cursor (`RowId < cursor` ordered `DESC`; `nextCursor` = the last row's rowid, or null when the page is short). Filters map 1:1 to indexed columns; `limit` clamped (default 50, max 200). **Record** = `{ id (evt_…), ts (Z), origin, actor:{ kind:user\|system\|token, name, provider:discord\|system\|api? }, action, severity:info\|success\|warn\|danger, target:{ kind,id,name }?, serverId?, hostId?, summary, meta? }`. **WS:** the `audit` topic carries **`audit.append`** (one full record; the client **prepends** — events are immutable). Unlike the metric/status patches it is **NOT supersede-by-latest**: the coalesce key is the unique event id, so distinct appends never collapse. **Action vocab wired in M5** (the honestly-sourceable subset): `server.start\|stop\|restart\|update\|install\|uninstall`, `backup.create\|restore` (from kgsm events), `auth.login\|logout` (API-internal). **Deferred (no source yet):** `server.crash` (watchdog, M6), `config.change`/`network.ports.open`/`player.*`/`host.*`/`discord.*`/`settings.change`. **Source model (the no-double-write decision):** kgsm **owns** `server.*`/`backup.*`, so the API records the engine's **event echo** — it never writes an audit row when it issues a command; instead the command path **stamps** `actor`(bearer identity)+`origin`(declared surface) which ride the event and are read back off it. `auth.*` has no kgsm event → written directly (no double-write). **Divergences (the negotiated honest-vs-aspirational call, like the M1·b DTO):** (1) **`origin` is nullable** (the §3·d DDL says `NOT NULL`) — a direct-CLI engine action has no product surface, so the engine emits `null` and we persist that, never fabricate a surface; (2) the example's **`meta.jobId` is not populatable** — no correlation id round-trips the stateless engine, so `meta` holds action-specific detail (e.g. `{oldVersion,newVersion}`, `{blueprint}`, `{source,version}`, the login `{tier}`) instead; (3) the command path's `origin` is **caller-declared** (`ui\|assistant\|discord\|api`, default `api` — literally true; `system` reserved for autonomous engine actions and rejected), **never derived from the actor** (the two axes stay independent). **Honest boundary:** events emitted while the API isn't listening are **never audited** (stateless engine, no backfill) — inherent to a downstream-consumer design. **Storage:** the §3·d SQLite schema, created via **`EnsureCreated`, NOT an EF migration** (greenfield/dev authority — wipe the DB on a schema change). Gated at **viewer** (a core read surface). |
 | Alert record + raise/resolve/retract; `network` block | M6 | `architecture.html §3·c, §3·g` |
 | Assistant SSE event vocabulary (proxy vs re-wrap) | M7 | `architecture.html §5·a`; keystone O1 |
 | Install body (honored vs reserved) | M8 | `architecture.html §3·h` |
@@ -906,3 +934,69 @@ flag (low severity: bearers ride the `Authorization` header, not cookies; the no
 
 **Owed before the full M4 flips to `built`:** only the **frontend gate** (the per-host session state machine +
 tier-gated controls) — the SPA, still `planned`. The backend auth boundary is complete and live-proven.
+
+### M5 — 2026-06-15 · audit log (the append-only event-persistence consumer) self-validated; frontend gate PENDING · live socket round-trip OWED
+
+**Status:** the durable, append-only action record is built and self-validated — persistence **downstream of
+the stateless engine** (CLAUDE.md invariant #5), exactly where keystone O3 puts it. The frontend gate
+(`auditStore` prepends on `audit.append`) and the live kgsm-socket round-trip are pending (the latter a
+trusted-host validate, like M3's mutation happy path).
+
+**The shape of it (frozen §6).** `GET /api/v1/audit?cursor=&limit=&severity=&serverId=&actor=` → keyset
+`{ data, nextCursor }`, newest first (rowid `DESC`, `nextCursor` = last rowid or null on a short page);
+`audit` WS topic carries `audit.append` (one full immutable record, coalesced by the **unique event id** so
+distinct appends never supersede each other — the client prepends). The record is the §3·d shape with two
+recorded divergences: **`origin` nullable** (a direct-CLI engine action has no surface → `null`, never a
+fabricated one) and **no `meta.jobId`** (no correlation id round-trips the stateless engine → `meta` holds
+action-specific detail instead).
+
+**The source model (the no-double-write decision, the whole point of the upstream provenance work).** kgsm
+**owns** `server.*`/`backup.*`; the API records the engine's **event echo** rather than writing an audit row
+when it issues a command. The command path (`ServersController` → `CommandRunner` → `ILifecycleService
+.Start/Stop/Restart(serverId, actor, origin)`, the kgsm-lib 1.8.0 hook) **stamps** the bearer identity
+(`discord:<username>`) + the caller-declared surface; kgsm emits them on the event; `KgsmAuditConsumer` reads
+them back and writes one row. So watchdog-driven (`origin=system`) and direct-CLI actions audit uniformly
+through the same path, and there is no echo-dedup problem (which is unsolvable without provenance). `auth.*`
+has no kgsm event → `AuthController` writes it directly (no double-write risk). **actor and origin stay
+independent axes** — origin is never derived from the actor (the explicit user requirement); a missing/unknown
+origin is `null`, not guessed.
+
+**Actor fidelity (the mapping risk, tested via round-trip).** The flat event `Actor` string is `provider:name`;
+`AuditMapping.ParseActor` derives `kind` from the provider (`discord`→user, `api`→token, `system`→system),
+treats a bare string as kgsm's OS-user fallback (`user`/`system`), and leaves `provider` null for an
+unrecognized prefix rather than coerce it. The test asserts the **round-trip**: what the command path stamps
+(`discord:haru`) parses back to `{kind:user, name:haru, provider:discord}`. **No compound-emission
+double-count (verified in kgsm):** `_cmd_restart` dispatches exactly **one** `instance_restarted` event —
+`__logic_instance_restart` composes the stop/start *logic* functions internally (they only return exit
+codes; the command layer emits once on the single terminal code), so a restart is one `server.restart`
+row, never a stop+start+restart triple. (Install likewise maps only its terminal event, skipping the
+download/deploy sub-steps.)
+
+**No EF migration (user directive 2026-06-15).** Greenfield/dev authority: the schema is `EnsureCreated`, and a
+schema change means wiping the dev DB — there is no `__EFMigrationsHistory`. The M0 `Probe` table is **removed**
+(replaced by `AuditEntry`); `_dbcheck` became a **read** round-trip (the append-only table must never be
+probe-written). The consumer `EnsureCreated`s at startup so `GET /audit` + the auth writes work even with no
+engine. (The advisor's EnsureCreated trap — it no-ops on an existing DB — is handled: smoke `rm -f`s its DB,
+and the dev box had no stale DB; verified the `audit` table lands by `_dbcheck` → `auditRows:0` and a real
+`GET /audit` query, not assumed from a green build.)
+
+**Socket direction (verified, not assumed).** kgsm-lib's `UnixSocketClient` **binds + listens**; kgsm
+**connects outbound** (`socat - UNIX-CONNECT:`) to push each event, and only to a socket file that already
+exists (the `config_event_socket_filenames` multi-listener list). So the api must bind its **own dedicated**
+`KGSM_API_KGSM_SOCKET` first (the listener deletes any file at its path before binding — a shared default
+could clobber another consumer's live socket; smoke uses a temp path to avoid this). Events emitted while the
+api isn't listening are not backfilled — the honest downstream-consumer boundary.
+
+**Self-validated:** `scripts/smoke.sh` → **33/33** (8 M0 + 4 M1·a + 6 M1·b + 7 M2 + 3 M3 + **2 M5** + 3 M4·a);
+the 2 M5 checks prove the `GET /audit` empty `{data:[],nextCursor:null}` page + the filter params (the table
+existing is itself the proof EnsureCreated ran), and the no-token sweep now includes `/audit` → `401`.
+**`tests/Api.Tests` → 59/59** (+27 since M4·b): `AuditMappingTests` (the actor round-trip + provider→kind
+derivation, origin normalization, event→write, the entity↔record + meta round-trip) and `AuditTests` (keyset
+newest-first + the honest record shape, the two-page pagination walk, the severity/actor filters, the viewer
+`401`, the **`auth.login` written-and-read end-to-end** through the fake Discord callback, and the `audit` WS
+**`audit.append`** delivery). Release build **0-warning** (the analyzer gate).
+
+**Owed to the frontend at the gate:** `auditStore` prepends on `audit.append` (immutable — a correction is a
+new event, never an edit); the filters map 1:1 to indexed columns; render a `null` origin honestly (no surface
+declared, e.g. a CLI action) rather than inventing one; on (re)connect hydrate via `GET /audit` and apply
+appends (the §3·j pattern — the WS is patch-only, no replay).

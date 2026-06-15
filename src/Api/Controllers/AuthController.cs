@@ -1,7 +1,9 @@
+using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 
 namespace TheKrystalShip.Api.Controllers;
@@ -23,6 +25,7 @@ public sealed class AuthController(
     IDiscordIdentityResolver discord,
     ISessionTokenService tokens,
     ApiOptions options,
+    AuditService audit,
     ILogger<AuthController> logger) : ControllerBase
 {
     // The OAuth CSRF state cookie — set at /start, verified at /callback. This is the stateless
@@ -108,6 +111,12 @@ public sealed class AuthController(
 
         string access = tokens.MintAccess(resolved.Identity, resolved.Tier);
         string refresh = tokens.MintRefresh(resolved.Identity, resolved.Tier);
+
+        // M5: an auth.login is an API-internal action (no kgsm event), so it is written directly here
+        // — no double-write risk. Best-effort: a failed audit write must never break the login.
+        await RecordAuthAsync(AuditAction.AuthLogin, resolved.Identity, resolved.Tier,
+            $"{resolved.Identity.Display} logged in", ct);
+
         return Ok(new CallbackResult("ok", AuthTiers.ToWire(resolved.Tier), access, refresh, userHandle));
     }
 
@@ -154,11 +163,22 @@ public sealed class AuthController(
 
     /// <summary>
     /// End the session. Stateless JWT — there is nothing server-side to revoke, so the client drops
-    /// its tokens; the short access TTL bounds the window. Always <c>204</c> (idempotent).
+    /// its tokens; the short access TTL bounds the window. Always <c>204</c> (idempotent). If the call
+    /// carries a resolvable bearer we record an <c>auth.logout</c> (best-effort) — anonymous, so we
+    /// can't attribute an unauthenticated logout and simply skip the row.
     /// </summary>
     [AllowAnonymous]
     [HttpPost("/auth/logout")]
-    public IActionResult Logout() => NoContent();
+    public async Task<IActionResult> Logout(CancellationToken ct)
+    {
+        if (User.Identity is ClaimsIdentity ci && ci.IsAuthenticated
+            && SessionClaims.ReadIdentity(ci) is { } id)
+        {
+            await RecordAuthAsync(AuditAction.AuthLogout, id, SessionClaims.ReadTier(ci),
+                $"{id.Display} logged out", ct);
+        }
+        return NoContent();
+    }
 
     // The bearer from the Authorization header, or null. Used by /refresh (which can't use [Authorize]:
     // the refresh token is deliberately rejected as an access bearer by the JwtBearer pipeline).
@@ -173,6 +193,33 @@ public sealed class AuthController(
 
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
+
+    // Write an API-internal auth.* audit row. origin = "ui": an interactive Discord OAuth login/logout
+    // is a human acting through the web surface (there is no headless login path). actor = the Discord
+    // identity (kind=user, provider=discord). Best-effort: a failed audit write is logged, never fatal.
+    private async Task RecordAuthAsync(string action, DiscordIdentity id, AuthTier tier, string summary,
+        CancellationToken ct)
+    {
+        try
+        {
+            await audit.AppendAsync(new AuditWrite(
+                Ts: DateTimeOffset.UtcNow,
+                Origin: AuditOrigin.Ui,
+                Actor: new AuditActor(ActorKind.User, id.Username, ActorProvider.Discord),
+                Action: action,
+                Severity: AuditSeverity.Info,
+                Target: null,
+                ServerId: null,
+                HostId: options.HostId,
+                Summary: summary,
+                Meta: new Dictionary<string, string> { ["tier"] = AuthTiers.ToWire(tier) }),
+                ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "audit {Action} write failed (non-fatal)", action);
+        }
+    }
 
     // The CSRF state cookie's attributes — shared by the set (at /start) and the delete (at /callback,
     // where Path must match for the deletion to take). Secure tracks the scheme so it works on an http

@@ -15,8 +15,15 @@ The first write path (M3) — `POST /api/v1/servers/{id}/commands { verb }` → 
 - **`job.state` is the JOB's own lifecycle** (`queued→running→succeeded|failed`), NOT the server's
   status. The affected server's status rides the `servers` topic via `server.patch`; the client derives
   the optimistic display from the verb. (Frozen §6 divergence from the §5·d server-shaped example.)
-- **Jobs are in-memory.** `JobRegistry` holds state; SQLite + the audit write land at **M5**. Don't add
-  a jobs table now.
+- **Jobs are in-memory.** `JobRegistry` holds state; jobs themselves are **not** persisted (no jobs table).
+  Don't add one.
+- **Provenance stamping, NOT an audit write (M5).** The command path stamps `actor`(bearer identity)+
+  `origin`(caller-declared surface) onto `ILifecycleService.Start/Stop/Restart(serverId, actor, origin)`
+  (kgsm-lib 1.8.0) so the resulting kgsm event carries who/through-what. The **audit row is written by the
+  M5 event consumer from that event echo** — the command path does **NOT** write one (kgsm owns `server.*`
+  → no double-write). `CommandRunner.Start(job, actor, origin)` threads them; `ServersController` derives
+  `actor` from the JWT (`AuditPrincipal`) and validates `origin` (`ui|assistant|discord|api`, default `api`;
+  `system` rejected). Don't add an `AuditService` call here.
 
 ## Invariants when you touch this
 

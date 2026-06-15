@@ -13,6 +13,10 @@ frozen in `PLAN.md §6` (WS stream row) + `§8` (M2 log). This file is the local
   on (re)connect it re-hydrates via REST. Don't send a full snapshot when a client subscribes.
 - **Coalesce-to-latest per key** is the backpressure rule: a slow client gets the *newest* frame, never
   an unbounded backlog; a stalled send is torn down → the client reconnects (§3·j). Don't buffer history.
+  **Exception — the `audit` topic (M5):** audit appends are distinct immutable facts, not supersede-by-latest
+  patches, so each carries a **unique** coalesce key (the event id, `StreamProtocol.AuditEntityKey`) — never
+  the static topic name, which would silently drop all but the latest append. The client prepends; on
+  reconnect it re-hydrates via `GET /audit` (the WS stays patch-only, no replay).
 
 ## Invariants when you touch this
 

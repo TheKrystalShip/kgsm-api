@@ -1,0 +1,58 @@
+# CLAUDE.md — Services/Audit/
+
+The append-only **audit log** (M5, architecture.html §3·d) — persistence *downstream* of the stateless
+engine (keystone O3). `GET /api/v1/audit` (keyset) + the `audit` WS topic (`audit.append`). Built; the
+contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is the local "what you must not break."
+
+## Locked decisions (do not relitigate)
+
+- **Event-sourced, single writer, NO double-write.** kgsm **owns** `server.*`/`backup.*`. `AuditService`
+  is the one writer; engine actions land via `KgsmAuditConsumer` (the kgsm-lib `IEventService` echo) —
+  the API **never** writes an audit row when it *issues* a command. The command path only **stamps**
+  `actor`+`origin` onto `ILifecycleService.*(serverId, actor, origin)` (kgsm-lib 1.8.0) so they ride the
+  event. `auth.*` has no kgsm event → written directly (no double-write risk). **Never add a second
+  writer for an action kgsm already emits** — you can't dedup echoes, which is the whole reason provenance
+  is stamped instead.
+- **actor and origin are independent axes.** `actor` = who (identity); `origin` = the surface. **Never
+  derive origin from actor.** A missing/unknown origin is **`null`**, never a fabricated surface (the
+  never-fabricate invariant). The command path's origin is **caller-declared** (`ui|assistant|discord|api`,
+  default `api`; `system` is reserved for autonomous engine actions and rejected at the controller).
+- **Append-only & immutable.** Rows are never updated or deleted; a correction is a *new* row. Don't add
+  an update/delete path. `EnsureCreated`, **not an EF migration** (dev authority — wipe the DB on a schema
+  change; see the api `CLAUDE.md` gotcha).
+- **Closed `action` vocabulary** (`Contracts/AuditAction`). Clients/the model can't invent one. The M5
+  subset is what's honestly sourceable today; `server.crash`/`config.*`/`player.*`/… are deferred (no
+  source yet) — add them when their producer lands, not speculatively.
+- **`origin` nullable + no `meta.jobId`** are the two recorded §6 divergences from the §3·d schema. Keep them.
+
+## Invariants when you touch this
+
+- **Serialized writes.** `AuditService` holds a `SemaphoreSlim` write gate (SQLite is single-writer) and
+  its **own DI scope per write** (writes arrive off the request path — the event listener). Don't capture
+  a request-scoped `AppDbContext`. Reads (`AuditController`) use the request scope directly via `AuditQueries`.
+- **Keyset pagination on `rowid`**, newest first (`RowId < cursor` `DESC`). Never offset pagination (it
+  skips/repeats as the head grows). `nextCursor` only when the page came back full.
+- **WS coalesce key = the unique event id** (`StreamProtocol.AuditEntityKey`), NOT a static `"audit"` key:
+  audit appends are distinct facts and must never supersede one another in a slow client's queue. (Contrast
+  the metric/status patches, which *are* supersede-by-latest.)
+- **Actor parse fidelity** (`AuditMapping.ParseActor`): `provider:name` → `{kind,name,provider}`, kind
+  derived from provider (`discord`→user, `api`→token, `system`→system); bare string = the OS-user fallback;
+  unknown provider keeps the name but leaves provider `null` (never coerce). The load-bearing test is the
+  **round-trip** (`discord:haru` → `{user,haru,discord}`) — keep it green when you touch the parser.
+- **kgsm-lib only / the listener owns its socket.** Events come through `IEventService`, never a raw socket.
+  `UnixSocketClient` **binds + deletes** its path, so `KGSM_API_KGSM_SOCKET` must be a **dedicated** path
+  (in kgsm's `config_event_socket_filenames`), never one another consumer owns.
+
+## Degrade gracefully (don't crash startup)
+
+`KgsmAuditConsumer.StartAsync` always `EnsureCreated`s (so `GET /audit` + auth writes work with no engine),
+then wires events **only if** the engine is provisioned and `IEventService` resolves; a bad/absent socket is
+logged and skipped (the bind faults kgsm-lib's own fire-and-forget task, never throws here). An auth audit
+write is best-effort — a failed write must never break login. **Honest boundary:** events emitted while the
+API isn't listening are **not** audited (stateless engine, no backfill) — state it, don't try to backfill.
+
+## Auth (M4·a)
+
+`GET /audit` is `[Authorize(Policy = viewer)]` — a core read surface ("every 'what happened' view reads
+here"). The `audit` WS topic rides the same viewer-gated `/stream` socket. Trivially bump to operator if the
+feed is later deemed sensitive — but viewer is the deliberate default.

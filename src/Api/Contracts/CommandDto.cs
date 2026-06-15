@@ -5,8 +5,15 @@ namespace TheKrystalShip.Api.Contracts;
 /// expresses <em>intent only</em> — a closed, server-defined verb set; an unknown/empty verb is
 /// rejected at write time (<c>400</c>). <c>update</c> (long-running, version-changing) is deferred
 /// from M3's first cut.
+/// <para>
+/// <see cref="Origin"/> (M5) is the optional driving <em>surface</em> the client declares (<c>ui</c>,
+/// <c>assistant</c>, <c>discord</c>, <c>api</c>) — stamped onto the kgsm command so the resulting event
+/// (and its audit row) records which surface drove it. Absent ⇒ <c>api</c> (literally true — it came
+/// through the API); an unknown or <c>system</c> value (reserved for autonomous engine actions) is
+/// rejected (<c>400</c>). It is independent of the actor (the bearer identity), never derived from it.
+/// </para>
 /// </summary>
-public sealed record CommandRequest(string? Verb);
+public sealed record CommandRequest(string? Verb, string? Origin = null);
 
 /// <summary>
 /// The closed lifecycle verb set the API admits in M3. Server-defined — the client (or, later, the

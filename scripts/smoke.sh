@@ -53,6 +53,11 @@ WD_SOCK="${SMOKE_WATCHDOG_SOCKET:-}"                                    # empty 
 # M1·b engine wiring. kgsm-lib is base, not a leaf: point it at the canonical dev checkout so
 # GET /servers reads a real roster. Override with SMOKE_KGSM_PATH on another host.
 KGSM_PATH="${SMOKE_KGSM_PATH:-/home/heisen/tks/kgsm/kgsm.sh}"
+# M5 event socket: a DEDICATED temp path the audit consumer binds — NEVER the shared default
+# (/usr/share/kgsm/kgsm.sock), since the listener deletes any file at its path before binding and
+# could clobber another consumer's live socket. Smoke fires no kgsm events, so this just proves the
+# consumer wires up without touching anything real.
+KGSM_SOCK="${SMOKE_KGSM_SOCKET:-/tmp/kgsm-api-smoke-events.sock}"; rm -f "$KGSM_SOCK"
 
 # M4·a: auth is ON by default. The M0–M3 checks below run under the dev escape hatch (synthetic admin)
 # so they exercise the domain contracts unchanged; the auth boundary itself gets its own ENABLED
@@ -91,7 +96,7 @@ trap cleanup EXIT
 start_api() {
   KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" \
   KGSM_API_HOST_ID="$HOST_ID" KGSM_API_MONITOR_SOCKET="$1" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" \
-  KGSM_API_KGSM_PATH="$KGSM_PATH" \
+  KGSM_API_KGSM_PATH="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
     dotnet "$DLL" >/tmp/kgsm-api-smoke.log 2>&1 &
   SRV=$!; PIDS+=("$SRV")
   for _ in $(seq 1 80); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
@@ -105,6 +110,7 @@ start_api_auth() {
   env -u KGSM_API_AUTH_DISABLED \
     KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" KGSM_API_HOST_ID="$HOST_ID" \
     KGSM_API_MONITOR_SOCKET="$MON_SOCK" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" KGSM_API_KGSM_PATH="$KGSM_PATH" \
+    KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
     dotnet "$DLL" >/tmp/kgsm-api-smoke-auth.log 2>&1 &
   SRV=$!; PIDS+=("$SRV")
   for _ in $(seq 1 80); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
@@ -156,10 +162,12 @@ req GET /api/v1
 [[ "$CODE" == 200 ]] && grep -q '"name":"kgsm-api"' <<<"$BODY" && grep -q '"version":"v1"' <<<"$BODY" \
   && ok "/api/v1 200 + {name,version}" || bad "/api/v1 handshake (code=$CODE body=$BODY)"
 
-# 4. EF Core + SQLite round-trip (the data layer wiring, end-to-end)
+# 4. EF Core + SQLite round-trip (the data layer wiring, end-to-end). M5: a READ round-trip now (connect
+#    -> EnsureCreated the audit schema -> count) — the audit table is append-only, so the probe never
+#    writes a fake row. Fresh DB => auditRows:0; the point is the wiring builds + queries.
 req GET /api/v1/_dbcheck
-[[ "$CODE" == 200 ]] && grep -qE '"probes":[1-9]' <<<"$BODY" \
-  && ok "EF+SQLite round-trip ($(grep -oE '"probes":[0-9]+' <<<"$BODY"))" || bad "_dbcheck (code=$CODE body=$BODY)"
+[[ "$CODE" == 200 ]] && grep -qE '"auditRows":[0-9]' <<<"$BODY" \
+  && ok "EF+SQLite round-trip ($(grep -oE '"auditRows":[0-9]+' <<<"$BODY"))" || bad "_dbcheck (code=$CODE body=$BODY)"
 
 # 5. error envelope on a REAL 500 (exception path, not assumed)
 req GET /api/v1/_throw
@@ -582,6 +590,35 @@ sys.exit(0 if any(t>u for t in tick_t) else 4)                         # ticks r
   # stub-driven smoke. The gate and all three error envelopes above ARE proven here, without mutation.
   echo "  (note: 202/job lifecycle + WS job.patch + verify are code-path-only in smoke — live-validated on a trusted host)"
 
+  # --- M5 audit: the read surface (the append path is xUnit + a trusted-host live-validate) ---
+  echo "==> M5 audit checks — GET /audit (the keyset read contract; empty here — no events fire in smoke)"
+
+  # 29. GET /audit -> 200 + the { data, nextCursor } page shape. Empty + nextCursor:null on a fresh DB
+  #     (no kgsm lifecycle events fire in smoke, auth is disabled so no login) — proves the endpoint, the
+  #     page envelope, and that EnsureCreated landed the audit table (a missing table would 500 here).
+  req GET /api/v1/audit
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if (isinstance(d.get('data'),list) and len(d['data'])==0 and d.get('nextCursor') is None) else 1)
+" 2>/dev/null; then
+    ok "/audit 200 + { data:[], nextCursor:null } (empty page; table created via EnsureCreated)"
+  else bad "M5 /audit empty page (code=$CODE body=$BODY)"; fi
+
+  # 30. The filters + limit are accepted (still empty here) — proves the keyset query parameters bind and
+  #     the page shape holds with filters applied (1:1 to the indexed columns).
+  req GET "/api/v1/audit?limit=5&severity=info&serverId=mc&actor=haru"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if ('data' in d and 'nextCursor' in d) else 1)
+" 2>/dev/null; then
+    ok "/audit accepts cursor/limit/severity/serverId/actor filters (page shape holds)"
+  else bad "M5 /audit filters (code=$CODE body=$BODY)"; fi
+
+  echo "  (note: the event-sourced append + the audit.append WS topic are proven in tests/Api.Tests; the"
+  echo "   live kgsm-event → audit row path is a trusted-host live-validate, like M3's mutation happy path)"
+
   stop_api
 fi
 
@@ -589,11 +626,12 @@ fi
 echo "==> M4·a auth checks — AUTH ENABLED instance (no-token sweep; full tier matrix in tests/Api.Tests)"
 start_api_auth || { echo "API never healthy (auth-enabled); log:"; tail -20 /tmp/kgsm-api-smoke-auth.log; exit 2; }
 
-# 29. Protected endpoints with NO bearer -> 401 + the frozen {error} envelope (never ProblemDetails).
+# 31. Protected endpoints with NO bearer -> 401 + the frozen {error} envelope (never ProblemDetails).
 #     Includes the diagnostics probes (_dbcheck touches the DB, _throw forces a 500): the secure-by-default
 #     fallback + the admin gate close them, so "protect all prior endpoints" holds with no open back door.
+#     /audit (M5) is a viewer read -> also 401 with no bearer.
 auth_401=true
-for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/_dbcheck /api/v1/_throw; do
+for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/_dbcheck /api/v1/_throw; do
   req GET "$p"
   if [[ "$CODE" != 401 ]] || ! grep -q '"code":"unauthorized"' <<<"$BODY" || grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY"; then
     auth_401=false; echo "    ($p -> $CODE $BODY)"
@@ -601,16 +639,16 @@ for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/_dbcheck /api/v1/_
 done
 req POST /api/v1/servers/x/commands -H 'Content-Type: application/json' -d '{"verb":"start"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST commands -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/_dbcheck,/_throw,POST commands (no open back door)" \
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/_dbcheck,/_throw,POST commands (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
-# 30. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).
+# 32. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).
 req GET /health; H=$CODE
 req GET /api/v1;  V=$CODE
 [[ "$H" == 200 && "$V" == 200 ]] && ok "/health + /api/v1 stay open under auth (200/200)" \
   || bad "open endpoints under auth (health=$H meta=$V)"
 
-# 31. The login endpoint 503s until Discord is configured (the M4·b live half) — honest "unconfigured",
+# 33. The login endpoint 503s until Discord is configured (the M4·b live half) — honest "unconfigured",
 #     not a 404/500. JWT validation + tier gating (above) are enforced regardless.
 req GET /auth/discord/start
 [[ "$CODE" == 503 ]] && grep -q '"code":"auth_unconfigured"' <<<"$BODY" \

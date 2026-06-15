@@ -31,10 +31,17 @@ public sealed class CommandRunner(
     JobRegistry registry,
     ILogger<CommandRunner> logger)
 {
-    /// <summary>Fire-and-forget the job's execution. The job is already registered (queued).</summary>
-    public void Start(Job job) => _ = Task.Run(() => ExecuteAsync(job));
+    /// <summary>
+    /// Fire-and-forget the job's execution. The job is already registered (queued). <paramref name="actor"/>
+    /// (the bearer identity, e.g. <c>discord:haru</c>) and <paramref name="origin"/> (the declared surface)
+    /// are stamped onto the engine command so the resulting kgsm event — and the audit row the M5 consumer
+    /// writes from it — carries who drove it and through which surface. The API does NOT write the audit
+    /// row here: kgsm owns <c>server.*</c>, so the row comes from the event echo (no double-write).
+    /// </summary>
+    public void Start(Job job, string? actor = null, string? origin = null) =>
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin));
 
-    private async Task ExecuteAsync(Job job)
+    private async Task ExecuteAsync(Job job, string? actor, string? origin)
     {
         bool ok = false;
         string? error = null;
@@ -53,9 +60,9 @@ public sealed class CommandRunner(
             {
                 KgsmResult result = job.Verb switch
                 {
-                    CommandVerb.Start => lifecycle.Start(job.ServerId),
-                    CommandVerb.Stop => lifecycle.Stop(job.ServerId),
-                    CommandVerb.Restart => lifecycle.Restart(job.ServerId),
+                    CommandVerb.Start => lifecycle.Start(job.ServerId, actor, origin),
+                    CommandVerb.Stop => lifecycle.Stop(job.ServerId, actor, origin),
+                    CommandVerb.Restart => lifecycle.Restart(job.ServerId, actor, origin),
                     _ => new KgsmResult(1, "", $"unknown verb '{job.Verb}'"),
                 };
                 ok = result.IsSuccess;

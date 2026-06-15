@@ -61,6 +61,23 @@ public static class StreamProtocol
     /// </summary>
     public static string JobEntityKey(string id) => $"jobs:{id}";
 
+    // --- audit (M5 — the append-only action log) ---
+    /// <summary>Newly-appended audit records (host-wide): <c>audit</c> (architecture.html §3·d).</summary>
+    public const string AuditTopic = "audit";
+    /// <summary>
+    /// A single appended <see cref="Contracts.AuditRecord"/> (the client prepends it — events are
+    /// immutable, never edited). Unlike the metric/status patches this is <em>not</em> a
+    /// supersede-by-latest patch: each append is a distinct fact, so its coalesce key is the unique
+    /// event id (see <see cref="AuditEntityKey"/>) and appends never collapse into one another.
+    /// </summary>
+    public const string AuditAppend = "audit.append";
+
+    /// <summary>
+    /// The per-connection coalesce key for an audit record on the <see cref="AuditTopic"/>: the unique
+    /// event id, so distinct appends each occupy their own outbound slot (never supersede each other).
+    /// </summary>
+    public static string AuditEntityKey(string id) => $"audit:{id}";
+
     /// <summary>
     /// The per-connection coalesce key for a server entity on the <see cref="ServersTopic"/>. A patch
     /// and a later removal for the same id share this key, so the newer supersedes any unsent older

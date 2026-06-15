@@ -7,6 +7,7 @@ using TheKrystalShip.Api.Infrastructure;
 using TheKrystalShip.Api.Json;
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Leaves;
@@ -90,6 +91,16 @@ public class Startup(IConfiguration configuration)
         // the verify server.patch. Both singletons.
         services.AddSingleton<JobRegistry>();
         services.AddSingleton<CommandRunner>();
+
+        // M5 — audit log (append-only, downstream of the stateless engine). AuditService is the single
+        // writer (own DI scope per write, serialized); the consumer subscribes to kgsm events via
+        // kgsm-lib's IEventService and turns server.*/backup.* into audit rows (the engine owns those,
+        // so the API records the echo, never double-writes a command). The consumer also EnsureCreates
+        // the audit table at startup — so GET /audit + the API-internal (auth) writes work even with no
+        // engine. Reads go straight to AppDbContext on the request scope (AuditController). No EF
+        // migrations — the schema is EnsureCreated (greenfield/dev authority; PLAN M5).
+        services.AddSingleton<AuditService>();
+        services.AddHostedService<KgsmAuditConsumer>();
 
         // M4·a — auth (Discord per-host, Model A). Stateless JWT bearer (the M4 decision): no session
         // table, no user row — keeps M5 as the first EF migration. The Discord seam (IDiscordIdentityResolver)

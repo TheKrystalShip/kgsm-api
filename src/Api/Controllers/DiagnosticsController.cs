@@ -25,12 +25,14 @@ public sealed class DiagnosticsController(AppDbContext db) : ControllerBase
     [HttpGet("_dbcheck")]
     public async Task<DbCheckResult> DbCheck()
     {
+        // A READ round-trip (connect → ensure schema → query) — proves the EF Core + SQLite wiring
+        // without writing. The audit table is append-only and immutable, so a probe must never insert
+        // a fake row (it would be an indelible bogus audit fact). EnsureCreated lands the schema on a
+        // fresh DB; against an existing DB it is a no-op (no migrations — see AppDbContext).
         await db.Database.EnsureCreatedAsync();
-        db.Probes.Add(new Probe { Note = "ef-roundtrip", At = DateTimeOffset.UtcNow });
-        await db.SaveChangesAsync();
-        int probes = await db.Probes.CountAsync();
-        return new DbCheckResult("EF Core 10 + Microsoft.Data.Sqlite", probes);
+        int auditRows = await db.Audit.CountAsync();
+        return new DbCheckResult("EF Core 10 + Microsoft.Data.Sqlite", auditRows);
     }
 }
 
-public sealed record DbCheckResult(string Driver, int Probes);
+public sealed record DbCheckResult(string Driver, int AuditRows);

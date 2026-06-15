@@ -21,13 +21,15 @@ its leaves + this API. The API aggregates **only its own host's** leaves; cross-
 capabilities), **M1·b** (servers — the kgsm-lib domain+run-state ⋈ monitor metrics join, the
 honest `Server` DTO), **M2** (realtime — the `GET /api/v1/stream` WebSocket + the always-on
 leaf-health capability model), **M3** (commands — the first write path: `POST /servers/{id}/commands`
-→ gate → `202` + job → `jobs` WS → verify; verbs `start`/`stop`/`restart`, `update` deferred) and now
-**M4·a** (auth — Discord per-host, Model A; the credential-independent half: stateless JWT bearer +
-hierarchical viewer/operator/admin tier policies + `[Authorize]` on every prior endpoint) are
-`built` & self-validated (`scripts/smoke.sh` **31/31** + **tests/Api.Tests 30/30**); **M4·b** (the live
-Discord OAuth round-trip) and M5–M8 are `planned`. **Auth is ON by default** — `KGSM_API_AUTH_DISABLED=1`
-is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4 open trust window). Trust
-`PLAN.md`'s per-milestone status, not assumptions.
+→ gate → `202` + job → `jobs` WS → verify; verbs `start`/`stop`/`restart`, `update` deferred),
+**M4·a/M4·b** (auth — Discord per-host, Model A; stateless JWT bearer + viewer/operator/admin tier
+policies + `[Authorize]` everywhere, live OAuth round-trip validated) and now **M5** (audit — the
+append-only action log: kgsm events → audit rows via kgsm-lib `IEventService`, the command path stamping
+actor+origin so the engine echo carries provenance with **no double-write**, `GET /audit` keyset +
+the `audit` WS topic; SQLite via `EnsureCreated`, no EF migration) are `built` & self-validated
+(`scripts/smoke.sh` **33/33** + **tests/Api.Tests 59/59**); M6–M8 are `planned`. **Auth is ON by default**
+— `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4
+open trust window). Trust `PLAN.md`'s per-milestone status, not assumptions.
 
 ## Read first (sources of truth)
 
@@ -119,8 +121,14 @@ exactly one correct access path:
   scope — the verb routes native→watchdog, container→Docker inside the engine). kgsm-lib is **base,
   not a leaf**: provisioned-by-default at `KGSM_API_KGSM_PATH` (`/usr/bin/kgsm`); an empty path is
   a surfaced misconfiguration (empty `/servers` + a one-time log), not a §4·b capability. The
-  process-based `IInstanceService` is transient → resolved per-request from the provider; the kgsm
-  event socket (`KGSM_API_KGSM_SOCKET`) is only a registration formality until the M5 event consumer.
+  process-based `IInstanceService` is transient → resolved per-request from the provider. **M5** opens
+  the kgsm **event socket** (`KGSM_API_KGSM_SOCKET`) via kgsm-lib's `IEventService` — `KgsmAuditConsumer`
+  binds + **listens** (kgsm connects outbound and pushes events; the listener deletes any file at its
+  path before binding, so this must be a **dedicated** socket path, listed in kgsm's
+  `config_event_socket_filenames`, never a path another consumer owns). M3's command path also **stamps**
+  `(actor, origin)` on `ILifecycleService.Start/Stop/Restart` (kgsm-lib **1.8.0**) so the engine event —
+  and the audit row M5 writes from it — carries who/through-what; the API never writes an audit row for
+  its own command (kgsm owns `server.*` → no double-write, see §5 below).
 - **Monitor** (host + per-instance metrics) → **scrape its unix socket**
   (`/run/kgsm-monitor.sock`, `GET /metrics`) directly — that's the monitor's neutral public
   output; reuse the watchdog client's `SocketsHttpHandler.ConnectCallback` pattern (done in
@@ -174,9 +182,16 @@ of leaves present.
    Record every frozen shape in `PLAN.md §6`.
 4. **Additive-only within `/api/v1`** (path-versioned). Grow into reserved fields, no break.
 5. **Persistence is downstream of the stateless engine.** The API persists only its *own*
-   operational metadata (sessions M4, append-only audit M5) via EF; the domain is
-   live-scraped, never stored. KGSM stays stateless (the watchdog is the lone resident
-   exception, and it's engine, not this API).
+   operational metadata — the append-only **audit log** (M5; M4 auth is stateless JWT, no
+   rows) via EF; the domain is live-scraped, never stored. KGSM stays stateless (the watchdog
+   is the lone resident exception, and it's engine, not this API). **The audit is event-sourced,
+   single-writer, no double-write:** kgsm owns `server.*`/`backup.*`, so the API records the
+   engine's event **echo** (`KgsmAuditConsumer` → `AuditService`) — it never writes a row when it
+   *issues* a command; the command path only **stamps** `actor`+`origin` onto the engine call so
+   they ride the event. `auth.*` (no kgsm event) is written directly. **Never** add a second writer
+   for an action kgsm already emits, and never derive `origin` from the actor — they are independent
+   axes (a missing origin is `null`, never fabricated). Schema is **`EnsureCreated`, not an EF
+   migration** (dev authority — wipe the DB on a schema change). See `Services/Audit/CLAUDE.md`.
 
 ## Conventions
 
@@ -197,9 +212,13 @@ of leaves present.
 
 - **`legacy/`** is the scrapped .NET 9 API — harvest patterns (e.g. log-streaming) but
   treat nothing in it as correct (it fabricates metrics).
-- **EF `EnsureCreated` vs migrations:** M0's `_dbcheck` uses `EnsureCreatedAsync` (no
-  `__EFMigrationsHistory`). When M5 introduces migrations, start from a clean DB or
-  `ef database update` will conflict.
+- **EF `EnsureCreated`, NOT migrations (settled at M5, user directive 2026-06-15).** Greenfield/dev
+  authority: the schema (`AuditEntry`) is created via `EnsureCreatedAsync` (no `__EFMigrationsHistory`),
+  and a schema change means **wiping the dev DB**, not adding a migration. ⚠ `EnsureCreated` **no-ops on
+  an existing DB** — so after any entity change, delete the DB file (smoke `rm -f`s its own `SMOKE_DB`)
+  or the new column/table silently won't exist and queries 500 at runtime, not build. Don't introduce
+  `Migrations/` without re-deciding this. The M0 `Probe` table is gone (replaced by `AuditEntry`);
+  `_dbcheck` is a **read** round-trip (the append-only audit table must never be probe-written).
 - **Diagnostics endpoints** (`/api/v1/_throw`, `/api/v1/_dbcheck`) are smoke-only probes —
   remove/restrict before any public exposure.
 - **Trust window:** M3 (commands, which mutate) lands before M4 (auth) — **CONFIRMED acceptable**
