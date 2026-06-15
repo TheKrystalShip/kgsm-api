@@ -302,7 +302,7 @@ wiring* lands first.
 - **Frontend gate:** confirm the trust window above; then action buttons → optimistic transitional
   state → `jobs`-topic tracking → reconcile to the authoritative status on `server.patch`.
 
-### M4 — Auth: Discord per-host (Model A)  ·  `partial` (M4·a built & self-validated 2026-06-15; M4·b live + frontend gate pending)
+### M4 — Auth: Discord per-host (Model A)  ·  `partial` (M4·a + M4·b backend built & live-validated 2026-06-15; frontend gate pending)
 - **Goal:** the security boundary — make good on the trust window M3 ran under.
 - **Wires:** Discord (external IdP, silent SSO) + this host's bot (role → tier).
 - **Split like M1** — the one milestone with an unfabricable live dependency (a real Discord app +
@@ -332,16 +332,23 @@ wiring* lands first.
   refresh-as-access/wrong-signature/garbage rejections, the WS `?access_token=` path, and the callback
   verdict ok/denied/invalid/upstream-error + refresh rotation + session snapshot).
 
-**M4·b — the live OAuth round-trip.** · `planned` (gates on Discord creds + the trusted host)
+**M4·b — the live OAuth round-trip.** · `built` (live-validated 2026-06-15 on the trusted host)
 - The real `DiscordIdentityResolver` (code exchange → `/users/@me` → `GET /guilds/{guild}/members/{user}`
   with the **bot token** — the only path to roles, since the `identify guilds` scopes don't carry them)
-  is **built but un-live-validated**; the login endpoints `503` until the Discord app / bot token / guild
-  / role-map are supplied. Validate once on the trusted host (the M3 live-validation pattern), then drop
-  any provisional notes. **Shared external config, not a kgsm-bot process dependency** (keystone §4).
-- **Depends:** M0 (the auth-pipeline placeholder, now filled). Must land before any public
-  exposure; tier-gating of M3 commands lands here (built in M4·a).
+  is now **live-validated**: a real Discord login resolved an in-guild member's 3 roles to `admin`, minted
+  the bearer, and that bearer passed live tier-gating end-to-end (see §8). The login endpoints `503` only
+  until the Discord app / bot token / guild / role-map are configured. **Shared external config, not a
+  kgsm-bot process dependency** (keystone §4).
+- **OAuth `state` CSRF round-trip (added here):** `/start` sets a one-time HttpOnly state cookie (the
+  stateless double-submit nonce — no server store, honoring the no-session-table decision); `/callback`
+  rejects a missing/mismatched state with `400 invalid_state` *before* any Discord exchange. `Secure`
+  tracks the scheme (off on http loopback, on under https); `SameSite=Lax` so it rides Discord's
+  top-level redirect back. Fake-tested (mismatch + no-cookie) and exercised on the live login.
+- **Depends:** M0 (the auth-pipeline placeholder, now filled). Tier-gating of M3 commands is live.
+- **Outstanding before `built` flips to the full M4:** the **frontend gate** only — the per-host session
+  state machine end-to-end + tier-gated controls (the SPA, still `planned`). Op note: set a stable
+  `KGSM_API_AUTH_SIGNING_KEY` on any real host (dev ran ephemeral — tokens die on restart).
 - **Risk:** the security boundary itself.
-- **Frontend gate:** the per-host session state machine end-to-end; tier-gated controls.
 
 ### M5 — Audit log + SQLite (the event-persistence consumer)  ·  `planned`  ←  *resolves keystone O3*
 - **Goal:** the durable, append-only action record — **persistence downstream of the
@@ -449,7 +456,7 @@ for the external surface and this doc for the backend's honest realization of it
 | Monitor `/metrics` wire shape (`Snapshot` graph) | M1·a | **shared package** `TheKrystalShip.KGSM.Monitor.Contracts` — the DTO graph + source-gen camelCase JSON, built in kgsm-monitor and consumed here so the contract is solid at build time. **Drift rule:** any contract change MUST bump the package `Version` and the api's `<PackageReference>` (a same-version repack is silently served stale from the NuGet cache). |
 | WS stream envelope + topic/type vocabulary | **M2** | `architecture.html §3·b/§3·j` — **frozen 2026-06-15.** Endpoint `GET /api/v1/stream` (WebSocket; **unauthenticated until M4** — a pre-auth *read* surface, less severe than M3's mutation but flagged). **Inbound:** `{ type: "subscribe"\|"unsubscribe", topics: [...] }`; unknown command type ignored; unknown/future topics accepted silently (forward-compat for `jobs` M3 / `audit` M5 / `alerts` / `console`); **no ack or error-frame protocol yet.** **Outbound:** `{ topic, type, data }`, patch-only (the client `hydrate(REST) + applyPatch(WS)`; **no snapshot on subscribe** — §3·j re-hydrates via REST on (re)connect). **Topics (M1-backable subset):** `servers` · `servers/{id}/metrics` · `hosts/{id}/metrics` · `hosts/{id}/capabilities`. **Message types** (only `server.patch` is doc-given; the rest are ours, negotiated like the M1·b DTO — all centralized in `Realtime/StreamProtocol.cs`, never inline strings): `server.patch` (data = the **frozen M1·b `Server`**, NOT the §3·b example's `{status:"online", players}`; carries the full element incl. a **point-in-time `metrics` block that may lag** the dedicated `servers/{id}/metrics` tick — merge by id), `server.removed` (`{ id }` tombstone), `metrics.tick` (`ServerMetricsDto`), `host.metrics` (`HostMetricsDto` = the capacity portion of the `Host` view; `net`/`temp` omitted, never fabricated), `capabilities.patch` (`HostCapabilities`). **`servers` carries status/roster only — NOT the 1s metric firehose** (resource ticks live on `servers/{id}/metrics`; a deliberate divergence from §3·b's "resource deltas" wording, smoke-proven the `servers` topic stays quiet under ticking metrics). **Honesty:** monitor-down → metric topics go **silent** (never a replayed stale frame) and `hosts/{id}/capabilities` flips metrics `down` — that flip is what explains the silence. **Capability availability is driven by the always-on `LeafHealthMonitor`** (frequent `/health` polls, the single source feeding both this stream and the REST `GET /hosts`), which stamps `since` on each flip — see the Capability-record row. The `capabilities.patch` keeps `provisioned:true` through a down→up cycle: degrade **and** recover gracefully, capability never "lost". |
 | Command verbs + `job` shape + `command.verified` | **M3** | `architecture.html §5·d` — **frozen 2026-06-15.** **Endpoint** `POST /servers/{id}/commands` body `{ verb }` → `202` + `{ job }`; closed, server-defined verb set **`start`·`stop`·`restart`** (**`update` deferred** from the first cut — long-running + version-changing, settles on a version re-check not a run-state one). **Errors:** unknown/missing verb → `400 bad_request`; unknown server → `404 not_found`; an obvious no-op against the real status (start-when-running / stop-when-stopped) or a command already in flight for that server → `409 conflict`. **`job`** = `{ id, serverId, verb, state, createdAt, settledAt?, error? }` (opaque `job_…` id; ISO-8601 UTC `Z` times; `error` set only on `failed`, the engine's real detail — never a fabricated success). **Divergence (honest-vs-aspirational, the same negotiated call as the M1·b DTO):** `job.state` is the **job's own** lifecycle `queued→running→succeeded\|failed`, NOT the §5·d example's server-shaped `state:"running"` — the affected server's authoritative/optimistic status rides the `servers` topic via `server.patch`, and the client derives the optimistic display from the verb (the same topic-separation discipline as the metric topics). **WS:** the `jobs` topic carries a single **`job.patch`** (the full `job` on every transition, coalesced by job id — patch-only, exactly like `server.patch`). **Gate (state guards):** minimal/honest — only the obvious no-ops; the engine (kgsm→watchdog/Docker) owns everything subtler, surfacing an impossible transition as the job's `failed` + its error (the API never fabricates admissibility kgsm does not enforce; `unknown` status never blocks). **Verify** (the §5·d `command.verified` for the direct write path): on settle, a fresh run-state read → an explicit `server.patch`. **Permissions** gate at M4; jobs are **in-memory** (SQLite + audit at M5). The propose/confirm half of §5·d (`command.proposed` over SSE) is the assistant flow (M7), not M3. |
-| Auth session + tiers + 401/403/login_required | **M4·a** | `architecture.html §3·f` — **frozen 2026-06-15 (M4·a).** **Bearer = stateless JWT** (HMAC; access ~15 min + refresh 8h cap; no session table). Endpoints `/auth/discord/start` (302→authorize), `/auth/discord/callback` (`{ verdict:"ok"\|"denied", tier, token, refresh?, userId }`), `/auth/session/refresh` (refresh bearer → `{ token }`), `/auth/session` (`{ user:{ id, username, display, avatarUrl? }, scopes }` or `401`), `/auth/logout` (`204`). Tiers `admin·operator·viewer·none` resolved from the guild role via the **bot token** (`GET /guilds/{guild}/members/{user}` — the only path to roles; the `identify guilds` user scopes don't carry them). `401` (no/invalid/expired bearer) recoverable; `403` (`none`/insufficient tier) terminal. **Divergences (the negotiated honest-vs-aspirational call, like the M1·b DTO / M3 job.state):** (1) camelCase `userId` (not the §3·f example's snake_case `user_id`) — one casing across the surface; (2) `GET /auth/session` returns the **login-time profile snapshot** embedded in the token, NOT a fresh live Discord fetch — the §3·f "fetched live" can't hold once the Discord token is discarded (which §3·f also requires), so snapshot is the honest realization; (3) role re-check happens only at a full bounce (≤ the 8h cap), not on refresh (refresh skips Discord); (4) `/auth/session/refresh` takes the refresh token in the `Authorization: Bearer` header (the `{host}` body is accepted but not required) — a per-host-API simplification of the §3·f `{host}`-body shape. **WS:** the `/stream` bearer rides `?access_token=` (a handshake can't set a header). **Tier gating:** viewer = reads + stream, operator = + the command `POST`, admin = diagnostics (`_throw`/`_dbcheck`) + reserved (settings/install/audit-config, M5/M8). **Secure-by-default:** an authorization `FallbackPolicy` requires an authenticated caller on any endpoint without explicit `[Authorize]`/`[AllowAnonymous]`; only `/health` + `/api/v1` opt out (the SPA's pre-login reachability probes). **M4·b (live):** the real Discord exchange + role lookup; until configured the login endpoints `503`. |
+| Auth session + tiers + 401/403/login_required | **M4·a** | `architecture.html §3·f` — **frozen 2026-06-15 (M4·a).** **Bearer = stateless JWT** (HMAC; access ~15 min + refresh 8h cap; no session table). Endpoints `/auth/discord/start` (302→authorize), `/auth/discord/callback` (`{ verdict:"ok"\|"denied", tier, token, refresh?, userId }`), `/auth/session/refresh` (refresh bearer → `{ token }`), `/auth/session` (`{ user:{ id, username, display, avatarUrl? }, scopes }` or `401`), `/auth/logout` (`204`). Tiers `admin·operator·viewer·none` resolved from the guild role via the **bot token** (`GET /guilds/{guild}/members/{user}` — the only path to roles; the `identify guilds` user scopes don't carry them). `401` (no/invalid/expired bearer) recoverable; `403` (`none`/insufficient tier) terminal. **Divergences (the negotiated honest-vs-aspirational call, like the M1·b DTO / M3 job.state):** (1) camelCase `userId` (not the §3·f example's snake_case `user_id`) — one casing across the surface; (2) `GET /auth/session` returns the **login-time profile snapshot** embedded in the token, NOT a fresh live Discord fetch — the §3·f "fetched live" can't hold once the Discord token is discarded (which §3·f also requires), so snapshot is the honest realization; (3) role re-check happens only at a full bounce (≤ the 8h cap), not on refresh (refresh skips Discord); (4) `/auth/session/refresh` takes the refresh token in the `Authorization: Bearer` header (the `{host}` body is accepted but not required) — a per-host-API simplification of the §3·f `{host}`-body shape. **WS:** the `/stream` bearer rides `?access_token=` (a handshake can't set a header). **Tier gating:** viewer = reads + stream, operator = + the command `POST`, admin = diagnostics (`_throw`/`_dbcheck`) + reserved (settings/install/audit-config, M5/M8). **Secure-by-default:** an authorization `FallbackPolicy` requires an authenticated caller on any endpoint without explicit `[Authorize]`/`[AllowAnonymous]`; only `/health` + `/api/v1` opt out (the SPA's pre-login reachability probes). **CSRF (added M4·b):** `/auth/discord/start` sets a one-time HttpOnly `state` cookie (stateless double-submit; `SameSite=Lax`, `Secure` only under https); `/auth/discord/callback` returns `400 invalid_state` on a missing/mismatched state before any Discord exchange. **M4·b — LIVE-VALIDATED 2026-06-15:** the real Discord exchange + bot-token role lookup resolved an admin login end-to-end (§8); login endpoints `503` only until the Discord app/bot-token/guild/role-map are configured. |
 | Audit record + closed `action` vocabulary + SQLite schema | M5 | `architecture.html §3·d` |
 | Alert record + raise/resolve/retract; `network` block | M6 | `architecture.html §3·c, §3·g` |
 | Assistant SSE event vocabulary (proxy vs re-wrap) | M7 | `architecture.html §5·a`; keystone O1 |
@@ -482,7 +489,7 @@ kgsm-api/
       Leaves/                 # [M1·a] MonitorClient (cached scrape + /health) + AssistantClient (typed HttpClient; /health probe, grows tools/SSE at M7) · [M2] LeafHealthMonitor (always-on /health poller → §4·b capability truth + capabilities.patch flips; watchdog via kgsm-lib IsReadyAsync)
       Aggregation/            # [M1·a] HostAggregator (capacity from /metrics + §4·b capabilities from LeafHealthMonitor) · [M1·b] ServerAggregator (lib status ⋈ monitor metrics) · MetricsMapping (shared snapshot→DTO, REST==WS)
       Commands/               # [M3 built] CommandGate (admissibility) + JobRegistry (in-memory, 1-in-flight/server) + CommandRunner (scope-per-job exec + job.patch + verify server.patch)
-      Auth/                   # [M4·a BUILT] IDiscordIdentityResolver (the seam) + DiscordIdentityResolver (real, live=M4·b) · SessionTokenService (HMAC JWT mint/validate) · AuthTier/TierAuthorization (hierarchical policies) · DisabledAuthHandler (escape hatch). Stateless JWT, no session store.
+      Auth/                   # [M4·a+b BUILT, live-validated] IDiscordIdentityResolver (the seam) + DiscordIdentityResolver (real, live-validated) · SessionTokenService (HMAC JWT mint/validate) · AuthTier/TierAuthorization (hierarchical policies) · DisabledAuthHandler (escape hatch) · AuthController state-cookie CSRF. Stateless JWT, no session store.
       Audit/  Alerts/ Ports/  # [M5]/[M6] event consumer, alert engine, port intent
       Assistant/              # [M7] SSE relay
       Install/ Library/ Settings/ Integrations/  # [M8]
@@ -775,7 +782,7 @@ derived from the verb until a `server.patch` carries the authoritative status; r
 that state / a command is already running", `400` as an invalid action. Unauthenticated until M4 — trusted
 window as above.
 
-### M4·a — 2026-06-15 · auth (Discord per-host, Model A — the credential-independent half) self-validated; M4·b live + frontend gate PENDING
+### M4·a — 2026-06-15 · auth (Discord per-host, Model A — the credential-independent half) self-validated; frontend gate PENDING (M4·b now live-validated — see the M4·b entry below)
 
 **Status:** the security boundary is built and self-validated for everything that does NOT need a live
 Discord app. Auth is **on by default**; the M0–M3 contracts now run behind it. The live OAuth round-trip
@@ -844,3 +851,58 @@ authorization `FallbackPolicy` requires an authenticated caller, `/health` + `/a
 terminal (never auto-re-auth); proactive refresh at ~75% of the access TTL; the bearer in `sessionStorage` (per
 host, never disk) + a URL-only host registry in `localStorage`. Tier-gated controls (hide/disable the command
 buttons below `operator`).
+
+### M4·b — 2026-06-15 · auth (the live Discord OAuth round-trip) LIVE-VALIDATED on the trusted host; frontend gate PENDING
+
+**Status:** the one thing M4·a couldn't prove — the wire correctness of the three Discord calls — is now
+proven against the real `discord.com`. The credentials arrived (a real Discord app + bot token + guild +
+role→tier map, held in a gitignored `appsettings.Development.json`), so the backend half of M4 is **built**.
+Only the **frontend session-state-machine gate** remains before the full M4 milestone flips to `built`.
+
+**Config-load trap (caught first).** `ApiOptions` reads via `IConfiguration`, and `appsettings.Development.json`
+only layers in when the environment is `Development` — a bare `dotnet run`/`dotnet <dll>` defaults to
+**Production** (there is no `launchSettings.json`) and would silently ignore the file (login endpoints keep
+`503`-ing as if unconfigured). Run with `ASPNETCORE_ENVIRONMENT=Development`. Confirmed: `/auth/discord/start`
+→ `302` with a well-formed authorize URL (right `client_id`/`redirect_uri`/`scope=identify guilds`/`state`),
+`/auth/discord/callback` (no code) → `400` (not `503`), i.e. `DiscordConfigured` true.
+
+**OAuth `state` CSRF round-trip — built here (the one piece of M4·a-owed logic).** `/start` sets a one-time
+HttpOnly `state` cookie (`kgsm_oauth_state`); `/callback` requires the echoed `state` to equal the cookie
+(constant-time compare) *before* any Discord exchange, else `400 invalid_state`; the cookie is cleared on use
+(no replay). **Stateless** — a client-side cookie, no server store, honoring the no-session-table decision.
+`Secure = Request.IsHttps` (off on the http loopback dev host, on under https); `SameSite=Lax` so it rides
+Discord's top-level cross-site redirect back (Strict would drop it); `Path=/auth/discord`; 10-min TTL. Observed
+live: `Set-Cookie: kgsm_oauth_state=…; max-age=600; path=/auth/discord; samesite=lax; httponly`. Fake-tested:
+the existing callback-verdict tests now each drive a real `/start`→`/callback` round-trip (proving the cookie
+carries end-to-end), plus two negatives (state mismatch, no-cookie → `400 invalid_state`). **tests 32/32**
+(was 30; +2), **smoke 31/31** unchanged (smoke's login check runs Discord-unconfigured → `503` before the
+cookie path).
+
+**Live round-trip (real browser, real Discord).** A real login through `/auth/discord/start?prompt=consent`
+resolved end-to-end: code exchange → `/users/@me` → `GET /guilds/{guild}/members/{user}` with the **bot token**.
+The resolver logged `Discord auth resolved user 245717107596197888 on guild 385730677141929985 -> tier admin
+(3 roles)` — i.e. the bot-token role lookup found the member's 3 guild roles and mapped them to `admin`. The
+callback returned `{ verdict:"ok", tier:"admin", token, refresh, userId:"discord:245717107596197888" }`, and the
+`state` matched the cookie (the CSRF gate passed live, not just in tests). Host audience resolved to the machine
+name (`hotrod`, `KGSM_API_HOST_ID` blank).
+
+**Live bearer verification (the minted token against the running pipeline).** admin `GET /hosts` → `200`; admin
+command `POST` (no such server) → `404` (past the operator gate); admin `GET /_dbcheck` (admin-gated) → `200`;
+no-token `/_dbcheck` → `401` (secure-by-default); the **refresh token used as an access bearer** → `401` (the
+`tkn` split holds live); `GET /auth/session` → the login-time profile snapshot (`heisen9386`/`Heisen`,
+scopes `identify guilds`); `POST /auth/session/refresh` (refresh bearer) → a fresh access token that then
+`GET /hosts` → `200` (rotation works). All as designed.
+
+**Honest boundary / op notes.** Dev ran with `KGSM_API_AUTH_SIGNING_KEY` **blank → an ephemeral key** (logged
+loudly; tokens die on restart) — set a stable secret on any real host. The role lookup needs the bot to be a
+**member of the guild** (it is); a not-in-guild member would yield `denied/403`. `prompt=none` (the `/start`
+default, silent SSO) bounces back `login_required` on a first-ever consent — use `?prompt=consent` for the
+first login (the frontend retries with consent per §3·f). Discord error-param handling on the callback
+(`?error=access_denied`) currently falls through to `400 bad_request` (no code) — a minor frontend-gate polish,
+not a security gap. **Reverse-proxy note (forward, non-blocking):** `Secure` on the state cookie tracks
+`Request.IsHttps`, which reads `false` behind a TLS-terminating proxy unless `UseForwardedHeaders` honors
+`X-Forwarded-Proto` — wire that when a real https-behind-proxy deploy lands so the CSRF cookie keeps its `Secure`
+flag (low severity: bearers ride the `Authorization` header, not cookies; the nonce is the only cookie).
+
+**Owed before the full M4 flips to `built`:** only the **frontend gate** (the per-host session state machine +
+tier-gated controls) — the SPA, still `planned`. The backend auth boundary is complete and live-proven.

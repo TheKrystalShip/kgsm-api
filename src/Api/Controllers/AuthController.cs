@@ -25,10 +25,18 @@ public sealed class AuthController(
     ApiOptions options,
     ILogger<AuthController> logger) : ControllerBase
 {
+    // The OAuth CSRF state cookie — set at /start, verified at /callback. This is the stateless
+    // double-submit guard: the random nonce rides BOTH the cookie (HttpOnly, our origin) and the
+    // authorize URL's `state` (which Discord echoes back), and the callback requires them equal. No
+    // server-side store, so it honors the no-session-table decision. One-time, short-lived.
+    private const string StateCookie = "kgsm_oauth_state";
+    private static readonly TimeSpan StateTtl = TimeSpan.FromMinutes(10);
+
     /// <summary>
     /// Begin the OAuth bounce — 302 to Discord's authorize URL (the API owns client id / redirect /
     /// scopes). <c>prompt=none</c> is silent SSO; the client retries with <c>consent</c> on
-    /// <c>login_required</c>. 503 until Discord is configured (M4·b).
+    /// <c>login_required</c>. Sets the one-time CSRF state cookie verified at the callback. 503 until
+    /// Discord is configured (M4·b).
     /// </summary>
     [AllowAnonymous]
     [HttpGet("/auth/discord/start")]
@@ -39,6 +47,7 @@ public sealed class AuthController(
                 "Discord auth is not configured on this host.");
 
         string state = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+        Response.Cookies.Append(StateCookie, state, StateCookieOptions());
         string url = discord.BuildAuthorizeUrl(state, prompt ?? "none");
         return Redirect(url);
     }
@@ -48,16 +57,27 @@ public sealed class AuthController(
     /// <list type="bullet">
     /// <item><c>200</c> <c>{ verdict:"ok", tier, token, refresh, userId }</c> — authorized.</item>
     /// <item><c>403</c> <c>{ verdict:"denied", userId }</c> — identity verified, no role on this host (terminal).</item>
-    /// <item><c>400</c> — missing code · <c>401</c> — bad/expired code · <c>502</c> — Discord unreachable · <c>503</c> — unconfigured.</item>
+    /// <item><c>400</c> — bad/forged state (<c>invalid_state</c>) or missing code · <c>401</c> — bad/expired code · <c>502</c> — Discord unreachable · <c>503</c> — unconfigured.</item>
     /// </list>
     /// </summary>
     [AllowAnonymous]
     [HttpGet("/auth/discord/callback")]
-    public async Task<IActionResult> Callback([FromQuery] string? code, CancellationToken ct)
+    public async Task<IActionResult> Callback([FromQuery] string? code, [FromQuery] string? state, CancellationToken ct)
     {
         if (!options.DiscordConfigured)
             return Error(StatusCodes.Status503ServiceUnavailable, "auth_unconfigured",
                 "Discord auth is not configured on this host.");
+
+        // CSRF gate: the state Discord echoes back must equal the nonce we set in the cookie at
+        // /start. The cookie is one-time — clear it whatever the outcome (no replay). A missing
+        // cookie (expired/never-started) or a mismatch is a forged/stale login -> 400, never a grant.
+        string? expectedState = Request.Cookies[StateCookie];
+        if (expectedState is not null)
+            Response.Cookies.Delete(StateCookie, StateCookieOptions());
+        if (!StateMatches(state, expectedState))
+            return Error(StatusCodes.Status400BadRequest, "invalid_state",
+                "the OAuth state did not validate (possible CSRF, or the login expired — start again).");
+
         if (string.IsNullOrWhiteSpace(code))
             return Error(StatusCodes.Status400BadRequest, "bad_request", "missing authorization code");
 
@@ -153,4 +173,27 @@ public sealed class AuthController(
 
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
+
+    // The CSRF state cookie's attributes — shared by the set (at /start) and the delete (at /callback,
+    // where Path must match for the deletion to take). Secure tracks the scheme so it works on an http
+    // loopback dev host yet is Secure on a real https host; SameSite=Lax (NOT Strict) so the cookie
+    // still rides Discord's top-level cross-site redirect back to the callback.
+    private CookieOptions StateCookieOptions() => new()
+    {
+        HttpOnly = true,
+        Secure = Request.IsHttps,
+        SameSite = SameSiteMode.Lax,
+        Path = "/auth/discord",
+        IsEssential = true,
+        MaxAge = StateTtl,
+    };
+
+    // Constant-time compare of the echoed state against the cookie nonce; either missing => no match.
+    private static bool StateMatches(string? echoed, string? expected)
+    {
+        if (string.IsNullOrEmpty(echoed) || string.IsNullOrEmpty(expected)) return false;
+        return CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.ASCII.GetBytes(echoed),
+            System.Text.Encoding.ASCII.GetBytes(expected));
+    }
 }

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
 using TheKrystalShip.Api.Services.Auth;
 
 namespace TheKrystalShip.Api.Tests;
@@ -16,11 +17,27 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     private static async Task<JsonElement> Json(HttpResponseMessage resp) =>
         JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
 
-    // --- /auth/discord/callback verdicts -----------------------------------------------------------
+    // Drive the CSRF state round-trip: GET /start mints the nonce (it rides both the returned
+    // Location's `state=` and the Set-Cookie the client now holds), so the returned client can replay
+    // a matching callback. HandleCookies defaults on, so the state cookie auto-rides the next request.
+    private async Task<(HttpClient Client, string State)> BeginLogin()
+    {
+        HttpClient c = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+        });
+        HttpResponseMessage start = await c.GetAsync("/auth/discord/start");
+        string query = start.Headers.Location!.Query.TrimStart('?');
+        string state = query.Split('&').First(kv => kv.StartsWith("state=")).Substring("state=".Length);
+        return (c, state);
+    }
+
+    // --- /auth/discord/callback verdicts (each through a real /start CSRF round-trip) --------------
     [Fact]
     public async Task Callback_Authorized_200_MintsWorkingToken()
     {
-        HttpResponseMessage resp = await factory.CreateClient().GetAsync("/auth/discord/callback?code=operator");
+        (HttpClient c, string state) = await BeginLogin();
+        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=operator&state={state}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         JsonElement body = await Json(resp);
         Assert.Equal("ok", body.GetProperty("verdict").GetString());
@@ -39,7 +56,8 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task Callback_NoRole_403_Denied()
     {
-        HttpResponseMessage resp = await factory.CreateClient().GetAsync("/auth/discord/callback?code=none");
+        (HttpClient c, string state) = await BeginLogin();
+        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=none&state={state}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
         Assert.Equal("denied", (await Json(resp)).GetProperty("verdict").GetString());
     }
@@ -47,7 +65,8 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task Callback_BadCode_401()
     {
-        HttpResponseMessage resp = await factory.CreateClient().GetAsync("/auth/discord/callback?code=bad");
+        (HttpClient c, string state) = await BeginLogin();
+        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=bad&state={state}");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
         Assert.Contains("\"code\":\"login_required\"", await resp.Content.ReadAsStringAsync());
     }
@@ -55,7 +74,8 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task Callback_DiscordUnreachable_502()
     {
-        HttpResponseMessage resp = await factory.CreateClient().GetAsync("/auth/discord/callback?code=boom");
+        (HttpClient c, string state) = await BeginLogin();
+        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=boom&state={state}");
         Assert.Equal(HttpStatusCode.BadGateway, resp.StatusCode);
         Assert.Contains("\"code\":\"auth_provider_error\"", await resp.Content.ReadAsStringAsync());
     }
@@ -63,8 +83,32 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task Callback_MissingCode_400()
     {
-        HttpResponseMessage resp = await factory.CreateClient().GetAsync("/auth/discord/callback");
+        // State validates; the code is what's missing -> bad_request (NOT invalid_state).
+        (HttpClient c, string state) = await BeginLogin();
+        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?state={state}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    // --- CSRF state gate: a mismatched or absent state is rejected before any Discord exchange ------
+    [Fact]
+    public async Task Callback_StateMismatch_400_InvalidState()
+    {
+        // The cookie is present (we did /start) but the echoed state is wrong -> forged callback.
+        (HttpClient c, _) = await BeginLogin();
+        HttpResponseMessage resp = await c.GetAsync("/auth/discord/callback?code=operator&state=deadbeefdeadbeef");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"invalid_state\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Callback_NoStateCookie_400_InvalidState()
+    {
+        // A client that never hit /start has no state cookie -> the callback can't be trusted.
+        HttpResponseMessage resp = await factory.CreateClient()
+            .GetAsync("/auth/discord/callback?code=operator&state=whatever");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"invalid_state\"", await resp.Content.ReadAsStringAsync());
     }
 
     // --- /auth/session — the login-time profile snapshot behind the bearer -------------------------

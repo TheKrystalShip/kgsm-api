@@ -41,10 +41,20 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
 - **`/auth/session` returns the login-time profile snapshot** embedded in the token claims, NOT a live
   re-fetch — the Discord token is discarded at callback, so "fetched live" can't hold (a §6 divergence).
 
-## M4·a vs M4·b — the honesty boundary
+- **OAuth `state` CSRF (M4·b).** `/start` sets a one-time HttpOnly `state` cookie (`kgsm_oauth_state`);
+  `/callback` requires the echoed `state` to equal the cookie (constant-time) *before* any Discord
+  exchange, else `400 invalid_state`, then clears it (no replay). **Stateless** — a client cookie, no
+  server store (honors the no-session-table decision). `SameSite=Lax` (NOT Strict — it must ride
+  Discord's top-level redirect back), `Secure = Request.IsHttps` (off on http loopback, on under
+  https), `Path=/auth/discord`. Don't switch it to a server-side pending-state store.
 
-`DiscordIdentityResolver` (the real HTTP impl) is **built but un-live-validated**. The login
-endpoints `503` until `KGSM_API_AUTH_DISCORD_*` are configured. **M4·b** (owed, on the trusted host
-once a Discord app + bot token + guild + role-map exist) live-validates the three Discord calls and
-adds the OAuth **`state` CSRF round-trip** (generated at `/start` today, not yet verified on callback).
-Until then, don't claim the live flow works — the fake-tested logic is proven, the wire correctness is not.
+## M4 status — backend built & live-validated (2026-06-15)
+
+`DiscordIdentityResolver` (the real HTTP impl) is now **live-validated** on the trusted host: a real
+Discord login resolved an in-guild member's roles → `admin`, minted the bearer, and that bearer passed
+live tier-gating end-to-end (PLAN.md §8 M4·b). The login endpoints `503` only until
+`KGSM_API_AUTH_DISCORD_*` are configured. **What's still owed for the *full* M4: only the frontend gate**
+(the per-host session state machine + tier-gated controls — the SPA, still `planned`). Op note: dev ran an
+**ephemeral** signing key (`KGSM_API_AUTH_SIGNING_KEY` blank → tokens die on restart) — set a stable secret
+on any real host. To run with the dev creds, the env must be `Development` (`ASPNETCORE_ENVIRONMENT=Development`)
+or `appsettings.Development.json` is ignored and the login endpoints `503` as if unconfigured.
