@@ -39,6 +39,11 @@ is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4 ope
 - **`../system-architecture.md`** — the ecosystem keystone (topology, invariants, the
   open-decision ledger). The API is its `web-API aggregator`.
 - **`docs/m0-aot-spike-findings.md`** — why the runtime/stack is what it is (below).
+- **Directory-local `CLAUDE.md` guides** — the locked decisions + "what you must not break"
+  for the subsystems with the densest invariants (auto-loaded when you work in them):
+  `src/Api/Services/Auth/` (the auth seam, stateless JWT, secure-by-default tiers),
+  `src/Api/Realtime/` (the WS protocol), `src/Api/Services/Commands/` (the gate→job→verify write
+  path), and `tests/Api.Tests/` (the WebApplicationFactory + faked-seam test pattern).
 
 ## Commands
 
