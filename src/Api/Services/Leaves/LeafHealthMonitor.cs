@@ -126,7 +126,7 @@ public sealed class LeafHealthMonitor : BackgroundService
         try
         {
             // The watchdog is reached ONLY via kgsm-lib (the C#<->engine chokepoint); IsReadyAsync is the
-            // liveness call. Standardizing its underlying path (/ready) to /health is a kgsm-lib change.
+            // readiness call. Its underlying path is now the unified /health (kgsm-lib, 2026-06-15).
             return await watchdog.IsReadyAsync(timed.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)

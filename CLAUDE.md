@@ -121,10 +121,11 @@ axes, never conflated: **`provisioned`** (the capability *set*) is fixed at star
 availability. A leaf failing flips only `status` (operational→down→operational) with
 `provisioned:true` — "temporarily unavailable, still there", **never** "lost"; never invent a softer
 status nor suppress the down flip. `since` = when *this api* observed the flip.
-**⚠ Uniform `/health` is wired ahead of upstream:** the api targets `/health` on every HTTP leaf, but
-the monitor's current build serves `/healthz` (assistant already serves `/health`) — so against an
-un-updated monitor the metrics capability reads `down` until upstream renames/adds `/health` (PLAN.md
-§8). This is the accepted, explicit state, not a bug.
+**Uniform `/health` across the ecosystem (unified 2026-06-15):** every leaf now serves `GET /health`
+(`200` ⇒ can provide its capability; else ⇒ unavailable). monitor `/healthz`→`/health`; assistant already
+`/health`; watchdog merged `/healthz`+`/ready`→`/health` (readiness; `/ready` kept as a deprecated transition
+alias) — reached via kgsm-lib `IsReadyAsync` (the api pins kgsm-lib **1.6.0**, which still hits `/ready`, so
+it rides the alias until it adopts **1.7.0**). The api's own ops endpoint is also `/health` now. (PLAN.md §8.)
 
 **Degrade gracefully:** a missing/down leaf removes only its capability (the §4·b
 capabilities block makes this first-class), never a 500. The API must run with any subset
@@ -157,7 +158,7 @@ of leaves present.
   `Z` automatically.
 - **Errors:** every non-2xx returns the frozen envelope `{ "error": { "code", "message",
   "details?" } }` (`architecture.html §6`) — via `ApiExceptionHandler` (500s) and
-  `UseStatusCodePages` (404, and 401/403 once M4 lands). `/healthz` is **ours** (ops), not a
+  `UseStatusCodePages` (404, and 401/403 once M4 lands). `/health` is **ours** (ops), not a
   frontend contract.
 - **Namespaces** are `TheKrystalShip.Api.*` (ecosystem-wide `TheKrystalShip.*`).
 - **Validation model:** each milestone ends at a **frontend gate** — agree the wire shapes

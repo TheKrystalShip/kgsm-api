@@ -108,8 +108,8 @@ public sealed class MonitorClient : IDisposable
     /// not down). Returns <c>false</c> on unprovisioned, unreachable, slow, or non-2xx — never throws.
     /// </summary>
     /// <remarks>
-    /// Targets the ecosystem-standard <c>/health</c> path (uniform across leaves). The monitor's current
-    /// build serves <c>/healthz</c>; <c>/health</c> is to be added/renamed upstream — see PLAN.md §6.
+    /// Targets the ecosystem-standard <c>/health</c> path (uniform across leaves), which the monitor
+    /// now serves (unified 2026-06-15, renamed from <c>/healthz</c>) — see PLAN.md §6.
     /// </remarks>
     public async Task<bool> CheckHealthAsync(CancellationToken ct)
     {

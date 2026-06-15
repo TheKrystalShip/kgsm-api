@@ -77,14 +77,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# start_api MONITOR_SOCKET — launch the API with the given monitor socket; wait for /healthz.
+# start_api MONITOR_SOCKET — launch the API with the given monitor socket; wait for /health.
 start_api() {
   KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" \
   KGSM_API_HOST_ID="$HOST_ID" KGSM_API_MONITOR_SOCKET="$1" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" \
   KGSM_API_KGSM_PATH="$KGSM_PATH" \
     dotnet "$DLL" >/tmp/kgsm-api-smoke.log 2>&1 &
   SRV=$!; PIDS+=("$SRV")
-  for _ in $(seq 1 80); do curl -fsS "${BASE}/healthz" >/dev/null 2>&1 && return 0; sleep 0.1; done
+  for _ in $(seq 1 80); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
   return 1
 }
 stop_api() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
@@ -117,10 +117,10 @@ wait_caps_warm || echo "  (warn: capability status still 'unknown' after warm-wa
 
 echo "==> Checks"
 
-# 1. /healthz — 200, camelCase liveness, Z timestamp
-req GET /healthz
+# 1. /health — 200, camelCase liveness, Z timestamp (the API's own, unified ecosystem path)
+req GET /health
 [[ "$CODE" == 200 ]] && grep -q '"status":"ok"' <<<"$BODY" && grep -q '"service":"kgsm-api"' <<<"$BODY" \
-  && ok "/healthz 200 + {status,service}" || bad "/healthz shape (code=$CODE body=$BODY)"
+  && ok "/health 200 + {status,service}" || bad "/health shape (code=$CODE body=$BODY)"
 
 # 2. timestamp convention: ISO-8601 UTC ending in 'Z', NOT the +00:00 offset form
 if grep -qE '"time":"[0-9T:.\-]+Z"' <<<"$BODY" && ! grep -q '+00:00' <<<"$BODY"; then
