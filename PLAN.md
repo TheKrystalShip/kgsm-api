@@ -21,8 +21,8 @@
 `built` = exists & verified · `partial` = exists, incomplete · `planned` =
 designed, not built · `open` = not yet decided.
 
-**Today:** M0 `partial`, **M1·a/M1·b `partial`**, **M2 `partial`** and now **M3 `partial`** (backend built &
-self-validated; frontend gate pending). The skeleton (controllers + EF Core, **JIT**; §8),
+**Today:** M0 `partial`, **M1·a/M1·b `partial`**, **M2 `partial`**, **M3 `partial`** and now **M4·a `partial`**
+(backend built & self-validated; frontend gate pending). The skeleton (controllers + EF Core, **JIT**; §8),
 the first leaf wiring — `GET /hosts` + `/hosts/{id}` scraped from kgsm-monitor with the §4·b
 capability block — **the join `GET /servers` + `/servers/{id}`** (kgsm-lib domain +
 run-state ⋈ monitor per-instance metrics, the honest `Server` DTO frozen in §6), and now **the
@@ -30,7 +30,12 @@ realtime `GET /api/v1/stream` WebSocket** (per-host topics pushed by gated pumps
 leaf health monitor; the capability set fixed at connect, status flipping on `/health` polls), and now
 **the first write path `POST /servers/{id}/commands`** (gate → `202` + `job` → `jobs` WS → verify; verbs
 `start`/`stop`/`restart`, `update` deferred) are
-built and `scripts/smoke.sh` is **28/28** (8 M0 + 4 M1·a + 6 M1·b + 7 M2 + 3 M3), proven both ways: degrade path
+built, and now **the auth boundary `POST`-protecting it all** (M4·a — Discord per-host Model A, the
+credential-independent half: stateless JWT bearer + hierarchical viewer/operator/admin tier policies +
+`[Authorize]` on every prior endpoint, auth **on by default** with an explicit `KGSM_API_AUTH_DISABLED=1`
+dev escape) are built. `scripts/smoke.sh` is **31/31** (8 M0 + 4 M1·a + 6 M1·b + 7 M2 + 3 M3 + 3 M4·a) and
+**tests/Api.Tests is 30/30** (the 401/403/tier matrix + the callback/refresh/session flow, Discord seam
+faked), proven both ways: degrade path
 (no monitor → host metrics `down`/capacity `null`, every server `metrics:null`, stream falls silent) and happy path
 (live/stub monitor → real host capacity, a real `operational` watchdog probe, the servers
 join's present-branch by id, honest ticks streamed, and a full kill→restart degrade→recover cycle). The superseded .NET 9 attempt is
@@ -297,18 +302,44 @@ wiring* lands first.
 - **Frontend gate:** confirm the trust window above; then action buttons → optimistic transitional
   state → `jobs`-topic tracking → reconcile to the authoritative status on `server.patch`.
 
-### M4 — Auth: Discord per-host (Model A)  ·  `planned`
+### M4 — Auth: Discord per-host (Model A)  ·  `partial` (M4·a built & self-validated 2026-06-15; M4·b live + frontend gate pending)
 - **Goal:** the security boundary — make good on the trust window M3 ran under.
 - **Wires:** Discord (external IdP, silent SSO) + this host's bot (role → tier).
-- **Scope:** `/auth/discord/callback`, `/auth/session`, `/auth/session/refresh`,
-  `/auth/logout`; per-host bearer (short TTL, proactive refresh, 8h cap); tiers
-  `admin·operator·viewer·none`; the `401`/`403`/`login_required` state machine
-  (`architecture.html §3·f`); protect all prior endpoints. JIT unlocks the conventional
-  ASP.NET Core auth pipeline (`UseAuthentication`/`UseAuthorization`, `[Authorize]`,
-  policy-based tiers); the Discord OAuth code flow + a session/bearer store (EF
-  `sessions` table, or JWT) — **decide the bearer mechanism here.**
-- **Depends:** M0 (the auth-pipeline placeholder). Must land before any public
-  exposure; tier-gating of M3 commands lands here.
+- **Split like M1** — the one milestone with an unfabricable live dependency (a real Discord app +
+  bot token + guild + role-map). The credential-*independent* half is fully buildable/self-validatable
+  now; only the live OAuth round-trip gates on creds + the trusted host.
+
+**M4·a — the credential-independent half.** · `partial` (built & self-validated 2026-06-15)
+- **Bearer mechanism (the §5-open decision, RESOLVED):** **stateless JWT** (HMAC-SHA256; access ~15 min +
+  refresh with an 8h absolute cap) — no session table, no user row (honors "no user row anywhere",
+  keeps M5 as the first EF migration). The signing key derives from `KGSM_API_AUTH_SIGNING_KEY`
+  (SHA-256 → 256-bit; ephemeral + loud warn if unset).
+- **Built:** `Services/Auth/` — the **Discord seam** `IDiscordIdentityResolver` (everything that talks to
+  discord.com behind one interface, so the whole 401/403/tier matrix is testable with a fake — the
+  M3-style "exercise the contract without the live dependency" move); `SessionTokenService`
+  (mint/validate, shared `TokenValidationParameters` with the JwtBearer pipeline); the hierarchical
+  `TierRequirement`/handler (viewer⊆operator⊆admin); `DisabledAuthHandler` (the escape hatch — synthetic
+  admin). `AuthController` (`/auth/discord/start` 302, `/auth/discord/callback`, `/auth/session/refresh`,
+  `/auth/session`, `/auth/logout`). `[Authorize]` on Hosts/Servers (viewer) + the command `POST` (operator)
+  + the `/stream` WS (viewer; the bearer rides `?access_token=` since a WS handshake can't set a header).
+- **Auth is ON by default;** `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged dev escape hatch.
+- **Honest failure modes (the security analog of never-fabricate-a-status):** Discord unreachable → `502`,
+  never a default grant; `none`/not-in-guild → terminal `403`; a failed role lookup is never silently
+  downgraded; a refresh token is never accepted as an access bearer.
+- **Self-validated:** `scripts/smoke.sh` **31/31** (the +3 M4·a no-token sweep: protected → `401` envelope,
+  `/health`+`/api/v1` open, login → `503` unconfigured) + **`tests/Api.Tests` 30/30** (xUnit +
+  `WebApplicationFactory`, Discord seam faked: the 401/403/viewer-operator-admin matrix, none-tier/
+  refresh-as-access/wrong-signature/garbage rejections, the WS `?access_token=` path, and the callback
+  verdict ok/denied/invalid/upstream-error + refresh rotation + session snapshot).
+
+**M4·b — the live OAuth round-trip.** · `planned` (gates on Discord creds + the trusted host)
+- The real `DiscordIdentityResolver` (code exchange → `/users/@me` → `GET /guilds/{guild}/members/{user}`
+  with the **bot token** — the only path to roles, since the `identify guilds` scopes don't carry them)
+  is **built but un-live-validated**; the login endpoints `503` until the Discord app / bot token / guild
+  / role-map are supplied. Validate once on the trusted host (the M3 live-validation pattern), then drop
+  any provisional notes. **Shared external config, not a kgsm-bot process dependency** (keystone §4).
+- **Depends:** M0 (the auth-pipeline placeholder, now filled). Must land before any public
+  exposure; tier-gating of M3 commands lands here (built in M4·a).
 - **Risk:** the security boundary itself.
 - **Frontend gate:** the per-host session state machine end-to-end; tier-gated controls.
 
@@ -391,7 +422,10 @@ v1.0 or as a fast-follow v1.1, depending on how the integration is holding toget
 **Open decisions to resolve along the way:**
 - ~~AOT vs JIT~~ — **RESOLVED at M0: standard JIT** (controllers + EF Core), traded for
   maintainability; see §8. The forward milestones no longer carry AOT cautions.
-- **Bearer mechanism** (EF `sessions` table vs JWT) — decide at M4.
+- ~~**Bearer mechanism** (EF `sessions` table vs JWT)~~ — **RESOLVED at M4·a: stateless JWT**
+  (HMAC; access ~15 min + refresh with an 8h cap). No session table, no user row — honors the §3·f
+  "no user row anywhere" doctrine and keeps M5 as the first EF migration. Trade: no instant
+  server-side revocation, bounded by the short access TTL.
 - **Metrics-history store** (for `GET /servers/{id}/metrics?range=…`) — does the
   backend persist monitor ticks (a second SQLite table / ring buffer), or does the
   monitor grow a history buffer? Decide before any time-series chart milestone.
@@ -415,7 +449,7 @@ for the external surface and this doc for the backend's honest realization of it
 | Monitor `/metrics` wire shape (`Snapshot` graph) | M1·a | **shared package** `TheKrystalShip.KGSM.Monitor.Contracts` — the DTO graph + source-gen camelCase JSON, built in kgsm-monitor and consumed here so the contract is solid at build time. **Drift rule:** any contract change MUST bump the package `Version` and the api's `<PackageReference>` (a same-version repack is silently served stale from the NuGet cache). |
 | WS stream envelope + topic/type vocabulary | **M2** | `architecture.html §3·b/§3·j` — **frozen 2026-06-15.** Endpoint `GET /api/v1/stream` (WebSocket; **unauthenticated until M4** — a pre-auth *read* surface, less severe than M3's mutation but flagged). **Inbound:** `{ type: "subscribe"\|"unsubscribe", topics: [...] }`; unknown command type ignored; unknown/future topics accepted silently (forward-compat for `jobs` M3 / `audit` M5 / `alerts` / `console`); **no ack or error-frame protocol yet.** **Outbound:** `{ topic, type, data }`, patch-only (the client `hydrate(REST) + applyPatch(WS)`; **no snapshot on subscribe** — §3·j re-hydrates via REST on (re)connect). **Topics (M1-backable subset):** `servers` · `servers/{id}/metrics` · `hosts/{id}/metrics` · `hosts/{id}/capabilities`. **Message types** (only `server.patch` is doc-given; the rest are ours, negotiated like the M1·b DTO — all centralized in `Realtime/StreamProtocol.cs`, never inline strings): `server.patch` (data = the **frozen M1·b `Server`**, NOT the §3·b example's `{status:"online", players}`; carries the full element incl. a **point-in-time `metrics` block that may lag** the dedicated `servers/{id}/metrics` tick — merge by id), `server.removed` (`{ id }` tombstone), `metrics.tick` (`ServerMetricsDto`), `host.metrics` (`HostMetricsDto` = the capacity portion of the `Host` view; `net`/`temp` omitted, never fabricated), `capabilities.patch` (`HostCapabilities`). **`servers` carries status/roster only — NOT the 1s metric firehose** (resource ticks live on `servers/{id}/metrics`; a deliberate divergence from §3·b's "resource deltas" wording, smoke-proven the `servers` topic stays quiet under ticking metrics). **Honesty:** monitor-down → metric topics go **silent** (never a replayed stale frame) and `hosts/{id}/capabilities` flips metrics `down` — that flip is what explains the silence. **Capability availability is driven by the always-on `LeafHealthMonitor`** (frequent `/health` polls, the single source feeding both this stream and the REST `GET /hosts`), which stamps `since` on each flip — see the Capability-record row. The `capabilities.patch` keeps `provisioned:true` through a down→up cycle: degrade **and** recover gracefully, capability never "lost". |
 | Command verbs + `job` shape + `command.verified` | **M3** | `architecture.html §5·d` — **frozen 2026-06-15.** **Endpoint** `POST /servers/{id}/commands` body `{ verb }` → `202` + `{ job }`; closed, server-defined verb set **`start`·`stop`·`restart`** (**`update` deferred** from the first cut — long-running + version-changing, settles on a version re-check not a run-state one). **Errors:** unknown/missing verb → `400 bad_request`; unknown server → `404 not_found`; an obvious no-op against the real status (start-when-running / stop-when-stopped) or a command already in flight for that server → `409 conflict`. **`job`** = `{ id, serverId, verb, state, createdAt, settledAt?, error? }` (opaque `job_…` id; ISO-8601 UTC `Z` times; `error` set only on `failed`, the engine's real detail — never a fabricated success). **Divergence (honest-vs-aspirational, the same negotiated call as the M1·b DTO):** `job.state` is the **job's own** lifecycle `queued→running→succeeded\|failed`, NOT the §5·d example's server-shaped `state:"running"` — the affected server's authoritative/optimistic status rides the `servers` topic via `server.patch`, and the client derives the optimistic display from the verb (the same topic-separation discipline as the metric topics). **WS:** the `jobs` topic carries a single **`job.patch`** (the full `job` on every transition, coalesced by job id — patch-only, exactly like `server.patch`). **Gate (state guards):** minimal/honest — only the obvious no-ops; the engine (kgsm→watchdog/Docker) owns everything subtler, surfacing an impossible transition as the job's `failed` + its error (the API never fabricates admissibility kgsm does not enforce; `unknown` status never blocks). **Verify** (the §5·d `command.verified` for the direct write path): on settle, a fresh run-state read → an explicit `server.patch`. **Permissions** gate at M4; jobs are **in-memory** (SQLite + audit at M5). The propose/confirm half of §5·d (`command.proposed` over SSE) is the assistant flow (M7), not M3. |
-| Auth session + tiers + 401/403/login_required | M4 | `architecture.html §3·f` |
+| Auth session + tiers + 401/403/login_required | **M4·a** | `architecture.html §3·f` — **frozen 2026-06-15 (M4·a).** **Bearer = stateless JWT** (HMAC; access ~15 min + refresh 8h cap; no session table). Endpoints `/auth/discord/start` (302→authorize), `/auth/discord/callback` (`{ verdict:"ok"\|"denied", tier, token, refresh?, userId }`), `/auth/session/refresh` (refresh bearer → `{ token }`), `/auth/session` (`{ user:{ id, username, display, avatarUrl? }, scopes }` or `401`), `/auth/logout` (`204`). Tiers `admin·operator·viewer·none` resolved from the guild role via the **bot token** (`GET /guilds/{guild}/members/{user}` — the only path to roles; the `identify guilds` user scopes don't carry them). `401` (no/invalid/expired bearer) recoverable; `403` (`none`/insufficient tier) terminal. **Divergences (the negotiated honest-vs-aspirational call, like the M1·b DTO / M3 job.state):** (1) camelCase `userId` (not the §3·f example's snake_case `user_id`) — one casing across the surface; (2) `GET /auth/session` returns the **login-time profile snapshot** embedded in the token, NOT a fresh live Discord fetch — the §3·f "fetched live" can't hold once the Discord token is discarded (which §3·f also requires), so snapshot is the honest realization; (3) role re-check happens only at a full bounce (≤ the 8h cap), not on refresh (refresh skips Discord); (4) `/auth/session/refresh` takes the refresh token in the `Authorization: Bearer` header (the `{host}` body is accepted but not required) — a per-host-API simplification of the §3·f `{host}`-body shape. **WS:** the `/stream` bearer rides `?access_token=` (a handshake can't set a header). **Tier gating:** viewer = reads + stream, operator = + the command `POST`, admin = diagnostics (`_throw`/`_dbcheck`) + reserved (settings/install/audit-config, M5/M8). **Secure-by-default:** an authorization `FallbackPolicy` requires an authenticated caller on any endpoint without explicit `[Authorize]`/`[AllowAnonymous]`; only `/health` + `/api/v1` opt out (the SPA's pre-login reachability probes). **M4·b (live):** the real Discord exchange + role lookup; until configured the login endpoints `503`. |
 | Audit record + closed `action` vocabulary + SQLite schema | M5 | `architecture.html §3·d` |
 | Alert record + raise/resolve/retract; `network` block | M6 | `architecture.html §3·c, §3·g` |
 | Assistant SSE event vocabulary (proxy vs re-wrap) | M7 | `architecture.html §5·a`; keystone O1 |
@@ -437,22 +471,22 @@ kgsm-api/
     appsettings.json          # [M0] logging defaults (env vars override via IConfiguration)
     Program.cs                # [M0] entry: Host.CreateDefaultBuilder + ConfigureWebHostDefaults().UseStartup<Startup>() (classic structure, no top-level statements)
     Startup.cs                # [M0] ConfigureServices (controllers+JSON, EF, CORS, exception handler) + Configure (pipeline)
-    Controllers/              # [M0] Health, Meta, Diagnostics · [M1·a] Hosts → [M1·b] Servers · [M2] Stream (WebSocket) → [M3] Commands → [M5] Audit → …
-    Contracts/                # [M0] ErrorEnvelope, HealthStatus, ApiInfo · [M1·a] HostDto · [M1·b] ServerDto (Server/ServerMetricsDto/ServerStatus) · [M2] StreamDto (HostMetricsDto/ServerRemoved)
+    Controllers/              # [M0] Health, Meta, Diagnostics · [M1·a] Hosts → [M1·b] Servers · [M2] Stream (WebSocket) → [M3] Commands → [M4·a] Auth → [M5] Audit → …
+    Contracts/                # [M0] ErrorEnvelope, HealthStatus, ApiInfo · [M1·a] HostDto · [M1·b] ServerDto (Server/ServerMetricsDto/ServerStatus) · [M2] StreamDto (HostMetricsDto/ServerRemoved) · [M3] CommandDto · [M4·a] AuthDto (CallbackResult/RefreshResponse/SessionResponse)
     Realtime/                 # [M2] BUILT — StreamProtocol (central topic/type vocabulary), StreamMessage (envelope), StreamHub (registry+fan-out), StreamConnection (coalescing duplex loops), MetricsPump + DomainPump (gated push pumps)
-    Infrastructure/           # [M0] ApiExceptionHandler (IExceptionHandler→500 envelope), ApiErrors (envelope writer); auth handlers [M4]
+    Infrastructure/           # [M0] ApiExceptionHandler (IExceptionHandler→500 envelope), ApiErrors (envelope writer)
     Json/                     # [M0] ApiJson (shared options config) + Iso8601UtcConverter
-    Data/                     # [M0] AppDbContext (+ Probe de-risk) → [M4] Session → [M5] AuditEntry; Migrations/ from M5
-    ApiOptions.cs             # [M1·a] config consolidation via IConfiguration (host id/label, monitor/watchdog sockets, assistant url; keys documented in appsettings.json, env-overridable; *Provisioned derived from config) — built
+    Data/                     # [M0] AppDbContext (+ Probe de-risk) → [M5] AuditEntry; Migrations/ from M5. (M4·a auth is STATELESS JWT — no Session table.)
+    ApiOptions.cs             # [M1·a] config consolidation via IConfiguration (host id/label, monitor/watchdog sockets, assistant url; [M4·a] + auth: signing key, Discord app/bot/guild, role→tier map, AUTH_DISABLED) — built
     Services/
       Leaves/                 # [M1·a] MonitorClient (cached scrape + /health) + AssistantClient (typed HttpClient; /health probe, grows tools/SSE at M7) · [M2] LeafHealthMonitor (always-on /health poller → §4·b capability truth + capabilities.patch flips; watchdog via kgsm-lib IsReadyAsync)
       Aggregation/            # [M1·a] HostAggregator (capacity from /metrics + §4·b capabilities from LeafHealthMonitor) · [M1·b] ServerAggregator (lib status ⋈ monitor metrics) · MetricsMapping (shared snapshot→DTO, REST==WS)
       Commands/               # [M3 built] CommandGate (admissibility) + JobRegistry (in-memory, 1-in-flight/server) + CommandRunner (scope-per-job exec + job.patch + verify server.patch)
-      Auth/                   # [M4] Discord per-host OAuth, bearer/session, tiers
+      Auth/                   # [M4·a BUILT] IDiscordIdentityResolver (the seam) + DiscordIdentityResolver (real, live=M4·b) · SessionTokenService (HMAC JWT mint/validate) · AuthTier/TierAuthorization (hierarchical policies) · DisabledAuthHandler (escape hatch). Stateless JWT, no session store.
       Audit/  Alerts/ Ports/  # [M5]/[M6] event consumer, alert engine, port intent
       Assistant/              # [M7] SSE relay
       Install/ Library/ Settings/ Integrations/  # [M8]
-  tests/Api.Tests/            # xUnit; mock IInstanceService + captured-snapshot fake scrape per milestone
+  tests/Api.Tests/            # [M4·a BUILT] xUnit + WebApplicationFactory; the auth tier matrix + callback/refresh/session flow with the Discord seam faked (FakeDiscordResolver). Grows per milestone.
 ```
 
 ---
@@ -740,3 +774,73 @@ returned `job.id` on the `jobs` topic (`job.patch`, merge by id); show the optim
 derived from the verb until a `server.patch` carries the authoritative status; render `409` as "already in
 that state / a command is already running", `400` as an invalid action. Unauthenticated until M4 — trusted
 window as above.
+
+### M4·a — 2026-06-15 · auth (Discord per-host, Model A — the credential-independent half) self-validated; M4·b live + frontend gate PENDING
+
+**Status:** the security boundary is built and self-validated for everything that does NOT need a live
+Discord app. Auth is **on by default**; the M0–M3 contracts now run behind it. The live OAuth round-trip
+(M4·b) and the collaborative session-state-machine gate are deferred — no Discord creds + no frontend yet.
+
+**Decisions (this session).** (1) **Bearer = stateless JWT** (the §5-open call) — HMAC-SHA256, access ~15 min
++ refresh with an 8h absolute cap; no session table, no user row (honors §3·f "no user row anywhere", keeps M5
+as the first EF migration; trade = no instant server-side revocation, bounded by the short TTL). (2) **Build the
+credential-independent half now**, defer live validation (the M1/M3 split). (3) **Auth ON by default** with an
+explicit, loudly-logged `KGSM_API_AUTH_DISABLED=1` escape hatch (synthetic admin — the pre-M4 open window).
+
+**The shape of it.** Everything that talks to discord.com is behind one seam, `IDiscordIdentityResolver`
+(code→identity→tier), so the whole authorization surface is testable in-process with a fake — the same
+"exercise the contract without the live dependency" move that made the M3 gate testable without mutation.
+`SessionTokenService` mints/validates the host-scoped JWTs and shares its `TokenValidationParameters` with the
+JwtBearer pipeline (access and refresh validate identically); `OnTokenValidated` rejects a refresh token used
+as an access bearer; `OnMessageReceived` reads `?access_token=` for the `/stream` WS (a handshake can't set a
+header). Hierarchical tier policies (`TierRequirement`: viewer⊆operator⊆admin) gate the endpoints — viewer on
+Hosts/Servers reads + the stream, operator on the command `POST`; an unauthenticated caller fails to a `401`
+challenge, an authenticated-but-too-low tier to `403` (the framework picks challenge vs forbid), both rendered
+as the frozen `{error}` envelope. **Honest failure modes (the security analog of never-fabricate-a-status):**
+Discord unreachable → `502`, never a default grant; `none`/not-in-guild → terminal `403`; a failed role lookup
+is never silently downgraded.
+
+**Role resolution is via the bot token, by doc mandate.** The session scopes are `identify guilds`
+(`architecture.html:570`) — `guilds` lists guilds, not roles, and `guilds.members.read` is absent, so the user
+token *cannot* yield roles. `GET /guilds/{guild}/members/{user}` with the **bot token** is the only path. The
+API holds its own copy of the Discord app/guild/bot-token/role-map — **shared external config** (the same values
+the host's Discord bot uses), explicitly NOT a process dependency on kgsm-bot (keystone §4 lines 141–143).
+
+**Self-validated:** `scripts/smoke.sh` → **31/31** (8 M0 + 4 M1·a + 6 M1·b + 7 M2 + 3 M3 + **3 M4·a**). The M0–M3
+checks run under `KGSM_API_AUTH_DISABLED=1` (synthetic admin) so they exercise the domain contracts unchanged; a
+dedicated **auth-ENABLED** instance then proves the no-token sweep: protected endpoints (`/hosts`, `/servers`,
+`/stream`, the command `POST`) → `401` + the frozen `{error:{code:unauthorized}}` envelope; `/health` + `/api/v1`
+stay open (the SPA's pre-login reachability probes); the login endpoint → `503 auth_unconfigured` (the M4·b half).
+**`tests/Api.Tests` → 30/30** (xUnit + `WebApplicationFactory`, the Discord seam faked — the first test project,
+stood up here): the full **401/403/viewer-operator-admin matrix**, the none-tier / refresh-as-access /
+wrong-signature / garbage-token rejections, the **WS `?access_token=` path** (connects with a viewer token, the
+handshake fails without one), and the callback verdict (`ok`/`denied`/`invalid`/`upstream-error`) + refresh
+rotation + session snapshot — all deterministic, no Discord.
+
+**Coverage honesty (what is NOT exercised — the M4·b live half).** The **real** `DiscordIdentityResolver` (the
+actual code exchange + `/users/@me` + bot-token guild-member lookup over HTTP) is **built but un-live-validated**:
+the login endpoints `503` until `KGSM_API_AUTH_DISCORD_*` are supplied. The tests/smoke prove the pipeline,
+policies, token machinery and verdict *logic* with the seam faked; the wire correctness of the three Discord
+calls is the M3-style **live validation on the trusted host**, owed once the user provides the Discord
+application (client id/secret + a registered redirect URI), the bot token, the guild id, and the role→tier map.
+Also deferred to M4·b live hardening: the OAuth `state` CSRF round-trip validation (today `/start` generates a
+state but the callback doesn't yet verify it — stateless, so it needs a signed-state or cookie mechanism).
+
+**§6 divergences recorded (the negotiated honest-vs-aspirational call, like the M1·b DTO / M3 job.state):**
+camelCase `userId` (not `user_id`); `GET /auth/session` returns the **login-time profile snapshot** (not a live
+re-fetch — the Discord token is discarded per §3·f, so "fetched live" can't hold); role re-check only at a full
+bounce (≤8h cap), not on refresh; `/auth/session/refresh` reads the refresh token from the `Authorization`
+header (the `{host}` body is accepted but unused).
+
+**Secure-by-default (closed a gap at review).** Every endpoint is now gated unless it explicitly opts out: an
+authorization `FallbackPolicy` requires an authenticated caller, `/health` + `/api/v1` carry `[AllowAnonymous]`
+(the SPA's pre-login reachability probes), and the diagnostics probes (`_throw`/`_dbcheck`) are **admin-gated**
+(a review caught them unauthenticated — `_dbcheck` touches the DB). Smoke's no-token sweep now asserts
+`_dbcheck`/`_throw` → `401` too, so "protect all prior endpoints" holds with no open back door. The M0 `_dbcheck`/
+`_throw` checks still pass because they run under the disabled escape hatch (synthetic admin clears the gate).
+
+**Owed to the frontend at the gate:** the per-host session state machine end-to-end (`none`→`bootstrapping`→
+`live`/`denied`/`login_required`); `401` recoverable (refresh, then silent re-bounce past the 8h cap), `403`
+terminal (never auto-re-auth); proactive refresh at ~75% of the access TTL; the bearer in `sessionStorage` (per
+host, never disk) + a URL-only host registry in `localStorage`. Tier-gated controls (hide/disable the command
+buttons below `operator`).

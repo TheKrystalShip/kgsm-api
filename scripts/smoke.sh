@@ -15,6 +15,11 @@
 #   the metric firehose, and the capability lifecycle: kill the monitor -> metric ticks fall silent +
 #   a capabilities patch reports metrics 'down' (provisioned:true — never "lost"); restart it ->
 #   metrics flips back 'operational' + ticks resume. Degrade AND recover gracefully, capability set fixed.
+#   M4·a (§3·f): auth is ON by default. The M0–M3 checks above run under KGSM_API_AUTH_DISABLED=1 (the
+#   dev escape hatch — synthetic admin), then a dedicated AUTH-ENABLED instance proves the no-token
+#   sweep: every protected endpoint 401s with the frozen envelope, /health + /api/v1 stay open, and the
+#   login endpoint 503s until Discord is configured (the M4·b live half). The full 401/403/tier matrix +
+#   the callback/refresh/session flow are proven in-process by tests/Api.Tests (the Discord seam faked).
 #
 # Two phases. Phase A runs deterministically with NO monitor (the degrade path: host metrics
 # down + capacity null; every server metrics:null). Phase B starts an EMBEDDED stub monitor
@@ -48,6 +53,11 @@ WD_SOCK="${SMOKE_WATCHDOG_SOCKET:-}"                                    # empty 
 # M1·b engine wiring. kgsm-lib is base, not a leaf: point it at the canonical dev checkout so
 # GET /servers reads a real roster. Override with SMOKE_KGSM_PATH on another host.
 KGSM_PATH="${SMOKE_KGSM_PATH:-/home/heisen/tks/kgsm/kgsm.sh}"
+
+# M4·a: auth is ON by default. The M0–M3 checks below run under the dev escape hatch (synthetic admin)
+# so they exercise the domain contracts unchanged; the auth boundary itself gets its own ENABLED
+# instance + no-token sweep at the end (and the full tier matrix lives in tests/Api.Tests).
+export KGSM_API_AUTH_DISABLED=1
 # Unix socket for the embedded stub monitor (Phase B — proves the join's present-branch).
 STUB_SOCK="/tmp/kgsm-api-smoke-stub-monitor.sock"; rm -f "$STUB_SOCK"
 # Canned per-server metric values the stub serves; the join must carry these through verbatim.
@@ -88,6 +98,18 @@ start_api() {
   return 1
 }
 stop_api() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
+
+# start_api_auth — launch with auth ENABLED (the escape hatch unset for this child only), Discord
+# unconfigured (ephemeral signing key). Used by the M4·a no-token sweep.
+start_api_auth() {
+  env -u KGSM_API_AUTH_DISABLED \
+    KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" KGSM_API_HOST_ID="$HOST_ID" \
+    KGSM_API_MONITOR_SOCKET="$MON_SOCK" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" KGSM_API_KGSM_PATH="$KGSM_PATH" \
+    dotnet "$DLL" >/tmp/kgsm-api-smoke-auth.log 2>&1 &
+  SRV=$!; PIDS+=("$SRV")
+  for _ in $(seq 1 80); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
+  return 1
+}
 
 # wait_caps_warm — block until the always-on LeafHealthMonitor has finished its first /health poll, so
 # the §4·b capability statuses have left their cold 'unknown' (makes the capability assertions deterministic).
@@ -562,6 +584,47 @@ sys.exit(0 if any(t>u for t in tick_t) else 4)                         # ticks r
 
   stop_api
 fi
+
+# --- M4·a auth: the no-token sweep (auth ENABLED) --------------------------
+echo "==> M4·a auth checks — AUTH ENABLED instance (no-token sweep; full tier matrix in tests/Api.Tests)"
+start_api_auth || { echo "API never healthy (auth-enabled); log:"; tail -20 /tmp/kgsm-api-smoke-auth.log; exit 2; }
+
+# 29. Protected endpoints with NO bearer -> 401 + the frozen {error} envelope (never ProblemDetails).
+#     Includes the diagnostics probes (_dbcheck touches the DB, _throw forces a 500): the secure-by-default
+#     fallback + the admin gate close them, so "protect all prior endpoints" holds with no open back door.
+auth_401=true
+for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/_dbcheck /api/v1/_throw; do
+  req GET "$p"
+  if [[ "$CODE" != 401 ]] || ! grep -q '"code":"unauthorized"' <<<"$BODY" || grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY"; then
+    auth_401=false; echo "    ($p -> $CODE $BODY)"
+  fi
+done
+req POST /api/v1/servers/x/commands -H 'Content-Type: application/json' -d '{"verb":"start"}'
+[[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST commands -> $CODE $BODY)"; }
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/_dbcheck,/_throw,POST commands (no open back door)" \
+  || bad "no-bearer 401 sweep (see above)"
+
+# 30. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).
+req GET /health; H=$CODE
+req GET /api/v1;  V=$CODE
+[[ "$H" == 200 && "$V" == 200 ]] && ok "/health + /api/v1 stay open under auth (200/200)" \
+  || bad "open endpoints under auth (health=$H meta=$V)"
+
+# 31. The login endpoint 503s until Discord is configured (the M4·b live half) — honest "unconfigured",
+#     not a 404/500. JWT validation + tier gating (above) are enforced regardless.
+req GET /auth/discord/start
+[[ "$CODE" == 503 ]] && grep -q '"code":"auth_unconfigured"' <<<"$BODY" \
+  && ok "/auth/discord/start -> 503 auth_unconfigured (login needs Discord cfg; M4·b)" \
+  || bad "/auth/discord/start 503 (code=$CODE body=$BODY)"
+
+# Coverage note: the 401/403/tier matrix (viewer/operator/admin), the callback verdict (ok/denied/
+# invalid/upstream-error), refresh rotation, the session snapshot and the WS ?access_token= path are
+# proven deterministically in tests/Api.Tests with the Discord seam faked. The real discord.com code
+# exchange + bot-token role lookup are the M4·b LIVE half (validated once on the trusted host when the
+# Discord app / bot token / guild / role-map are supplied).
+echo "  (note: tier matrix + callback/refresh/session are in tests/Api.Tests; live OAuth is M4·b)"
+
+stop_api
 
 echo
 echo "==> ${pass} passed, ${fail} failed"

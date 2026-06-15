@@ -1,6 +1,8 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Auth;
 // Disambiguate from Microsoft.Extensions.Hosting.Host (pulled in by ImplicitUsings).
 using Host = TheKrystalShip.Api.Contracts.Host;
 
@@ -14,6 +16,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/hosts")]
+[Authorize(Policy = AuthPolicy.Viewer)] // reads — viewer and up (M4·a)
 public sealed class HostsController(HostAggregator aggregator) : ControllerBase
 {
     [HttpGet]

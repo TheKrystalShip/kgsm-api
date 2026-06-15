@@ -1,9 +1,13 @@
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Infrastructure;
 using TheKrystalShip.Api.Json;
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Extensions;
@@ -87,6 +91,78 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<JobRegistry>();
         services.AddSingleton<CommandRunner>();
 
+        // M4·a — auth (Discord per-host, Model A). Stateless JWT bearer (the M4 decision): no session
+        // table, no user row — keeps M5 as the first EF migration. The Discord seam (IDiscordIdentityResolver)
+        // keeps everything that talks to discord.com behind one interface, so the whole 401/403/tier matrix
+        // is testable in-process with a fake. The token service mints/validates the host-scoped JWTs; the
+        // tier handler grants a hierarchical viewer/operator/admin policy from the 'tier' claim.
+        services.AddSingleton<ISessionTokenService, SessionTokenService>();
+        services.AddHttpClient<IDiscordIdentityResolver, DiscordIdentityResolver>(
+            c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddSingleton<IAuthorizationHandler, TierAuthorizationHandler>();
+
+        // Auth is ON by default; KGSM_API_AUTH_DISABLED=1 swaps the default scheme for a synthetic-admin
+        // handler so every policy passes (the explicit, loudly-logged dev/open window). When enabled, the
+        // JwtBearer scheme validates the session JWTs with the SAME parameters the token service mints under
+        // (shared via the post-configure below). The WS handshake can't set an Authorization header, so the
+        // /stream path also accepts ?access_token=; a refresh token is never accepted as an access bearer.
+        string defaultScheme = apiOptions.AuthEnabled
+            ? JwtBearerDefaults.AuthenticationScheme
+            : DisabledAuthHandler.SchemeName;
+        AuthenticationBuilder authBuilder = services.AddAuthentication(defaultScheme);
+        if (apiOptions.AuthEnabled)
+        {
+            authBuilder.AddJwtBearer(options =>
+            {
+                options.MapInboundClaims = false; // keep claim types verbatim ("sub", "tier", …)
+                options.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = ctx =>
+                    {
+                        if (string.IsNullOrEmpty(ctx.Token)
+                            && ctx.Request.Path.StartsWithSegments("/api/v1/stream"))
+                        {
+                            string? qsToken = ctx.Request.Query["access_token"];
+                            if (!string.IsNullOrEmpty(qsToken))
+                                ctx.Token = qsToken;
+                        }
+                        return Task.CompletedTask;
+                    },
+                    OnTokenValidated = ctx =>
+                    {
+                        // A refresh token authenticates ONLY /auth/session/refresh, never a protected call.
+                        if (ctx.Principal?.FindFirst(AuthClaims.TokenKind)?.Value != TokenKind.Access)
+                            ctx.Fail("not an access token");
+                        return Task.CompletedTask;
+                    },
+                };
+            });
+            // The signing key lives in the token service (derived once); share its validation rules so
+            // access tokens and refresh tokens validate identically.
+            services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+                .Configure<ISessionTokenService>((o, tokens) => o.TokenValidationParameters = tokens.ValidationParameters);
+        }
+        else
+        {
+            authBuilder.AddScheme<AuthenticationSchemeOptions, DisabledAuthHandler>(
+                DisabledAuthHandler.SchemeName, _ => { });
+        }
+
+        // Hierarchical tier policies (admin ⊇ operator ⊇ viewer). An unauthenticated caller fails the
+        // requirement → 401 challenge; an authenticated-but-too-low tier → 403 (the authorization
+        // middleware picks challenge vs forbid). 401/403 already render the frozen {error} envelope below.
+        services.AddAuthorization(o =>
+        {
+            o.AddPolicy(AuthPolicy.Viewer, p => p.Requirements.Add(new TierRequirement(AuthTier.Viewer)));
+            o.AddPolicy(AuthPolicy.Operator, p => p.Requirements.Add(new TierRequirement(AuthTier.Operator)));
+            o.AddPolicy(AuthPolicy.Admin, p => p.Requirements.Add(new TierRequirement(AuthTier.Admin)));
+            // Secure-by-default: any endpoint without an explicit [Authorize]/[AllowAnonymous] still
+            // requires an authenticated caller — so a future controller can't ship silently open. The
+            // open probes (/health, /api/v1) opt out with [AllowAnonymous]; diagnostics are admin-gated.
+            // (Under the disabled escape hatch the synthetic-admin scheme satisfies this too.)
+            o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
+        });
+
         // Error contract over the default ProblemDetails body. AddProblemDetails is
         // registered only to satisfy UseExceptionHandler's startup guard — ApiExceptionHandler
         // always handles, so the ProblemDetails fallback never fires.
@@ -107,8 +183,20 @@ public class Startup(IConfiguration configuration)
         }));
     }
 
-    public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
+    public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ILoggerFactory loggerFactory)
     {
+        // Make the trust posture impossible to miss in the logs.
+        ApiOptions options = app.ApplicationServices.GetRequiredService<ApiOptions>();
+        ILogger startupLog = loggerFactory.CreateLogger("TheKrystalShip.Api.Startup");
+        if (options.AuthDisabled)
+            startupLog.LogWarning(
+                "AUTH DISABLED (KGSM_API_AUTH_DISABLED) — every request is authenticated as admin. "
+                + "This is the pre-M4 open trust window; never enable it on an exposed host.");
+        else if (!options.DiscordConfigured)
+            startupLog.LogWarning(
+                "Auth is ON but Discord is not fully configured — the /auth/discord/* login endpoints "
+                + "will 503 until KGSM_API_AUTH_DISCORD_* are set. Protected endpoints require a bearer (401).");
+
         app.UseExceptionHandler(); // unhandled -> 500 error envelope (ApiExceptionHandler)
 
         // Status-only responses with no body (unmatched 404 now; 401/403 once M4 auth lands)
@@ -131,7 +219,11 @@ public class Startup(IConfiguration configuration)
 
         app.UseRouting();
         app.UseCors(CorsPolicy);
-        // M4 auth slots in here: app.UseAuthentication(); app.UseAuthorization();
+        // M4·a — auth pipeline (the M0 placeholder, now filled). Authentication populates User from the
+        // bearer (or the synthetic-admin scheme when disabled); authorization enforces the [Authorize]
+        // tier policies. A 401/403 here flows through UseStatusCodePages above into the {error} envelope.
+        app.UseAuthentication();
+        app.UseAuthorization();
         app.UseEndpoints(endpoints => endpoints.MapControllers());
     }
 }

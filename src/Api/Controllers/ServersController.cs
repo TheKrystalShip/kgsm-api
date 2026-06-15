@@ -1,7 +1,9 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Commands;
 
 namespace TheKrystalShip.Api.Controllers;
@@ -16,6 +18,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/servers")]
+[Authorize(Policy = AuthPolicy.Viewer)] // reads — viewer and up; the write below requires operator (M4·a)
 public sealed class ServersController(
     ServerAggregator aggregator,
     JobRegistry jobs,
@@ -57,6 +60,7 @@ public sealed class ServersController(
     /// </list>
     /// </summary>
     [HttpPost("{id}/commands")]
+    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up (architecture.html §3·e control set)
     public async Task<IActionResult> PostCommand(string id, [FromBody] CommandRequest? body, CancellationToken ct)
     {
         string? verb = body?.Verb?.Trim().ToLowerInvariant();

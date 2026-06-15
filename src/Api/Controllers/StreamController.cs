@@ -1,7 +1,9 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Net.WebSockets;
 using TheKrystalShip.Api.Infrastructure;
 using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.Api.Services.Auth;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -14,6 +16,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/stream")]
+[Authorize(Policy = AuthPolicy.Viewer)] // a read surface — viewer and up; the WS bearer rides ?access_token= (M4·a)
 public sealed class StreamController(
     StreamHub hub,
     IHostApplicationLifetime lifetime,

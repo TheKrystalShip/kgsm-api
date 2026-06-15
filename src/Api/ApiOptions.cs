@@ -69,6 +69,62 @@ public sealed class ApiOptions
     /// </summary>
     public bool KgsmProvisioned => !string.IsNullOrWhiteSpace(KgsmPath);
 
+    // --- Auth (M4·a) — Discord per-host, Model A (architecture.html §3·f, keystone O5) -----------
+    // Identity is a global Discord SSO anchor; authorization is a short-lived host-scoped bearer
+    // this host mints after verifying identity once and resolving the role via the host's bot.
+    // The Discord app/guild/bot-token/role-map are SHARED EXTERNAL CONFIG (same values the Discord
+    // bot uses) — keystone §4: this is configuration, NOT a process dependency on kgsm-bot.
+
+    /// <summary>
+    /// Dev escape hatch (<c>KGSM_API_AUTH_DISABLED=1</c>). When set, every request is authenticated
+    /// as a synthetic <c>admin</c> and all tier policies pass — the pre-M4 unauthenticated trust
+    /// window, now explicit and loudly logged. Off by default: <strong>auth is on by default</strong>.
+    /// </summary>
+    public bool AuthDisabled { get; init; }
+
+    /// <summary>HMAC signing key for the host-scoped session JWTs (<c>KGSM_API_AUTH_SIGNING_KEY</c>).
+    /// Empty + auth enabled ⇒ an ephemeral per-process key is generated (tokens die on restart;
+    /// logged loudly). Set a stable secret on a real host.</summary>
+    public required string SigningKey { get; init; }
+
+    /// <summary>Discord OAuth application client id (<c>KGSM_API_AUTH_DISCORD_CLIENT_ID</c>).</summary>
+    public required string DiscordClientId { get; init; }
+    /// <summary>Discord OAuth application client secret (<c>KGSM_API_AUTH_DISCORD_CLIENT_SECRET</c>).</summary>
+    public required string DiscordClientSecret { get; init; }
+    /// <summary>The host's OAuth redirect URI — this host's <c>/auth/discord/callback</c>
+    /// (<c>KGSM_API_AUTH_DISCORD_REDIRECT_URI</c>).</summary>
+    public required string DiscordRedirectUri { get; init; }
+    /// <summary>Bot token used to read guild member roles via the Discord REST API
+    /// (<c>KGSM_API_AUTH_DISCORD_BOT_TOKEN</c>) — the only path to roles, since the
+    /// <c>identify guilds</c> user scopes don't carry them. Same token the host's bot uses.</summary>
+    public required string DiscordBotToken { get; init; }
+    /// <summary>The Discord guild whose roles authorize this host (<c>KGSM_API_AUTH_DISCORD_GUILD_ID</c>).</summary>
+    public required string DiscordGuildId { get; init; }
+
+    /// <summary>Discord role ids granting the <c>admin</c> tier (comma-separated;
+    /// <c>KGSM_API_AUTH_ROLE_ADMIN</c>).</summary>
+    public required IReadOnlyList<string> RoleAdminIds { get; init; }
+    /// <summary>Discord role ids granting the <c>operator</c> tier (<c>KGSM_API_AUTH_ROLE_OPERATOR</c>);
+    /// the natural mapping for the bot's existing Ops <c>ActionRoleId</c>.</summary>
+    public required IReadOnlyList<string> RoleOperatorIds { get; init; }
+    /// <summary>Discord role ids granting the <c>viewer</c> tier (<c>KGSM_API_AUTH_ROLE_VIEWER</c>).</summary>
+    public required IReadOnlyList<string> RoleViewerIds { get; init; }
+
+    /// <summary>Auth is on unless the dev escape hatch is set.</summary>
+    public bool AuthEnabled => !AuthDisabled;
+
+    /// <summary>
+    /// Whether the Discord OAuth login flow can run — all of client id/secret, redirect URI, bot
+    /// token and guild id are configured. Auth (JWT validation, tier gates) is enforced regardless;
+    /// this only gates the <em>login</em> endpoints (the M4·b live half), which 503 when unconfigured.
+    /// </summary>
+    public bool DiscordConfigured =>
+        !string.IsNullOrWhiteSpace(DiscordClientId)
+        && !string.IsNullOrWhiteSpace(DiscordClientSecret)
+        && !string.IsNullOrWhiteSpace(DiscordRedirectUri)
+        && !string.IsNullOrWhiteSpace(DiscordBotToken)
+        && !string.IsNullOrWhiteSpace(DiscordGuildId);
+
     public static ApiOptions FromConfiguration(IConfiguration configuration)
     {
         string? hostId = Clean(configuration["KGSM_API_HOST_ID"]);
@@ -86,6 +142,18 @@ public sealed class ApiOptions
             AssistantBaseUrl = Defaulted(configuration["KGSM_API_ASSISTANT_URL"], ""),
             KgsmPath = Defaulted(configuration["KGSM_API_KGSM_PATH"], "/usr/bin/kgsm"),
             KgsmSocketPath = Defaulted(configuration["KGSM_API_KGSM_SOCKET"], "/usr/share/kgsm/kgsm.sock"),
+
+            // Auth (M4·a). On by default; the dev escape hatch is the only way to the old open window.
+            AuthDisabled = Flag(configuration["KGSM_API_AUTH_DISABLED"]),
+            SigningKey = Defaulted(configuration["KGSM_API_AUTH_SIGNING_KEY"], ""),
+            DiscordClientId = Defaulted(configuration["KGSM_API_AUTH_DISCORD_CLIENT_ID"], ""),
+            DiscordClientSecret = Defaulted(configuration["KGSM_API_AUTH_DISCORD_CLIENT_SECRET"], ""),
+            DiscordRedirectUri = Defaulted(configuration["KGSM_API_AUTH_DISCORD_REDIRECT_URI"], ""),
+            DiscordBotToken = Defaulted(configuration["KGSM_API_AUTH_DISCORD_BOT_TOKEN"], ""),
+            DiscordGuildId = Defaulted(configuration["KGSM_API_AUTH_DISCORD_GUILD_ID"], ""),
+            RoleAdminIds = Csv(configuration["KGSM_API_AUTH_ROLE_ADMIN"]),
+            RoleOperatorIds = Csv(configuration["KGSM_API_AUTH_ROLE_OPERATOR"]),
+            RoleViewerIds = Csv(configuration["KGSM_API_AUTH_ROLE_VIEWER"]),
         };
     }
 
@@ -93,4 +161,12 @@ public sealed class ApiOptions
 
     // null key (unset) -> fallback; present key (even empty) -> the given value, trimmed.
     private static string Defaulted(string? value, string fallback) => value is null ? fallback : value.Trim();
+
+    // Truthy env flag: "1"/"true"/"yes"/"on" (case-insensitive) -> true; anything else -> false.
+    private static bool Flag(string? value) =>
+        value?.Trim().ToLowerInvariant() is "1" or "true" or "yes" or "on";
+
+    // Comma-separated list (role ids), trimmed and de-blanked. Empty/unset -> empty list.
+    private static IReadOnlyList<string> Csv(string? value) =>
+        (value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

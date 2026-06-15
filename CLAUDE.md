@@ -20,11 +20,14 @@ its leaves + this API. The API aggregates **only its own host's** leaves; cross-
 **Status:** M0 (skeleton + runtime/stack decision), **M1·a** (hosts — monitor scrape + §4·b
 capabilities), **M1·b** (servers — the kgsm-lib domain+run-state ⋈ monitor metrics join, the
 honest `Server` DTO), **M2** (realtime — the `GET /api/v1/stream` WebSocket + the always-on
-leaf-health capability model) and **M3** (commands — the first write path: `POST /servers/{id}/commands`
-→ gate → `202` + job → `jobs` WS → verify; verbs `start`/`stop`/`restart`, `update` deferred) are
-`built` & self-validated (`scripts/smoke.sh` 28/28, degrade + happy path + a kill→restart degrade→recover
-cycle + the M3 gate/rejection contract); M4–M8 are `planned`. Trust `PLAN.md`'s
-per-milestone status, not assumptions.
+leaf-health capability model), **M3** (commands — the first write path: `POST /servers/{id}/commands`
+→ gate → `202` + job → `jobs` WS → verify; verbs `start`/`stop`/`restart`, `update` deferred) and now
+**M4·a** (auth — Discord per-host, Model A; the credential-independent half: stateless JWT bearer +
+hierarchical viewer/operator/admin tier policies + `[Authorize]` on every prior endpoint) are
+`built` & self-validated (`scripts/smoke.sh` **31/31** + **tests/Api.Tests 30/30**); **M4·b** (the live
+Discord OAuth round-trip) and M5–M8 are `planned`. **Auth is ON by default** — `KGSM_API_AUTH_DISABLED=1`
+is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4 open trust window). Trust
+`PLAN.md`'s per-milestone status, not assumptions.
 
 ## Read first (sources of truth)
 
@@ -48,7 +51,11 @@ dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --self-contained -p:Pu
 ```
 
 `scripts/smoke.sh` is the **stand-in for the frontend** until the SPA can reach a host —
-it asserts every M0/M1/M2/M3 contract (28/28). The 3 M3 checks prove the command gate/rejection
+it asserts every M0/M1/M2/M3 contract (and the M4·a no-token sweep) — **31/31**. The M0–M3 checks
+run under `KGSM_API_AUTH_DISABLED=1` (the escape hatch — synthetic admin) so they exercise the domain
+contracts unchanged; a dedicated **auth-ENABLED** instance then proves the no-token sweep (every
+protected endpoint `401`s with the frozen envelope, `/health`+`/api/v1` stay open, the login endpoint
+`503`s until Discord is configured). The 3 M3 checks prove the command gate/rejection
 contract (`400`/`404`/`409`) **without mutation** — the gate rejects before a verb runs. The write
 happy path (the stub smoke can't reach it) was **live-validated on the trusted host** (2026-06-15):
 `202`+job, `job.patch` `running→succeeded`, verify `server.patch`, and the in-flight `409` guard under
@@ -66,10 +73,15 @@ host), `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A).
 **Runtime config lives in `appsettings.json`** — the documented schema + defaults
 for every `KGSM_API_*` key (host identity, the **kgsm engine path/socket**, the
 monitor/watchdog/assistant endpoints, bind `KGSM_API_URLS`, `KGSM_API_DB`,
-`KGSM_API_CORS_ORIGINS`). Each is **overridable by an env var
+`KGSM_API_CORS_ORIGINS`, and the **M4·a auth keys** — `KGSM_API_AUTH_DISABLED`,
+`KGSM_API_AUTH_SIGNING_KEY`, the `KGSM_API_AUTH_DISCORD_*` app/bot/guild, the
+`KGSM_API_AUTH_ROLE_*` role→tier map). Each is **overridable by an env var
 of the same name** (env wins — that's how the systemd unit and smoke configure a host); a
-blank leaf endpoint reports its capability `absent`. There is **no test project yet**
-(`tests/Api.Tests/` is planned — see `PLAN.md §7`); smoke is the current gate.
+blank leaf endpoint reports its capability `absent`. The Discord app/guild/bot-token/role ids are
+**shared external config** (the same values the host's Discord bot uses) — configuration, not a
+process dependency on kgsm-bot (keystone §4). **`tests/Api.Tests/`** (xUnit + `WebApplicationFactory`,
+the Discord seam faked) stands up at M4·a — `dotnet test kgsm-api.slnx`; it owns the 401/403/tier
+matrix + the callback/refresh/session flow, with smoke covering the HTTP contract surface.
 
 ## The stack decision — do NOT undo it
 

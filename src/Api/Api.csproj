@@ -20,6 +20,11 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.5" />
 
+    <!-- M4·a auth — JWT bearer validation for the host-scoped session tokens (stateless JWT,
+         no session table; the M4 bearer decision). Brings Microsoft.IdentityModel.* transitively,
+         which SessionTokenService uses to mint/validate. Standard under JIT (no AOT concern). -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.5" />
+
     <!-- The single C#<->engine chokepoint: instances, run-state and the watchdog
          client (IWatchdogClient) used for the M1 capability probe. Never shell kgsm.sh. -->
     <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.6.0" />
