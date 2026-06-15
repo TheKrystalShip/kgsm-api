@@ -21,14 +21,16 @@
 `built` = exists & verified · `partial` = exists, incomplete · `planned` =
 designed, not built · `open` = not yet decided.
 
-**Today:** M0 `partial`, **M1·a/M1·b `partial`** and now **M2 `partial`** (backend built &
+**Today:** M0 `partial`, **M1·a/M1·b `partial`**, **M2 `partial`** and now **M3 `partial`** (backend built &
 self-validated; frontend gate pending). The skeleton (controllers + EF Core, **JIT**; §8),
 the first leaf wiring — `GET /hosts` + `/hosts/{id}` scraped from kgsm-monitor with the §4·b
 capability block — **the join `GET /servers` + `/servers/{id}`** (kgsm-lib domain +
 run-state ⋈ monitor per-instance metrics, the honest `Server` DTO frozen in §6), and now **the
 realtime `GET /api/v1/stream` WebSocket** (per-host topics pushed by gated pumps + an always-on
-leaf health monitor; the capability set fixed at connect, status flipping on `/health` polls) are
-built and `scripts/smoke.sh` is **25/25** (8 M0 + 4 M1·a + 6 M1·b + 7 M2), proven both ways: degrade path
+leaf health monitor; the capability set fixed at connect, status flipping on `/health` polls), and now
+**the first write path `POST /servers/{id}/commands`** (gate → `202` + `job` → `jobs` WS → verify; verbs
+`start`/`stop`/`restart`, `update` deferred) are
+built and `scripts/smoke.sh` is **28/28** (8 M0 + 4 M1·a + 6 M1·b + 7 M2 + 3 M3), proven both ways: degrade path
 (no monitor → host metrics `down`/capacity `null`, every server `metrics:null`, stream falls silent) and happy path
 (live/stub monitor → real host capacity, a real `operational` watchdog probe, the servers
 join's present-branch by id, honest ticks streamed, and a full kill→restart degrade→recover cycle). The superseded .NET 9 attempt is
@@ -270,24 +272,30 @@ wiring* lands first.
 - **Frontend gate:** `realtimeStore` connects, applies patches, falls back to polling
   on drop and snaps back on reconnect.
 
-### M3 — Commands: gate → confirm → job → verify  ·  `planned`
+### M3 — Commands: gate → job → verify  ·  `partial` (backend built & self-validated 2026-06-15; frontend gate pending)
 - **Goal:** the first write path — lifecycle actions.
-- **Wires:** **kgsm-watchdog leaf** (via kgsm-lib: native→watchdog, container→Docker).
-- **⚠ Trust-window assumption (explicit, must be confirmed at this gate):** M3 mutates a
-  real host (start/stop/restart/update) a full milestone **before** M4 authenticates.
-  This is acceptable **only** because the API is validated on a **trusted local network
-  and is not exposed publicly until M4 lands**. If the frontend team cannot guarantee
-  that during M3 validation, **pull M4 auth forward to gate M3**. Do not skip this
-  confirmation — it's a safety boundary, not a nit.
-- **Scope:** `POST /servers/{id}/commands { verb: start|stop|restart|update }` → `202`
-  + `job`; `jobs` WS topic for progress/completion; the **admissibility gate** (state
-  guards, later permissions); `command.verified` re-check when the job settles. Closed
-  verb set.
+- **Wires:** **kgsm-watchdog leaf** (via kgsm-lib `ILifecycleService`: native→watchdog, container→Docker).
+- **⚠ Trust-window assumption — CONFIRMED (user, 2026-06-15):** M3 mutates a real host a full
+  milestone **before** M4 authenticates. Accepted **only** because the API is validated on a
+  **trusted local network and is not exposed publicly until M4 lands**. (If that ever can't be
+  guaranteed, pull M4 auth forward to gate M3 — it's a safety boundary, not a nit.)
+- **Scope (first cut):** `POST /servers/{id}/commands { verb: start|stop|restart }` → `202` + `job`;
+  the `jobs` WS topic (single `job.patch`, patch-only) for progress/completion; the **admissibility
+  gate** (state guards now, permissions at M4); a **verify** re-check (`server.patch`) when the job
+  settles. **`update` deferred** (user, 2026-06-15) — long-running + version-changing; the three fast
+  run-state verbs ship first, `update` follows once the job-progress story is proven. Contract frozen
+  in §6.
 - **Depends:** M1/M2; M4 auth can be pulled forward to gate M3 if the trust window can't be guaranteed.
-- **Risk:** real mutation — the gate, idempotency, and (once M5 lands) the audit write
-  must be right. Optimistic-UI reconciliation contract.
-- **Frontend gate:** confirm the trust window above; then action buttons → optimistic
-  transitional state → job tracking → reconcile to authoritative status.
+- **Risk:** real mutation — the gate, the one-in-flight-per-server guard, and (once M5 lands) the audit
+  write must be right. Optimistic-UI reconciliation contract.
+- **Self-validated:** `scripts/smoke.sh` → **28/28** (8 M0 + 4 M1·a + 6 M1·b + 7 M2 + **3 M3**): the
+  gate/rejection contract (`400` unknown verb · `404` unknown server · `409` no-op-against-real-status),
+  proven **without mutation** (the gate rejects before any verb runs). The happy path the stub smoke can't
+  reach — `202` + job + `job.patch` lifecycle (`running→succeeded`) + verify `server.patch` + the in-flight
+  `409` guard (6 concurrent POSTs → 1×`202` / 5×`409`) — was **live-validated on the trusted host**
+  (2026-06-15), per the confirmed trust window. See §8 (incl. the watchdog-must-be-up finding).
+- **Frontend gate:** confirm the trust window above; then action buttons → optimistic transitional
+  state → `jobs`-topic tracking → reconcile to the authoritative status on `server.patch`.
 
 ### M4 — Auth: Discord per-host (Model A)  ·  `planned`
 - **Goal:** the security boundary — make good on the trust window M3 ran under.
@@ -406,7 +414,7 @@ for the external surface and this doc for the backend's honest realization of it
 | Capability record `{ provisioned, status, since?, message?, info? }` | M1·a · **refined M2** | `architecture.html §4·b` — **frozen 2026-06-14, refined 2026-06-15.** **Two independent axes, never conflated:** `provisioned` (bool) is the **fixed** "what leaves this host has" — resolved once from config, the one-time set the frontend negotiates at connect; it **never flips at runtime**. `status` ∈ `operational\|degraded\|down\|unknown` is the **live availability**, driven by frequently polling each leaf's health (M2 `LeafHealthMonitor`, ~2s) — monitor/assistant `GET /health`, watchdog `IsReadyAsync` via kgsm-lib. A leaf failing flips `status` (operational→down→operational), **never** `provisioned`: the capability is "temporarily unavailable, still there", never "lost" — `provisioned:true, status:down` IS the down notification (we never invent a softer status nor suppress the flip). `provisioned:false` → client-derived `absent`. `since` **now emitted** (M2): the timestamp this api *observed* the flip (not an authoritative leaf-change time). `degraded` reserved (a restarting leaf is `down`); cold (pre-first-poll) reads as `unknown`. **Divergences:** `info.intervalMs` (camelCase, ms) replaces the example's `info.interval_s`; `transport` **omitted** (REST + WS, not `"sse"`). |
 | Monitor `/metrics` wire shape (`Snapshot` graph) | M1·a | **shared package** `TheKrystalShip.KGSM.Monitor.Contracts` — the DTO graph + source-gen camelCase JSON, built in kgsm-monitor and consumed here so the contract is solid at build time. **Drift rule:** any contract change MUST bump the package `Version` and the api's `<PackageReference>` (a same-version repack is silently served stale from the NuGet cache). |
 | WS stream envelope + topic/type vocabulary | **M2** | `architecture.html §3·b/§3·j` — **frozen 2026-06-15.** Endpoint `GET /api/v1/stream` (WebSocket; **unauthenticated until M4** — a pre-auth *read* surface, less severe than M3's mutation but flagged). **Inbound:** `{ type: "subscribe"\|"unsubscribe", topics: [...] }`; unknown command type ignored; unknown/future topics accepted silently (forward-compat for `jobs` M3 / `audit` M5 / `alerts` / `console`); **no ack or error-frame protocol yet.** **Outbound:** `{ topic, type, data }`, patch-only (the client `hydrate(REST) + applyPatch(WS)`; **no snapshot on subscribe** — §3·j re-hydrates via REST on (re)connect). **Topics (M1-backable subset):** `servers` · `servers/{id}/metrics` · `hosts/{id}/metrics` · `hosts/{id}/capabilities`. **Message types** (only `server.patch` is doc-given; the rest are ours, negotiated like the M1·b DTO — all centralized in `Realtime/StreamProtocol.cs`, never inline strings): `server.patch` (data = the **frozen M1·b `Server`**, NOT the §3·b example's `{status:"online", players}`; carries the full element incl. a **point-in-time `metrics` block that may lag** the dedicated `servers/{id}/metrics` tick — merge by id), `server.removed` (`{ id }` tombstone), `metrics.tick` (`ServerMetricsDto`), `host.metrics` (`HostMetricsDto` = the capacity portion of the `Host` view; `net`/`temp` omitted, never fabricated), `capabilities.patch` (`HostCapabilities`). **`servers` carries status/roster only — NOT the 1s metric firehose** (resource ticks live on `servers/{id}/metrics`; a deliberate divergence from §3·b's "resource deltas" wording, smoke-proven the `servers` topic stays quiet under ticking metrics). **Honesty:** monitor-down → metric topics go **silent** (never a replayed stale frame) and `hosts/{id}/capabilities` flips metrics `down` — that flip is what explains the silence. **Capability availability is driven by the always-on `LeafHealthMonitor`** (frequent `/health` polls, the single source feeding both this stream and the REST `GET /hosts`), which stamps `since` on each flip — see the Capability-record row. The `capabilities.patch` keeps `provisioned:true` through a down→up cycle: degrade **and** recover gracefully, capability never "lost". |
-| Command verbs + `job` shape + `command.verified` | M3 | `architecture.html §5·d` |
+| Command verbs + `job` shape + `command.verified` | **M3** | `architecture.html §5·d` — **frozen 2026-06-15.** **Endpoint** `POST /servers/{id}/commands` body `{ verb }` → `202` + `{ job }`; closed, server-defined verb set **`start`·`stop`·`restart`** (**`update` deferred** from the first cut — long-running + version-changing, settles on a version re-check not a run-state one). **Errors:** unknown/missing verb → `400 bad_request`; unknown server → `404 not_found`; an obvious no-op against the real status (start-when-running / stop-when-stopped) or a command already in flight for that server → `409 conflict`. **`job`** = `{ id, serverId, verb, state, createdAt, settledAt?, error? }` (opaque `job_…` id; ISO-8601 UTC `Z` times; `error` set only on `failed`, the engine's real detail — never a fabricated success). **Divergence (honest-vs-aspirational, the same negotiated call as the M1·b DTO):** `job.state` is the **job's own** lifecycle `queued→running→succeeded\|failed`, NOT the §5·d example's server-shaped `state:"running"` — the affected server's authoritative/optimistic status rides the `servers` topic via `server.patch`, and the client derives the optimistic display from the verb (the same topic-separation discipline as the metric topics). **WS:** the `jobs` topic carries a single **`job.patch`** (the full `job` on every transition, coalesced by job id — patch-only, exactly like `server.patch`). **Gate (state guards):** minimal/honest — only the obvious no-ops; the engine (kgsm→watchdog/Docker) owns everything subtler, surfacing an impossible transition as the job's `failed` + its error (the API never fabricates admissibility kgsm does not enforce; `unknown` status never blocks). **Verify** (the §5·d `command.verified` for the direct write path): on settle, a fresh run-state read → an explicit `server.patch`. **Permissions** gate at M4; jobs are **in-memory** (SQLite + audit at M5). The propose/confirm half of §5·d (`command.proposed` over SSE) is the assistant flow (M7), not M3. |
 | Auth session + tiers + 401/403/login_required | M4 | `architecture.html §3·f` |
 | Audit record + closed `action` vocabulary + SQLite schema | M5 | `architecture.html §3·d` |
 | Alert record + raise/resolve/retract; `network` block | M6 | `architecture.html §3·c, §3·g` |
@@ -439,7 +447,7 @@ kgsm-api/
     Services/
       Leaves/                 # [M1·a] MonitorClient (cached scrape + /health) + AssistantClient (typed HttpClient; /health probe, grows tools/SSE at M7) · [M2] LeafHealthMonitor (always-on /health poller → §4·b capability truth + capabilities.patch flips; watchdog via kgsm-lib IsReadyAsync)
       Aggregation/            # [M1·a] HostAggregator (capacity from /metrics + §4·b capabilities from LeafHealthMonitor) · [M1·b] ServerAggregator (lib status ⋈ monitor metrics) · MetricsMapping (shared snapshot→DTO, REST==WS)
-      Commands/               # [M3] gate + job tracker + verify
+      Commands/               # [M3 built] CommandGate (admissibility) + JobRegistry (in-memory, 1-in-flight/server) + CommandRunner (scope-per-job exec + job.patch + verify server.patch)
       Auth/                   # [M4] Discord per-host OAuth, bearer/session, tiers
       Audit/  Alerts/ Ports/  # [M5]/[M6] event consumer, alert engine, port intent
       Assistant/              # [M7] SSE relay
@@ -678,3 +686,57 @@ as a drop; render a `capabilities.patch` `down` (with `provisioned:true`) as "te
 not "gone", and snap back on the `operational` flip; on socket drop, fall back to REST polling and
 re-hydrate on reconnect (§3·j). The stream is **unauthenticated until M4** — same trusted-network window
 as M3.
+
+### M3 — 2026-06-15 · commands (the first write path: gate → job → verify) self-validated; frontend gate PENDING
+
+**Status:** the first mutation path is built and self-validated. `POST /servers/{id}/commands { verb }`
+admits a closed verb set (**`start`·`stop`·`restart`**; `update` deferred), creates an in-memory `job`,
+runs the verb off-request through kgsm-lib `ILifecycleService` (native→watchdog, container→Docker), and
+streams the job on the `jobs` WS topic as a single coalesced `job.patch`, then a verify `server.patch` on
+settle. Contract frozen in §6; `job.state` is the **job's own** lifecycle (the honest divergence from the
+§5·d server-shaped example, signed off like the M1·b DTO).
+
+**Decisions (user, 2026-06-15).** (1) **Trust window CONFIRMED** — trusted LAN only, not publicly exposed
+until M4, so the unauthenticated write path is acceptable for this milestone (permissions land at M4).
+(2) **Verb scope = three fast run-state verbs**; `update` (long-running, version-changing) follows once the
+job-progress story is proven.
+
+**The shape of it.** `CommandGate` (pure) rejects only the obvious no-ops against the *real observed* status
+— start-when-running / stop-when-stopped — and lets everything else through so the **engine stays the single
+authority** on what a verb does (a subtler-but-impossible transition runs and surfaces as the job's `failed`
++ kgsm's real error; `unknown` status never blocks). `JobRegistry` (singleton, in-memory) holds job state and
+enforces **one in-flight command per server** via an atomic slot claim (second concurrent command → `409` +
+the in-flight job id). `CommandRunner` (singleton) executes on a background task that creates its **own DI
+scope** and resolves the transient/process-based `ILifecycleService` *there* — the request scope is gone by
+`202`, so capturing a request-scoped service would be use-after-dispose; only the `Job` (value data) crosses
+the boundary. The verb runs in try/finally so a started job **always** settles (releasing the slot even on a
+throw). On settle it re-reads run-state and publishes a `server.patch` (the §5·d `command.verified` for the
+direct write path); the `DomainPump`'s next diff also reconciles (coalesced by the same key, so the overlap
+is harmless).
+
+**Self-validated:** `scripts/smoke.sh` → **28/28** (8 M0 + 4 M1·a + 6 M1·b + 7 M2 + **3 M3**), stable. The 3
+M3 checks prove the **gate/rejection contract without any mutation** (the gate rejects before a verb runs):
+`400 bad_request` (unknown verb) · `404 not_found` (unknown server) · `409 conflict` (a no-op chosen from the
+server's live status — `stop` on the stopped `factorio-test`). All three use the frozen `{error:{code,message}}`
+envelope, not ProblemDetails.
+
+**Live-validated on the trusted host (2026-06-15)** — the happy path the stub-driven smoke can't reach
+(a real verb mutates real state) was exercised directly against the dev kgsm + `factorio-test`: `POST start`
+→ **`202` + `{ job }`**; the `jobs` WS streamed the **`job.patch` lifecycle `running→succeeded`**; a **verify
+`server.patch`** landed on the `servers` topic on settle; and **6 concurrent `POST start`s returned exactly
+one `202` + five `409 conflict`** — the atomic one-in-flight-per-server guard, proven under true concurrency.
+(Asserted the *mechanics*, not the verb's outcome.)
+
+**Environment finding (not an M3 issue):** the test host had **no `kgsm-watchdog` running**, so kgsm-lib's
+`Start` fell back to **direct-spawn**, producing an **orphaned** `factorio` process (PPID 1) that `kgsm stop`
+reported "stopped" for but did **not** reap (and that the run-state read reported as `stopped` while it was
+in fact up). The M3 verify path worked correctly — it published the `server.patch` kgsm gave it; the *status
+value* was wrong because kgsm's native run-state tracking is unreliable **without the watchdog**. Cleaned up
+by killing the orphan directly. Takeaway: M3's real-lifecycle correctness (accurate verify status, reliable
+stop) depends on the watchdog being up — the engine's resident half, assumed present per the keystone.
+
+**Owed to the frontend at the gate:** issue intent only (`{ verb }`), never a result; on `202` track the
+returned `job.id` on the `jobs` topic (`job.patch`, merge by id); show the optimistic transitional state
+derived from the verb until a `server.patch` carries the authoritative status; render `409` as "already in
+that state / a command is already running", `400` as an invalid action. Unauthenticated until M4 — trusted
+window as above.

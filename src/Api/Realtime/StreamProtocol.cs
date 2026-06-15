@@ -43,6 +43,24 @@ public static class StreamProtocol
     /// <summary>The host's capability block after a status flip (<c>HostCapabilities</c>).</summary>
     public const string CapabilitiesPatch = "capabilities.patch";
 
+    // --- jobs (M3 — the command write path) ---
+    /// <summary>Command/job progress + completion (host-wide): <c>jobs</c> (architecture.html §5·d).</summary>
+    public const string JobsTopic = "jobs";
+    /// <summary>
+    /// A full <see cref="Contracts.Job"/> on every state transition, merged by id (patch-only, exactly like
+    /// <see cref="ServerPatch"/>). <c>job.state</c> is the <em>job's own</em> lifecycle
+    /// (<c>queued→running→succeeded|failed</c>); the affected server's authoritative status rides
+    /// <see cref="ServersTopic"/> via <see cref="ServerPatch"/> on settle — a deliberate divergence from the
+    /// §5·d example's server-shaped <c>state</c>, the same topic-separation discipline as the metric topics.
+    /// </summary>
+    public const string JobPatch = "job.patch";
+
+    /// <summary>
+    /// The per-connection coalesce key for a job on the <see cref="JobsTopic"/>: a slow client gets the
+    /// newest transition for a job id, never an unbounded backlog of its intermediate states.
+    /// </summary>
+    public static string JobEntityKey(string id) => $"jobs:{id}";
+
     /// <summary>
     /// The per-connection coalesce key for a server entity on the <see cref="ServersTopic"/>. A patch
     /// and a later removal for the same id share this key, so the newer supersedes any unsent older

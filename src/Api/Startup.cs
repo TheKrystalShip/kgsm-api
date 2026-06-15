@@ -4,6 +4,7 @@ using TheKrystalShip.Api.Infrastructure;
 using TheKrystalShip.Api.Json;
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Extensions;
 
@@ -78,6 +79,13 @@ public class Startup(IConfiguration configuration)
         // instance exposed as both a singleton (the readable cache) and a hosted service (the poll loop).
         services.AddSingleton<LeafHealthMonitor>();
         services.AddHostedService(sp => sp.GetRequiredService<LeafHealthMonitor>());
+
+        // M3 — commands (the first write path). The registry holds in-memory job state + the
+        // one-in-flight-per-server guard; the runner executes admitted verbs off-request (its own DI
+        // scope per job, since ILifecycleService is transient/process-based) and streams job.patch +
+        // the verify server.patch. Both singletons.
+        services.AddSingleton<JobRegistry>();
+        services.AddSingleton<CommandRunner>();
 
         // Error contract over the default ProblemDetails body. AddProblemDetails is
         // registered only to satisfy UseExceptionHandler's startup guard — ApiExceptionHandler

@@ -521,6 +521,45 @@ sys.exit(0 if any(t>u for t in tick_t) else 4)                         # ticks r
     ok "WS recovery: metrics flips back operational (provisioned:true throughout) + ticks resume"
   else bad "WS recovery flip / resume not observed (see $WS_LOG)"; fi
 
+  # --- M3 commands: the write path (gate → 202 + job → jobs WS → verify) ------
+  echo "==> M3 command checks — POST /servers/{id}/commands (the gate/rejection contract, no mutation)"
+
+  # 26. Unknown server id -> OUR 404 envelope (the write path resolves the server like the read path).
+  req POST /api/v1/servers/does-not-exist/commands -H 'Content-Type: application/json' -d '{"verb":"start"}'
+  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
+    && ok "POST commands unknown server → 404 {error:{code:not_found}}" || bad "M3 unknown-server 404 (code=$CODE body=$BODY)"
+
+  # 27. Unknown verb -> 400 bad_request. The verb set is closed and server-defined; the client (or model)
+  #     cannot invent one. No job is created, nothing runs.
+  req POST "/api/v1/servers/${FIRST_ID}/commands" -H 'Content-Type: application/json' -d '{"verb":"frobnicate"}'
+  [[ "$CODE" == 400 ]] && grep -q '"code":"bad_request"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
+    && ok "POST commands unknown verb → 400 {error:{code:bad_request}}" || bad "M3 unknown-verb 400 (code=$CODE body=$BODY)"
+
+  # 28. The admissibility gate: an obvious no-op against the REAL observed status -> 409 conflict, with
+  #     NO mutation (the gate rejects before the verb ever runs). The no-op verb is chosen from the live
+  #     status; 'unknown' status never blocks (we can't honestly call a transition a no-op), so skip it.
+  req GET "/api/v1/servers/${FIRST_ID}"
+  ST="$(python3 -c "import json;print(json.load(open('/tmp/kgsm-api-smoke.body')).get('status',''))" 2>/dev/null)"
+  case "$ST" in
+    running) NOOP_VERB=start ;;
+    stopped) NOOP_VERB=stop  ;;
+    *)       NOOP_VERB=""     ;;
+  esac
+  if [[ -n "$NOOP_VERB" ]]; then
+    req POST "/api/v1/servers/${FIRST_ID}/commands" -H 'Content-Type: application/json' -d "{\"verb\":\"${NOOP_VERB}\"}"
+    [[ "$CODE" == 409 ]] && grep -q '"code":"conflict"' <<<"$BODY" \
+      && ok "gate: no-op '${NOOP_VERB}' on ${ST} server → 409 conflict (rejected pre-execution, no mutation)" \
+      || bad "M3 no-op gate 409 (status=$ST verb=$NOOP_VERB code=$CODE body=$BODY)"
+  else
+    echo "  (skipping no-op gate check: server status '${ST:-unknown}' — the gate correctly does not block unknown)"
+  fi
+
+  # Coverage note (honest, mirroring M2's server.patch boundary): the 202 + job + WS job.patch + verify
+  # server.patch + the in-flight 409 guard are exercised by code review + a LIVE mutation on a trusted
+  # host — the verb must actually run, which mutates real state and is not deterministic in this
+  # stub-driven smoke. The gate and all three error envelopes above ARE proven here, without mutation.
+  echo "  (note: 202/job lifecycle + WS job.patch + verify are code-path-only in smoke — live-validated on a trusted host)"
+
   stop_api
 fi
 

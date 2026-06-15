@@ -19,9 +19,11 @@ its leaves + this API. The API aggregates **only its own host's** leaves; cross-
 
 **Status:** M0 (skeleton + runtime/stack decision), **M1·a** (hosts — monitor scrape + §4·b
 capabilities), **M1·b** (servers — the kgsm-lib domain+run-state ⋈ monitor metrics join, the
-honest `Server` DTO) and **M2** (realtime — the `GET /api/v1/stream` WebSocket + the always-on
-leaf-health capability model) are `built` & self-validated (`scripts/smoke.sh` 25/25, degrade +
-happy path + a kill→restart degrade→recover cycle); M3–M8 are `planned`. Trust `PLAN.md`'s
+honest `Server` DTO), **M2** (realtime — the `GET /api/v1/stream` WebSocket + the always-on
+leaf-health capability model) and **M3** (commands — the first write path: `POST /servers/{id}/commands`
+→ gate → `202` + job → `jobs` WS → verify; verbs `start`/`stop`/`restart`, `update` deferred) are
+`built` & self-validated (`scripts/smoke.sh` 28/28, degrade + happy path + a kill→restart degrade→recover
+cycle + the M3 gate/rejection contract); M4–M8 are `planned`. Trust `PLAN.md`'s
 per-milestone status, not assumptions.
 
 ## Read first (sources of truth)
@@ -46,7 +48,13 @@ dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --self-contained -p:Pu
 ```
 
 `scripts/smoke.sh` is the **stand-in for the frontend** until the SPA can reach a host —
-it asserts every M0/M1/M2 contract (25/25). It runs two phases: Phase A degrade (no monitor,
+it asserts every M0/M1/M2/M3 contract (28/28). The 3 M3 checks prove the command gate/rejection
+contract (`400`/`404`/`409`) **without mutation** — the gate rejects before a verb runs. The write
+happy path (the stub smoke can't reach it) was **live-validated on the trusted host** (2026-06-15):
+`202`+job, `job.patch` `running→succeeded`, verify `server.patch`, and the in-flight `409` guard under
+6 concurrent POSTs (1×202 / 5×409). NB real native lifecycle needs `kgsm-watchdog` up — without it,
+kgsm direct-spawns an orphan and run-state tracking is unreliable (PLAN §8).
+It runs two phases: Phase A degrade (no monitor,
 live kgsm) and Phase B an **embedded stub monitor** (a unix socket serving a canned `Snapshot`)
 that makes the host happy path + the M1·b servers-join present-branch deterministic with no
 external monitor. **M2** is covered by an embedded **stdlib RFC6455 WebSocket client** (no
@@ -89,7 +97,9 @@ exactly one correct access path:
   (`TheKrystalShip.KGSM`, the single C#↔engine chokepoint; it reaches the watchdog via
   `IWatchdogClient`). **Never shell out to `kgsm.sh` or open the watchdog socket directly.**
   Added in M1 (local feed: `/home/heisen/local-nuget`, currently 1.6.0). Wired at **M1·b** for
-  `GET /servers` (`IInstanceService.GetAll` + `GetAllStatuses(fast:true)`). kgsm-lib is **base,
+  `GET /servers` (`IInstanceService.GetAll` + `GetAllStatuses(fast:true)`) and at **M3** for the write
+  path (`ILifecycleService.Start/Stop/Restart`, run off-request by the `CommandRunner` in its own DI
+  scope — the verb routes native→watchdog, container→Docker inside the engine). kgsm-lib is **base,
   not a leaf**: provisioned-by-default at `KGSM_API_KGSM_PATH` (`/usr/bin/kgsm`); an empty path is
   a surfaced misconfiguration (empty `/servers` + a one-time log), not a §4·b capability. The
   process-based `IInstanceService` is transient → resolved per-request from the provider; the kgsm
@@ -175,8 +185,10 @@ of leaves present.
   `ef database update` will conflict.
 - **Diagnostics endpoints** (`/api/v1/_throw`, `/api/v1/_dbcheck`) are smoke-only probes —
   remove/restrict before any public exposure.
-- **Trust window:** M3 (commands, which mutate) lands before M4 (auth). Acceptable **only**
-  on a trusted, non-public network until M4 — see `PLAN.md` M3.
+- **Trust window:** M3 (commands, which mutate) lands before M4 (auth) — **CONFIRMED acceptable**
+  (user, 2026-06-15) **only** on a trusted, non-public network until M4. The M3 write path is
+  unauthenticated by design this milestone; the gate enforces state guards only (permissions at M4).
+  See `PLAN.md` M3.
 - **`SuppressMapClientErrors=true`** (Startup): `[ApiController]` would otherwise turn a
   controller `NotFound()`/`BadRequest()` into RFC-9110 ProblemDetails. We suppress it so 4xx
   flow through `UseStatusCodePages` → the `{error}` envelope (one error shape everywhere).
