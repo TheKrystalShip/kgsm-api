@@ -409,7 +409,7 @@ wiring* lands first.
   `RegisterHandler` wires; tests 67/67. Live round-trip proven on all four paths — which
   **discharged M5's owed socket round-trip**. No wire contract (internal). See §8.
 
-**M6·b — Ports.** · `partial` (contract **frozen 2026-06-16**; backend built & self-validated; the api's full `open_ports` path live-proven as a faithful firewall client 2026-06-16 — the **end-to-end `open:true` verdict is UNPROVEN**, blocked by a kgsm-firewall daemon gap on this inactive-ufw host (a flagged firewall follow-up, not an api defect); frontend gate pending — see §8)
+**M6·b — Ports.** · `partial` (contract **frozen 2026-06-16**; backend built & self-validated; the full `open_ports` path **LIVE-VALIDATED end-to-end 2026-06-16 with ufw active** — `open:true` enforced, the direct audit row, the app-join, the `network.patch` WS delivery, and restore all proven (8/8); only the frontend gate remains. A separate **kgsm-firewall** follow-up will announce the firewall's enforcement state so an inactive ufw reads as reachable, not closed — see §8)
 - **Goal:** required-vs-open ports per server + the host open-ports grid + the one-click fix.
 - **Wires:** **kgsm-firewall** via kgsm-lib `IFirewallService` (1.13.0 — **no bump**); required
   ports from `Instance.Ports` (already carried by the `GetAll` roster — `instances list
@@ -1116,7 +1116,7 @@ temp DB; the kgsm config was untouched — broadcasting was already on). **Still
 disruptive to force here); the `FromFailedEvent` mapper is unit-tested, and it rides the same now-live-proven
 transport + dispatch as the warn crash.
 
-### M6·b — 2026-06-16 · ports (the network surface: required ⋈ open + the open_ports command) self-validated + the api's full open_ports path LIVE-PROVEN as a faithful firewall client; the end-to-end `open:true` verdict UNPROVEN (a flagged kgsm-firewall daemon gap, not an api defect); frontend gate PENDING
+### M6·b — 2026-06-16 · ports (the network surface: required ⋈ open + the open_ports command) self-validated + LIVE-VALIDATED end-to-end with ufw active (open:true enforced, direct audit, app-join, network.patch delivery, restore — 8/8); frontend gate PENDING; a kgsm-firewall enforcement-state follow-up is queued (inactive ufw should read reachable, not closed)
 
 **Status:** the ports half of M6. Contract **frozen 2026-06-16** (§6 `network`-block row + the three locked
 decisions); backend built, self-proven, and the firewall **read** path live-validated against the deployed
@@ -1186,15 +1186,26 @@ verify re-probed and the runner **honestly reported `open:false`** (it did **not
 write→audit→job→deliver→re-probe→restore path is **live-proven** (the `RunOpenPortsAsync` write-decision paths —
 `Applied`→direct-write, the target derivation, the verify/`network.patch` — all executed).
 
-**UNPROVEN — the end-to-end `open:true` verdict, blocked by a kgsm-firewall daemon gap (NOT an api defect).** On
-this host ufw is **inactive**, and the daemon (journal: `backend=Ufw, canApply=True`, `EnsureOpen … 2 port spec(s)
-via Ufw`) reports **`Applied`** but produces **no observable rule** — `ufw show added` is empty even right after a
-CLI `files firewall enable factorio-test` reports success, and `ListOwnedAsync` then enumerates nothing → every
-`open` reads `false`. So the open/reachable surface is **inert on an inactive-ufw host**, regardless of what is
-"applied". This is a **kgsm-firewall follow-up** (should the daemon return `Unknown` (not `operational`+empty)
-when ufw is inactive, so the composite doesn't read "firewall up, port closed" when nothing is enforcing?) — see
-the firewall memory. The api maps each daemon answer faithfully; the **composite** is the daemon's to fix. A
-definitive `open:true` test needs **ufw active** (a host-posture change memory says was deliberately left off —
-not done unprompted; offered as the user's call, SSH/loopback allowed first). The `app`-join on a populated grid
-is unproven for the same reason (the live grid was empty). The runner's `instances info <name>` port source was
-confirmed live to carry the same structured `ports` as the roster.
+**DEFINITIVE end-to-end test — PASSED 8/8 with ufw ACTIVE (2026-06-16, the user enabled ufw for it).** Re-ran the
+full round-trip with ufw enforcing (default-deny incoming, SSH allowed): PRE `open:false` (active, no rule yet);
+`POST open_ports {origin:"ui"}` → `202`+job → re-probe **`open:true` for every required port** (enforced by the
+real ufw rule) → the direct `network.ports.open` audit row (`meta.jobId==job` + `ports` + `origin:"ui"`) → the
+host grid lists `factorio-test` with **`app:"factorio"`** (the roster join, now proven) → job `running→succeeded`
++ a **`network.patch` frame carrying `open:true`** delivered to a subscribed WS client → `files firewall disable`
+→ `open:false` again (rule removed, default-deny) → no leftover `ufw show added` rule. So the api's **entire
+`open_ports` path is now proven end-to-end** (write→enforce→`open:true`→audit→app-join→WS-deliver→restore). ufw
+left **active** (the user's setting); no leftover rule. The runner's `instances info <name>` port source was
+confirmed to carry the same structured `ports` as the roster.
+
+**Earlier-run honesty correction (the inactive-ufw observation that preceded this).** The first mutation run was
+on an **inactive** ufw and showed `Applied` + `open:false` everywhere. The "produces no observable rule" read of
+that was partly a grep artifact — the daemon adds an **application-profile** rule (`ufw allow kgsm-<instance>`),
+NOT a numeric `34197/...` rule, so `ufw show added | grep 34197` could never match; combined with inactive
+`ufw status` listing nothing, `ListOwnedAsync` enumerated empty. The rule was **staged** (persisted for when ufw
+is enabled), not absent. The real gap is a **kgsm-firewall composite-honesty** one: on an inactive ufw the daemon
+reports `operational`+empty (→ api `open:false` = "closed"), but **inactive ufw enforces nothing, so the port is
+actually OPEN/unfiltered** — the verdict is inverted. That is a **kgsm-firewall design follow-up** (announce the
+enforcement state: inactive → reachable/`open:true` + a distinct "not enforcing" status; possibly an
+`applied-inactive` apply outcome) — see the firewall memory + the design note. **Not an api defect:** the api
+faithfully maps each daemon answer and re-probed after its own open rather than assuming `open:true` from
+`Applied`, which is exactly what surfaced the gap.
