@@ -156,10 +156,15 @@ public sealed class CommandRunner(
                 ? $"firewall {result.Outcome.ToString().ToLowerInvariant()}"
                 : result.Detail);
 
-        // Direct audit write only when rules actually changed (Applied) — symmetric with the CLI echo path.
-        if (result.Outcome == FirewallOutcome.Applied)
-            await audit.AppendAsync(
-                AuditMapping.FromPortsOpenedCommand(job.ServerId, ports, actor, origin, options.HostId, job.Id))
+        // Direct audit write when a rule actually changed — Applied (enforced) OR AppliedInactive (staged on
+        // an inactive firewall). Both are real config changes; the audit summary distinguishes "opened" from
+        // "staged" via `enforced`. A NoOp (desired state already held) writes nothing — recording "opened"
+        // when nothing changed would fabricate a change (symmetric with the CLI echo, which fires only on a
+        // confirmed change).
+        if (result.Outcome is FirewallOutcome.Applied or FirewallOutcome.AppliedInactive)
+            await audit.AppendAsync(AuditMapping.FromPortsOpenedCommand(
+                    job.ServerId, ports, actor, origin, options.HostId, job.Id,
+                    enforced: result.Outcome == FirewallOutcome.Applied))
                 .ConfigureAwait(false);
 
         return (true, null);

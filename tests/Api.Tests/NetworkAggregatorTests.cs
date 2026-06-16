@@ -115,6 +115,41 @@ public sealed class NetworkAggregatorTests
         Assert.All(net.Required, r => Assert.True(r.Open));
     }
 
+    [Fact]
+    public async Task ServerNetwork_Inactive_EveryPortOpenTrue_FirewallInactive()
+    {
+        // The fix's core: an inactive firewall filters nothing, so every required port is reachable
+        // (open:true) and the block status says WHY — never read "closed" off an empty rule set.
+        var fw = new FakeFirewall { OnList = _ => Ok([], FirewallEnforcement.Inactive) };
+        NetworkAggregator agg = Aggregator(provisioned: true, fw);
+
+        ServerNetwork net = await agg.BuildServerNetworkAsync(
+            "valheim", [Port(2456, "udp"), Port(2457, "udp")], CancellationToken.None);
+
+        Assert.Equal(FirewallAvailability.Inactive, net.Firewall);
+        Assert.All(net.Required, r => Assert.True(r.Open)); // unfiltered → all reachable, not false
+        Assert.Null(net.Reachable);
+    }
+
+    [Fact]
+    public async Task ServerNetwork_OkUnknownEnforcement_FallsBackToEnforcing()
+    {
+        // A pre-1.1.0 authority sends Ok + Unknown enforcement → treat as operational/rule-present (the
+        // legacy behaviour), never inactive. Firewall owns 2456 only.
+        var fw = new FakeFirewall
+        {
+            OnList = _ => Ok([new FirewallOwnedRule("valheim", [Port(2456, "udp")])], FirewallEnforcement.Unknown),
+        };
+        NetworkAggregator agg = Aggregator(provisioned: true, fw);
+
+        ServerNetwork net = await agg.BuildServerNetworkAsync(
+            "valheim", [Port(2456, "udp"), Port(2457, "udp")], CancellationToken.None);
+
+        Assert.Equal(FirewallAvailability.Operational, net.Firewall);
+        Assert.True(net.Required[0].Open);
+        Assert.False(net.Required[1].Open);
+    }
+
     // --- host open-ports grid: Unknown ≠ empty -----------------------------------------------------
 
     [Fact]
@@ -163,6 +198,21 @@ public sealed class NetworkAggregatorTests
     }
 
     [Fact]
+    public async Task HostNetwork_Inactive_CarriesInactiveStatus_EmptyGridMeansAllOpen()
+    {
+        // Inactive ufw enumerates no rules, but the block must carry firewall:"inactive" so the empty grid
+        // is read as "firewall off → everything open", never "nothing open".
+        var fw = new FakeFirewall { OnList = _ => Ok([], FirewallEnforcement.Inactive) };
+        NetworkAggregator agg = Aggregator(provisioned: true, fw);
+
+        HostNetwork? host = await agg.BuildHostNetworkAsync(CancellationToken.None);
+
+        Assert.NotNull(host);
+        Assert.Equal(FirewallAvailability.Inactive, host!.Firewall);
+        Assert.Empty(host.OpenPorts);
+    }
+
+    [Fact]
     public async Task HostNetwork_FirewallAbsent_IsNull()
     {
         NetworkAggregator agg = Aggregator(provisioned: false, firewall: null);
@@ -188,8 +238,9 @@ public sealed class NetworkAggregatorTests
     private static PortMapping Port(int port, string proto) => new() { Start = port, End = port, Protocol = proto };
     private static PortMapping Range(int start, int end, string proto) => new() { Start = start, End = end, Protocol = proto };
 
-    private static FirewallListResult Ok(IReadOnlyList<FirewallOwnedRule> rules) =>
-        new() { Status = FirewallListStatus.Ok, Rules = rules };
+    private static FirewallListResult Ok(
+        IReadOnlyList<FirewallOwnedRule> rules, FirewallEnforcement enforcement = FirewallEnforcement.Enforcing) =>
+        new() { Status = FirewallListStatus.Ok, Rules = rules, Enforcement = enforcement };
 
     private sealed class StubProvider : IServiceProvider
     {

@@ -316,6 +316,23 @@ public sealed class AuditMappingTests
     }
 
     [Fact]
+    public void FromPortsOpenedCommand_StagedOnInactiveFirewall_SaysStagedNotOpened()
+    {
+        // applied-inactive: the rule is staged on an inactive firewall — the row must NOT claim an enforced
+        // open. Summary says "staged", meta flags enforced:false (the honesty the whole follow-up is about).
+        AuditWrite w = AuditMapping.FromPortsOpenedCommand(
+            serverId: "valheim",
+            ports: [new PortMapping { Start = 2456, End = 2456, Protocol = "udp" }],
+            actor: "discord:haru", origin: "ui", hostId: "primary", jobId: "job_x", enforced: false);
+
+        Assert.Equal(AuditAction.NetworkPortsOpen, w.Action);
+        Assert.Contains("staged firewall ports", w.Summary);
+        Assert.DoesNotContain("opened", w.Summary);
+        Assert.Equal("false", w.Meta!["enforced"]);
+        Assert.Equal("job_x", w.Meta!["jobId"]);
+    }
+
+    [Fact]
     public void FromPortsOpenedCommand_NoPorts_KeepsJobIdDropsPortsMetaNullOrigin()
     {
         // The runner skips an empty open, but the mapper must stay honest if called: jobId present (always),

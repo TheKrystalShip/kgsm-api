@@ -21,7 +21,12 @@ namespace TheKrystalShip.Api.Contracts;
 /// </summary>
 /// <param name="Firewall">The block-level firewall availability for this probe
 /// (<see cref="FirewallAvailability"/>) — the single liveness signal (the firewall is deliberately NOT a
-/// polled <c>HostCapabilities</c> leaf; it is socket-activated + idle-exits).</param>
+/// polled <c>HostCapabilities</c> leaf; it is socket-activated + idle-exits). <strong>Clients MUST read
+/// this alongside <c>open</c>:</strong> when it is <see cref="FirewallAvailability.Inactive"/>, every
+/// <c>open:true</c> means "reachable because the host firewall is OFF (nothing is filtering)" — the opposite
+/// security posture from <c>open:true</c> under <see cref="FirewallAvailability.Operational"/> ("allowed by
+/// a rule"). A UI that paints a green check on <c>open:true</c> without consulting this would render
+/// "all clear" over "no firewall at all".</param>
 /// <param name="Required">The server's required ports, expanded one row per port from
 /// <c>Instance.Ports</c> — always present (domain truth), even when the firewall is absent.</param>
 /// <param name="Reachable">Reserved — always <see langword="null"/> (no upstream prober; see the type remarks).</param>
@@ -33,20 +38,29 @@ public sealed record ServerNetwork(
 /// <summary>One required port and its host-firewall verdict (M6·b).</summary>
 /// <param name="Port">The single port number (ranges are expanded one row per port).</param>
 /// <param name="Proto">Transport protocol — <c>"tcp"</c> or <c>"udp"</c> (lower-cased).</param>
-/// <param name="Open"><see langword="true"/> when the host firewall owns a rule covering this
-/// <c>(port, proto)</c>; <see langword="false"/> when it does not (firewall answered); <see langword="null"/>
-/// when the firewall could not answer — honest unknown, never a fabricated <c>false</c>.</param>
+/// <param name="Open"><see langword="true"/> when the port is reachable at the host firewall — either a
+/// rule allows it (firewall <c>operational</c>) OR the firewall is <c>inactive</c> (nothing filters, so all
+/// ports are open); <see langword="false"/> when the firewall is operational and owns no covering rule
+/// (default-deny); <see langword="null"/> when the firewall could not answer (down/unknown/unsupported/absent)
+/// — honest unknown, never a fabricated <c>false</c>. Always read with the block-level <c>firewall</c> status
+/// to tell "open because allowed" from "open because the firewall is off".</param>
 public sealed record RequiredPort(int Port, string Proto, bool? Open);
 
 /// <summary>
 /// The host-wide open-ports grid (architecture.html §3·g, M6·b) — the raw firewall listing for the
 /// Diagnostics panel, a field on the <see cref="Host"/> <strong>detail</strong> response
 /// (<c>GET /hosts/{id}</c>). The whole block is <see langword="null"/> when the firewall can't answer
-/// (absent/unreachable/unknown — honest "not measurable now"); an <em>empty</em> <see cref="OpenPorts"/>
-/// list means the firewall answered and owns no rules (the <c>Ok</c>-but-empty case, distinct from
-/// <c>Unknown</c> which is null).
+/// (absent/unreachable/unknown — honest "not measurable now").
+/// <para>
+/// <strong>Read <see cref="Firewall"/> to interpret <see cref="OpenPorts"/>:</strong> when
+/// <see cref="Firewall"/> is <see cref="FirewallAvailability.Operational"/>, an <em>empty</em>
+/// <see cref="OpenPorts"/> means "the firewall is enforcing and owns no rules" (nothing open); but when it
+/// is <see cref="FirewallAvailability.Inactive"/>, an empty <see cref="OpenPorts"/> means the OPPOSITE —
+/// the firewall is OFF, so <em>every</em> port is open/unfiltered (the grid is empty only because an
+/// inactive ufw enumerates no active rules). Never read the empty grid as "nothing open" without the status.
+/// </para>
 /// </summary>
-public sealed record HostNetwork(IReadOnlyList<OpenPort> OpenPorts);
+public sealed record HostNetwork(string Firewall, IReadOnlyList<OpenPort> OpenPorts);
 
 /// <summary>One host-firewall rule, expanded one row per port (M6·b).</summary>
 /// <param name="Port">The single port number.</param>
@@ -67,6 +81,11 @@ public sealed record OpenPort(int Port, string Proto, string? App, string Server
 public static class FirewallAvailability
 {
     public const string Operational = "operational";
+    /// <summary>The firewall authority is reachable but NOT enforcing (e.g. ufw inactive) — it filters
+    /// nothing, so every port is open/unfiltered. Maps from kgsm-lib's <c>FirewallEnforcement.Inactive</c>
+    /// (Firewall.Contracts 1.1.0). With this status, <c>open:true</c> means "reachable because the firewall
+    /// is OFF", not "allowed" — a distinct security posture the client must surface (see <see cref="ServerNetwork"/>).</summary>
+    public const string Inactive = "inactive";
     public const string Down = "down";
     public const string Unknown = "unknown";
     public const string Unsupported = "unsupported";

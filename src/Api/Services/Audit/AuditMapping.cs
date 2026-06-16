@@ -161,12 +161,20 @@ public static class AuditMapping
     /// M5 echo path could not provide (no id round-trips the stateless engine), now populatable because the
     /// api owns both the job and this append (the alert↔audit <c>resolution.actionId</c> bridge for M6·a).
     /// </summary>
+    /// <param name="enforced"><see langword="true"/> when the firewall is enforcing (the rule is live —
+    /// "opened"); <see langword="false"/> when it was staged on an INACTIVE firewall (the
+    /// <c>applied-inactive</c> outcome — the rule persists and enforces on the operator's next
+    /// <c>ufw enable</c>, and the port is open meanwhile). The audit row must say "staged", not "opened",
+    /// when nothing is enforcing — recording an enforced open that didn't happen would be the very lie this
+    /// work removes.</param>
     public static AuditWrite FromPortsOpenedCommand(
-        string serverId, IReadOnlyList<PortMapping> ports, string? actor, string? origin, string hostId, string jobId)
+        string serverId, IReadOnlyList<PortMapping> ports, string? actor, string? origin, string hostId,
+        string jobId, bool enforced = true)
     {
         var meta = new Dictionary<string, string> { ["jobId"] = jobId };
         string formatted = FormatPorts(ports);
         if (!string.IsNullOrEmpty(formatted)) meta["ports"] = formatted;
+        if (!enforced) meta["enforced"] = "false"; // staged on an inactive firewall, not yet enforcing
 
         return new AuditWrite(
             Ts: DateTimeOffset.UtcNow,
@@ -177,7 +185,9 @@ public static class AuditMapping
             Target: new AuditTarget(AuditTargetKind.Server, serverId, serverId),
             ServerId: serverId,
             HostId: hostId,
-            Summary: $"opened firewall ports for {Display(serverId)}",
+            Summary: enforced
+                ? $"opened firewall ports for {Display(serverId)}"
+                : $"staged firewall ports for {Display(serverId)} (firewall inactive — enforces on enable)",
             Meta: meta);
     }
 

@@ -31,9 +31,11 @@ The first write path (M3) — `POST /api/v1/servers/{id}/commands { verb }` → 
 - **`open_ports` is the audit EXCEPTION — a DIRECT write (M6·b).** It goes through `IFirewallService`
   (`EnsureOpenAsync`), which runs no kgsm command and emits **no event**, so there is no echo to read — the
   `auth.*` case. The runner therefore writes the `network.ports.open` row **directly** via `AuditService`
-  (`AuditMapping.FromPortsOpenedCommand`), but **only on a real change (`Applied`)** — a `NoOp` succeeds with
-  no row (recording "opened" when nothing changed would fabricate a change; symmetric with the CLI echo,
-  which only fires on a confirmed open). This is **not** a double-write: kgsm never echoes an api firewall
+  (`AuditMapping.FromPortsOpenedCommand`), but **only on a real change (`Applied` or `AppliedInactive`)** — a
+  `NoOp` succeeds with no row (recording "opened" when nothing changed would fabricate a change; symmetric
+  with the CLI echo, which only fires on a confirmed open). `AppliedInactive` (the rule was staged but ufw is
+  inactive, Firewall.Contracts 1.1.0) is a real config change, so it IS audited — with `enforced:false`, and
+  the summary says "staged" not "opened". This is **not** a double-write: kgsm never echoes an api firewall
   call, and the CLI echo path (`instance_ports_opened`) is disjoint. The `meta` carries `{jobId, ports}` —
   `jobId` is the job↔audit correlation (populatable because the api owns both job + append; the M5 "no jobId"
   limit was the echo path). Don't extend this direct-write to the lifecycle verbs.

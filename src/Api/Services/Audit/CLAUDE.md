@@ -33,9 +33,11 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   **pure** `AuditMapping.From{Crash,Failed,PortsOpened,PortsClosed}Event` mappers, unit-tested without a socket.
 - **M6·b: `open_ports` writes `network.ports.open` DIRECTLY** (`AuditMapping.FromPortsOpenedCommand`, called by
   `CommandRunner`) — the `auth.*` case: it goes through `IFirewallService`, which emits no event, so there is no
-  echo and no double-write (the CLI echo path above is disjoint). Written **only on a real change (`Applied`)**,
-  not a `NoOp` (recording "opened" when nothing changed fabricates a change; symmetric with the CLI echo). Its
-  `meta` carries **`jobId`** (the job↔audit correlation — see the next bullet) plus the opened `ports`.
+  echo and no double-write (the CLI echo path above is disjoint). Written **only on a real change (`Applied` or
+  `AppliedInactive`)**, not a `NoOp` (recording "opened" when nothing changed fabricates a change; symmetric with
+  the CLI echo). `AppliedInactive` (rule staged, ufw inactive — Firewall.Contracts 1.1.0) audits with
+  `enforced:false` and a "staged" summary, distinct from an enforced "opened". Its `meta` carries **`jobId`**
+  (the job↔audit correlation — see the next bullet) plus the opened `ports`.
 - **`origin` nullable** is a recorded §6 divergence. **`meta.jobId` was the OTHER divergence ("not populatable")
   — but that was the event-ECHO path only.** The M6·b `open_ports` DIRECT write CAN populate it (the api owns
   both the job and the append), so its row carries `meta.jobId` for the alert↔audit `resolution.actionId` bridge

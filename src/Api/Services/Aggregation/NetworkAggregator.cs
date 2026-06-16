@@ -53,16 +53,24 @@ public sealed class NetworkAggregator(
 
         FirewallListResult? probe = await ProbeAsync(firewall, serverId, ct).ConfigureAwait(false);
 
-        // Map the honest outcome to availability + (only when Ok) the set of owned (port, proto).
+        // Map the honest outcome to availability + (only when enforcing) the set of owned (port, proto).
+        // When the backend is INACTIVE it filters nothing → every port is reachable, so we don't compute an
+        // owned set at all (the `inactive` flag below makes every row open:true). An Ok result with Unknown
+        // enforcement is a pre-1.1.0 authority → treat as operational (the legacy rule-present behaviour).
         string availability;
+        bool inactive = false;
         HashSet<(int, string)>? owned = null;
         if (probe is null)
             availability = FirewallAvailability.Down; // unreachable / timed out
         else
             switch (probe.Status)
             {
+                case FirewallListStatus.Ok when probe.Enforcement == FirewallEnforcement.Inactive:
+                    availability = FirewallAvailability.Inactive;
+                    inactive = true; // nothing is filtering → all ports reachable
+                    break;
                 case FirewallListStatus.Ok:
-                    availability = FirewallAvailability.Operational;
+                    availability = FirewallAvailability.Operational; // enforcing (or pre-1.1.0 Unknown → legacy)
                     owned = OwnedSet(probe.Rules);
                     break;
                 case FirewallListStatus.Unsupported:
@@ -75,8 +83,11 @@ public sealed class NetworkAggregator(
 
         var rows = new List<RequiredPort>(required.Count);
         foreach ((int port, string proto) in required)
-            // open is null whenever we lack an authoritative answer — never coerced to false.
-            rows.Add(new RequiredPort(port, proto, owned is null ? null : owned.Contains((port, proto))));
+        {
+            // inactive firewall → reachable (true); enforcing → rule-present; can't-answer → null (never false).
+            bool? open = inactive ? true : owned is null ? null : owned.Contains((port, proto));
+            rows.Add(new RequiredPort(port, proto, open));
+        }
 
         return new ServerNetwork(availability, rows, Reachable: null);
     }
@@ -84,7 +95,8 @@ public sealed class NetworkAggregator(
     /// <summary>
     /// Build the host-wide <see cref="HostNetwork"/> grid (the Diagnostics open-ports view). Returns
     /// <see langword="null"/> when the firewall is absent/unreachable/unknown (honest "not measurable now");
-    /// an empty <see cref="HostNetwork.OpenPorts"/> means the firewall answered and owns no rules.
+    /// an empty <see cref="HostNetwork.OpenPorts"/> means the firewall answered and owns no rules WHEN
+    /// <see cref="HostNetwork.Firewall"/> is operational — but the OPPOSITE (all open) when it is inactive.
     /// </summary>
     public async Task<HostNetwork?> BuildHostNetworkAsync(CancellationToken ct)
     {
@@ -99,6 +111,12 @@ public sealed class NetworkAggregator(
         // Only an Ok result yields a grid; Unknown/Unsupported/unreachable are honest null (never []).
         if (probe is not { Status: FirewallListStatus.Ok })
             return null;
+
+        // Carry the enforcement status so an empty grid is never misread: inactive → the firewall is OFF
+        // (all open), not "nothing open". Inactive ufw enumerates no rules, so OpenPorts is empty either way.
+        string firewallStatus = probe.Enforcement == FirewallEnforcement.Inactive
+            ? FirewallAvailability.Inactive
+            : FirewallAvailability.Operational;
 
         IReadOnlyDictionary<string, string> appByInstance = AppMap();
 
@@ -118,7 +136,7 @@ public sealed class NetworkAggregator(
             int byPort = x.Port.CompareTo(y.Port);
             return byPort != 0 ? byPort : string.CompareOrdinal(x.Proto, y.Proto);
         });
-        return new HostNetwork(rows);
+        return new HostNetwork(firewallStatus, rows);
     }
 
     // Run ListOwnedAsync bounded to ProbeTimeout. Returns null when the authority is unreachable or the
