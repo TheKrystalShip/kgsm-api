@@ -98,6 +98,24 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceBackupRestoredData>(d =>
             WriteServer(d, AuditAction.BackupRestore, AuditSeverity.Success, "restored backup for",
                 Meta(("source", d.Source), ("version", d.Version))));
+
+        // server.crash — the resident supervisor's autonomous signals (kgsm-watchdog, kgsm-lib 1.9.0),
+        // both stamped Actor/Origin = "system" upstream. Per-event policy (action/severity/summary/meta)
+        // lives in the pure AuditMapping mappers so it is unit-tested without a live socket (M6·0).
+        events.RegisterHandler<InstanceCrashedData>(d =>
+            audit.AppendAsync(AuditMapping.FromCrashEvent(d, options.HostId)));
+        events.RegisterHandler<InstanceFailedData>(d =>
+            audit.AppendAsync(AuditMapping.FromFailedEvent(d, options.HostId)));
+
+        // network.ports.open / .close — the CLI-path firewall echoes (kgsm bash emits these on a
+        // confirmed open/close via create, firewall-enable/disable, or uninstall — kgsm-lib 1.12.0).
+        // Both recorded so the trail is symmetric. The api-issued `open_ports` command writes
+        // `network.ports.open` directly at M6·b (kgsm runs nothing → no echo, the auth.* case); there is
+        // no api close command (§3·g is open-only), so `network.ports.close` is cleanly CLI-echo-only.
+        events.RegisterHandler<InstancePortsOpenedData>(d =>
+            audit.AppendAsync(AuditMapping.FromPortsOpenedEvent(d, options.HostId)));
+        events.RegisterHandler<InstancePortsClosedData>(d =>
+            audit.AppendAsync(AuditMapping.FromPortsClosedEvent(d, options.HostId)));
     }
 
     private Task WriteServer(

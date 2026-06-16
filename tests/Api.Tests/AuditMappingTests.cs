@@ -1,5 +1,6 @@
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Audit;
+using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Tests;
@@ -163,5 +164,126 @@ public sealed class AuditMappingTests
 
         Assert.Null(AuditMapping.ToEntity(write, "evt_x").Meta);
         Assert.Null(AuditMapping.ToRecord(AuditMapping.ToEntity(write, "evt_x")).Target); // null target survives
+    }
+
+    // --- M6·0: crash events (kgsm-watchdog, system-stamped) → server.crash -------------------------
+    [Fact]
+    public void FromCrashEvent_IsWarnServerCrash_SystemProvenance()
+    {
+        var data = new InstanceCrashedData
+        {
+            InstanceName = "valheim",
+            Actor = "system",
+            Origin = "system",
+            ExitCode = "139",
+            Restarts = "2",
+        };
+
+        AuditWrite w = AuditMapping.FromCrashEvent(data, hostId: "primary");
+
+        Assert.Equal(AuditAction.ServerCrash, w.Action);
+        Assert.Equal(AuditSeverity.Warn, w.Severity);             // auto-restarting → warn, not danger
+        Assert.Equal("system", w.Origin);                         // autonomous engine action
+        Assert.Equal(ActorKind.System, w.Actor.Kind);
+        Assert.Equal(ActorProvider.System, w.Actor.Provider);
+        Assert.Equal("valheim", w.ServerId);
+        Assert.Equal(AuditTargetKind.Server, w.Target!.Kind);
+        Assert.Equal("valheim", w.Target.Id);
+        Assert.Contains("auto-restarting", w.Summary);
+        Assert.Equal("139", w.Meta!["exitCode"]);
+        Assert.Equal("2", w.Meta["restarts"]);
+    }
+
+    [Fact]
+    public void FromFailedEvent_IsDangerServerCrash_GaveUpWithCount()
+    {
+        var data = new InstanceFailedData
+        {
+            InstanceName = "rust",
+            Actor = "system",
+            Origin = "system",
+            ExitCode = "unknown",
+            Restarts = "5",
+        };
+
+        AuditWrite w = AuditMapping.FromFailedEvent(data, hostId: "primary");
+
+        Assert.Equal(AuditAction.ServerCrash, w.Action);          // same doc-given action as a crash
+        Assert.Equal(AuditSeverity.Danger, w.Severity);           // gave up → danger
+        Assert.Contains("gave up", w.Summary);
+        Assert.Contains("5 restart(s)", w.Summary);
+        Assert.Equal("unknown", w.Meta!["exitCode"]);             // honest "unknown" preserved, not dropped
+        Assert.Equal("5", w.Meta["restarts"]);
+    }
+
+    [Fact]
+    public void FromFailedEvent_EmptyRestarts_OmitsCountClauseAndMeta()
+    {
+        var data = new InstanceFailedData { InstanceName = "ark", Actor = "system", Origin = "system" };
+
+        AuditWrite w = AuditMapping.FromFailedEvent(data, hostId: "primary");
+
+        Assert.DoesNotContain("restart(s)", w.Summary);           // no "after  restart(s)" with a blank count
+        Assert.Null(w.Meta);                                       // both fields blank → no meta, never ""
+    }
+
+    // --- M6·0: the CLI-path firewall echo → network.ports.open -------------------------------------
+    [Fact]
+    public void FromPortsOpenedEvent_IsNetworkPortsOpen_WithFormattedPortsMeta()
+    {
+        var data = new InstancePortsOpenedData
+        {
+            InstanceName = "valheim",
+            Actor = "discord:haru",
+            Origin = "ui",
+            Ports =
+            [
+                new PortMapping { Start = 2456, End = 2458, Protocol = "udp" },
+                new PortMapping { Start = 27015, End = 27015, Protocol = "tcp" },
+            ],
+        };
+
+        AuditWrite w = AuditMapping.FromPortsOpenedEvent(data, hostId: "primary");
+
+        Assert.Equal(AuditAction.NetworkPortsOpen, w.Action);
+        Assert.Equal(AuditSeverity.Info, w.Severity);
+        Assert.Equal("ui", w.Origin);                             // a CLI-path open carries its real provenance
+        Assert.Equal("valheim", w.ServerId);
+        Assert.Equal(AuditTargetKind.Server, w.Target!.Kind);
+        Assert.Equal("2456-2458/udp, 27015/tcp", w.Meta!["ports"]); // range preserved; single port not dashed
+    }
+
+    [Fact]
+    public void FromPortsClosedEvent_IsNetworkPortsClose_SymmetricWithOpen()
+    {
+        var data = new InstancePortsClosedData
+        {
+            InstanceName = "valheim",
+            Actor = "system",
+            Origin = null,                                          // a teardown/CLI close may carry no surface
+            Ports = [new PortMapping { Start = 2456, End = 2456, Protocol = "udp" }],
+        };
+
+        AuditWrite w = AuditMapping.FromPortsClosedEvent(data, hostId: "primary");
+
+        Assert.Equal(AuditAction.NetworkPortsClose, w.Action);
+        Assert.Equal(AuditSeverity.Info, w.Severity);
+        Assert.Null(w.Origin);                                      // unset origin → null, never fabricated
+        Assert.Contains("closed firewall ports", w.Summary);
+        Assert.Equal("2456/udp", w.Meta!["ports"]);
+    }
+
+    [Theory]
+    [InlineData(2456, 2456, "udp", "2456/udp")]          // single port → no dash
+    [InlineData(2456, 2458, "udp", "2456-2458/udp")]     // range → dashed
+    public void FormatPorts_RendersRangeAndSingle(int start, int end, string proto, string expected) =>
+        Assert.Equal(expected, AuditMapping.FormatPorts(
+            [new PortMapping { Start = start, End = end, Protocol = proto }]));
+
+    [Fact]
+    public void FormatPorts_Empty_IsEmptyString()
+    {
+        Assert.Equal("", AuditMapping.FormatPorts([]));
+        Assert.Equal("", AuditMapping.FormatPorts(null));
     }
 }

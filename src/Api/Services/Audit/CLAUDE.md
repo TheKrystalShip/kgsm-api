@@ -20,9 +20,17 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
 - **Append-only & immutable.** Rows are never updated or deleted; a correction is a *new* row. Don't add
   an update/delete path. `EnsureCreated`, **not an EF migration** (dev authority — wipe the DB on a schema
   change; see the api `CLAUDE.md` gotcha).
-- **Closed `action` vocabulary** (`Contracts/AuditAction`). Clients/the model can't invent one. The M5
-  subset is what's honestly sourceable today; `server.crash`/`config.*`/`player.*`/… are deferred (no
-  source yet) — add them when their producer lands, not speculatively.
+- **Closed `action` vocabulary** (`Contracts/AuditAction`). Clients/the model can't invent one. Add an
+  action only when its producer has landed, never speculatively. **M6·0 added** `server.crash` (watchdog
+  `instance_crashed`→warn / `instance_failed`→danger, both `system`-stamped) and `network.ports.open`/
+  `network.ports.close` (the CLI-path `instance_ports_opened`/`_closed` echoes). `network.ports.close` is a
+  deliberate **server-side additive** action beyond the doc's `ports.open`-only `network` set — it is now
+  honestly sourceable and keeps the trail symmetric (a standalone `files firewall disable` would otherwise
+  leave an opened-never-closed gap); the frontend accepts unknown actions forward-compat. `config.*`/`player.*`/
+  `host.*`/… stay deferred. The api-issued `open_ports` command writes `network.ports.open` **directly** (M6·b)
+  — kgsm runs nothing, so there is no echo to read (the `auth.*` case); there is no api close command (§3·g is
+  open-only), so `network.ports.close` is cleanly CLI-echo-only. The per-event mapping policy lives in the
+  **pure** `AuditMapping.From{Crash,Failed,PortsOpened,PortsClosed}Event` mappers, unit-tested without a socket.
 - **`origin` nullable + no `meta.jobId`** are the two recorded §6 divergences from the §3·d schema. Keep them.
 
 ## Invariants when you touch this

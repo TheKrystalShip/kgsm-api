@@ -26,8 +26,13 @@ leaf-health capability model), **M3** (commands — the first write path: `POST 
 policies + `[Authorize]` everywhere, live OAuth round-trip validated) and now **M5** (audit — the
 append-only action log: kgsm events → audit rows via kgsm-lib `IEventService`, the command path stamping
 actor+origin so the engine echo carries provenance with **no double-write**, `GET /audit` keyset +
-the `audit` WS topic; SQLite via `EnsureCreated`, no EF migration) are `built` & self-validated
-(`scripts/smoke.sh` **33/33** + **tests/Api.Tests 59/59**); M6–M8 are `planned`. **Auth is ON by default**
+the `audit` WS topic; SQLite via `EnsureCreated`, no EF migration) are `built` & self-validated, plus
+**M6·0** (kgsm-lib bumped 1.8.0→1.13.0 + the audit consumer extended with `server.crash` from the watchdog
+crash events and `network.ports.open`/`.close` from the CLI-path firewall echoes — internal, no wire contract;
+**live-validated** 2026-06-16 with real `files firewall enable`/`disable` + a real watchdog crash → audit rows,
+also discharging M5's owed socket round-trip)
+(`scripts/smoke.sh` **33/33** + **tests/Api.Tests 67/67**); the rest of **M6** (ports `network` block + host
+open-ports grid + the `open_ports` command; alerts) and M7–M8 are `planned`. **Auth is ON by default**
 — `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4
 open trust window). Trust `PLAN.md`'s per-milestone status, not assumptions.
 

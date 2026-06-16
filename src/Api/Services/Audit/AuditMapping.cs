@@ -1,6 +1,7 @@
 using System.Text.Json;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
+using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Services.Audit;
@@ -101,6 +102,124 @@ public static class AuditMapping
             Summary: $"{summaryVerb} {instance}",
             Meta: meta);
     }
+
+    /// <summary>
+    /// Map a watchdog <c>instance_crashed</c> event (a desired-running process died and is being
+    /// auto-restarted) to a <c>server.crash</c> row at <see cref="AuditSeverity.Warn"/>. Provenance
+    /// is <c>system</c>/<c>system</c> off the envelope (an autonomous engine action — no human
+    /// surface), which <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/> handle unchanged.
+    /// </summary>
+    public static AuditWrite FromCrashEvent(InstanceCrashedData d, string hostId)
+    {
+        string instance = Instance(d);
+        return CrashWrite(d, hostId, instance, AuditSeverity.Warn,
+            $"{Display(instance)} crashed — auto-restarting");
+    }
+
+    /// <summary>
+    /// Map a watchdog <c>instance_failed</c> event (the supervisor exhausted its restart retries and
+    /// gave up — the escalation signal, staying down) to a <c>server.crash</c> row at
+    /// <see cref="AuditSeverity.Danger"/>. Same single doc-given action as <see cref="FromCrashEvent"/>;
+    /// the give-up is carried by the severity, the summary, and the exhausted restart count.
+    /// </summary>
+    public static AuditWrite FromFailedEvent(InstanceFailedData d, string hostId)
+    {
+        string instance = Instance(d);
+        string tail = string.IsNullOrEmpty(d.Restarts) ? "" : $" after {d.Restarts} restart(s)";
+        return CrashWrite(d, hostId, instance, AuditSeverity.Danger,
+            $"{Display(instance)} crashed — supervisor gave up{tail}");
+    }
+
+    /// <summary>
+    /// Map a kgsm <c>instance_ports_opened</c> event (the CLI-path firewall echo — kgsm bash opened
+    /// the host-firewall ports on a confirmed success) to a <c>network.ports.open</c> row, recording
+    /// the opened ports in <c>meta</c> in the canonical range-preserving form. The api-issued
+    /// <c>open_ports</c> command writes this action directly at M6·b (no kgsm echo exists), so this
+    /// mapper covers only the engine-sourced opens.
+    /// </summary>
+    public static AuditWrite FromPortsOpenedEvent(InstancePortsOpenedData d, string hostId) =>
+        PortsWrite(d, hostId, AuditAction.NetworkPortsOpen, "opened", d.Ports);
+
+    /// <summary>
+    /// Map a kgsm <c>instance_ports_closed</c> event (the CLI-path firewall echo — kgsm bash removed
+    /// the host-firewall ports on a confirmed success, via uninstall or a standalone firewall-disable)
+    /// to a <c>network.ports.close</c> row. Recording closes keeps the trail symmetric — a disable that
+    /// isn't part of an uninstall would otherwise leave an opened-never-closed gap. There is no
+    /// api-issued close command (§3·g is open-only), so this action is cleanly CLI-echo-only.
+    /// </summary>
+    public static AuditWrite FromPortsClosedEvent(InstancePortsClosedData d, string hostId) =>
+        PortsWrite(d, hostId, AuditAction.NetworkPortsClose, "closed", d.Ports);
+
+    // Open/close differ only in action + summary verb — build the row once.
+    private static AuditWrite PortsWrite(
+        EventDataBase d, string hostId, string action, string verb, IReadOnlyList<PortMapping> ports)
+    {
+        string instance = Instance(d);
+        string formatted = FormatPorts(ports);
+        return new AuditWrite(
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
+            Action: action,
+            Severity: AuditSeverity.Info,
+            Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
+            ServerId: instance,
+            HostId: hostId,
+            Summary: $"{verb} firewall ports for {Display(instance)}",
+            Meta: string.IsNullOrEmpty(formatted)
+                ? null
+                : new Dictionary<string, string> { ["ports"] = formatted });
+    }
+
+    /// <summary>Render a set of <see cref="PortMapping"/>s to a compact human string
+    /// (<c>"2456-2458/udp, 27015/tcp"</c>) for an audit <c>meta</c> entry; empty for an empty set.</summary>
+    public static string FormatPorts(IReadOnlyList<PortMapping>? ports) =>
+        ports is null || ports.Count == 0
+            ? ""
+            : string.Join(", ", ports
+                .Where(p => p is not null)
+                .Select(p => p.Start == p.End
+                    ? $"{p.Start}/{p.Protocol}"
+                    : $"{p.Start}-{p.End}/{p.Protocol}"));
+
+    // The two crash events share everything but severity + summary — build the row once.
+    private static AuditWrite CrashWrite(
+        EventDataBase d, string hostId, string instance, string severity, string summary) =>
+        new(
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
+            Action: AuditAction.ServerCrash,
+            Severity: severity,
+            Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
+            ServerId: instance,
+            HostId: hostId,
+            Summary: summary,
+            Meta: CrashMeta(d));
+
+    // Meta off the two crash event types (both expose ExitCode + Restarts strings); empties dropped,
+    // null when nothing material — never store "".
+    private static IReadOnlyDictionary<string, string>? CrashMeta(EventDataBase d)
+    {
+        (string ExitCode, string Restarts) f = d switch
+        {
+            InstanceCrashedData c => (c.ExitCode, c.Restarts),
+            InstanceFailedData c => (c.ExitCode, c.Restarts),
+            _ => ("", ""),
+        };
+        Dictionary<string, string>? meta = null;
+        if (!string.IsNullOrEmpty(f.ExitCode)) (meta ??= [])["exitCode"] = f.ExitCode;
+        if (!string.IsNullOrEmpty(f.Restarts)) (meta ??= [])["restarts"] = f.Restarts;
+        return meta;
+    }
+
+    private static string Instance(EventDataBase d) =>
+        string.IsNullOrEmpty(d.InstanceName) ? "" : d.InstanceName;
+
+    // A human-facing fallback for the summary line only (ids/scope keep the raw, possibly-empty value
+    // to match FromServerEvent); a crash/ports event always carries an instance in practice.
+    private static string Display(string instance) =>
+        string.IsNullOrEmpty(instance) ? "instance" : instance;
 
     /// <summary>Map a persisted row to its wire record (deserializing the <c>meta</c> JSON blob).</summary>
     public static AuditRecord ToRecord(AuditEntry e)

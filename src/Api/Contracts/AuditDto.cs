@@ -64,12 +64,25 @@ public static class AuditAction
     public const string ServerUpdate = "server.update";
     public const string ServerInstall = "server.install";
     public const string ServerUninstall = "server.uninstall";
-    // server.crash is in the closed vocab but has no source yet (no kgsm crash event; the watchdog
-    // detects crashes — M6). Not emitted in M5.
+    // server.crash — the resident supervisor's autonomous crash signals (kgsm-watchdog, kgsm-lib
+    // 1.9.0). Wired in M6·0: both InstanceCrashed (auto-restarting, warn) and InstanceFailed
+    // (retries exhausted, danger) map to this single doc-given action, distinguished by severity +
+    // summary + the restart count. Stamped Actor/Origin = "system" upstream (no human surface).
+    public const string ServerCrash = "server.crash";
 
     // backup.* — sourced from kgsm backup events.
     public const string BackupCreate = "backup.create";
     public const string BackupRestore = "backup.restore";
+
+    // network.* — the firewall door. The doc's §3·d `network` set lists only `ports.open`; the server
+    // additionally records `network.ports.close` — a real, now-sourceable action (instance_ports_closed,
+    // kgsm-lib 1.12.0), so opens and closes form a symmetric trail (a standalone `files firewall disable`
+    // closes ports outside any uninstall and would otherwise go unrecorded). Both are CLI-path echoes
+    // (kgsm bash emits them, kgsm-lib 1.12.0). The api-issued `open_ports` command writes `ports.open`
+    // DIRECTLY at M6·b (kgsm runs nothing → no echo, the auth.* case); there is no close command
+    // (§3·g is open-only), so `ports.close` is cleanly CLI-echo-only — no double-write risk.
+    public const string NetworkPortsOpen = "network.ports.open";
+    public const string NetworkPortsClose = "network.ports.close";
 
     // auth.* — API-internal (no kgsm event → written directly, no double-write risk).
     public const string AuthLogin = "auth.login";
