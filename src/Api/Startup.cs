@@ -7,6 +7,7 @@ using TheKrystalShip.Api.Infrastructure;
 using TheKrystalShip.Api.Json;
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Commands;
@@ -113,6 +114,15 @@ public class Startup(IConfiguration configuration)
         // migrations — the schema is EnsureCreated (greenfield/dev authority; PLAN M5).
         services.AddSingleton<AuditService>();
         services.AddHostedService<KgsmAuditConsumer>();
+
+        // M6·a — alerts (the condition-mirror). The engine is ALWAYS-ON (like LeafHealthMonitor, not gated
+        // on WS subscribers): GET /alerts must serve fresh truth regardless of who is listening. It polls
+        // the watchdog's supervision state (via kgsm-lib IWatchdogClient — the crash source) every ~5s,
+        // raises/resolves/escalates/retracts, and serves the in-memory feed (no EF table — the durable
+        // record is /audit). One instance, exposed as both the readable singleton (the controller) and the
+        // poll loop (hosted service). With no watchdog provisioned it logs once and serves an empty feed.
+        services.AddSingleton<AlertEngine>();
+        services.AddHostedService(sp => sp.GetRequiredService<AlertEngine>());
 
         // M4·a — auth (Discord per-host, Model A). Stateless JWT bearer (the M4 decision): no session
         // table, no user row — keeps M5 as the first EF migration. The Discord seam (IDiscordIdentityResolver)

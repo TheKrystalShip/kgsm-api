@@ -36,9 +36,17 @@ also discharging M5's owed socket round-trip), and now **M6·b** (ports — the 
 target → `EnsureOpenAsync` → re-probe verify → **direct** `network.ports.open` audit write, no echo, no
 double-write); `reachable` reserved-null, honest-unknown `open`, firewall probed **on-demand** not polled;
 backend self-validated + the operational firewall **read** path live-validated 2026-06-16, the `open_ports`
-**mutation** round-trip owed)
-(`scripts/smoke.sh` **37/37** + **tests/Api.Tests 79/79**); the rest of **M6** (`open_ports` mutation live-validate;
-M6·a alerts) and M7–M8 are `planned`. **Auth is ON by default**
+**mutation** round-trip owed), and now **M6·a** (alerts — the condition-mirror: `GET /alerts?status=firing|resolved&since=24h`
++ the `alerts` WS topic (`alert.raise`/`resolve`/`retract`), read-only + in-memory + viewer-gated. **Crash source only**
+— the `AlertEngine` polls the watchdog's supervision state via kgsm-lib `IWatchdogClient` (poll-as-authority: the
+interval IS the raise debounce; api-owned 30s resolve probation; mirrored escalation; retract on a vanished instance;
+honest-unknown on a blind poll; rebuilds on restart). The alert↔audit `resolution.actionId` bridges an **operator/api**
+start|restart recovery (an autonomous watchdog restart emits no audited action → auto-heal links null, never faked).
+Built + self-validated + **LIVE-VALIDATED 2026-06-16** (real watchdog crash on `factorio-test` → `warn` raise →
+30s-probation resolve → `actionId:null` auto-heal, no flap); the contract is **proposed** (§6 divergences pending
+frontend sign-off))
+(`scripts/smoke.sh` **39/39** + **tests/Api.Tests 93/93**); the rest of **M6** (`open_ports` mutation live-validate;
+M6·a's contract sign-off) and M7–M8 are `planned`. **Auth is ON by default**
 — `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4
 open trust window). Trust `PLAN.md`'s per-milestone status, not assumptions.
 

@@ -95,6 +95,28 @@ public static class StreamProtocol
     /// </summary>
     public static string AuditEntityKey(string id) => $"audit:{id}";
 
+    // --- alerts (M6·a — the condition-mirror feed) ---
+    /// <summary>Live problem conditions, host-wide: <c>alerts</c> (architecture.html §3·c).</summary>
+    public const string AlertsTopic = "alerts";
+    /// <summary>A new condition starts firing, OR a re-push of the full <see cref="Contracts.Alert"/>
+    /// record (e.g. to flip <c>escalated</c>). The client upserts by id.</summary>
+    public const string AlertRaise = "alert.raise";
+    /// <summary>A condition cleared — carries <c>{ id, resolution }</c> (<see cref="Contracts.AlertResolved"/>).
+    /// The client stamps <c>resolvedAt</c> and moves the record to the 24h rear-view.</summary>
+    public const string AlertResolve = "alert.resolve";
+    /// <summary>The thing was never an actionable condition (or its subject is gone) — carries <c>{ id }</c>
+    /// (<see cref="Contracts.AlertRetracted"/>). The client drops it: no rear-view, no resolution.</summary>
+    public const string AlertRetract = "alert.retract";
+
+    /// <summary>
+    /// The per-connection coalesce key for an alert on the <see cref="AlertsTopic"/>: the alert id, so all
+    /// three message kinds for one condition share a slot — a <c>resolve</c>/<c>retract</c> correctly
+    /// supersedes a still-queued <c>raise</c> for that id, exactly like <see cref="ServerRemoved"/> overrides
+    /// a queued <see cref="ServerPatch"/>. A torn-down slow client re-hydrates the firing set via
+    /// <c>GET /alerts</c> on reconnect (§3·j), so coalescing never loses durable truth.
+    /// </summary>
+    public static string AlertEntityKey(string id) => $"alerts:{id}";
+
     /// <summary>
     /// The per-connection coalesce key for a server entity on the <see cref="ServersTopic"/>. A patch
     /// and a later removal for the same id share this key, so the newer supersedes any unsent older

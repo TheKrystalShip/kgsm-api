@@ -673,6 +673,35 @@ sys.exit(0 if 'network' not in json.load(open('/tmp/kgsm-api-smoke.body')) else 
   echo "   network.ports.open audit + the servers/{id}/network verify patch — is a trusted-host live-validate,"
   echo "   needing the kgsm-firewall daemon + kgsm-group socket access, like M3's mutation happy path)"
 
+  # --- M6·a alerts: the condition-mirror read surface (watchdog ABSENT here → empty feed) ------
+  echo "==> M6·a alerts checks — GET /alerts (the condition-mirror read; empty here — no watchdog in smoke)"
+
+  # 35. GET /alerts (default firing) -> 200 + { data:[] }. No watchdog is provisioned in smoke, so the
+  #     engine serves an EMPTY feed (degrade gracefully — never a 500). Proves the endpoint + the envelope.
+  req GET /api/v1/alerts
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if (isinstance(d.get('data'),list) and len(d['data'])==0) else 1)
+" 2>/dev/null; then
+    ok "/alerts 200 + { data:[] } (empty feed — no crash source provisioned; never a 500)"
+  else bad "M6·a /alerts empty feed (code=$CODE body=$BODY)"; fi
+
+  # 36. The resolved rear-view + the since window bind (still empty here) — proves status=resolved & since
+  #     parse and the page shape holds (the firing/resolved split + the 24h rear-view).
+  req GET "/api/v1/alerts?status=resolved&since=24h"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if (isinstance(d.get('data'),list) and len(d['data'])==0) else 1)
+" 2>/dev/null; then
+    ok "/alerts?status=resolved&since=24h 200 + { data:[] } (rear-view + since window bind)"
+  else bad "M6·a /alerts resolved window (code=$CODE body=$BODY)"; fi
+
+  echo "  (note: the crash raise/escalate/probation-resolve/retract lifecycle + the alert↔audit bridge are"
+  echo "   proven in tests/Api.Tests/AlertEngineTests; the live watchdog-crash → alert path is a trusted-host"
+  echo "   live-validate, needing kgsm-watchdog up + a forced crash, like M3's mutation happy path)"
+
   stop_api
 fi
 
@@ -683,9 +712,9 @@ start_api_auth || { echo "API never healthy (auth-enabled); log:"; tail -20 /tmp
 # 31. Protected endpoints with NO bearer -> 401 + the frozen {error} envelope (never ProblemDetails).
 #     Includes the diagnostics probes (_dbcheck touches the DB, _throw forces a 500): the secure-by-default
 #     fallback + the admin gate close them, so "protect all prior endpoints" holds with no open back door.
-#     /audit (M5) is a viewer read -> also 401 with no bearer.
+#     /audit (M5) + /alerts (M6·a) are viewer reads -> also 401 with no bearer.
 auth_401=true
-for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/_dbcheck /api/v1/_throw; do
+for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/_dbcheck /api/v1/_throw; do
   req GET "$p"
   if [[ "$CODE" != 401 ]] || ! grep -q '"code":"unauthorized"' <<<"$BODY" || grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY"; then
     auth_401=false; echo "    ($p -> $CODE $BODY)"
@@ -693,7 +722,7 @@ for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/_dbc
 done
 req POST /api/v1/servers/x/commands -H 'Content-Type: application/json' -d '{"verb":"start"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST commands -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/_dbcheck,/_throw,POST commands (no open back door)" \
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/_dbcheck,/_throw,POST commands (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 32. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).

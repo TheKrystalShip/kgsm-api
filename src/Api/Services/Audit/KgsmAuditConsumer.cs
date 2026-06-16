@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Events;
 
@@ -26,6 +27,7 @@ namespace TheKrystalShip.Api.Services.Audit;
 public sealed class KgsmAuditConsumer(
     IServiceProvider services,
     AuditService audit,
+    AlertEngine alerts,
     ApiOptions options,
     ILogger<KgsmAuditConsumer> logger) : IHostedService
 {
@@ -70,12 +72,19 @@ public sealed class KgsmAuditConsumer(
     private void RegisterHandlers(IEventService events)
     {
         // server.* — the closed lifecycle subset kgsm emits today. Each maps 1:1 to a dotted action.
+        // server.start / server.restart additionally feed the alert↔audit bridge (M6·a): AFTER the row is
+        // written we hand its evt_ id to the AlertEngine, so a crash that clears because an OPERATOR/api
+        // start|restart brought the server back links to that action as resolution.actionId. The hand-off
+        // (not a second event-socket binding) is why the consumer owns it. NB an AUTONOMOUS watchdog
+        // crash-restart emits NO start/restart event (it is not an audited action today — the watchdog
+        // emits only instance_crashed/_failed), so a pure auto-heal resolves with actionId null — honest,
+        // never a fabricated link. See Services/Alerts/CLAUDE.md.
         events.RegisterHandler<InstanceStartedData>(d =>
-            WriteServer(d, AuditAction.ServerStart, AuditSeverity.Info, "started"));
+            WriteServerAndBridge(d, AuditAction.ServerStart, "started"));
         events.RegisterHandler<InstanceStoppedData>(d =>
             WriteServer(d, AuditAction.ServerStop, AuditSeverity.Info, "stopped"));
         events.RegisterHandler<InstanceRestartedData>(d =>
-            WriteServer(d, AuditAction.ServerRestart, AuditSeverity.Info, "restarted"));
+            WriteServerAndBridge(d, AuditAction.ServerRestart, "restarted"));
         events.RegisterHandler<InstanceUninstalledData>(d =>
             WriteServer(d, AuditAction.ServerUninstall, AuditSeverity.Warn, "uninstalled"));
 
@@ -122,6 +131,18 @@ public sealed class KgsmAuditConsumer(
         EventDataBase data, string action, string severity, string verb,
         IReadOnlyDictionary<string, string>? meta = null) =>
         audit.AppendAsync(AuditMapping.FromServerEvent(data, action, severity, verb, options.HostId, meta));
+
+    // Write a server.start/server.restart row, then hand its id to the alert engine: a crash that clears
+    // because THIS recovery brought the server back links to it (resolution.actionId — M6·a). Start and
+    // restart are the two "bring it up" actions an operator/api can take; a stop is not a recovery.
+    private async Task WriteServerAndBridge(EventDataBase data, string action, string verb)
+    {
+        AuditRecord row = await audit
+            .AppendAsync(AuditMapping.FromServerEvent(data, action, AuditSeverity.Info, verb, options.HostId))
+            .ConfigureAwait(false);
+        if (!string.IsNullOrEmpty(data.InstanceName))
+            alerts.NoteRecoveryAction(data.InstanceName, row.Id);
+    }
 
     // Build a meta dict from non-empty pairs (a blank value is omitted, never stored as ""). Null if empty.
     private static IReadOnlyDictionary<string, string>? Meta(params (string Key, string? Value)[] pairs)
