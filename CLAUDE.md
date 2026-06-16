@@ -40,8 +40,9 @@ backend self-validated + the operational firewall **read** path live-validated 2
 + the `alerts` WS topic (`alert.raise`/`resolve`/`retract`), read-only + in-memory + viewer-gated. **Crash source only**
 — the `AlertEngine` polls the watchdog's supervision state via kgsm-lib `IWatchdogClient` (poll-as-authority: the
 interval IS the raise debounce; api-owned 30s resolve probation; mirrored escalation; retract on a vanished instance;
-honest-unknown on a blind poll; rebuilds on restart). The alert↔audit `resolution.actionId` bridges an **operator/api**
-start|restart recovery (an autonomous watchdog restart emits no audited action → auto-heal links null, never faked).
+honest-unknown on a blind poll; rebuilds on restart). The alert↔audit `resolution.actionId` bridges a
+start|restart recovery — operator/api OR (since kgsm-watchdog `d4b453f`) the watchdog's **autonomous** crash-restart,
+which now emits `instance_restarted` (system/system) → a `server.restart` row; only a stop-cleared crash links null.
 Built + self-validated + **LIVE-VALIDATED 2026-06-16** (real watchdog crash on `factorio-test` → `warn` raise →
 30s-probation resolve → `actionId:null` auto-heal, no flap); the contract is **proposed** (§6 divergences pending
 frontend sign-off))

@@ -48,11 +48,13 @@ resolved condition to the audit action that fixed it.
   (so the id exists); the poll stashes it and, when a crash later resolves because the server recovered,
   stamps it as `resolution.actionId`. The poll can't learn an audit id on its own — this is the sole reason
   the engine touches the event path, and it's lock-free (a `ConcurrentDictionary`, not shared alert state).
-  **Honest limit (verified against the watchdog source):** an AUTONOMOUS watchdog crash-restart emits NO
-  start/restart event (the watchdog emits only `instance_crashed`/`_failed` — its respawn is not an audited
-  action), so a **pure auto-heal resolves with `actionId` null**. The bridge links only an **operator/api**
-  start|restart recovery (which IS audited) and a stop-cleared crash is null too — never a fabricated link.
-  Auditing the watchdog's autonomous restart (a future kgsm-watchdog/kgsm-lib change) would bridge auto-heals.
+  **The bridge and its limit:** the watchdog's autonomous crash-restart now emits `instance_restarted`
+  (`system`/`system`, kgsm-watchdog `d4b453f`) → a `server.restart` row through the same `WriteServerAndBridge`
+  handler, so a **pure auto-heal bridges** `resolution.actionId` once that row is consumed (within the resolve
+  probation) — alongside an **operator/api** start|restart recovery. **Still null (never fabricated):** a
+  **stop-cleared** crash (a stop is not a recovery), and a crash that resolves before its `server.restart` row
+  is consumed (an honest race, not a fabricated link). *(The watchdog-emit half is live-validated on the wire;
+  the full on-host bridge round-trip with a running API is owed.)*
 
 ## WS message contract (architecture.html §3·c)
 

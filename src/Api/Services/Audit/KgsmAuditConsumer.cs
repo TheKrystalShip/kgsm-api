@@ -73,11 +73,11 @@ public sealed class KgsmAuditConsumer(
     {
         // server.* — the closed lifecycle subset kgsm emits today. Each maps 1:1 to a dotted action.
         // server.start / server.restart additionally feed the alert↔audit bridge (M6·a): AFTER the row is
-        // written we hand its evt_ id to the AlertEngine, so a crash that clears because an OPERATOR/api
-        // start|restart brought the server back links to that action as resolution.actionId. The hand-off
-        // (not a second event-socket binding) is why the consumer owns it. NB an AUTONOMOUS watchdog
-        // crash-restart emits NO start/restart event (it is not an audited action today — the watchdog
-        // emits only instance_crashed/_failed), so a pure auto-heal resolves with actionId null — honest,
+        // written we hand its evt_ id to the AlertEngine, so a crash that clears because a start|restart
+        // brought the server back links to that action as resolution.actionId. The hand-off (not a second
+        // event-socket binding) is why the consumer owns it. The watchdog's autonomous crash-restart now
+        // emits instance_restarted (system/system, kgsm-watchdog d4b453f) → a server.restart row through
+        // this same handler, so a pure auto-heal bridges too; only a stop-cleared crash links null — honest,
         // never a fabricated link. See Services/Alerts/CLAUDE.md.
         events.RegisterHandler<InstanceStartedData>(d =>
             WriteServerAndBridge(d, AuditAction.ServerStart, "started"));

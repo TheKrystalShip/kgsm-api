@@ -40,10 +40,11 @@ namespace TheKrystalShip.Api.Services.Alerts;
 /// resolves because an OPERATOR/api start|restart brought the server back, that id becomes the
 /// resolution's <c>actionId</c> — the one-way link to the fix. The poll can't learn an audit id on its
 /// own, so this is the sole event integration; it is lock-free (a <see cref="ConcurrentDictionary{TKey,TValue}"/>
-/// read by the poll thread). <b>Limit:</b> an AUTONOMOUS watchdog crash-restart emits no start/restart
-/// event (the watchdog emits only crash/failed — it is not an audited action today), so a pure auto-heal
-/// resolves with <c>actionId</c> <see langword="null"/> — honest, never a fabricated link. Auditing the
-/// watchdog's autonomous restart (a future kgsm-watchdog/kgsm-lib change) would bridge that case too.</para>
+/// read by the poll thread). The watchdog's autonomous crash-restart now emits <c>instance_restarted</c>
+/// (<c>system</c>/<c>system</c>, kgsm-watchdog <c>d4b453f</c>) → a <c>server.restart</c> row, so a pure
+/// auto-heal bridges its <c>actionId</c> once that row is consumed (within the resolve probation).
+/// <b>Limit:</b> a crash cleared by a STOP resolves with <c>actionId</c> <see langword="null"/> — a stop
+/// is not a recovery — never a fabricated link.</para>
 /// <para><b>Threading.</b> The alert state (<see cref="_firing"/>/<see cref="_resolved"/>/<see cref="_clearSince"/>)
 /// is mutated ONLY by <see cref="Tick"/> on the single poll-loop thread; the controller reads the volatile
 /// immutable <see cref="_snapshot"/>; <see cref="_lastStartAction"/> is concurrent. No locks.</para>
@@ -102,8 +103,9 @@ public sealed class AlertEngine : BackgroundService
     /// <summary>Stash the audit <c>evt_</c> id of a <c>server.start</c>/<c>server.restart</c> (a "bring it
     /// up" recovery action) so a later crash resolution can reference it as <c>resolution.actionId</c> (the
     /// alert↔audit bridge). Called by the audit consumer AFTER the row is written. Lock-free; the last
-    /// recovery for a server wins (the action that held). An autonomous watchdog restart is NOT a recovery
-    /// action here (it emits no event) — so an auto-heal keeps <c>actionId</c> null, never fabricated.</summary>
+    /// recovery for a server wins (the action that held). The watchdog's autonomous crash-restart now emits
+    /// <c>instance_restarted</c> (system/system) → a <c>server.restart</c> row that lands here too, so an
+    /// auto-heal links its recovery; only a stop-cleared crash keeps <c>actionId</c> null, never fabricated.</summary>
     public void NoteRecoveryAction(string serverId, string actionId)
     {
         if (string.IsNullOrEmpty(serverId) || string.IsNullOrEmpty(actionId)) return;
@@ -283,9 +285,9 @@ public sealed class AlertEngine : BackgroundService
             : stopped ? "Server was stopped — no longer supervised as running."
             : "No longer in a crash state.";
 
-        // actionId is the bridge: set only when an operator/api start|restart (an audited recovery action,
-        // stashed by NoteRecoveryAction) brought it back. A pure autonomous auto-heal (no audited action)
-        // or a stop-cleared crash resolves with actionId null — honest, never a fabricated link.
+        // actionId is the bridge: set only when a start|restart (operator/api OR the watchdog's own
+        // autonomous crash-restart — all audited recovery actions stashed by NoteRecoveryAction) brought it
+        // back to running. A stop-cleared crash resolves with actionId null — a stop is not a recovery.
         string? actionId = running && _lastStartAction.TryGetValue(serverId, out string? a) ? a : null;
         return new AlertResolution(AlertResolvedBy.System, AlertSource.Watchdog, reason, actionId);
     }
