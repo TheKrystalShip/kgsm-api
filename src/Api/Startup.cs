@@ -70,6 +70,18 @@ public class Startup(IConfiguration configuration)
         // per-request and degrades to an empty list (logged once) if the engine is unconfigured.
         if (apiOptions.KgsmProvisioned)
             services.AddKgsmServices(apiOptions.KgsmPath, apiOptions.KgsmSocketPath);
+
+        // M6·b — ports. The firewall authority (kgsm-firewall) is OPT-IN like the assistant: its kgsm-lib
+        // client is registered ONLY when its socket is configured (blank => firewall "absent"). It is
+        // deliberately NOT added to the LeafHealthMonitor 2s poll — the daemon is socket-activated and
+        // idle-exits, so a periodic probe would defeat that; NetworkAggregator probes it ON-DEMAND (detail
+        // views + the open_ports verify), bounding each call, and reports liveness as the block-level
+        // `firewall` status. A longer request timeout covers ufw mutation serialized behind the global lock.
+        if (apiOptions.FirewallProvisioned)
+            services.AddKgsmFirewallClient(o => { o.SocketPath = apiOptions.FirewallSocketPath; o.RequestTimeout = TimeSpan.FromSeconds(30); });
+        // Always registered: it degrades to firewall:"absent"/null when the client isn't present, so the
+        // server/host aggregators can depend on it unconditionally.
+        services.AddSingleton<NetworkAggregator>();
         services.AddSingleton<ServerAggregator>();
 
         // M2 — realtime. The hub is the per-host connection registry + fan-out; the three pumps poll

@@ -29,6 +29,7 @@ public sealed class ServerAggregator
 {
     private readonly ApiOptions _options;
     private readonly MonitorClient _monitor;
+    private readonly NetworkAggregator _network;
     private readonly IServiceProvider _services;
     private readonly ILogger<ServerAggregator> _logger;
 
@@ -38,11 +39,13 @@ public sealed class ServerAggregator
     public ServerAggregator(
         ApiOptions options,
         MonitorClient monitor,
+        NetworkAggregator network,
         IServiceProvider services,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
         _monitor = monitor;
+        _network = network;
         _services = services;
         _logger = logger;
     }
@@ -56,6 +59,33 @@ public sealed class ServerAggregator
         await Task.WhenAll(domainTask, snapshotTask).ConfigureAwait(false);
 
         return Join(domainTask.Result, snapshotTask.Result);
+    }
+
+    /// <summary>
+    /// Build one server's <strong>detail</strong> record (the <c>GET /servers/{id}</c> body) — the same
+    /// join as the list element <em>plus</em> the M6·b <see cref="ServerNetwork"/> block (a firewall probe
+    /// cross-referenced against the instance's required ports). Returns <see langword="null"/> for an
+    /// unknown id (the controller maps that to <c>404</c>). This is the first place the detail view diverges
+    /// from the list element — the list/stream deliberately omit <c>network</c> (no per-poll firewall probe).
+    /// </summary>
+    public async Task<Server?> GetServerDetailAsync(string id, CancellationToken ct)
+    {
+        Task<DomainReadout> domainTask = Task.Run(ReadDomain, ct);
+        Task<Snap.Snapshot?> snapshotTask = _monitor.GetLatestAsync(ct);
+        await Task.WhenAll(domainTask, snapshotTask).ConfigureAwait(false);
+
+        DomainReadout domain = domainTask.Result;
+        if (!domain.Instances.TryGetValue(id, out Instance? instance))
+            return null;
+
+        Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshotTask.Result);
+        Server server = BuildServer(id, instance, domain.Statuses, metricsById);
+
+        // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
+        // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
+        ServerNetwork network = await _network
+            .BuildServerNetworkAsync(id, instance.Ports, ct).ConfigureAwait(false);
+        return server with { Network = network };
     }
 
     /// <summary>The kgsm-lib domain read: the instance roster + each instance's status reading.</summary>
@@ -95,53 +125,69 @@ public sealed class ServerAggregator
 
     private IReadOnlyList<Server> Join(DomainReadout domain, Snap.Snapshot? snapshot)
     {
-        // Index per-instance metrics by id (the monitor guarantees unique ids per tick).
-        Dictionary<string, Snap.ServerMetrics> metricsById = new(StringComparer.Ordinal);
-        if (snapshot is not null)
-            foreach (Snap.ServerMetrics sm in snapshot.Servers)
-                metricsById[sm.Id] = sm;
+        Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshot);
 
         var servers = new List<Server>(domain.Instances.Count);
         foreach ((string id, Instance instance) in domain.Instances)
-        {
-            // Run-state + version from the status reading; a non-measured/missing reading is "unknown".
-            string status = ServerStatus.Unknown;
-            string? version = null;
-            if (domain.Statuses.TryGetValue(id, out Reading<InstanceRuntimeStatus>? reading)
-                && reading is { IsMeasured: true, Value: { } runtimeStatus })
-            {
-                status = runtimeStatus.Status ? ServerStatus.Running : ServerStatus.Stopped;
-                version = string.IsNullOrWhiteSpace(runtimeStatus.Version.Current)
-                    ? null
-                    : runtimeStatus.Version.Current;
-            }
-
-            // Metrics only when the monitor produced a row for this id; otherwise honest null. The shared
-            // MetricsMapping is what keeps this byte-identical to the M2 servers/{id}/metrics tick.
-            ServerMetricsDto? metrics = metricsById.TryGetValue(id, out Snap.ServerMetrics? m)
-                ? MetricsMapping.ToServerMetrics(m)
-                : null;
-
-            servers.Add(new Server(
-                Id: id,
-                Name: string.IsNullOrWhiteSpace(instance.Name) ? id : instance.Name,
-                Blueprint: CleanBlueprintId(instance),
-                Status: status,
-                Version: version,
-                Runtime: instance.Runtime == InstanceRuntime.Container ? "container" : "native",
-                HostId: _options.HostId,
-                Metrics: metrics));
-        }
+            servers.Add(BuildServer(id, instance, domain.Statuses, metricsById));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
         return servers;
     }
 
+    // Index per-instance metrics by id (the monitor guarantees unique ids per tick).
+    private static Dictionary<string, Snap.ServerMetrics> IndexMetrics(Snap.Snapshot? snapshot)
+    {
+        Dictionary<string, Snap.ServerMetrics> metricsById = new(StringComparer.Ordinal);
+        if (snapshot is not null)
+            foreach (Snap.ServerMetrics sm in snapshot.Servers)
+                metricsById[sm.Id] = sm;
+        return metricsById;
+    }
+
+    // Build one Server (the shared list/detail element — detail adds the network block on top). status,
+    // version and metrics are all independent + honest: a non-measured reading is "unknown", a missing
+    // metrics row is null — never inferred from one another.
+    private Server BuildServer(
+        string id,
+        Instance instance,
+        IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> statuses,
+        IReadOnlyDictionary<string, Snap.ServerMetrics> metricsById)
+    {
+        string status = ServerStatus.Unknown;
+        string? version = null;
+        if (statuses.TryGetValue(id, out Reading<InstanceRuntimeStatus>? reading)
+            && reading is { IsMeasured: true, Value: { } runtimeStatus })
+        {
+            status = runtimeStatus.Status ? ServerStatus.Running : ServerStatus.Stopped;
+            version = string.IsNullOrWhiteSpace(runtimeStatus.Version.Current)
+                ? null
+                : runtimeStatus.Version.Current;
+        }
+
+        // Metrics only when the monitor produced a row for this id; otherwise honest null. The shared
+        // MetricsMapping is what keeps this byte-identical to the M2 servers/{id}/metrics tick.
+        ServerMetricsDto? metrics = metricsById.TryGetValue(id, out Snap.ServerMetrics? m)
+            ? MetricsMapping.ToServerMetrics(m)
+            : null;
+
+        return new Server(
+            Id: id,
+            Name: string.IsNullOrWhiteSpace(instance.Name) ? id : instance.Name,
+            Blueprint: CleanBlueprintId(instance),
+            Status: status,
+            Version: version,
+            Runtime: instance.Runtime == InstanceRuntime.Container ? "container" : "native",
+            HostId: _options.HostId,
+            Metrics: metrics);
+    }
+
     // The clean blueprint id, e.g. "factorio" from ".../factorio.bp.yaml". Unified blueprints are
     // "<name>.bp.yaml", so strip that compound suffix deliberately — Path.GetFileNameWithoutExtension
     // (what Instance.Blueprint uses) only drops the last extension and would leave "factorio.bp".
-    private static string CleanBlueprintId(Instance instance)
+    // internal so the M6·b NetworkAggregator can reuse it for the host open-ports `app` join.
+    internal static string CleanBlueprintId(Instance instance)
     {
         string file = Path.GetFileName(instance.BlueprintFile);
         foreach (string suffix in BlueprintSuffixes)

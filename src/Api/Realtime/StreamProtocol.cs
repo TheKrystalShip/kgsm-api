@@ -25,6 +25,13 @@ public static class StreamProtocol
     /// <summary>One server's per-instance metric ticks: <c>servers/{id}/metrics</c>.</summary>
     public static string ServerMetricsTopic(string id) => $"servers/{id}/metrics";
 
+    /// <summary>One server's firewall/ports block: <c>servers/{id}/network</c> (M6·b). The fresh
+    /// <see cref="Contracts.ServerNetwork"/> is pushed here after an <c>open_ports</c> command verifies —
+    /// kept off the <see cref="ServersTopic"/> so <see cref="ServerPatch"/> stays the frozen M1·b
+    /// <c>Server</c> (the same topic-separation discipline as the metric topic). On-demand only — no pump
+    /// publishes it (the firewall is socket-activated + idle-exits; a periodic probe would defeat that).</summary>
+    public static string ServerNetworkTopic(string id) => $"servers/{id}/network";
+
     /// <summary>This host's capacity metric ticks: <c>hosts/{hostId}/metrics</c>.</summary>
     public static string HostMetricsTopic(string hostId) => $"hosts/{hostId}/metrics";
 
@@ -42,6 +49,16 @@ public static class StreamProtocol
     public const string HostMetrics = "host.metrics";
     /// <summary>The host's capability block after a status flip (<c>HostCapabilities</c>).</summary>
     public const string CapabilitiesPatch = "capabilities.patch";
+
+    /// <summary>A fresh <see cref="Contracts.ServerNetwork"/> block (M6·b) on <see cref="ServerNetworkTopic"/>,
+    /// after an <c>open_ports</c> command re-probes the firewall. Patch-only, supersede-by-latest per server
+    /// (the topic is already per-id) — exactly like <see cref="ServerPatch"/>. The data is byte-identical to
+    /// the <c>network</c> field a subsequent <c>GET /servers/{id}</c> returns (one shared build path).</summary>
+    public const string NetworkPatch = "network.patch";
+
+    /// <summary>The per-connection coalesce key for a server's network block on
+    /// <see cref="ServerNetworkTopic"/>: a slow client gets the newest re-probe, never a backlog.</summary>
+    public static string ServerNetworkEntityKey(string id) => $"servers-network:{id}";
 
     // --- jobs (M3 — the command write path) ---
     /// <summary>Command/job progress + completion (host-wide): <c>jobs</c> (architecture.html §5·d).</summary>

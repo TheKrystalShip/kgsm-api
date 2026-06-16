@@ -150,6 +150,37 @@ public static class AuditMapping
     public static AuditWrite FromPortsClosedEvent(InstancePortsClosedData d, string hostId) =>
         PortsWrite(d, hostId, AuditAction.NetworkPortsClose, "closed", d.Ports);
 
+    /// <summary>
+    /// Build the <see cref="AuditWrite"/> for the API-issued <c>open_ports</c> command (M6·b) — a
+    /// <strong>direct</strong> write, the <c>auth.*</c> case: the api opens the ports through kgsm-lib's
+    /// <c>IFirewallService</c>, which runs no kgsm command and emits no event, so there is no echo to read
+    /// and no double-write risk (the CLI path's <c>instance_ports_opened</c> echo is disjoint —
+    /// <see cref="FromPortsOpenedEvent"/>). Provenance is the bearer <paramref name="actor"/> + the
+    /// caller-declared <paramref name="origin"/>, parsed/normalized exactly like an event's. <c>meta</c>
+    /// carries the opened ports <em>and</em> the <paramref name="jobId"/> — the job↔audit correlation the
+    /// M5 echo path could not provide (no id round-trips the stateless engine), now populatable because the
+    /// api owns both the job and this append (the alert↔audit <c>resolution.actionId</c> bridge for M6·a).
+    /// </summary>
+    public static AuditWrite FromPortsOpenedCommand(
+        string serverId, IReadOnlyList<PortMapping> ports, string? actor, string? origin, string hostId, string jobId)
+    {
+        var meta = new Dictionary<string, string> { ["jobId"] = jobId };
+        string formatted = FormatPorts(ports);
+        if (!string.IsNullOrEmpty(formatted)) meta["ports"] = formatted;
+
+        return new AuditWrite(
+            Ts: DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(origin),
+            Actor: ParseActor(actor),
+            Action: AuditAction.NetworkPortsOpen,
+            Severity: AuditSeverity.Info,
+            Target: new AuditTarget(AuditTargetKind.Server, serverId, serverId),
+            ServerId: serverId,
+            HostId: hostId,
+            Summary: $"opened firewall ports for {Display(serverId)}",
+            Meta: meta);
+    }
+
     // Open/close differ only in action + summary verb — build the row once.
     private static AuditWrite PortsWrite(
         EventDataBase d, string hostId, string action, string verb, IReadOnlyList<PortMapping> ports)

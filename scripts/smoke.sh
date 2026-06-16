@@ -20,6 +20,11 @@
 #   sweep: every protected endpoint 401s with the frozen envelope, /health + /api/v1 stay open, and the
 #   login endpoint 503s until Discord is configured (the M4·b live half). The full 401/403/tier matrix +
 #   the callback/refresh/session flow are proven in-process by tests/Api.Tests (the Discord seam faked).
+#   M6·b (§3·g): the ports surface degrade path (no firewall configured here) — open_ports is an admitted
+#   verb (unknown server → 404, not a 400), the server DETAIL `network` block reports firewall:"absent" +
+#   reachable:null (reserved) + every required open:null (never fabricated false), the list OMITS network
+#   (detail≠list), and the host grid is omitted when the firewall is absent. The operational firewall path
+#   (open verdicts + the open_ports apply/audit/verify) is a trusted-host live-validate.
 #
 # Two phases. Phase A runs deterministically with NO monitor (the degrade path: host metrics
 # down + capacity null; every server metrics:null). Phase B starts an EMBEDDED stub monitor
@@ -618,6 +623,55 @@ sys.exit(0 if ('data' in d and 'nextCursor' in d) else 1)
 
   echo "  (note: the event-sourced append + the audit.append WS topic are proven in tests/Api.Tests; the"
   echo "   live kgsm-event → audit row path is a trusted-host live-validate, like M3's mutation happy path)"
+
+  # --- M6·b ports: the network surface (firewall ABSENT here → the honest degrade path) -------
+  echo "==> M6·b ports checks — network block degrade (no firewall configured in smoke)"
+
+  # 31. open_ports is an ADMITTED verb now (the closed set grew): an unknown server resolves first → 404,
+  #     NOT a 400 unknown-verb. That distinction is the proof the verb is in the closed set.
+  req POST /api/v1/servers/does-not-exist/commands -H 'Content-Type: application/json' -d '{"verb":"open_ports"}'
+  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
+    && ok "open_ports admitted (unknown server → 404, not a 400 unknown-verb)" \
+    || bad "M6·b open_ports verb (code=$CODE body=$BODY)"
+
+  # 32. The server DETAIL view carries the `network` block; with no firewall configured it degrades
+  #     honestly — firewall:"absent", reachable:null (RESERVED — no upstream prober), and EVERY required
+  #     row open:null (never a fabricated false). `required` is domain truth (Instance.Ports), present regardless.
+  req GET "/api/v1/servers/${FIRST_ID}"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+n=json.load(open('/tmp/kgsm-api-smoke.body')).get('network')
+sys.exit(0 if (n is not None and n['firewall']=='absent' and n['reachable'] is None
+               and isinstance(n['required'],list) and all(r['open'] is None for r in n['required'])) else 1)
+" 2>/dev/null; then
+    ok "/servers/{id} network: firewall:absent + reachable:null + every open:null (honest, never fabricated)"
+  else bad "M6·b server network degrade (code=$CODE body=$BODY)"; fi
+
+  # 33. detail ≠ list: the `network` block is detail-ONLY — the /servers list element omits it, so the list
+  #     and the `servers` stream stay byte-identical to the frozen M1·b shape (no per-poll firewall probe).
+  req GET /api/v1/servers
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if (d and 'network' not in d[0]) else 1)
+" 2>/dev/null; then
+    ok "/servers list OMITS network (detail-only; list/stream keep the M1·b shape)"
+  else bad "M6·b list omits network (code=$CODE body=$BODY)"; fi
+
+  # 34. The host DETAIL grid is null (the key is omitted) when the firewall is absent — honest "not
+  #     measurable", never [] nor a fabricated grid. (An Ok-but-empty firewall yields openPorts:[] —
+  #     the Unknown≠empty distinction is covered in tests/Api.Tests.)
+  req GET "/api/v1/hosts/${HOST_ID}"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+sys.exit(0 if 'network' not in json.load(open('/tmp/kgsm-api-smoke.body')) else 1)
+" 2>/dev/null; then
+    ok "/hosts/{id} omits the openPorts grid when firewall absent (honest null, omitted)"
+  else bad "M6·b host network omitted (code=$CODE body=$BODY)"; fi
+
+  echo "  (note: the OPERATIONAL firewall path — open/closed verdicts, the open_ports apply + the direct"
+  echo "   network.ports.open audit + the servers/{id}/network verify patch — is a trusted-host live-validate,"
+  echo "   needing the kgsm-firewall daemon + kgsm-group socket access, like M3's mutation happy path)"
 
   stop_api
 fi

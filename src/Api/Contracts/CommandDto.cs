@@ -25,7 +25,18 @@ public static class CommandVerb
     public const string Stop = "stop";
     public const string Restart = "restart";
 
-    public static bool IsKnown(string? verb) => verb is Start or Stop or Restart;
+    /// <summary>
+    /// Open this server's required host-firewall ports (M6·b, architecture.html §3·g). <strong>Intent
+    /// only — the client sends NO port list</strong>: the server derives the target set from the
+    /// instance's own <c>Instance.Ports</c> (accepting a client list would let the browser open
+    /// anything). Always admissible (no run-state no-op — opening ports is declarative/idempotent),
+    /// audited by a <em>direct</em> <c>network.ports.open</c> write (kgsm runs nothing on the
+    /// <c>IFirewallService</c> path → no event echo → no double-write), verified by a firewall re-probe
+    /// pushed on <c>servers/{id}/network</c>.
+    /// </summary>
+    public const string OpenPorts = "open_ports";
+
+    public static bool IsKnown(string? verb) => verb is Start or Stop or Restart or OpenPorts;
 }
 
 /// <summary>

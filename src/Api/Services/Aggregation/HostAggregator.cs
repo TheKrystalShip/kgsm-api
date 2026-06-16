@@ -20,9 +20,11 @@ namespace TheKrystalShip.Api.Services.Aggregation;
 /// <see cref="LeafHealthMonitor"/> — the single source feeding both this REST read and the M2
 /// <c>hosts/{id}/capabilities</c> stream — so the two surfaces can never disagree.
 /// </remarks>
-public sealed class HostAggregator(ApiOptions options, MonitorClient monitor, LeafHealthMonitor health)
+public sealed class HostAggregator(
+    ApiOptions options, MonitorClient monitor, NetworkAggregator network, LeafHealthMonitor health)
 {
-    /// <summary>Build the single host this api serves.</summary>
+    /// <summary>Build the single host this api serves (the <c>GET /hosts</c> list element — capacity +
+    /// capabilities, no <c>network</c> grid; that is detail-only, see <see cref="GetHostDetailAsync"/>).</summary>
     public async Task<Host> GetHostAsync(CancellationToken ct)
     {
         Snap.Snapshot? snapshot = await monitor.GetLatestAsync(ct).ConfigureAwait(false);
@@ -37,5 +39,18 @@ public sealed class HostAggregator(ApiOptions options, MonitorClient monitor, Le
             Mem: capacity?.Mem,
             Disks: capacity?.Disks,
             Capabilities: health.Current);
+    }
+
+    /// <summary>
+    /// Build the host <strong>detail</strong> view (the <c>GET /hosts/{id}</c> body) — the list element
+    /// plus the M6·b open-ports grid (<see cref="HostNetwork"/>). The grid is a single on-demand firewall
+    /// probe (the Diagnostics panel, not the capacity-strip poll), bounded inside <see cref="NetworkAggregator"/>;
+    /// it is <see langword="null"/> when the firewall can't answer, so the detail stays a superset of the list.
+    /// </summary>
+    public async Task<Host> GetHostDetailAsync(CancellationToken ct)
+    {
+        Host host = await GetHostAsync(ct).ConfigureAwait(false);
+        HostNetwork? net = await network.BuildHostNetworkAsync(ct).ConfigureAwait(false);
+        return host with { Network = net };
     }
 }

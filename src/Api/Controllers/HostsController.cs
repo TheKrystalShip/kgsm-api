@@ -17,7 +17,7 @@ namespace TheKrystalShip.Api.Controllers;
 [ApiController]
 [Route("api/v1/hosts")]
 [Authorize(Policy = AuthPolicy.Viewer)] // reads — viewer and up (M4·a)
-public sealed class HostsController(HostAggregator aggregator) : ControllerBase
+public sealed class HostsController(HostAggregator aggregator, ApiOptions options) : ControllerBase
 {
     [HttpGet]
     public async Task<IReadOnlyList<Host>> GetAll(CancellationToken ct) =>
@@ -26,12 +26,12 @@ public sealed class HostsController(HostAggregator aggregator) : ControllerBase
     [HttpGet("{id}")]
     public async Task<ActionResult<Host>> GetById(string id, CancellationToken ct)
     {
-        Host host = await aggregator.GetHostAsync(ct);
-
-        // Unknown id -> 404 with no body; UseStatusCodePages renders the not_found envelope.
-        if (!string.Equals(id, host.Id, StringComparison.OrdinalIgnoreCase))
+        // Check the id against this host's identity BEFORE the detail build, so an unknown id never
+        // triggers the firewall probe. Unknown id -> 404 (UseStatusCodePages renders the envelope).
+        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
             return NotFound();
 
-        return host;
+        // Detail view: the list element + the M6·b open-ports grid (one on-demand firewall probe).
+        return await aggregator.GetHostDetailAsync(ct);
     }
 }

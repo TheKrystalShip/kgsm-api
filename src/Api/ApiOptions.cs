@@ -46,6 +46,19 @@ public sealed class ApiOptions
     public required string AssistantBaseUrl { get; init; }
 
     /// <summary>
+    /// kgsm-firewall control socket (M6·b). Empty ⇒ the firewall/ports surface is not provisioned
+    /// (the per-server <c>network</c> block reports <c>firewall:"absent"</c>, the host
+    /// <c>network</c> is null). <strong>Opt-in like the assistant</strong>: the host-firewall
+    /// authority is a separate, optional install (kgsm-firewall) — set this to
+    /// <c>/run/kgsm-firewall/firewall.sock</c> to enable the ports surface. Deliberately NOT
+    /// default-provisioned: a host with no firewall authority should report <c>absent</c>, not a
+    /// perpetually-<c>down</c> capability. NOT polled by the <see cref="Services.Leaves.LeafHealthMonitor"/>
+    /// — kgsm-firewall is socket-activated + idle-exits, so a 2s poll would defeat that; liveness is
+    /// reported per-probe as the block-level <c>firewall</c> status instead.
+    /// </summary>
+    public required string FirewallSocketPath { get; init; }
+
+    /// <summary>
     /// Path to the host's <c>kgsm.sh</c> entrypoint — the single C#↔engine chokepoint kgsm-lib
     /// shells (instances, run-state). Default: the AUR-packaged symlink <c>/usr/bin/kgsm</c>.
     /// Empty ⇒ the engine is not configured (a misconfiguration: <c>/servers</c> is empty + logged).
@@ -62,6 +75,11 @@ public sealed class ApiOptions
     public bool MetricsProvisioned => !string.IsNullOrWhiteSpace(MonitorSocketPath);
     public bool WatchdogProvisioned => !string.IsNullOrWhiteSpace(WatchdogSocketPath);
     public bool AssistantProvisioned => !string.IsNullOrWhiteSpace(AssistantBaseUrl);
+
+    /// <summary>Whether the kgsm-firewall authority is configured (a non-empty
+    /// <see cref="FirewallSocketPath"/>). When false the ports surface degrades to
+    /// <c>firewall:"absent"</c> (server) / null (host) — never an error.</summary>
+    public bool FirewallProvisioned => !string.IsNullOrWhiteSpace(FirewallSocketPath);
 
     /// <summary>
     /// Whether the kgsm engine is configured (a non-empty <see cref="KgsmPath"/>). Unlike a leaf
@@ -140,6 +158,8 @@ public sealed class ApiOptions
             MonitorSocketPath = Defaulted(configuration["KGSM_API_MONITOR_SOCKET"], "/run/kgsm-monitor.sock"),
             WatchdogSocketPath = Defaulted(configuration["KGSM_API_WATCHDOG_SOCKET"], "/run/kgsm-watchdog/control.sock"),
             AssistantBaseUrl = Defaulted(configuration["KGSM_API_ASSISTANT_URL"], ""),
+            // Opt-in (blank = absent): the firewall authority is a separate optional install.
+            FirewallSocketPath = Defaulted(configuration["KGSM_API_FIREWALL_SOCKET"], ""),
             KgsmPath = Defaulted(configuration["KGSM_API_KGSM_PATH"], "/usr/bin/kgsm"),
             KgsmSocketPath = Defaulted(configuration["KGSM_API_KGSM_SOCKET"], "/usr/share/kgsm/kgsm.sock"),
 

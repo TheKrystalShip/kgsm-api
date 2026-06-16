@@ -30,9 +30,15 @@ the `audit` WS topic; SQLite via `EnsureCreated`, no EF migration) are `built` &
 **M6·0** (kgsm-lib bumped 1.8.0→1.13.0 + the audit consumer extended with `server.crash` from the watchdog
 crash events and `network.ports.open`/`.close` from the CLI-path firewall echoes — internal, no wire contract;
 **live-validated** 2026-06-16 with real `files firewall enable`/`disable` + a real watchdog crash → audit rows,
-also discharging M5's owed socket round-trip)
-(`scripts/smoke.sh` **33/33** + **tests/Api.Tests 67/67**); the rest of **M6** (ports `network` block + host
-open-ports grid + the `open_ports` command; alerts) and M7–M8 are `planned`. **Auth is ON by default**
+also discharging M5's owed socket round-trip), and now **M6·b** (ports — the `network` block on
+`GET /servers/{id}` detail (required ⋈ firewall-open via `IFirewallService.ListOwnedAsync`), the host
+`network.openPorts[]` grid on `GET /hosts/{id}`, and the intent-only `open_ports` command (server-derived
+target → `EnsureOpenAsync` → re-probe verify → **direct** `network.ports.open` audit write, no echo, no
+double-write); `reachable` reserved-null, honest-unknown `open`, firewall probed **on-demand** not polled;
+backend self-validated + the operational firewall **read** path live-validated 2026-06-16, the `open_ports`
+**mutation** round-trip owed)
+(`scripts/smoke.sh` **37/37** + **tests/Api.Tests 79/79**); the rest of **M6** (`open_ports` mutation live-validate;
+M6·a alerts) and M7–M8 are `planned`. **Auth is ON by default**
 — `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4
 open trust window). Trust `PLAN.md`'s per-milestone status, not assumptions.
 

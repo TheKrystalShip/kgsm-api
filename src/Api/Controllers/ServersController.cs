@@ -29,15 +29,15 @@ public sealed class ServersController(
         await aggregator.GetServersAsync(ct);
 
     /// <summary>
-    /// One server's record. For M1·b this is the same shape as a list element (full detail —
-    /// console, files, players — arrives in later milestones), filtered out of the bulk join so the
-    /// list and detail views never diverge.
+    /// One server's detail record. From M6·b this is a <em>superset</em> of the list element: the same
+    /// domain ⋈ metrics join <b>plus</b> the <c>network</c> block (required ⋈ firewall-open, §3·g) — the
+    /// first place the detail view diverges from the list (the list/stream omit <c>network</c> so they
+    /// never trigger a per-poll firewall probe). Fuller detail (console, files, players) arrives later.
     /// </summary>
     [HttpGet("{id}")]
     public async Task<ActionResult<Server>> GetById(string id, CancellationToken ct)
     {
-        IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct);
-        Server? server = servers.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.Ordinal));
+        Server? server = await aggregator.GetServerDetailAsync(id, ct);
 
         // Unknown id -> 404 with no body; UseStatusCodePages renders the not_found envelope.
         if (server is null)
@@ -47,15 +47,16 @@ public sealed class ServersController(
     }
 
     /// <summary>
-    /// Issue a lifecycle command (M3, architecture.html §5·d). The body is intent only —
-    /// <c>{ "verb": "start"|"stop"|"restart" }</c>, a closed set. The verb is admitted (state guards,
-    /// later permissions), a <see cref="Job"/> is created, and the work runs off-request; the
-    /// <c>202</c> returns the job immediately and progress arrives on the <c>jobs</c> WS topic.
+    /// Issue a command (M3 lifecycle + M6·b ports, architecture.html §5·d/§3·g). The body is intent only —
+    /// <c>{ "verb": "start"|"stop"|"restart"|"open_ports" }</c>, a closed set; <c>open_ports</c> in
+    /// particular carries <strong>no port list</strong> (the server derives the target from the instance's
+    /// own ports). The verb is admitted (state guards, permissions), a <see cref="Job"/> is created, and the
+    /// work runs off-request; the <c>202</c> returns the job and progress arrives on the <c>jobs</c> WS topic.
     /// <list type="bullet">
     /// <item><c>400</c> — unknown/missing verb (the closed set is server-defined).</item>
     /// <item><c>404</c> — unknown server id.</item>
     /// <item><c>409</c> — an obvious no-op against the real status (start-when-running /
-    /// stop-when-stopped), or a command already in flight for this server.</item>
+    /// stop-when-stopped; <c>open_ports</c> is always admissible), or a command already in flight.</item>
     /// <item><c>202</c> — accepted: <c>{ job }</c>.</item>
     /// </list>
     /// </summary>
@@ -66,7 +67,7 @@ public sealed class ServersController(
         string? verb = body?.Verb?.Trim().ToLowerInvariant();
         if (!CommandVerb.IsKnown(verb))
             return Error(StatusCodes.Status400BadRequest, "bad_request",
-                "unknown or missing verb; expected one of: start, stop, restart");
+                "unknown or missing verb; expected one of: start, stop, restart, open_ports");
 
         // Provenance to stamp on the engine command (M5) so the resulting kgsm event — and the audit row
         // the consumer writes from it — records the driving surface. Caller-declared, validated against

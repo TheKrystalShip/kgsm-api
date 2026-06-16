@@ -23,6 +23,11 @@ frozen in `PLAN.md §6` (WS stream row) + `§8` (M2 log). This file is the local
 - **The `servers` topic carries status/roster ONLY — never the 1s metric firehose.** Resource ticks
   live on `servers/{id}/metrics`. `DomainPump`'s change-detection deliberately ignores the metrics block
   so it never double-streams. Breaking this floods the status topic (smoke check 22 guards it).
+- **`network.patch` rides its OWN topic `servers/{id}/network` (M6·b) — never `server.patch`.** The same
+  topic-separation discipline as metrics: keeping the firewall block off the `servers` topic is what lets
+  `server.patch` stay the frozen M1·b `Server`. **No pump publishes it** — it is pushed ONLY by the
+  `open_ports` verify (the firewall is socket-activated + idle-exits; a periodic probe would defeat that).
+  Don't add a network pump; don't fold `network` into `server.patch`.
 - **One shared `MetricsMapping`** makes a WS tick byte-identical to the REST element it patches —
   REST and WS must not drift. Map in one place.
 - **Honesty: monitor-down → metric topics go silent**, never a replayed stale frame. The

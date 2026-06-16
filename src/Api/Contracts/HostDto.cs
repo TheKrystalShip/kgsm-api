@@ -22,7 +22,11 @@ public sealed record Host(
     double? CpuPct,
     MemCapacity? Mem,
     IReadOnlyList<DiskCapacity>? Disks,
-    HostCapabilities Capabilities);
+    HostCapabilities Capabilities,
+    // The host-wide open-ports grid (M6·b) — populated ONLY on the GET /hosts/{id} detail view; omitted
+    // on the GET /hosts list (which stays the M1·a shape). Null when the firewall can't answer
+    // (absent/unreachable/unknown); an empty OpenPorts means the firewall answered and owns no rules.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] HostNetwork? Network = null);
 
 /// <summary>Host memory capacity, in GiB (matching the §4·a contract unit).</summary>
 public sealed record MemCapacity(double Used, double Total);

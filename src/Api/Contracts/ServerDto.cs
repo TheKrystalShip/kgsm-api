@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
@@ -46,7 +48,12 @@ public sealed record Server(
     // Per-instance resource usage from the monitor, or null when the monitor is absent/unreachable
     // or has no sample for this instance (e.g. a stopped server has no cgroup/process tree). Null
     // here is the honest "not measurable now" — never a fabricated zero.
-    ServerMetricsDto? Metrics);
+    ServerMetricsDto? Metrics,
+    // The firewall/ports cross-reference (M6·b) — populated ONLY on the GET /servers/{id} detail view
+    // (and the servers/{id}/network WS patch); omitted entirely on the list + the `servers` stream, so
+    // those stay byte-identical to the frozen M1·b shape (detail ≠ list, the first such split). See
+    // ServerNetwork for the honest-unknown + reserved-`reachable` semantics.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ServerNetwork? Network = null);
 
 /// <summary>
 /// One server's resource sample, mapped 1:1 from the monitor's <c>ServerMetrics</c> with its native

@@ -396,18 +396,66 @@ wiring* lands first.
   (the multi-listener model) — events emitted while the api isn't listening are not backfilled.
 - **Frontend gate:** `auditStore` prepends on `audit.append`; filters map to indexed columns.
 
-### M6 — Alerts (condition-mirror) + ports  ·  `planned`
-- **Goal:** the needs-attention surface + the one-click firewall fix.
-- **Wires:** monitor thresholds + watchdog crash signals → alerts; kgsm-lib firewall/UPnP
-  (+ the watchdog-network-delegation plan) → ports.
+### M6 — Alerts (condition-mirror) + ports  ·  `partial`
+- **Goal:** the needs-attention surface + the one-click firewall fix. **Split into three**
+  (M6 is too large for one increment): **M6·0** (the internal kgsm-lib-bump + audit-consumer
+  extension — done), **M6·b** (ports — contract frozen, below), **M6·a** (alerts — planned).
+
+**M6·0 — kgsm-lib 1.13.0 + audit consumers.** · `built` (committed `14bd4f8` + live-validated 2026-06-16)
+- Bumped the api's kgsm-lib ref **1.8.0 → 1.13.0** (picks up `IFirewallService`, the firewall
+  port events, and the crash events) and extended `KgsmAuditConsumer`/`AuditMapping` with
+  `server.crash` (watchdog `instance_crashed`→warn / `instance_failed`→danger, both `system`)
+  and `network.ports.open`/`.close` (the CLI-path firewall echoes). Pure mappers + 4
+  `RegisterHandler` wires; tests 67/67. Live round-trip proven on all four paths — which
+  **discharged M5's owed socket round-trip**. No wire contract (internal). See §8.
+
+**M6·b — Ports.** · `partial` (contract **frozen 2026-06-16**; backend built & self-validated; the api's full `open_ports` path live-proven as a faithful firewall client 2026-06-16 — the **end-to-end `open:true` verdict is UNPROVEN**, blocked by a kgsm-firewall daemon gap on this inactive-ufw host (a flagged firewall follow-up, not an api defect); frontend gate pending — see §8)
+- **Goal:** required-vs-open ports per server + the host open-ports grid + the one-click fix.
+- **Wires:** **kgsm-firewall** via kgsm-lib `IFirewallService` (1.13.0 — **no bump**); required
+  ports from `Instance.Ports` (already carried by the `GetAll` roster — `instances list
+  --detailed --json`, confirmed live; no extra spawn).
+- **Scope (3 deliverables):**
+  1. `network` block on **`GET /servers/{id}` (detail only — the first place detail ≠ the list
+     element)**: `required[]` (from `Instance.Ports`, ranges `Expand()`'d to per-port rows) ⋈
+     per-row `open` (firewall rule present, via `ListOwnedAsync(instance)`).
+  2. `network.openPorts[]` on **`GET /hosts/{id}` (detail only)**: the raw firewall listing
+     (`ListOwnedAsync(null)` across all instances), `app` joined from the roster.
+  3. `POST /servers/{id}/commands { verb: "open_ports" }` — **intent-only, no client port
+     list**; server-derives the target from `Instance.Ports`; `EnsureOpenAsync` → re-probe
+     verify; **direct** audit write (`network.ports.open` — no kgsm echo on the
+     `IFirewallService` path, so no double-write).
+- **Frozen decisions (user, 2026-06-16):** (1) **`reachable` reserved** — emits `null`, no
+  upstream prober exists; the honest verdict is per-row `open` = host-firewall-rule-present
+  (the rename-not-redefine call, like M1·b `cpu`→`cpuPctCore`); (2) the WS verify rides a
+  **dedicated `servers/{id}/network` topic** (`network.patch`), so `server.patch` stays the
+  frozen M1·b `Server`; (3) firewall liveness is a **block-level `firewall` status** only —
+  `HostCapabilities` unchanged, NOT added to the 2s `LeafHealthMonitor` poll (it's
+  socket-activated + idle-exits ~30s — a poll defeats it; probed on-demand). Full shape in §6.
+- **Honest-unknown:** `required[]` is always present (domain truth, firewall-independent);
+  `open`/`reachable` go **null** (never fabricated `false`) when the firewall can't answer;
+  host `network` is **null** when unreachable, **`[]`** when Ok-but-empty (the
+  `ListOwnedAsync` `Unknown`≠empty distinction preserved).
+- **`open_ports` gate:** 404 unknown server; **no state no-op** (declarative/idempotent —
+  always admissible); 409 if a command is already in flight (shared per-server slot).
+- **actionId / alert↔audit bridge:** direct-write means the api owns **both** job and audit
+  append, so it **can** correlate (the M5 "no jobId" limit was the event-echo path only) —
+  `meta.jobId` on the audit row + `actionId` = the audit `evt_` id on `audit.append`; no new
+  field on the generic `Job`.
+- **Depends:** M5 (audit), M3 (the command path), M6·0 (the kgsm-lib bump + the ports vocab).
+- **Op note (live validation):** the api process needs `kgsm`-group membership to reach
+  `/run/kgsm-firewall/firewall.sock` (root:kgsm 0660) — the M6·0 constraint.
+- **Frontend gate:** the per-server network card (renders `required[].open`; derives "all open"
+  itself; shows reachability as "unknown") + the host open-ports grid + the open_ports flow.
+
+**M6·a — Alerts (condition-mirror).** · `planned`
+- **Goal:** the needs-attention surface.
 - **Scope:** alerts `raise/resolve/retract` with debounce → probation → escalation
   (`architecture.html §3·c`), `GET /alerts?status=firing|resolved`, `alerts` WS, the
-  alert↔audit bridge (`resolution.actionId`). Ports: the `network` block on
-  `/servers/{id}` (blueprint-required ⋈ firewall-probed-open ⋈ `reachable`),
-  `/hosts/{id}` open-ports grid, `POST .../commands { verb: open_ports }`
-  (**intent-only — no client port list**; server-derived target; re-probe verify; audited).
-- **Depends:** M5 (audit bridge), M3 (the open_ports command), monitor/watchdog signals.
-- **Frontend gate:** `alertsStore` (the prototype-proven shape) + the network card / open-ports flow.
+  alert↔audit bridge (`resolution.actionId` — now sourceable off the M6·b open_ports row).
+  Monitor-threshold + crash-event (`instance_failed`→`server.crash` danger) sourced; in-memory
+  (no EF table). Needs its own contract freeze.
+- **Depends:** M5 (audit bridge), M6·b (the open_ports actionId), monitor/watchdog signals.
+- **Frontend gate:** `alertsStore` (the prototype-proven shape).
 
 ### M7 — Assistant turn relay  ·  `planned`  ←  *resolves keystone O1*
 - **Goal:** the AI surface — relay the assistant service's turn stream.
@@ -486,7 +534,8 @@ for the external surface and this doc for the backend's honest realization of it
 | Command verbs + `job` shape + `command.verified` | **M3** | `architecture.html §5·d` — **frozen 2026-06-15.** **Endpoint** `POST /servers/{id}/commands` body `{ verb }` → `202` + `{ job }`; closed, server-defined verb set **`start`·`stop`·`restart`** (**`update` deferred** from the first cut — long-running + version-changing, settles on a version re-check not a run-state one). **Errors:** unknown/missing verb → `400 bad_request`; unknown server → `404 not_found`; an obvious no-op against the real status (start-when-running / stop-when-stopped) or a command already in flight for that server → `409 conflict`. **`job`** = `{ id, serverId, verb, state, createdAt, settledAt?, error? }` (opaque `job_…` id; ISO-8601 UTC `Z` times; `error` set only on `failed`, the engine's real detail — never a fabricated success). **Divergence (honest-vs-aspirational, the same negotiated call as the M1·b DTO):** `job.state` is the **job's own** lifecycle `queued→running→succeeded\|failed`, NOT the §5·d example's server-shaped `state:"running"` — the affected server's authoritative/optimistic status rides the `servers` topic via `server.patch`, and the client derives the optimistic display from the verb (the same topic-separation discipline as the metric topics). **WS:** the `jobs` topic carries a single **`job.patch`** (the full `job` on every transition, coalesced by job id — patch-only, exactly like `server.patch`). **Gate (state guards):** minimal/honest — only the obvious no-ops; the engine (kgsm→watchdog/Docker) owns everything subtler, surfacing an impossible transition as the job's `failed` + its error (the API never fabricates admissibility kgsm does not enforce; `unknown` status never blocks). **Verify** (the §5·d `command.verified` for the direct write path): on settle, a fresh run-state read → an explicit `server.patch`. **Permissions** gate at M4; jobs are **in-memory** (SQLite + audit at M5). The propose/confirm half of §5·d (`command.proposed` over SSE) is the assistant flow (M7), not M3. |
 | Auth session + tiers + 401/403/login_required | **M4·a** | `architecture.html §3·f` — **frozen 2026-06-15 (M4·a).** **Bearer = stateless JWT** (HMAC; access ~15 min + refresh 8h cap; no session table). Endpoints `/auth/discord/start` (302→authorize), `/auth/discord/callback` (`{ verdict:"ok"\|"denied", tier, token, refresh?, userId }`), `/auth/session/refresh` (refresh bearer → `{ token }`), `/auth/session` (`{ user:{ id, username, display, avatarUrl? }, scopes }` or `401`), `/auth/logout` (`204`). Tiers `admin·operator·viewer·none` resolved from the guild role via the **bot token** (`GET /guilds/{guild}/members/{user}` — the only path to roles; the `identify guilds` user scopes don't carry them). `401` (no/invalid/expired bearer) recoverable; `403` (`none`/insufficient tier) terminal. **Divergences (the negotiated honest-vs-aspirational call, like the M1·b DTO / M3 job.state):** (1) camelCase `userId` (not the §3·f example's snake_case `user_id`) — one casing across the surface; (2) `GET /auth/session` returns the **login-time profile snapshot** embedded in the token, NOT a fresh live Discord fetch — the §3·f "fetched live" can't hold once the Discord token is discarded (which §3·f also requires), so snapshot is the honest realization; (3) role re-check happens only at a full bounce (≤ the 8h cap), not on refresh (refresh skips Discord); (4) `/auth/session/refresh` takes the refresh token in the `Authorization: Bearer` header (the `{host}` body is accepted but not required) — a per-host-API simplification of the §3·f `{host}`-body shape. **WS:** the `/stream` bearer rides `?access_token=` (a handshake can't set a header). **Tier gating:** viewer = reads + stream, operator = + the command `POST`, admin = diagnostics (`_throw`/`_dbcheck`) + reserved (settings/install/audit-config, M5/M8). **Secure-by-default:** an authorization `FallbackPolicy` requires an authenticated caller on any endpoint without explicit `[Authorize]`/`[AllowAnonymous]`; only `/health` + `/api/v1` opt out (the SPA's pre-login reachability probes). **CSRF (added M4·b):** `/auth/discord/start` sets a one-time HttpOnly `state` cookie (stateless double-submit; `SameSite=Lax`, `Secure` only under https); `/auth/discord/callback` returns `400 invalid_state` on a missing/mismatched state before any Discord exchange. **M4·b — LIVE-VALIDATED 2026-06-15:** the real Discord exchange + bot-token role lookup resolved an admin login end-to-end (§8); login endpoints `503` only until the Discord app/bot-token/guild/role-map are configured. |
 | Audit record + closed `action` vocabulary + SQLite schema | **M5** | `architecture.html §3·d` — **frozen 2026-06-15.** **Endpoint** `GET /api/v1/audit?cursor=&limit=50&severity=&serverId=&actor=` → `{ data, nextCursor }`, **newest first**, keyset on the opaque `rowid` cursor (`RowId < cursor` ordered `DESC`; `nextCursor` = the last row's rowid, or null when the page is short). Filters map 1:1 to indexed columns; `limit` clamped (default 50, max 200). **Record** = `{ id (evt_…), ts (Z), origin, actor:{ kind:user\|system\|token, name, provider:discord\|system\|api? }, action, severity:info\|success\|warn\|danger, target:{ kind,id,name }?, serverId?, hostId?, summary, meta? }`. **WS:** the `audit` topic carries **`audit.append`** (one full record; the client **prepends** — events are immutable). Unlike the metric/status patches it is **NOT supersede-by-latest**: the coalesce key is the unique event id, so distinct appends never collapse. **Action vocab wired in M5** (the honestly-sourceable subset): `server.start\|stop\|restart\|update\|install\|uninstall`, `backup.create\|restore` (from kgsm events), `auth.login\|logout` (API-internal). **Extended in M6·0** (producers now landed): `server.crash` (kgsm-watchdog — `instance_crashed`→warn, `instance_failed`→danger, both `system`-stamped, kgsm-lib 1.9.0) and `network.ports.open`/`network.ports.close` (the CLI-path firewall echoes `instance_ports_opened`/`_closed`, kgsm-lib 1.12.0; ports recorded in `meta`). **Divergence (a server-side additive extension, like origin-nullable):** the §3·d `network` set lists only `ports.open`, but the server also records `network.ports.close` — a real, now-sourceable action — so opens and closes form a symmetric trail (a standalone `files firewall disable` closes ports outside any uninstall and would otherwise go unrecorded); the frontend already accepts unknown actions forward-compat (M2). The api-issued `open_ports` command writes `network.ports.open` **directly** at M6·b (kgsm runs nothing → no echo, the `auth.*` case); there is no api close command (§3·g is open-only), so `ports.close` is cleanly CLI-echo-only — no double-write. **Still deferred (no source yet):** `config.change`/`player.*`/`host.*`/`discord.*`/`settings.change`. **Source model (the no-double-write decision):** kgsm **owns** `server.*`/`backup.*`, so the API records the engine's **event echo** — it never writes an audit row when it issues a command; instead the command path **stamps** `actor`(bearer identity)+`origin`(declared surface) which ride the event and are read back off it. `auth.*` has no kgsm event → written directly (no double-write). **Divergences (the negotiated honest-vs-aspirational call, like the M1·b DTO):** (1) **`origin` is nullable** (the §3·d DDL says `NOT NULL`) — a direct-CLI engine action has no product surface, so the engine emits `null` and we persist that, never fabricate a surface; (2) the example's **`meta.jobId` is not populatable** — no correlation id round-trips the stateless engine, so `meta` holds action-specific detail (e.g. `{oldVersion,newVersion}`, `{blueprint}`, `{source,version}`, the login `{tier}`) instead; (3) the command path's `origin` is **caller-declared** (`ui\|assistant\|discord\|api`, default `api` — literally true; `system` reserved for autonomous engine actions and rejected), **never derived from the actor** (the two axes stay independent). **Honest boundary:** events emitted while the API isn't listening are **never audited** (stateless engine, no backfill) — inherent to a downstream-consumer design. **Storage:** the §3·d SQLite schema, created via **`EnsureCreated`, NOT an EF migration** (greenfield/dev authority — wipe the DB on a schema change). Gated at **viewer** (a core read surface). |
-| Alert record + raise/resolve/retract; `network` block | M6 | `architecture.html §3·c, §3·g` |
+| `network` block (server) + host `openPorts` + `open_ports` command | **M6·b** | `architecture.html §3·g` — **frozen 2026-06-16.** **Per-server, `GET /servers/{id}` DETAIL ONLY** (the first place detail ≠ the `/servers` list element): `network:{ firewall, required[], reachable }`. `required[]` = `{ port, proto:"tcp"\|"udp", open: bool\|null }` derived from `Instance.Ports` (the `GetAll` roster, `instances list --detailed --json` — confirmed to carry structured `ports`), ranges `Expand()`'d to one row per port; **always present** when the instance is known (domain truth, firewall-independent). `open` per row: `true` = the firewall owns a rule covering `(port,proto)` (via `IFirewallService.ListOwnedAsync(instance)`), `false` = no such rule (firewall answered Ok), **`null`** = firewall could not answer. `firewall` ∈ `operational\|down\|unknown\|unsupported\|absent` (block-level liveness: Ok / `FirewallException` / `ListOwnedAsync.Status=Unknown` / `Unsupported` / not-provisioned) — **NOT** a `HostCapabilities` entry and **NOT** in the 2s `LeafHealthMonitor` poll (firewall is socket-activated + idle-exits ~30s; probed **on-demand** per detail view). **Divergences (the negotiated honest-vs-aspirational call, like M1·b `cpuPctCore`):** (1) **`reachable` is RESERVED — always `null`** (the §3·g DDL/prose ask for an end-to-end verdict — "a rule can be applied while the port stays blocked upstream, router NAT/ISP" — but the api has **no upstream prober**; the honest verdict is per-row `open` = host-firewall-rule-present, and the frontend derives "all required open" from `required[].open` itself; the strong name is reserved for a real prober, e.g. a future UPnP/watchdog probe — **rename-not-redefine**, not an overclaiming boolean); (2) per-row `open` and `reachable` are **nullable** — honest-unknown when the firewall can't answer, **never fabricated `false`**. **Per-host, `GET /hosts/{id}` DETAIL ONLY:** `network:{ openPorts:[{ port, proto, app\|null, server }] } \| null` — `ListOwnedAsync(null)` across all instances; `server` = instance name (`FirewallOwnedRule.Instance`), `app` = blueprint id joined from the roster (**`null` when unmapped — never guessed**); the whole `network` is **`null`** when the firewall is absent/unreachable/`Unknown`, **`[]`** when Ok-but-empty (the `Unknown`≠empty distinction preserved); camelCase `openPorts` (not §3·g's snake `open_ports` — one casing, like `userId`). **Command** `POST /servers/{id}/commands { verb:"open_ports", origin? }` — **intent-only, NO client port list** (server derives the target from `Instance.Ports`; accepting a client list would let the browser open anything); gate = 404 unknown server, **no state no-op** (declarative/idempotent — always admissible), 409 if a command is already in flight (shared per-server slot); exec = `EnsureOpenAsync(serverId, Instance.Ports)` → re-probe `ListOwnedAsync(serverId)` verify; **audited by DIRECT write** (action `network.ports.open` — the firewall emits nothing on the `IFirewallService` path, so kgsm runs nothing → no echo → no double-write; the CLI path stays event-echo-only, §M5 row). **Verify push:** `job.patch` (`queued→running→succeeded\|failed`) on `jobs`, a fresh `network.patch` on the **dedicated `servers/{id}/network` topic** (so `server.patch` stays the frozen M1·b `Server` — no contradiction), and `audit.append` on `audit`. **`{opened,reachable,actionId}` realization (§3·g):** `reachable` reserved-`null`; `opened` (the delta) recorded in audit `meta`; `actionId` = the audit `evt_` id on `audit.append`; **`meta.jobId` IS populatable here** (direct-write owns both job + append — the M5 "no jobId" limit was the event-echo path) → the frontend correlates job→audit via it; **no new field on the generic `Job`**. On `EnsureOpenAsync` `Ok=false` (Unsupported/Failed) or `FirewallException` → job `failed` with the backend detail, **never a fabricated success**. |
+| Alert record + raise/resolve/retract | **M6·a** | `architecture.html §3·c` — planned; the alert↔audit bridge `resolution.actionId` points at the M6·b `open_ports` audit row. |
 | Assistant SSE event vocabulary (proxy vs re-wrap) | M7 | `architecture.html §5·a`; keystone O1 |
 | Install body (honored vs reserved) | M8 | `architecture.html §3·h` |
 
@@ -1066,3 +1115,86 @@ temp DB; the kgsm config was untouched — broadcasting was already on). **Still
 → `server.crash` **danger** (it needs the watchdog to *exhaust* its restart retries — repeated kills, too
 disruptive to force here); the `FromFailedEvent` mapper is unit-tested, and it rides the same now-live-proven
 transport + dispatch as the warn crash.
+
+### M6·b — 2026-06-16 · ports (the network surface: required ⋈ open + the open_ports command) self-validated + the api's full open_ports path LIVE-PROVEN as a faithful firewall client; the end-to-end `open:true` verdict UNPROVEN (a flagged kgsm-firewall daemon gap, not an api defect); frontend gate PENDING
+
+**Status:** the ports half of M6. Contract **frozen 2026-06-16** (§6 `network`-block row + the three locked
+decisions); backend built, self-proven, and the firewall **read** path live-validated against the deployed
+kgsm-firewall daemon. Owed (like M3's mutation / M5's append): the live `open_ports` **mutation** round-trip
+(it opens a real host firewall port) + the frontend gate.
+
+**No kgsm-lib bump** (1.13.0 from M6·0 already carries `IFirewallService`). The firewall is **opt-in like the
+assistant** (`KGSM_API_FIREWALL_SOCKET` blank ⇒ `absent`), and deliberately **NOT** in the 2s `LeafHealthMonitor`
+poll — kgsm-firewall is socket-activated + idle-exits, so it is probed **on-demand** (detail views + the
+open_ports verify), each call bounded (2s read / 30s mutate), liveness reported as the block-level `firewall`
+status. Confirmed live that `GetAll` (`instances list --detailed --json`) carries the structured `ports`, so
+`required` needs no extra spawn (the §4 fact-check the freeze owed).
+
+**The three frozen decisions, as built.** (1) **`reachable` reserved → always `null`** (no upstream prober;
+the honest verdict is per-row `open` = host-firewall-rule-present, the frontend derives "all open" itself —
+rename-not-redefine, the M1·b `cpuPctCore` precedent). (2) **Dedicated `servers/{id}/network` WS topic**
+(`network.patch`) for the verify push, so `server.patch` stays the frozen M1·b `Server` (detail ≠ list — the
+first such split; the list/stream omit `network` via `JsonIgnore(WhenWritingNull)`, byte-identical to M1·b).
+(3) **Block-level `firewall` status only** — `HostCapabilities` unchanged, no redundant polled leaf.
+
+**Honest-unknown, never fabricated-closed (the central M6·b discipline).** `required[]` is always present
+(domain truth from `Instance.Ports`, firewall-independent); per-row `open` and `reachable` go **`null`** — never
+`false` — when the firewall can't answer; the host grid is **`null`** when unreachable/unknown, **`[]`** only on
+a real `Ok`-but-empty (the `ListOwnedAsync` `Unknown`≠empty distinction, preserved end-to-end). `NetworkAggregator`
+maps `FirewallException`→`down`, `ListOwnedAsync.Status` `Unknown`→`unknown` / `Unsupported`→`unsupported` /
+`Ok`→`operational`, all on-demand and bounded.
+
+**The `open_ports` command (intent-only, server-derived, direct-write).** Added to the closed `CommandVerb` set;
+always admissible (no run-state no-op — declarative/idempotent), shares the one-in-flight slot. `CommandRunner`
+branches: it derives the target from the instance's own `Instance.Ports` (never a client list), calls
+`IFirewallService.EnsureOpenAsync`, and on a real change (`Applied`) writes the `network.ports.open` audit row
+**directly** — kgsm runs nothing on the `IFirewallService` path, so there is no echo and **no double-write** (the
+CLI echo path is disjoint, M6·0). A `NoOp` succeeds without a row (recording "opened" when nothing changed would
+fabricate a change — symmetric with the CLI echo, which only fires on a confirmed open). The audit `meta` carries
+`{jobId, ports}` — **`jobId` IS populatable here** (the api owns both the job and the append; the M5 "no jobId"
+limit was the event-echo path), giving the alert↔audit `resolution.actionId` bridge M6·a needs. On settle the
+verify re-probes and pushes the fresh block on `servers/{id}/network` (byte-identical to a `GET /servers/{id}`
+network field — one shared build path).
+
+**Self-validated:** 0-warning Release build; **tests/Api.Tests → 79/79** (+12: `NetworkAggregator` cross-ref —
+absent→open:null, operational open true/false, **Unknown→open:null not false**, unreachable→down, unsupported,
+range-expansion, the host grid Ok-rows / **Ok-empty→[] / Unknown→null** distinction; + `FromPortsOpenedCommand`
+direct-write with the jobId correlation + the no-ports case); **smoke 33/33 → 37/37** (+4 M6·b degrade path:
+`open_ports` is an admitted verb (unknown server→404 not 400), the server detail `network` block reports
+`firewall:"absent"` + `reachable:null` + every `open:null`, the `/servers` list **omits** `network` (detail≠list,
+M1·b shape preserved), the host grid is omitted when the firewall is absent).
+
+**LIVE-VALIDATED (2026-06-16) against the deployed kgsm-firewall daemon — the api's full open_ports path as a
+faithful firewall client; the end-to-end `open:true` verdict UNPROVEN (a daemon-side gap, flagged below).**
+Ran the api under `sg kgsm` (the `/run/kgsm-firewall/firewall.sock` is `root:kgsm 0660`, same constraint as M6·0)
+with `KGSM_API_FIREWALL_SOCKET` set, engine at the dev kgsm.
+
+*Read path:* `GET /servers/factorio-test` → `network.firewall = "operational"` (the api reached the real daemon;
+`ListOwnedAsync` returned `Ok`), `required = [34197/tcp, 34197/udp]` (from `Instance.Ports`), both `open:false`,
+`reachable:null`; `GET /hosts/live-host` → `network.openPorts = []` (the **`Ok`-but-empty** grid — honest `[]`,
+not `null`). **Honesty correction:** that `open:false`/`[]` is **not** "the daemon owns no rules" — it is the
+daemon enumerating **nothing** (see the daemon gap below); do not read it as a confident measured-closed.
+
+*Mutation round-trip (the live `open_ports`):* `POST /servers/factorio-test/commands {verb:"open_ports",origin:"api"}`
+→ `202` + `job_…`; the runner server-derived the target from `Instance.Ports` (audit `meta.ports` =
+`"34197/tcp, 34197/udp"`, no client list), called `IFirewallService.EnsureOpenAsync` → the daemon returned
+**`Applied`** → the runner wrote the **direct `network.ports.open` audit row** with `meta.jobId == job_…` +
+`meta.ports` + `origin:"api"` (read back off `GET /audit`); the **job lifecycle `running→succeeded`** and a
+**`network.patch` frame delivered on `servers/factorio-test/network`** to a subscribed WS client; on settle the
+verify re-probed and the runner **honestly reported `open:false`** (it did **not** assume `open:true` from
+`Applied` — never-fabricate working as designed); `files firewall disable` restored cleanly. So the api's
+write→audit→job→deliver→re-probe→restore path is **live-proven** (the `RunOpenPortsAsync` write-decision paths —
+`Applied`→direct-write, the target derivation, the verify/`network.patch` — all executed).
+
+**UNPROVEN — the end-to-end `open:true` verdict, blocked by a kgsm-firewall daemon gap (NOT an api defect).** On
+this host ufw is **inactive**, and the daemon (journal: `backend=Ufw, canApply=True`, `EnsureOpen … 2 port spec(s)
+via Ufw`) reports **`Applied`** but produces **no observable rule** — `ufw show added` is empty even right after a
+CLI `files firewall enable factorio-test` reports success, and `ListOwnedAsync` then enumerates nothing → every
+`open` reads `false`. So the open/reachable surface is **inert on an inactive-ufw host**, regardless of what is
+"applied". This is a **kgsm-firewall follow-up** (should the daemon return `Unknown` (not `operational`+empty)
+when ufw is inactive, so the composite doesn't read "firewall up, port closed" when nothing is enforcing?) — see
+the firewall memory. The api maps each daemon answer faithfully; the **composite** is the daemon's to fix. A
+definitive `open:true` test needs **ufw active** (a host-posture change memory says was deliberately left off —
+not done unprompted; offered as the user's call, SSH/loopback allowed first). The `app`-join on a populated grid
+is unproven for the same reason (the live grid was empty). The runner's `instances info <name>` port source was
+confirmed live to carry the same structured `ports` as the roster.

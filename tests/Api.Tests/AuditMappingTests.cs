@@ -286,4 +286,45 @@ public sealed class AuditMappingTests
         Assert.Equal("", AuditMapping.FormatPorts([]));
         Assert.Equal("", AuditMapping.FormatPorts(null));
     }
+
+    // --- M6·b: the open_ports DIRECT write (no kgsm echo — the api owns both job + append) ---------
+
+    [Fact]
+    public void FromPortsOpenedCommand_DirectWrite_HasJobIdCorrelationAndPortsMeta()
+    {
+        AuditWrite w = AuditMapping.FromPortsOpenedCommand(
+            serverId: "valheim",
+            ports:
+            [
+                new PortMapping { Start = 2456, End = 2458, Protocol = "udp" },
+                new PortMapping { Start = 27015, End = 27015, Protocol = "tcp" },
+            ],
+            actor: "discord:haru", origin: "ui", hostId: "primary", jobId: "job_abc123");
+
+        Assert.Equal(AuditAction.NetworkPortsOpen, w.Action);
+        Assert.Equal(AuditSeverity.Info, w.Severity);
+        Assert.Equal("ui", w.Origin);                              // caller-declared surface, parsed like an event
+        Assert.Equal(ActorKind.User, w.Actor.Kind);               // discord:haru → user via discord
+        Assert.Equal("haru", w.Actor.Name);
+        Assert.Equal(ActorProvider.Discord, w.Actor.Provider);
+        Assert.Equal("valheim", w.ServerId);
+        Assert.Equal(AuditTargetKind.Server, w.Target!.Kind);
+        // The job↔audit correlation the M5 echo path could NOT provide — populatable here (direct write).
+        Assert.Equal("job_abc123", w.Meta!["jobId"]);
+        Assert.Equal("2456-2458/udp, 27015/tcp", w.Meta!["ports"]); // range preserved; single port not dashed
+        Assert.Contains("opened firewall ports", w.Summary);
+    }
+
+    [Fact]
+    public void FromPortsOpenedCommand_NoPorts_KeepsJobIdDropsPortsMetaNullOrigin()
+    {
+        // The runner skips an empty open, but the mapper must stay honest if called: jobId present (always),
+        // ports meta omitted (nothing to record), origin null (none declared → null, never fabricated).
+        AuditWrite w = AuditMapping.FromPortsOpenedCommand(
+            serverId: "valheim", ports: [], actor: null, origin: null, hostId: "primary", jobId: "job_x");
+
+        Assert.Equal("job_x", w.Meta!["jobId"]);
+        Assert.False(w.Meta!.ContainsKey("ports"));
+        Assert.Null(w.Origin);
+    }
 }
