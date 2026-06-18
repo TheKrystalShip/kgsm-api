@@ -35,8 +35,9 @@ also discharging M5's owed socket round-trip), and now **M6·b** (ports — the 
 `network.openPorts[]` grid on `GET /hosts/{id}`, and the intent-only `open_ports` command (server-derived
 target → `EnsureOpenAsync` → re-probe verify → **direct** `network.ports.open` audit write, no echo, no
 double-write); `reachable` reserved-null, honest-unknown `open`, firewall probed **on-demand** not polled;
-backend self-validated + the operational firewall **read** path live-validated 2026-06-16, the `open_ports`
-**mutation** round-trip owed), and now **M6·a** (alerts — the condition-mirror: `GET /alerts?status=firing|resolved&since=24h`
+backend self-validated + the operational firewall **read** path live-validated 2026-06-16, and the `open_ports`
+**mutation** round-trip **LIVE-VALIDATED 8/8 with ufw active** 2026-06-16 — write→enforce→`open:true`→direct audit
+row→app-join→`network.patch` WS deliver→restore, commits `50b4dab`/`1813cb5`; only the frontend gate remains), and now **M6·a** (alerts — the condition-mirror: `GET /alerts?status=firing|resolved&since=24h`
 + the `alerts` WS topic (`alert.raise`/`resolve`/`retract`), read-only + in-memory + viewer-gated. **Crash source only**
 — the `AlertEngine` polls the watchdog's supervision state via kgsm-lib `IWatchdogClient` (poll-as-authority: the
 interval IS the raise debounce; api-owned 30s resolve probation; mirrored escalation; retract on a vanished instance;
