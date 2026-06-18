@@ -46,6 +46,15 @@ public sealed class ApiOptions
     public required string AssistantBaseUrl { get; init; }
 
     /// <summary>
+    /// Shared secret for the M7 assistant turn relay (<c>KGSM_API_ASSISTANT_RELAY_SECRET</c>) — the
+    /// API presents it as <c>X-Relay-Secret</c> so the co-located assistant trusts the forwarded
+    /// end-user identity (it must match the assistant's <c>Assistant:Relay:Secret</c>). Empty ⇒ no
+    /// secret is sent; if the assistant requires one the relay is refused (its 401 → our 502).
+    /// <strong>Shared external config</strong>, like the Discord app — not a process dependency.
+    /// </summary>
+    public required string AssistantRelaySecret { get; init; }
+
+    /// <summary>
     /// kgsm-firewall control socket (M6·b). Empty ⇒ the firewall/ports surface is not provisioned
     /// (the per-server <c>network</c> block reports <c>firewall:"absent"</c>, the host
     /// <c>network</c> is null). <strong>Opt-in like the assistant</strong>: the host-firewall
@@ -158,6 +167,7 @@ public sealed class ApiOptions
             MonitorSocketPath = Defaulted(configuration["KGSM_API_MONITOR_SOCKET"], "/run/kgsm-monitor.sock"),
             WatchdogSocketPath = Defaulted(configuration["KGSM_API_WATCHDOG_SOCKET"], "/run/kgsm-watchdog/control.sock"),
             AssistantBaseUrl = Defaulted(configuration["KGSM_API_ASSISTANT_URL"], ""),
+            AssistantRelaySecret = Defaulted(configuration["KGSM_API_ASSISTANT_RELAY_SECRET"], ""),
             // Opt-in (blank = absent): the firewall authority is a separate optional install.
             FirewallSocketPath = Defaulted(configuration["KGSM_API_FIREWALL_SOCKET"], ""),
             KgsmPath = Defaulted(configuration["KGSM_API_KGSM_PATH"], "/usr/bin/kgsm"),

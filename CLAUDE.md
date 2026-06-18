@@ -50,9 +50,17 @@ start — a boot bring-up is not a crash recovery); a stop-cleared crash also li
 crash's raise, so a dropped recovery event can't mislink a stale prior-episode id (root-cause closed).
 Built + self-validated + **LIVE-VALIDATED 2026-06-16** (real watchdog crash on `factorio-test` → `warn` raise →
 30s-probation resolve → `actionId:null` auto-heal, no flap); the contract is **proposed** (§6 divergences pending
-frontend sign-off))
-(`scripts/smoke.sh` **39/39** + **tests/Api.Tests 93/93**); the rest of **M6** (`open_ports` mutation live-validate;
-M6·a's contract sign-off) and M7–M8 are `planned`. **Auth is ON by default**
+frontend sign-off)), and now **M7** (assistant turn relay — `POST /api/v1/assistant/turn`, **viewer**-gated,
+near-verbatim SSE relay of the assistant's now-§5·a-shaped `/turn` stream; **resolves keystone O1**. Strategy:
+the §5·a shaping is pushed UPSTREAM into the assistant (kgsm-llm Phase 1, committed `bda373a`), NOT an API re-wrap;
+**fork (a)** — a confirmed command executes via the M3 path, so `command.verified` is NOT a turn-stream event.
+Auth is the **trusted co-located relay**: the assistant gained a relay-auth path (shared `Assistant:Relay:Secret`
++ forwarded Discord identity → principal, authority still from the bot, per-user memory key `web:<userId>` intact);
+the API forwards the verified caller's Discord id + `KGSM_API_ASSISTANT_RELAY_SECRET`. Degrade-gracefully capability
+gate (absent → 404, down → 503, reject → 502) decided before the SSE commits; `OpenTurnStreamAsync` uses
+`ResponseHeadersRead` so the long stream isn't `HttpClient.Timeout`-bound. **Happy-path SSE stream is the owed
+live-validate** (needs a running assistant + Ollama), like M3's mutation / M5's socket half)
+(`scripts/smoke.sh` **41/41** + **tests/Api.Tests 109**); M8 and the M6·a/M7 frontend gates are `planned`. **Auth is ON by default**
 — `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4
 open trust window). Trust `PLAN.md`'s per-milestone status, not assumptions.
 

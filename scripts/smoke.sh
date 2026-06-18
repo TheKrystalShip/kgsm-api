@@ -702,6 +702,25 @@ sys.exit(0 if (isinstance(d.get('data'),list) and len(d['data'])==0) else 1)
   echo "   proven in tests/Api.Tests/AlertEngineTests; the live watchdog-crash → alert path is a trusted-host"
   echo "   live-validate, needing kgsm-watchdog up + a forced crash, like M3's mutation happy path)"
 
+  # --- M7 assistant turn relay: the gates that run before any upstream call ------
+  echo "==> M7 assistant relay checks — POST /api/v1/assistant/turn (auth + capability gates, no upstream)"
+
+  # The smoke instance configures NO assistant (KGSM_API_ASSISTANT_URL unset) -> capability absent, so the
+  # relay degrades to an honest 404 BEFORE any upstream call (degrade-gracefully, never a 500).
+  req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
+  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
+    && ok "POST assistant/turn, assistant absent → 404 {error:{code:not_found}} (capability gate)" \
+    || bad "M7 assistant-absent 404 (code=$CODE body=$BODY)"
+
+  # Prompt validation precedes the capability gate -> a blank prompt is a 400 envelope.
+  req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"   "}'
+  [[ "$CODE" == 400 ]] && grep -q '"code":"bad_request"' <<<"$BODY" \
+    && ok "POST assistant/turn blank prompt → 400 {error:{code:bad_request}}" \
+    || bad "M7 blank-prompt 400 (code=$CODE body=$BODY)"
+
+  echo "  (note: the happy-path SSE relay — a real/stub assistant streaming §5·a frames back verbatim — is a"
+  echo "   live/stub concern like M2/M3's streaming halves; the auth+capability gates are proven here + in tests)"
+
   stop_api
 fi
 
@@ -722,7 +741,9 @@ for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/aler
 done
 req POST /api/v1/servers/x/commands -H 'Content-Type: application/json' -d '{"verb":"start"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST commands -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/_dbcheck,/_throw,POST commands (no open back door)" \
+req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
+[[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/_dbcheck,/_throw,POST commands,POST assistant/turn (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 32. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).

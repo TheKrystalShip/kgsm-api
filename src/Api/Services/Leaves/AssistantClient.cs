@@ -1,3 +1,4 @@
+using System.Net.Http.Json;
 using System.Net.Sockets;
 
 namespace TheKrystalShip.Api.Services.Leaves;
@@ -29,11 +30,13 @@ public sealed class AssistantClient : HttpClient
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
 
     private readonly ILogger<AssistantClient> _logger;
+    private readonly string _relaySecret;
 
     public AssistantClient(ApiOptions options, ILogger<AssistantClient> logger)
         : base(NewHandler(), disposeHandler: true)
     {
         _logger = logger;
+        _relaySecret = options.AssistantRelaySecret;
 
         if (options.AssistantProvisioned
             && Uri.TryCreate(options.AssistantBaseUrl, UriKind.Absolute, out Uri? baseUri))
@@ -45,6 +48,41 @@ public sealed class AssistantClient : HttpClient
 
     /// <summary>True when an assistant base URL is configured on this host (capability is declared).</summary>
     public bool IsProvisioned { get; }
+
+    /// <summary>
+    /// Opens the assistant's <c>POST /turn</c> as an SSE stream on a verified end-user's behalf (M7):
+    /// posts <paramref name="turnBody"/> with <c>Accept: text/event-stream</c> and the trusted-relay
+    /// headers — the shared <c>X-Relay-Secret</c> plus the forwarded Discord identity (<c>X-Relay-User</c>
+    /// / <c>X-Relay-User-Name</c>) — and returns the upstream response with <em>headers read only</em>, so
+    /// the caller can relay the body frames verbatim. The caller <strong>owns disposal</strong>: disposing
+    /// the response aborts the upstream request, which makes the assistant abort generation. Returns
+    /// <see langword="null"/> when the assistant isn't provisioned on this host.
+    /// </summary>
+    /// <remarks>
+    /// <c>ResponseHeadersRead</c> is deliberate: <see cref="HttpClient.Timeout"/> then bounds only the
+    /// connect+headers phase, never the long-lived SSE body — exactly why this client's timeout is left at
+    /// its default (see the type remarks). Caller cancellation (the client disconnecting) flows through
+    /// <paramref name="ct"/> and tears the whole chain down.
+    /// </remarks>
+    public async Task<HttpResponseMessage?> OpenTurnStreamAsync(
+        object turnBody, string relayUserId, string relayDisplayName, CancellationToken ct)
+    {
+        if (!IsProvisioned)
+            return null;
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/turn")
+        {
+            Content = JsonContent.Create(turnBody),
+        };
+        request.Headers.Accept.ParseAdd("text/event-stream");
+        if (!string.IsNullOrEmpty(_relaySecret))
+            request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
+        request.Headers.TryAddWithoutValidation("X-Relay-User", relayUserId);
+        if (!string.IsNullOrEmpty(relayDisplayName))
+            request.Headers.TryAddWithoutValidation("X-Relay-User-Name", relayDisplayName);
+
+        return await SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Liveness probe for the §4·b assistant capability: <c>GET /health</c>, a 2xx means the assistant
