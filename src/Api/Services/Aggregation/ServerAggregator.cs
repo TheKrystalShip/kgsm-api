@@ -180,6 +180,9 @@ public sealed class ServerAggregator
             Version: version,
             Runtime: instance.Runtime == InstanceRuntime.Container ? "container" : "native",
             HostId: _options.HostId,
+            SteamAppId: string.IsNullOrWhiteSpace(instance.SteamAppId) ? "0" : instance.SteamAppId,
+            ClientSteamAppId: string.IsNullOrWhiteSpace(instance.ClientSteamAppId) ? "0" : instance.ClientSteamAppId,
+            IsSteamAccountRequired: instance.IsSteamAccountRequired,
             Metrics: metrics);
     }
 

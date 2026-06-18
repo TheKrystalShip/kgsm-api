@@ -45,6 +45,12 @@ public sealed record Server(
     string Runtime,
     // The host this server runs on (architecture §4·a). Always this api's single host.
     string HostId,
+    // Dedicated-server Steam App ID ("0" for non-Steam games). Static per-blueprint.
+    string SteamAppId,
+    // Client Steam App ID for launch/connect deeplinks ("0" for non-Steam games). Static per-blueprint.
+    string ClientSteamAppId,
+    // Whether a Steam account is required to download the server. Static per-blueprint.
+    bool IsSteamAccountRequired,
     // Per-instance resource usage from the monitor, or null when the monitor is absent/unreachable
     // or has no sample for this instance (e.g. a stopped server has no cgroup/process tree). Null
     // here is the honest "not measurable now" — never a fabricated zero.
