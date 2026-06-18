@@ -73,12 +73,15 @@ public sealed class KgsmAuditConsumer(
     {
         // server.* — the closed lifecycle subset kgsm emits today. Each maps 1:1 to a dotted action.
         // server.start / server.restart additionally feed the alert↔audit bridge (M6·a): AFTER the row is
-        // written we hand its evt_ id to the AlertEngine, so a crash that clears because a start|restart
-        // brought the server back links to that action as resolution.actionId. The hand-off (not a second
-        // event-socket binding) is why the consumer owns it. The watchdog's autonomous crash-restart now
-        // emits instance_restarted (system/system, kgsm-watchdog d4b453f) → a server.restart row through
-        // this same handler, so a pure auto-heal bridges too; only a stop-cleared crash links null — honest,
-        // never a fabricated link. See Services/Alerts/CLAUDE.md.
+        // written we hand its evt_ id to the AlertEngine (only when IsRecoveryAction), so a crash that
+        // clears because a start|restart brought the server back links to that action as
+        // resolution.actionId. The hand-off (not a second event-socket binding) is why the consumer owns
+        // it. The watchdog's autonomous crash-restart emits instance_restarted (system/system,
+        // kgsm-watchdog d4b453f) → a server.restart row through this same handler, so a pure auto-heal
+        // bridges too. The watchdog's BOOT-AUTOSTART emits instance_started (system/system) → audited as a
+        // server.start row but NOT bridged (a boot bring-up is not a crash recovery — IsRecoveryAction
+        // excludes the system-origin start). A stop-cleared crash links null. Honest, never fabricated.
+        // See Services/Alerts/CLAUDE.md.
         events.RegisterHandler<InstanceStartedData>(d =>
             WriteServerAndBridge(d, AuditAction.ServerStart, "started"));
         events.RegisterHandler<InstanceStoppedData>(d =>
@@ -132,17 +135,36 @@ public sealed class KgsmAuditConsumer(
         IReadOnlyDictionary<string, string>? meta = null) =>
         audit.AppendAsync(AuditMapping.FromServerEvent(data, action, severity, verb, options.HostId, meta));
 
-    // Write a server.start/server.restart row, then hand its id to the alert engine: a crash that clears
-    // because THIS recovery brought the server back links to it (resolution.actionId — M6·a). Start and
-    // restart are the two "bring it up" actions an operator/api can take; a stop is not a recovery.
+    // Write a server.start/server.restart row, then — only if it is a RECOVERY action — hand its id to
+    // the alert engine: a crash that clears because THIS recovery brought the server back links to it
+    // (resolution.actionId — M6·a). A stop is not a recovery (it never reaches here, separate handler).
     private async Task WriteServerAndBridge(EventDataBase data, string action, string verb)
     {
         AuditRecord row = await audit
             .AppendAsync(AuditMapping.FromServerEvent(data, action, AuditSeverity.Info, verb, options.HostId))
             .ConfigureAwait(false);
-        if (!string.IsNullOrEmpty(data.InstanceName))
+        if (IsRecoveryAction(data, action) && !string.IsNullOrEmpty(data.InstanceName))
             alerts.NoteRecoveryAction(data.InstanceName, row.Id);
     }
+
+    // Whether a start/restart row is a RECOVERY action eligible to become a resolved crash's
+    // resolution.actionId (the alert↔audit bridge). A human start (operator/api/discord) and the
+    // watchdog's autonomous crash-RESTART recover a crashed server, so they bridge. A watchdog
+    // BOOT-AUTOSTART — the sole source of a system-origin server.start (kgsm-watchdog RespawnFresh; a
+    // caller may never declare origin=system, AuditOrigin.IsCallerDeclarable) — is a fresh bring-up at
+    // boot, not a response to a crash; bridging it could stamp a stale id on a later crash whose own
+    // recovery event happened to drop (the emit is best-effort), so it is audited but NEVER bridged.
+    // Keyed on ORIGIN, not "is it the watchdog", so any future autonomous start path inherits the safe
+    // non-bridging default rather than silently linking a stale id.
+    //   NOTE — narrow scope: this only stops boot-autostart from CONTRIBUTING a stale id. _lastStartAction
+    //   is still "the last start/restart ever" (not crash-episode-scoped), so a dropped recovery event for
+    //   an *operator* start can still stamp a stale operator id. That is a pre-existing, broader limit;
+    //   the real root-cause fix is episode-scoping/clearing _lastStartAction — a separate change.
+    internal static bool IsRecoveryAction(EventDataBase data, string action) =>
+        action != AuditAction.ServerStart || !IsSystemOrigin(data);
+
+    private static bool IsSystemOrigin(EventDataBase data) =>
+        string.Equals(data.Origin, AuditOrigin.System, StringComparison.OrdinalIgnoreCase);
 
     // Build a meta dict from non-empty pairs (a blank value is omitted, never stored as ""). Null if empty.
     private static IReadOnlyDictionary<string, string>? Meta(params (string Key, string? Value)[] pairs)

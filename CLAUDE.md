@@ -42,7 +42,9 @@ backend self-validated + the operational firewall **read** path live-validated 2
 interval IS the raise debounce; api-owned 30s resolve probation; mirrored escalation; retract on a vanished instance;
 honest-unknown on a blind poll; rebuilds on restart). The alert↔audit `resolution.actionId` bridges a
 start|restart recovery — operator/api OR (since kgsm-watchdog `d4b453f`) the watchdog's **autonomous** crash-restart,
-which now emits `instance_restarted` (system/system) → a `server.restart` row; only a stop-cleared crash links null.
+which now emits `instance_restarted` (system/system) → a `server.restart` row. The watchdog **boot-autostart**
+(`instance_started` system/system) is audited but **NOT** bridged (`IsRecoveryAction` excludes the system-origin
+start — a boot bring-up is not a crash recovery); a stop-cleared crash also links null.
 Built + self-validated + **LIVE-VALIDATED 2026-06-16** (real watchdog crash on `factorio-test` → `warn` raise →
 30s-probation resolve → `actionId:null` auto-heal, no flap); the contract is **proposed** (§6 divergences pending
 frontend sign-off))

@@ -51,10 +51,16 @@ resolved condition to the audit action that fixed it.
   **The bridge and its limit:** the watchdog's autonomous crash-restart now emits `instance_restarted`
   (`system`/`system`, kgsm-watchdog `d4b453f`) → a `server.restart` row through the same `WriteServerAndBridge`
   handler, so a **pure auto-heal bridges** `resolution.actionId` once that row is consumed (within the resolve
-  probation) — alongside an **operator/api** start|restart recovery. **Still null (never fabricated):** a
-  **stop-cleared** crash (a stop is not a recovery), and a crash that resolves before its `server.restart` row
-  is consumed (an honest race, not a fabricated link). *(The watchdog-emit half is live-validated on the wire;
-  the full on-host bridge round-trip with a running API is owed.)*
+  probation) — alongside an **operator/api** start|restart recovery. The watchdog's **boot-autostart** also
+  emits (`instance_started`, `system`/`system`) → it is **audited** as a `server.start` row but **NOT bridged**:
+  `KgsmAuditConsumer.IsRecoveryAction` excludes the system-origin start, because a fresh boot bring-up is not a
+  crash recovery — letting it bridge could stamp a stale id on a later crash whose own recovery event dropped
+  (honest-null over a plausible-but-wrong link). **Still null (never fabricated):** a **stop-cleared** crash (a
+  stop is not a recovery), and a crash that resolves before its `server.restart` row is consumed (an honest
+  race). **Pre-existing broader limit (not closed here):** `_lastStartAction` is "last start/restart ever," not
+  crash-episode-scoped, so a dropped recovery event for an *operator* start can still stamp a stale operator id;
+  the root-cause fix (episode-scoping/clearing `_lastStartAction`) is a separate change. *(The watchdog-emit
+  halves are live-validated on the wire; the full on-host bridge round-trip with a running API is owed.)*
 
 ## WS message contract (architecture.html §3·c)
 

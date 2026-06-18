@@ -42,9 +42,11 @@ namespace TheKrystalShip.Api.Services.Alerts;
 /// own, so this is the sole event integration; it is lock-free (a <see cref="ConcurrentDictionary{TKey,TValue}"/>
 /// read by the poll thread). The watchdog's autonomous crash-restart now emits <c>instance_restarted</c>
 /// (<c>system</c>/<c>system</c>, kgsm-watchdog <c>d4b453f</c>) → a <c>server.restart</c> row, so a pure
-/// auto-heal bridges its <c>actionId</c> once that row is consumed (within the resolve probation).
-/// <b>Limit:</b> a crash cleared by a STOP resolves with <c>actionId</c> <see langword="null"/> — a stop
-/// is not a recovery — never a fabricated link.</para>
+/// auto-heal bridges its <c>actionId</c> once that row is consumed (within the resolve probation). Not
+/// every <c>server.start</c> row is bridge-eligible, though — <see cref="Audit.KgsmAuditConsumer.IsRecoveryAction"/>
+/// decides; notably the watchdog's BOOT-AUTOSTART (a system-origin start) is audited but never bridged
+/// (a boot bring-up is not a crash recovery). <b>Limit:</b> a crash cleared by a STOP, or by a non-bridged
+/// action, resolves with <c>actionId</c> <see langword="null"/> — never a fabricated link.</para>
 /// <para><b>Threading.</b> The alert state (<see cref="_firing"/>/<see cref="_resolved"/>/<see cref="_clearSince"/>)
 /// is mutated ONLY by <see cref="Tick"/> on the single poll-loop thread; the controller reads the volatile
 /// immutable <see cref="_snapshot"/>; <see cref="_lastStartAction"/> is concurrent. No locks.</para>
