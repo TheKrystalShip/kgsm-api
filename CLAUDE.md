@@ -44,7 +44,9 @@ honest-unknown on a blind poll; rebuilds on restart). The alert↔audit `resolut
 start|restart recovery — operator/api OR (since kgsm-watchdog `d4b453f`) the watchdog's **autonomous** crash-restart,
 which now emits `instance_restarted` (system/system) → a `server.restart` row. The watchdog **boot-autostart**
 (`instance_started` system/system) is audited but **NOT** bridged (`IsRecoveryAction` excludes the system-origin
-start — a boot bring-up is not a crash recovery); a stop-cleared crash also links null.
+start — a boot bring-up is not a crash recovery); a stop-cleared crash also links null. The bridge is
+**episode-scoped** — `BuildResolution` stamps a stashed action only when its audit-row timestamp post-dates that
+crash's raise, so a dropped recovery event can't mislink a stale prior-episode id (root-cause closed).
 Built + self-validated + **LIVE-VALIDATED 2026-06-16** (real watchdog crash on `factorio-test` → `warn` raise →
 30s-probation resolve → `actionId:null` auto-heal, no flap); the contract is **proposed** (§6 divergences pending
 frontend sign-off))

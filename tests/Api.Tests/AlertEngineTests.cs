@@ -16,7 +16,8 @@ namespace TheKrystalShip.Api.Tests;
 /// <c>crash:&lt;id&gt;</c> firing record; <c>failed</c> escalates to danger and never auto-resolves; a clear
 /// resolves ONLY after the probation dwell (a crash-loop never flaps); a re-crash inside the window cancels
 /// the pending resolve; a vanished instance retracts (no rear-view); the alert↔audit bridge stamps the
-/// stashed <c>server.start</c> id as <c>resolution.actionId</c>; the rear-view ages off at retention.
+/// stashed <c>server.start</c> id as <c>resolution.actionId</c> — but only when it post-dates the raise
+/// (episode-scoped: a stale prior-episode action is never linked); the rear-view ages off at retention.
 /// </summary>
 public sealed class AlertEngineTests
 {
@@ -85,7 +86,8 @@ public sealed class AlertEngineTests
         AlertEngine engine = Engine();
 
         engine.Tick([Crashing("mc")], T0);
-        engine.NoteRecoveryAction("mc", "evt_recovered"); // the audit row id from the start|restart that held
+        // The start|restart that held, stamped AFTER the raise (T0) — bridge-eligible under episode-scoping.
+        engine.NoteRecoveryAction("mc", "evt_recovered", T0 + TimeSpan.FromSeconds(2));
 
         // The condition reads clear (probation starts HERE — at the first clear observation, not the raise).
         DateTimeOffset tClear = T0 + TimeSpan.FromSeconds(5);
@@ -113,9 +115,10 @@ public sealed class AlertEngineTests
     {
         AlertEngine engine = Engine();
 
-        // The watchdog auto-restarts after a crash — it emits NO start/restart event, so the engine never
-        // gets a NoteRecoveryAction. The condition still clears (Phase=running) and resolves after probation,
-        // but with actionId NULL: the fix was not an audited action, so we never fabricate a link.
+        // The watchdog auto-restarts but its recovery event was NOT audited (dropped best-effort, or the API
+        // wasn't listening), so the engine never gets a NoteRecoveryAction. The condition still clears
+        // (Phase=running) and resolves after probation, but with actionId NULL: no audited action to link, so
+        // we never fabricate one. (When the instance_restarted event IS audited it bridges — see below.)
         engine.Tick([Crashing("mc")], T0);
         DateTimeOffset tClear = T0 + TimeSpan.FromSeconds(5);
         engine.Tick([Running("mc")], tClear);
@@ -159,7 +162,7 @@ public sealed class AlertEngineTests
         AlertEngine engine = Engine();
 
         engine.Tick([Crashing("mc")], T0);
-        engine.NoteRecoveryAction("mc", "evt_irrelevant"); // a recovery id exists, but a STOP cleared it, not a (re)start
+        engine.NoteRecoveryAction("mc", "evt_irrelevant", T0 + TimeSpan.FromSeconds(2)); // a recovery id exists, but a STOP cleared it, not a (re)start
 
         // The operator stops it; still present but Desired=stopped → clears, then resolves after probation.
         DateTimeOffset tClear = T0 + TimeSpan.FromSeconds(5);
@@ -169,6 +172,46 @@ public sealed class AlertEngineTests
 
         Alert r = Assert.Single(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
         Assert.Null(r.Resolution!.ActionId); // honest: we don't fabricate a start id for a stop-cleared crash
+    }
+
+    [Fact]
+    public void StaleRecoveryFromPriorEpisode_IsNotBridged()
+    {
+        AlertEngine engine = Engine();
+
+        // A recovery action lingers from an EARLIER episode (or a fast auto-heal blip that never fired):
+        // stashed at T0, well before the crash below.
+        engine.NoteRecoveryAction("mc", "evt_stale", T0);
+
+        // A NEW crash episode raises an hour later; its OWN recovery event dropped (best-effort emit), so
+        // nothing fresh is stashed. The stale id predates this episode's raise → it must NOT be bridged:
+        // episode-scoping resolves with actionId null rather than mislinking the unrelated prior action.
+        DateTimeOffset tCrash = T0 + TimeSpan.FromHours(1);
+        engine.Tick([Crashing("mc")], tCrash);
+        DateTimeOffset tClear = tCrash + TimeSpan.FromSeconds(5);
+        engine.Tick([Running("mc")], tClear); // arm probation
+        engine.Tick([Running("mc")], tClear + AlertEngine.ResolveProbation + TimeSpan.FromSeconds(1));
+
+        Alert r = Assert.Single(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
+        Assert.Null(r.Resolution!.ActionId); // a pre-raise action is never THIS crash's fix
+    }
+
+    [Fact]
+    public void AutonomousAutoHeal_AuditedRecovery_BridgesActionId()
+    {
+        AlertEngine engine = Engine();
+
+        // The watchdog's autonomous crash-restart (d4b453f) emits instance_restarted → a server.restart
+        // audit row, stamped at its COMPLETION time (after the crash was observed). Under episode-scoping
+        // that still bridges, because the recovery post-dates the raise — the auto-heal link is preserved.
+        engine.Tick([Crashing("mc")], T0);
+        engine.NoteRecoveryAction("mc", "evt_autoheal", T0 + TimeSpan.FromSeconds(3)); // restart completed after the raise
+        DateTimeOffset tClear = T0 + TimeSpan.FromSeconds(5);
+        engine.Tick([Running("mc")], tClear); // arm probation
+        engine.Tick([Running("mc")], tClear + AlertEngine.ResolveProbation + TimeSpan.FromSeconds(1));
+
+        Alert r = Assert.Single(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
+        Assert.Equal("evt_autoheal", r.Resolution!.ActionId); // a real recovery within the episode bridges
     }
 
     [Fact]

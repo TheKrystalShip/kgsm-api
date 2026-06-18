@@ -55,12 +55,18 @@ resolved condition to the audit action that fixed it.
   emits (`instance_started`, `system`/`system`) → it is **audited** as a `server.start` row but **NOT bridged**:
   `KgsmAuditConsumer.IsRecoveryAction` excludes the system-origin start, because a fresh boot bring-up is not a
   crash recovery — letting it bridge could stamp a stale id on a later crash whose own recovery event dropped
-  (honest-null over a plausible-but-wrong link). **Still null (never fabricated):** a **stop-cleared** crash (a
-  stop is not a recovery), and a crash that resolves before its `server.restart` row is consumed (an honest
-  race). **Pre-existing broader limit (not closed here):** `_lastStartAction` is "last start/restart ever," not
-  crash-episode-scoped, so a dropped recovery event for an *operator* start can still stamp a stale operator id;
-  the root-cause fix (episode-scoping/clearing `_lastStartAction`) is a separate change. *(The watchdog-emit
-  halves are live-validated on the wire; the full on-host bridge round-trip with a running API is owed.)*
+  (honest-null over a plausible-but-wrong link — though episode-scoping below now also catches this). **Still
+  null (never fabricated):** a **stop-cleared** crash (a stop is not a recovery), and a crash that resolves
+  before its `server.restart` row is consumed (an honest race). **The bridge is episode-scoped (root-cause
+  closed).** `_lastStartAction` stashes the action's audit-row timestamp, and `BuildResolution` honors it only
+  when it **post-dates that crash's raise** (`action.At >= RaisedAt`). So a dropped recovery event can no
+  longer let a stale "last start/restart ever" — operator OR system — mislink a later, unrelated crash: the
+  resolution is honest `null` instead. Soundness rests on one invariant: kgsm/watchdog emit lifecycle events at
+  operation **completion** (server up), never initiation, so a real recovery's timestamp is always at/after the
+  poll that observed the server *down* (single-host → both share a wall clock). This subsumes the
+  `IsRecoveryAction` boot-autostart exclusion above (a boot start's timestamp predates any later crash anyway),
+  which is now belt-and-braces. *(The watchdog-emit halves are live-validated on the wire; the full on-host
+  bridge round-trip with a running API is owed.)*
 
 ## WS message contract (architecture.html §3·c)
 

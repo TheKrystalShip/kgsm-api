@@ -458,9 +458,13 @@ wiring* lands first.
   **api-owned resolve probation** (30s dwell, no flap); **mirrored escalation**; **retract** on a vanished
   instance; 24h rear-view; rebuilds-on-restart; honest-unknown on a blind poll.
 - **The bridge (and its limit):** `resolution.actionId` is set off a `server.start`/`server.restart` audit
-  row (the hand-off) only for an **operator/api** recovery; an **autonomous** watchdog restart emits no
-  audited action (verified against the watchdog source — only `crash`/`failed`), so a pure auto-heal links to
-  `null` (never fabricated). Auditing the watchdog's autonomous restart would bridge auto-heals — deferred.
+  row (the hand-off) for an **operator/api** recovery AND for the watchdog's **autonomous** crash-restart
+  (which emits `instance_restarted` system/system since kgsm-watchdog `d4b453f` → a `server.restart` row), so a
+  pure auto-heal bridges too. The bridge is **episode-scoped** (`AlertEngine.BuildResolution` honors a stashed
+  action only when its audit-row timestamp post-dates that crash's raise), so a dropped recovery event can never
+  let a stale prior-episode action mislink a later crash; the boot-autostart (system-origin start) is audited
+  but never bridged (`KgsmAuditConsumer.IsRecoveryAction`). A crash cleared by a **stop**, or whose own recovery
+  event dropped, links to `null` — never fabricated.
 - **Deferred (no honest source at M6·a — like M6·b's reserved `reachable`):** monitor CPU/RAM/disk thresholds
   (the `host-monitor`/`metrics` source — needs a dwell evaluator), leaf-down (already on the
   `capabilities.patch` axis — infrastructure, not a §3·c game-server condition), port-unreachable (no prober).
@@ -1286,6 +1290,16 @@ fabricated link (the doc's `actionId:"evt_restart_mc"` presumes an audited resta
 Bridging auto-heals would require auditing the watchdog's autonomous restart — a future kgsm-watchdog/kgsm-lib
 change, out of M6·a's api-only scope. This was caught by an advisor review before any "the bridge works" claim
 (the self-test called `NoteRecoveryAction` by hand; smoke has no watchdog — neither could catch a missing call).
+
+> **Update (2026-06-17/18) — both halves landed; this limit is closed.** kgsm-watchdog `d4b453f` made the
+> autonomous crash-restart emit `instance_restarted` (system/system) → a `server.restart` row, so a pure
+> auto-heal now bridges (live-validated). The latent risk that a *dropped* recovery event could leave a stale
+> "last start/restart ever" id to mislink a later crash is now closed by **episode-scoping**: `_lastStartAction`
+> stashes the action's audit-row timestamp, and `AlertEngine.BuildResolution` honors it only when it
+> post-dates that crash's raise (`action.At >= RaisedAt`) — so a stale prior-episode action (operator or
+> system) resolves to honest `null`. Sound because lifecycle events fire at operation completion (server up),
+> after the down-poll that raised. The boot-autostart (`instance_started` system/system) is audited but never
+> bridged (`IsRecoveryAction`); episode-scoping would reject its pre-crash timestamp regardless.
 
 **Contract divergences (PROPOSED — need frontend sign-off, like the M1·b DTO / M6·b's three decisions):**
 (1) the record carries a **top-level `hostId`** (beyond the §3·c example's `anchor.hostId`) so the SPA filters

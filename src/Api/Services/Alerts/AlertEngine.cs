@@ -42,11 +42,15 @@ namespace TheKrystalShip.Api.Services.Alerts;
 /// own, so this is the sole event integration; it is lock-free (a <see cref="ConcurrentDictionary{TKey,TValue}"/>
 /// read by the poll thread). The watchdog's autonomous crash-restart now emits <c>instance_restarted</c>
 /// (<c>system</c>/<c>system</c>, kgsm-watchdog <c>d4b453f</c>) → a <c>server.restart</c> row, so a pure
-/// auto-heal bridges its <c>actionId</c> once that row is consumed (within the resolve probation). Not
-/// every <c>server.start</c> row is bridge-eligible, though — <see cref="Audit.KgsmAuditConsumer.IsRecoveryAction"/>
-/// decides; notably the watchdog's BOOT-AUTOSTART (a system-origin start) is audited but never bridged
-/// (a boot bring-up is not a crash recovery). <b>Limit:</b> a crash cleared by a STOP, or by a non-bridged
-/// action, resolves with <c>actionId</c> <see langword="null"/> — never a fabricated link.</para>
+/// auto-heal bridges its <c>actionId</c> once that row is consumed (within the resolve probation). The
+/// bridge is <b>episode-scoped</b>: a stashed action stamps a resolution only if it post-dates that crash's
+/// raise (see <see cref="BuildResolution"/>), so a dropped recovery event can never let a stale action from
+/// a PRIOR crash episode stand in — the resolution is an honest <see langword="null"/> instead. Not every
+/// <c>server.start</c> row is even eligible: <see cref="Audit.KgsmAuditConsumer.IsRecoveryAction"/> also
+/// excludes the watchdog's BOOT-AUTOSTART (a system-origin start — a boot bring-up is not a crash recovery;
+/// belt-and-braces now, since episode-scoping would reject its pre-crash timestamp regardless). <b>Limit:</b>
+/// a crash cleared by a STOP, or whose own recovery event dropped, resolves with <c>actionId</c>
+/// <see langword="null"/> — never a fabricated link.</para>
 /// <para><b>Threading.</b> The alert state (<see cref="_firing"/>/<see cref="_resolved"/>/<see cref="_clearSince"/>)
 /// is mutated ONLY by <see cref="Tick"/> on the single poll-loop thread; the controller reads the volatile
 /// immutable <see cref="_snapshot"/>; <see cref="_lastStartAction"/> is concurrent. No locks.</para>
@@ -81,8 +85,9 @@ public sealed class AlertEngine : BackgroundService
     private readonly List<Alert> _resolved = new();                      // resolved, within retention
     private readonly Dictionary<string, DateTimeOffset> _clearSince = new(); // id -> when first read clear
 
-    // Written by the event thread (NoteStart), read by the poll thread (Tick). Lock-free.
-    private readonly ConcurrentDictionary<string, string> _lastStartAction = new();
+    // Written by the event thread (NoteRecoveryAction), read by the poll thread (Tick). Lock-free.
+    // Episode-scoped at read time by timestamp (see BuildResolution) — a stale action never bridges.
+    private readonly ConcurrentDictionary<string, RecoveryAction> _lastStartAction = new();
 
     private volatile Snapshot _snapshot = Snapshot.Empty;
 
@@ -103,15 +108,18 @@ public sealed class AlertEngine : BackgroundService
         _snapshot.Resolved.Where(a => a.ResolvedAt is { } r && r >= cutoff).ToList();
 
     /// <summary>Stash the audit <c>evt_</c> id of a <c>server.start</c>/<c>server.restart</c> (a "bring it
-    /// up" recovery action) so a later crash resolution can reference it as <c>resolution.actionId</c> (the
-    /// alert↔audit bridge). Called by the audit consumer AFTER the row is written. Lock-free; the last
-    /// recovery for a server wins (the action that held). The watchdog's autonomous crash-restart now emits
-    /// <c>instance_restarted</c> (system/system) → a <c>server.restart</c> row that lands here too, so an
-    /// auto-heal links its recovery; only a stop-cleared crash keeps <c>actionId</c> null, never fabricated.</summary>
-    public void NoteRecoveryAction(string serverId, string actionId)
+    /// up" recovery action) together with <paramref name="at"/> (the action's audit-row timestamp) so a
+    /// later crash resolution can reference it as <c>resolution.actionId</c> (the alert↔audit bridge).
+    /// Called by the audit consumer AFTER the row is written. Lock-free; the latest action for a server
+    /// wins. The stash is <b>episode-scoped at read time</b>: <see cref="BuildResolution"/> honors it only
+    /// if it post-dates the firing record's raise, so a stale action from a PRIOR crash episode (or a fast
+    /// auto-heal blip that never fired) can never stamp a later resolution — honest null over a stale link.
+    /// The watchdog's autonomous crash-restart emits <c>instance_restarted</c> (system/system) → a
+    /// <c>server.restart</c> row that lands here too, so a real auto-heal still bridges its recovery.</summary>
+    public void NoteRecoveryAction(string serverId, string actionId, DateTimeOffset at)
     {
         if (string.IsNullOrEmpty(serverId) || string.IsNullOrEmpty(actionId)) return;
-        _lastStartAction[serverId] = actionId;
+        _lastStartAction[serverId] = new RecoveryAction(actionId, at);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -238,7 +246,7 @@ public sealed class AlertEngine : BackgroundService
 
             _firing.Remove(id);
             _clearSince.Remove(id);
-            AlertResolution resolution = BuildResolution(serverId, states);
+            AlertResolution resolution = BuildResolution(serverId, record.RaisedAt, states);
             Alert resolved = record with { Status = AlertStatus.Resolved, ResolvedAt = now, Resolution = resolution };
             _resolved.Add(resolved);
             Publish(StreamProtocol.AlertResolve, id, new AlertResolved(id, resolution));
@@ -277,7 +285,7 @@ public sealed class AlertEngine : BackgroundService
             Attempts: obs.Attempts);
     }
 
-    private AlertResolution BuildResolution(string serverId, IReadOnlyList<WatchdogInstanceState> states)
+    private AlertResolution BuildResolution(string serverId, DateTimeOffset raisedAt, IReadOnlyList<WatchdogInstanceState> states)
     {
         WatchdogInstanceState? ws = states.FirstOrDefault(s => string.Equals(s.Name, serverId, StringComparison.Ordinal));
         bool running = ws is not null && string.Equals(ws.Phase, PhaseRunning, StringComparison.OrdinalIgnoreCase);
@@ -288,9 +296,17 @@ public sealed class AlertEngine : BackgroundService
             : "No longer in a crash state.";
 
         // actionId is the bridge: set only when a start|restart (operator/api OR the watchdog's own
-        // autonomous crash-restart — all audited recovery actions stashed by NoteRecoveryAction) brought it
-        // back to running. A stop-cleared crash resolves with actionId null — a stop is not a recovery.
-        string? actionId = running && _lastStartAction.TryGetValue(serverId, out string? a) ? a : null;
+        // autonomous crash-restart) brought it back to running. EPISODE-SCOPED: the stashed action must
+        // post-date THIS crash's raise (action.At >= raisedAt), so a stale id from a prior episode — or a
+        // dropped recovery event that left an older action in the map — can never stamp this resolution; we
+        // emit honest null instead. Soundness rests on ONE invariant: kgsm/watchdog emit lifecycle events at
+        // operation COMPLETION (server up), never at initiation, so a genuine recovery's timestamp is always
+        // at/after the poll that observed the server DOWN (RaisedAt). Single-host → action.At and raisedAt
+        // share a wall clock. (A stop-cleared crash resolves null regardless — running is false below.)
+        string? actionId = running
+            && _lastStartAction.TryGetValue(serverId, out RecoveryAction action)
+            && action.At >= raisedAt
+            ? action.Id : null;
         return new AlertResolution(AlertResolvedBy.System, AlertSource.Watchdog, reason, actionId);
     }
 
@@ -302,6 +318,9 @@ public sealed class AlertEngine : BackgroundService
 
     // The watchdog-observed crash condition for one instance (the inputs that shape the firing record).
     private readonly record struct Observed(bool Escalated, int Attempts, string Reason);
+
+    // A stashed recovery action: the audit evt_ id + when it happened (the row Ts). Episode-scoped at read.
+    private readonly record struct RecoveryAction(string Id, DateTimeOffset At);
 
     // The immutable read view the controller serves (republished each tick).
     private sealed record Snapshot(IReadOnlyList<Alert> Firing, IReadOnlyList<Alert> Resolved)

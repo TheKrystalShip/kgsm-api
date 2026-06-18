@@ -144,7 +144,7 @@ public sealed class KgsmAuditConsumer(
             .AppendAsync(AuditMapping.FromServerEvent(data, action, AuditSeverity.Info, verb, options.HostId))
             .ConfigureAwait(false);
         if (IsRecoveryAction(data, action) && !string.IsNullOrEmpty(data.InstanceName))
-            alerts.NoteRecoveryAction(data.InstanceName, row.Id);
+            alerts.NoteRecoveryAction(data.InstanceName, row.Id, row.Ts);
     }
 
     // Whether a start/restart row is a RECOVERY action eligible to become a resolved crash's
@@ -156,10 +156,13 @@ public sealed class KgsmAuditConsumer(
     // recovery event happened to drop (the emit is best-effort), so it is audited but NEVER bridged.
     // Keyed on ORIGIN, not "is it the watchdog", so any future autonomous start path inherits the safe
     // non-bridging default rather than silently linking a stale id.
-    //   NOTE — narrow scope: this only stops boot-autostart from CONTRIBUTING a stale id. _lastStartAction
-    //   is still "the last start/restart ever" (not crash-episode-scoped), so a dropped recovery event for
-    //   an *operator* start can still stamp a stale operator id. That is a pre-existing, broader limit;
-    //   the real root-cause fix is episode-scoping/clearing _lastStartAction — a separate change.
+    //   NOTE: the broad root-cause is now CLOSED — AlertEngine episode-scopes the bridge by timestamp (a
+    //   stashed action stamps a resolution only if it post-dates that crash's raise), so a dropped recovery
+    //   event for ANY start (operator OR system) can no longer leave a stale id to mislink a later crash.
+    //   This origin exclusion is therefore now defense-in-depth/semantic (a boot bring-up simply isn't a
+    //   recovery) rather than the sole guard — kept so the intent is explicit and any future autonomous
+    //   start stays non-bridging by default; episode-scoping alone would also reject a boot start's
+    //   pre-crash timestamp. See Services/Alerts/AlertEngine.BuildResolution.
     internal static bool IsRecoveryAction(EventDataBase data, string action) =>
         action != AuditAction.ServerStart || !IsSystemOrigin(data);
 
