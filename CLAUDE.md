@@ -58,9 +58,10 @@ Auth is the **trusted co-located relay**: the assistant gained a relay-auth path
 + forwarded Discord identity → principal, authority still from the bot, per-user memory key `web:<userId>` intact);
 the API forwards the verified caller's Discord id + `KGSM_API_ASSISTANT_RELAY_SECRET`. Degrade-gracefully capability
 gate (absent → 404, down → 503, reject → 502) decided before the SSE commits; `OpenTurnStreamAsync` uses
-`ResponseHeadersRead` so the long stream isn't `HttpClient.Timeout`-bound. **Happy-path SSE stream is the owed
-live-validate** (needs a running assistant + Ollama), like M3's mutation / M5's socket half)
-(`scripts/smoke.sh` **41/41** + **tests/Api.Tests 109**); M8 and the M6·a/M7 frontend gates are `planned`. **Auth is ON by default**
+`ResponseHeadersRead` so the long stream isn't `HttpClient.Timeout`-bound. The **full relay path is stub-proven**
+(a smoke stub-assistant phase gates on the secret + echoes the user → proves `X-Relay-Secret`/`X-Relay-User`
+forwarding + byte-faithful streaming); only a **real-model (Ollama) end-to-end** remains owed)
+(`scripts/smoke.sh` **42/42** + **tests/Api.Tests 109**); M8 and the M6·a/M7 frontend gates are `planned`. **Auth is ON by default**
 — `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4
 open trust window). Trust `PLAN.md`'s per-milestone status, not assumptions.
 

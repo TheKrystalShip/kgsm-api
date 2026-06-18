@@ -77,12 +77,20 @@ public sealed class AssistantClient : HttpClient
         request.Headers.Accept.ParseAdd("text/event-stream");
         if (!string.IsNullOrEmpty(_relaySecret))
             request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
-        request.Headers.TryAddWithoutValidation("X-Relay-User", relayUserId);
-        if (!string.IsNullOrEmpty(relayDisplayName))
-            request.Headers.TryAddWithoutValidation("X-Relay-User-Name", relayDisplayName);
+        // The user id is a Discord snowflake the API set at login (not free text); the display name is a
+        // user-controlled Discord value crossing a trust boundary, so strip control chars (CR/LF) — defense
+        // in depth against header injection, and it also avoids a weird display name throwing on send.
+        request.Headers.TryAddWithoutValidation("X-Relay-User", HeaderSafe(relayUserId));
+        string displayName = HeaderSafe(relayDisplayName);
+        if (!string.IsNullOrEmpty(displayName))
+            request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
 
         return await SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
     }
+
+    // Drop control chars (incl. CR/LF) so a user-controlled value can never split a header.
+    private static string HeaderSafe(string value) =>
+        string.IsNullOrEmpty(value) ? value : new string(value.Where(c => !char.IsControl(c)).ToArray());
 
     /// <summary>
     /// Liveness probe for the §4·b assistant capability: <c>GET /health</c>, a 2xx means the assistant

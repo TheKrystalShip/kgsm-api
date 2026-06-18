@@ -75,6 +75,14 @@ STUB_CPU=142.5; STUB_MEM=3422552064; STUB_IO_READ=4096; STUB_PIDS=12  # ioWrite 
 # M2 realtime: the stdlib WebSocket client + where it logs the frames it receives.
 WS_PY="/tmp/kgsm-api-smoke-ws.py"
 WS_LOG="/tmp/kgsm-api-smoke-ws.log"
+# M7 assistant relay: a TCP HTTP stub serving /health + a canned §5·a /turn SSE that GATES on the relay
+# secret and echoes the forwarded user — the deterministic stub analogue of the M2 stub monitor, proving
+# the API forwards X-Relay-Secret + X-Relay-User and streams the body verbatim (the relay machinery the
+# gate-only checks never reach).
+ASSIST_PORT="$(( PORT + 1 ))"
+ASSIST_URL="http://127.0.0.1:${ASSIST_PORT}"
+REL_SECRET="smoke-relay-secret"
+STUB_ASSIST_PY="/tmp/kgsm-api-smoke-stub-assistant.py"
 
 pass=0; fail=0
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
@@ -93,7 +101,7 @@ PIDS=()
 cleanup() {
   for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
   for p in "${PIDS[@]:-}"; do wait "$p" 2>/dev/null; done
-  rm -f "$STUB_SOCK" 2>/dev/null
+  rm -f "$STUB_SOCK" "$STUB_ASSIST_PY" 2>/dev/null
 }
 trap cleanup EXIT
 
@@ -132,6 +140,35 @@ d=json.load(open('/tmp/kgsm-api-smoke.body'))
 sys.exit(0 if d['capabilities']['metrics']['status']!='unknown' else 1)
 " 2>/dev/null; then return 0; fi
     sleep 0.1
+  done
+  return 1
+}
+
+# start_api_assistant URL SECRET — launch the API (auth still disabled) pointed at a stub assistant +
+# the relay secret, so the M7 relay path can actually execute. Same monitor/watchdog/kgsm wiring as
+# start_api (the absent defaults); only the assistant is added.
+start_api_assistant() {
+  KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" KGSM_API_HOST_ID="$HOST_ID" \
+  KGSM_API_MONITOR_SOCKET="$MON_SOCK" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" \
+  KGSM_API_KGSM_PATH="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
+  KGSM_API_ASSISTANT_URL="$1" KGSM_API_ASSISTANT_RELAY_SECRET="$2" \
+    dotnet "$DLL" >/tmp/kgsm-api-smoke-m7.log 2>&1 &
+  SRV=$!; PIDS+=("$SRV")
+  for _ in $(seq 1 80); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
+  return 1
+}
+
+# wait_assistant_operational — block until the LeafHealthMonitor has polled the stub assistant's
+# /health and flipped the §4·b assistant capability to 'operational' (so the relay's capability gate
+# admits the call instead of 503-ing on a cold/down read).
+wait_assistant_operational() {
+  for _ in $(seq 1 60); do
+    if curl -fsS "${BASE}/api/v1/hosts/${HOST_ID}" -o /tmp/kgsm-api-smoke.body 2>/dev/null && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if d['capabilities']['assistant']['status']=='operational' else 1)
+" 2>/dev/null; then return 0; fi
+    sleep 0.2
   done
   return 1
 }
@@ -718,11 +755,75 @@ sys.exit(0 if (isinstance(d.get('data'),list) and len(d['data'])==0) else 1)
     && ok "POST assistant/turn blank prompt → 400 {error:{code:bad_request}}" \
     || bad "M7 blank-prompt 400 (code=$CODE body=$BODY)"
 
-  echo "  (note: the happy-path SSE relay — a real/stub assistant streaming §5·a frames back verbatim — is a"
-  echo "   live/stub concern like M2/M3's streaming halves; the auth+capability gates are proven here + in tests)"
+  echo "  (note: the FULL relay path — identity + secret forwarding + byte-faithful streaming — is proven by the"
+  echo "   dedicated stub-assistant phase below; only a real-model (Ollama) end-to-end remains a live nicety)"
 
   stop_api
 fi
+
+# --- M7 stub assistant relay: the FULL relay path (a fresh API pointed at a stub assistant) ---------
+# The gate-only checks above never reach the relay machinery (assistant absent). Here a stub assistant
+# GATES on the relay secret (wrong/absent secret -> 401, which the API maps to 502), so the API reaching
+# 200 PROVES it forwarded the correct X-Relay-Secret; the stub echoes X-Relay-User back in the stream,
+# proving identity forwarding; and the canned §5·a frames coming through verbatim prove the byte relay.
+echo "==> M7 assistant relay — stub assistant (forwards X-Relay-Secret + X-Relay-User; streams §5·a frames verbatim)"
+cat > "$STUB_ASSIST_PY" <<'PYEOF'
+import os, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+SECRET = os.environ.get("REL_SECRET", "")
+
+class H(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.0"  # connection-close delimits the finite SSE body for the client
+    def log_message(self, *a): pass
+
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+            self.wfile.write(b'{"status":"ok"}')
+        else:
+            self.send_response(404); self.end_headers()
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0) or 0)
+        if n: self.rfile.read(n)
+        if self.path != "/turn":
+            self.send_response(404); self.end_headers(); return
+        # Gate exactly like the real assistant's relay path: a wrong/absent secret is 401.
+        if self.headers.get("X-Relay-Secret") != SECRET:
+            self.send_response(401); self.end_headers(); return
+        user = self.headers.get("X-Relay-User", "")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+        self.wfile.write(b'event: text.delta\ndata: {"type":"text.delta","text":"relay ok"}\n\n')
+        self.wfile.write(('event: done\ndata: {"type":"done","relayUser":"%s"}\n\n' % user).encode())
+
+HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PYEOF
+REL_SECRET="$REL_SECRET" python3 "$STUB_ASSIST_PY" "$ASSIST_PORT" >/tmp/kgsm-api-smoke-stub-assistant.log 2>&1 &
+ASSIST_PID=$!; PIDS+=("$ASSIST_PID")
+for _ in $(seq 1 40); do curl -fsS "${ASSIST_URL}/health" >/dev/null 2>&1 && break; sleep 0.1; done
+
+if start_api_assistant "$ASSIST_URL" "$REL_SECRET"; then
+  if wait_assistant_operational; then
+    req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
+    if [[ "$CODE" == 200 ]] \
+       && grep -q 'event: text.delta' <<<"$BODY" \
+       && grep -q 'event: done' <<<"$BODY" \
+       && grep -q '"relayUser":"dev"' <<<"$BODY"; then
+      ok "relay 200 SSE: stub gated on the secret (200 ⇒ correct X-Relay-Secret forwarded), X-Relay-User=dev echoed, §5·a frames verbatim"
+    else
+      bad "M7 stub relay (code=$CODE body=$BODY; stub log: $(cat /tmp/kgsm-api-smoke-stub-assistant.log 2>/dev/null))"
+    fi
+  else
+    bad "M7 stub relay: assistant capability never went operational (api log: $(tail -5 /tmp/kgsm-api-smoke-m7.log 2>/dev/null))"
+  fi
+  stop_api
+else
+  bad "M7 stub relay: API never healthy; log: $(tail -20 /tmp/kgsm-api-smoke-m7.log 2>/dev/null)"
+fi
+kill "$ASSIST_PID" 2>/dev/null; wait "$ASSIST_PID" 2>/dev/null
 
 # --- M4·a auth: the no-token sweep (auth ENABLED) --------------------------
 echo "==> M4·a auth checks — AUTH ENABLED instance (no-token sweep; full tier matrix in tests/Api.Tests)"
