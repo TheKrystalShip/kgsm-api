@@ -55,7 +55,7 @@
          List<PortMapping> (kgsm now emits [{start,end,protocol}] on the blueprints JSON surface), so
          the library catalog projects it directly — no port-string parsing anywhere. Never shell
          kgsm.sh / open the firewall socket directly. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.17.0" />
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.18.0" />
 
     <!-- The shared GET /metrics wire contract (Snapshot graph + source-gen camelCase
          JSON), built in kgsm-monitor. We deserialize the monitor scrape into these exact

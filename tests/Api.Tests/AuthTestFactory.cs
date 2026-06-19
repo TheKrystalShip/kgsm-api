@@ -16,7 +16,7 @@ namespace TheKrystalShip.Api.Tests;
 /// the discord.com boundary is faked. The engine/monitor are left unprovisioned so reads degrade to
 /// 200 (empty roster / null capacity) with no external dependency.
 /// </summary>
-public sealed class AuthTestFactory : WebApplicationFactory<Program>
+public class AuthTestFactory : WebApplicationFactory<Program>
 {
     public const string HostId = "test-host";
     public const string SigningKey = "test-signing-key-please-ignore-deterministic";

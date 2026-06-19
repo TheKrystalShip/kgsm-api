@@ -809,6 +809,33 @@ sys.exit(0 if (isinstance(d.get('data'),list) and len(d['data'])==0) else 1)
   echo "  (note: the FULL relay path — identity + secret forwarding + byte-faithful streaming — is proven by the"
   echo "   dedicated stub-assistant phase below; only a real-model (Ollama) end-to-end remains a live nicety)"
 
+  # --- M8·b install / uninstall: the create/delete write path (gate only — NO mutation) ------
+  echo "==> M8·b install/uninstall checks — POST /servers + DELETE /servers/{id} (gate/rejection, no mutation)"
+
+  # 36. A missing blueprint is rejected before anything runs -> 400 bad_request. (A VALID blueprint would
+  #     really install under AUTH_DISABLED, so smoke only ever sends the rejection cases — exactly like M3.)
+  req POST /api/v1/servers -H 'Content-Type: application/json' -d '{}'
+  [[ "$CODE" == 400 ]] && grep -q '"code":"bad_request"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
+    && ok "POST /servers no blueprint → 400 {error:{code:bad_request}}" \
+    || bad "M8·b install no-blueprint 400 (code=$CODE body=$BODY)"
+
+  # 37. An unknown blueprint: the backend assigns the id via kgsm generate-id, which validates the blueprint
+  #     and fails -> 400 (nothing can be installed). The name is bogus, so kgsm creates NOTHING.
+  req POST /api/v1/servers -H 'Content-Type: application/json' -d '{"blueprint":"zzzz-not-a-real-blueprint"}'
+  [[ "$CODE" == 400 ]] && grep -q '"code":"bad_request"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
+    && ok "POST /servers unknown blueprint → 400 (generate-id rejects, nothing created)" \
+    || bad "M8·b install unknown-blueprint 400 (code=$CODE body=$BODY)"
+
+  # 38. Uninstall an unknown server -> OUR 404 envelope (the roster is the authority, like the command path).
+  req DELETE /api/v1/servers/does-not-exist
+  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
+    && ok "DELETE /servers/{unknown} → 404 {error:{code:not_found}}" \
+    || bad "M8·b uninstall unknown-server 404 (code=$CODE body=$BODY)"
+
+  echo "  (note: the 202 + install/uninstall job lifecycle + verify server.patch/server.removed + the"
+  echo "   server.install/uninstall audit echo are code-path-only in smoke — a real install mutates the host,"
+  echo "   so it is a trusted-host live-validate, like M3's mutation happy path)"
+
   stop_api
 fi
 
@@ -900,9 +927,13 @@ for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/aler
 done
 req POST /api/v1/servers/x/commands -H 'Content-Type: application/json' -d '{"verb":"start"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST commands -> $CODE $BODY)"; }
+req POST /api/v1/servers -H 'Content-Type: application/json' -d '{"blueprint":"factorio"}'
+[[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST /servers install -> $CODE $BODY)"; }
+req DELETE /api/v1/servers/x
+[[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (DELETE /servers/{id} -> $CODE $BODY)"; }
 req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/_dbcheck,/_throw,POST commands,POST assistant/turn (no open back door)" \
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,POST assistant/turn (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 32. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).

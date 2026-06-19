@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Infrastructure;
 using TheKrystalShip.Api.Json;
@@ -43,7 +45,20 @@ public class Startup(IConfiguration configuration)
             // (NotFound(), BadRequest(), …) to RFC ProblemDetails, so they emit a bodyless
             // status that UseStatusCodePages renders as our frozen { error: … } envelope.
             // One error shape across the whole surface — never the framework's ProblemDetails.
-            .ConfigureApiBehaviorOptions(o => o.SuppressMapClientErrors = true);
+            .ConfigureApiBehaviorOptions(o =>
+            {
+                o.SuppressMapClientErrors = true;
+                // A model-binding/validation failure (malformed JSON, or a body field of the wrong type —
+                // e.g. the M8 InstallRequest's typed reserved fields) is rejected by [ApiController] BEFORE
+                // the action runs, and would otherwise emit the framework's ValidationProblemDetails. Route
+                // it through the SAME frozen { error } envelope so every non-2xx is one shape (invariant #4 /
+                // the CLAUDE.md typed-body gotcha). SuppressMapClientErrors lets this BadRequestObjectResult
+                // pass through unmapped.
+                o.InvalidModelStateResponseFactory = static _ =>
+                    new BadRequestObjectResult(new ErrorEnvelope(new ErrorBody(
+                        "bad_request",
+                        "the request body is missing, malformed, or has a field of the wrong type")));
+            });
         services.ConfigureHttpJsonOptions(o => ApiJson.Configure(o.SerializerOptions));
 
         // EF Core over SQLite — the API's own operational metadata (sessions M4, audit M5).

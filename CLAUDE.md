@@ -68,10 +68,26 @@ increment (honesty bars a fuzzy `DisplayName`→RAWG match; resolve only from an
 `name` falls back to the blueprint `id` when uncurated; steam ids are honest-`null` not `"0"`; `specs`
 all-null today; `ports` structured `[{start,end,proto}]` emitted **directly by kgsm** on `blueprints` JSON
 (the 1.10.0 canonical-port-format migration extended to the blueprint surface — `Blueprint.Ports` is now
-`List<PortMapping>`), so the api never parses a port string. kgsm-lib bumped to **1.17.0** (BREAKING))
-(`scripts/smoke.sh` **44/44** — incl. a live 29-blueprint catalog read proving the bash→lib→api chain — +
-**tests/Api.Tests 120**); M8·b
-(install) and the M6·a/M7/M8·a frontend gates are `planned`. **Auth is ON by default**
+`List<PortMapping>`), so the api never parses a port string. kgsm-lib bumped to **1.17.0** (BREAKING)), and now
+**M8·b** (install/uninstall — `POST /servers` + `DELETE /servers/{id}`, **operator**-gated, async → `202` + a
+`job` reusing the M3 `JobRegistry`/`CommandRunner`. `install`/`uninstall` are new `job.Verb`s but NOT in the
+`/commands` `IsKnown` set — dedicated endpoints. Honors `blueprint`(required)+`name`+`origin`; the rest of the
+§3·h form is accepted-but-inert. The backend assigns the id via kgsm `generate-id` (passed as the install
+`--name`, which kgsm echoes verbatim → `job.serverId` == the new instance == the audit/verify key). **Echo-path
+audit, NO double-write** — the command stamps actor+origin, kgsm emits `instance_installed`/`_uninstalled`, the
+M5 consumer writes `server.install`/`server.uninstall`; verify = `server.patch` (new server) / `server.removed`
+(tombstone). **No upstream work** — kgsm-lib `Install`/`Uninstall`/`GenerateId`, the bash events with global
+provenance stamping, and the audit consumer handlers were all already in place; `name` is honored as the kgsm
+instance name (a free-text display name is deferred upstream))
+(`scripts/smoke.sh` **47/47** — +3 M8·b gate checks, all rejection/no-mutation like M3 — +
+**tests/Api.Tests 135** (incl. the now-closed model-validation `{error}`-envelope gap on typed bodies — see Gotchas).
+**Install + uninstall LIVE-VALIDATED GREEN end-to-end on `hotrod` 2026-06-19** (real `POST /servers {factorio}` →
+`server.install`; real `DELETE` → instance removed + `server.uninstall` `origin:api`). The uninstall surfaced — and
+the fix resolved — an **upstream** gap: `kgsm uninstall` was interactive-only (no bypass, returned `0` on cancel), so
+**kgsm gained a `--force`/`-y` flag** (+ `EC_CANCELLED` on decline) and **kgsm-lib `Uninstall` passes `--force`**
+(bumped here `1.17.0 → 1.18.0`, **no kgsm-api code change**));
+the config surfaces (`/settings`, `/me`, `/integrations/discord`) and the M6·a/M7/M8·a/M8·b frontend gates are
+`planned`. **Auth is ON by default**
 — `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4
 open trust window). Trust `PLAN.md`'s per-milestone status, not assumptions.
 
@@ -272,6 +288,11 @@ of leaves present.
 - **`SuppressMapClientErrors=true`** (Startup): `[ApiController]` would otherwise turn a
   controller `NotFound()`/`BadRequest()` into RFC-9110 ProblemDetails. We suppress it so 4xx
   flow through `UseStatusCodePages` → the `{error}` envelope (one error shape everywhere).
-  ⚠ When request bodies arrive (M3/M8), model-validation `400`s also bypass ProblemDetails
-  and must be routed through the envelope — don't let that surprise you.
+  **⚠ RESOLVED at M8·b:** `SuppressMapClientErrors` only covers *result*-based 4xx — a model-binding/
+  validation `400` (malformed JSON, or a body field of the wrong type, e.g. `InstallRequest`'s typed
+  `int?`/`bool?` reserved fields) is rejected by `[ApiController]` **before the action runs** and emitted
+  `ValidationProblemDetails`. Now Startup's `ConfigureApiBehaviorOptions` sets an
+  `InvalidModelStateResponseFactory` that returns the frozen `{error:{code:"bad_request"…}}` envelope
+  (regression-tested, type-mismatch + malformed JSON). **Don't remove it** — it's what keeps invariant #4
+  (every non-2xx is the envelope) true for any typed request body, here and on every future POST/PATCH.
 - Nothing here is committed unless the user asked; commit/push only on explicit request.

@@ -16,14 +16,58 @@ namespace TheKrystalShip.Api.Contracts;
 public sealed record CommandRequest(string? Verb, string? Origin = null);
 
 /// <summary>
-/// The closed lifecycle verb set the API admits in M3. Server-defined — the client (or, later, the
-/// model) cannot invent one.
+/// The request body for <c>POST /servers</c> (architecture.html §3·h, M8·b) — the panel's one
+/// <em>create</em> operation. The contract is deliberately lopsided: the client may send the whole
+/// install form, but the installer (kgsm) needs exactly one thing — which <strong>blueprint</strong>.
+/// <list type="bullet">
+///   <item><description><b>Required:</b> <see cref="Blueprint"/> — the library id the user picked.</description></item>
+///   <item><description><b>Honored today:</b> <see cref="Name"/> — passed to kgsm as the instance
+///     <em>name</em> (not a free-text display label: kgsm validates it as an instance id and falls back
+///     to an auto-generated <c>blueprint-suffix</c> if it isn't a usable unique name). <see cref="Origin"/>
+///     (the driving surface, like <see cref="CommandRequest.Origin"/>) is stamped onto the engine call so
+///     the resulting <c>instance_installed</c> event — and its <c>server.install</c> audit row — records it.</description></item>
+///   <item><description><b>Reserved — accepted &amp; ignored (additive-only, §3·h):</b> everything else.
+///     Sending them keeps the schema forward-compatible so the backend can grow into a field with no
+///     client change and no version bump; until then they are <em>inert</em> (never silently half-applied).</description></item>
+/// </list>
+/// Install is async: the endpoint returns a <see cref="Job"/> (not a server). When it completes the new
+/// server appears on <c>/servers</c> with a backend-assigned id and a <c>server.install</c> audit entry.
+/// </summary>
+public sealed record InstallRequest(
+    string? Blueprint,
+    string? Name = null,
+    string? Origin = null,
+    // ---- reserved: accepted & stored, not yet acted on (§3·h additive-only) ----
+    string? HostId = null,
+    string? Version = null,
+    int? Port = null,
+    int? QueryPort = null,
+    int? Slots = null,
+    string? Dir = null,
+    string? Password = null,
+    bool? Autostart = null);
+
+/// <summary>
+/// The closed lifecycle verb set the API admits in M3 (+ <c>open_ports</c> at M6·b). Server-defined —
+/// the client (or, later, the model) cannot invent one. <see cref="Install"/>/<see cref="Uninstall"/>
+/// (M8·b) are <em>not</em> part of <see cref="IsKnown"/>: they are NOT <c>POST /servers/{id}/commands</c>
+/// verbs (one creates a server, the other targets the collection) — they have dedicated endpoints
+/// (<c>POST /servers</c>, <c>DELETE /servers/{id}</c>). These constants only name the <see cref="Job.Verb"/>
+/// so install/uninstall reuse the shared <c>JobRegistry</c>/<c>CommandRunner</c> (one job model, one
+/// in-flight slot per server, one verify discipline).
 /// </summary>
 public static class CommandVerb
 {
     public const string Start = "start";
     public const string Stop = "stop";
     public const string Restart = "restart";
+
+    /// <summary>Install a new instance from a blueprint (M8·b — <c>POST /servers</c>). NOT in
+    /// <see cref="IsKnown"/>; the job's <see cref="Job.ServerId"/> is the backend-assigned instance id.</summary>
+    public const string Install = "install";
+
+    /// <summary>Uninstall an instance (M8·b — <c>DELETE /servers/{id}</c>). NOT in <see cref="IsKnown"/>.</summary>
+    public const string Uninstall = "uninstall";
 
     /// <summary>
     /// Open this server's required host-firewall ports (M6·b, architecture.html §3·g). <strong>Intent

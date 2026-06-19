@@ -9,11 +9,13 @@ using TheKrystalShip.KGSM.Core.Models;
 namespace TheKrystalShip.Api.Services.Commands;
 
 /// <summary>
-/// Executes an admitted command job off the request path (M3 lifecycle + M6·b <c>open_ports</c>). The
-/// controller returns <c>202</c> immediately; this runner drives the verb to completion on a background
-/// task, streaming each state transition as <c>job.patch</c> on the <c>jobs</c> topic and, on settle, a
-/// fresh verify patch — <c>server.patch</c> (run-state, lifecycle verbs) or <c>network.patch</c> on
-/// <c>servers/{id}/network</c> (the firewall re-probe, <c>open_ports</c>).
+/// Executes an admitted command job off the request path (M3 lifecycle + M6·b <c>open_ports</c> + M8·b
+/// <c>install</c>/<c>uninstall</c>). The controller returns <c>202</c> immediately; this runner drives the
+/// verb to completion on a background task, streaming each state transition as <c>job.patch</c> on the
+/// <c>jobs</c> topic and, on settle, a fresh verify patch — <c>server.patch</c> (run-state for the
+/// lifecycle verbs; the newly-created instance for <c>install</c>), <c>server.removed</c> (the tombstone
+/// for <c>uninstall</c>), or <c>network.patch</c> on <c>servers/{id}/network</c> (the firewall re-probe,
+/// <c>open_ports</c>).
 /// </summary>
 /// <remarks>
 /// <para><b>Lifetime (load-bearing):</b> a singleton. The <c>202</c> disposes the request's DI scope, but
@@ -21,11 +23,12 @@ namespace TheKrystalShip.Api.Services.Commands;
 /// conditionally-registered singleton (<see cref="IFirewallService"/>) — so the background task creates its
 /// <b>own</b> scope via <see cref="IServiceScopeFactory"/> and resolves them <em>there</em>. Only value data
 /// (the <see cref="Job"/>) crosses the async boundary; never a request-scoped service.</para>
-/// <para><b>Audit split (the no-double-write contract):</b> lifecycle verbs stamp <c>actor</c>+<c>origin</c>
-/// onto the engine call and the M5 consumer records the event echo — this runner writes NO audit row for
-/// them. <c>open_ports</c> goes through <see cref="IFirewallService"/>, which emits no event, so it is the
-/// <c>auth.*</c> case: this runner writes the <c>network.ports.open</c> row <b>directly</b>. Disjoint by
-/// construction — kgsm never echoes an api firewall call.</para>
+/// <para><b>Audit split (the no-double-write contract):</b> the lifecycle verbs <em>and</em>
+/// <c>install</c>/<c>uninstall</c> stamp <c>actor</c>+<c>origin</c> onto the engine call and the M5 consumer
+/// records the event echo (<c>server.start/stop/restart</c>, <c>server.install</c>, <c>server.uninstall</c>)
+/// — this runner writes NO audit row for them. <c>open_ports</c> goes through <see cref="IFirewallService"/>,
+/// which emits no event, so it is the <c>auth.*</c> case: this runner writes the <c>network.ports.open</c>
+/// row <b>directly</b>. Disjoint by construction — kgsm never echoes an api firewall call.</para>
 /// <para><b>Always settles:</b> the verb runs inside try/finally so a started job always reaches a terminal
 /// state — releasing the registry's in-flight slot even if the verb throws.</para>
 /// </remarks>
@@ -49,9 +52,27 @@ public sealed class CommandRunner(
     /// <c>open_ports</c>, onto the direct audit row this runner writes.
     /// </summary>
     public void Start(Job job, string? actor = null, string? origin = null) =>
-        _ = Task.Run(() => ExecuteAsync(job, actor, origin));
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null));
 
-    private async Task ExecuteAsync(Job job, string? actor, string? origin)
+    /// <summary>
+    /// Fire-and-forget an <c>install</c> job (M8·b — <c>POST /servers</c>). <paramref name="blueprint"/> is
+    /// the source blueprint; <paramref name="job"/>'s <see cref="Job.ServerId"/> is the backend-assigned
+    /// instance id (the controller resolved it via <c>GenerateId</c> and it is passed as the install
+    /// <c>--name</c>, which kgsm honors verbatim for an already-unique name). No audit row is written here —
+    /// kgsm's <c>instance_installed</c> echo carries the stamped provenance (the lifecycle case).
+    /// </summary>
+    public void StartInstall(Job job, string blueprint, string? actor = null, string? origin = null) =>
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint));
+
+    /// <summary>
+    /// Fire-and-forget an <c>uninstall</c> job (M8·b — <c>DELETE /servers/{id}</c>). Same echo-path
+    /// discipline as the lifecycle verbs; the verify pushes a <c>server.removed</c> tombstone once the
+    /// instance leaves the roster.
+    /// </summary>
+    public void StartUninstall(Job job, string? actor = null, string? origin = null) =>
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null));
+
+    private async Task ExecuteAsync(Job job, string? actor, string? origin, string? blueprint)
     {
         bool ok = false;
         string? error = null;
@@ -60,11 +81,15 @@ public sealed class CommandRunner(
             Publish(registry.Update(job with { State = JobState.Running }));
 
             // Own scope — the request scope is long gone; the kgsm-lib services are transient/process-based
-            // (lifecycle) or conditionally-registered (firewall), so resolve them here, never capture them.
+            // (lifecycle/install) or conditionally-registered (firewall), so resolve them here, never capture them.
             using IServiceScope scope = scopeFactory.CreateScope();
-            (ok, error) = job.Verb == CommandVerb.OpenPorts
-                ? await RunOpenPortsAsync(scope, job, actor, origin).ConfigureAwait(false)
-                : RunLifecycle(scope, job, actor, origin);
+            (ok, error) = job.Verb switch
+            {
+                CommandVerb.OpenPorts => await RunOpenPortsAsync(scope, job, actor, origin).ConfigureAwait(false),
+                CommandVerb.Install => RunInstall(scope, job, blueprint!, actor, origin),
+                CommandVerb.Uninstall => RunUninstall(scope, job, actor, origin),
+                _ => RunLifecycle(scope, job, actor, origin),
+            };
         }
         catch (Exception ex)
         {
@@ -85,13 +110,22 @@ public sealed class CommandRunner(
 
         // Verify: re-read authoritative state and reflect it. Best-effort — if the read fails, the next
         // poll/diff cycle reconciles instead (coalesced by the same key). open_ports verifies the firewall
-        // (network.patch); lifecycle verbs verify run-state (server.patch).
+        // (network.patch); uninstall pushes the server.removed tombstone once the instance is gone; the
+        // lifecycle verbs and install verify run-state/roster (server.patch — install surfaces the new server).
         try
         {
-            if (job.Verb == CommandVerb.OpenPorts)
-                await PublishNetworkPatchAsync(job.ServerId).ConfigureAwait(false);
-            else
-                await PublishServerPatchAsync(job.ServerId).ConfigureAwait(false);
+            switch (job.Verb)
+            {
+                case CommandVerb.OpenPorts:
+                    await PublishNetworkPatchAsync(job.ServerId).ConfigureAwait(false);
+                    break;
+                case CommandVerb.Uninstall:
+                    await PublishServerRemovedAsync(job.ServerId).ConfigureAwait(false);
+                    break;
+                default:
+                    await PublishServerPatchAsync(job.ServerId).ConfigureAwait(false);
+                    break;
+            }
         }
         catch (Exception ex)
         {
@@ -114,10 +148,43 @@ public sealed class CommandRunner(
             CommandVerb.Restart => lifecycle.Restart(job.ServerId, actor, origin),
             _ => new KgsmResult(1, "", $"unknown verb '{job.Verb}'"),
         };
-        if (result.IsSuccess)
-            return (true, null);
-        return (false, string.IsNullOrWhiteSpace(result.Stderr) ? $"exit {result.ExitCode}" : result.Stderr.Trim());
+        return result.IsSuccess ? (true, null) : (false, Detail(result));
     }
+
+    // install (M8·b) — create a new instance from `blueprint`. The job's ServerId is the backend-assigned
+    // id the controller resolved via GenerateId; passing it as the install `--name` lands the instance
+    // exactly there (kgsm's generate-id echoes an already-unique name verbatim), so the verify target and
+    // the instance_installed event's name match. installDir/version stay null — reserved/inert per §3·h
+    // (only blueprint + name are honored today). NO audit row here: kgsm emits instance_installed →
+    // KgsmAuditConsumer writes the server.install echo with the stamped provenance (the lifecycle case, NOT
+    // the open_ports direct write).
+    private (bool ok, string? error) RunInstall(
+        IServiceScope scope, Job job, string blueprint, string? actor, string? origin)
+    {
+        var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
+        if (instances is null)
+            return (false, "engine not provisioned");
+
+        KgsmResult result = instances.Install(blueprint, installDir: null, version: null, name: job.ServerId, actor, origin);
+        return result.IsSuccess ? (true, null) : (false, Detail(result));
+    }
+
+    // uninstall (M8·b) — remove the instance. Same echo-path discipline: kgsm emits instance_uninstalled →
+    // KgsmAuditConsumer writes the server.uninstall row. No audit write here.
+    private (bool ok, string? error) RunUninstall(IServiceScope scope, Job job, string? actor, string? origin)
+    {
+        var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
+        if (instances is null)
+            return (false, "engine not provisioned");
+
+        KgsmResult result = instances.Uninstall(job.ServerId, actor, origin);
+        return result.IsSuccess ? (true, null) : (false, Detail(result));
+    }
+
+    // kgsm's real failure detail (stderr), or a bare exit code when it said nothing — never a fabricated
+    // success message.
+    private static string Detail(KgsmResult r) =>
+        string.IsNullOrWhiteSpace(r.Stderr) ? $"exit {r.ExitCode}" : r.Stderr.Trim();
 
     // open_ports (M6·b) — intent only: the target ports are SERVER-DERIVED from the instance's own
     // Instance.Ports (never a client list). Opens through IFirewallService (no kgsm event → a DIRECT audit
@@ -181,6 +248,23 @@ public sealed class CommandRunner(
         if (server is not null)
             hub.Publish(StreamProtocol.ServersTopic, StreamProtocol.ServerEntityKey(serverId),
                 new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerPatch, server));
+    }
+
+    // The uninstall verify: if the instance has left the roster, push the server.removed tombstone; if it
+    // somehow survived (the uninstall failed), push its fresh server.patch instead — honest either way, and
+    // both share the ServerEntityKey coalesce slot so the newer correctly supersedes a queued older frame.
+    private async Task PublishServerRemovedAsync(string serverId)
+    {
+        IReadOnlyList<Server> servers = await aggregator.GetServersAsync(CancellationToken.None).ConfigureAwait(false);
+        Server? server = servers.FirstOrDefault(s => string.Equals(s.Id, serverId, StringComparison.Ordinal));
+        if (server is not null)
+        {
+            hub.Publish(StreamProtocol.ServersTopic, StreamProtocol.ServerEntityKey(serverId),
+                new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerPatch, server));
+            return;
+        }
+        hub.Publish(StreamProtocol.ServersTopic, StreamProtocol.ServerEntityKey(serverId),
+            new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerRemoved, new ServerRemoved(serverId)));
     }
 
     // The open_ports verify: re-probe the firewall and push the fresh network block on servers/{id}/network.

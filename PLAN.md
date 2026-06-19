@@ -541,8 +541,8 @@ wiring* lands first.
   job + `server.install` audit; `/settings`, `/me`, `/integrations/discord` (+ `/test`).
 - **Depends:** M3 (jobs), M5 (audit).
 - **Split** (M8 is several surfaces): **M8·a** (the library catalog read — built, below),
-  then **M8·b** (install `POST /servers` + the install job + uninstall), then the config
-  surfaces (`/settings`, `/me`, `/integrations/discord`).
+  then **M8·b** (install `POST /servers` + uninstall `DELETE /servers/{id}` — built, below),
+  then the config surfaces (`/settings`, `/me`, `/integrations/discord`).
 - **Frontend gate:** the install form (handle the "collected but inert" fields honestly)
   + settings/integration panels.
 
@@ -600,6 +600,49 @@ wiring* lands first.
   blueprints. **Not a clean backing-flip:** `cover` is reserved-`null` (the grid falls back to the themed
   `art` gradient until the RAWG increment), `specs` are all-null today, and `name == id` until metadata
   curation lands — agree these before the store swap.
+
+**M8·b — Install + uninstall (`POST /servers` / `DELETE /servers/{id}`).** · `partial` (backend built & self-validated 2026-06-19; the install/uninstall **mutation** happy path is a trusted-host live-validate, owed; frontend gate pending)
+- **Goal:** the panel's one CREATE operation + its delete — the async install/uninstall write path.
+- **Wires:** kgsm-lib `IInstanceService.Install`/`Uninstall`/`GenerateId` (engine base — all already carry the
+  `(actor, origin)` provenance params). **No upstream work needed** (verified end-to-end): kgsm already emits
+  `instance-installed`/`instance-uninstalled` with provenance off the **global** event chokepoint
+  (`events.sh` reads `KGSM_EVENT_ACTOR`/`_ORIGIN` for every event), kgsm-lib already types the event data, and
+  the M5 audit consumer already maps both to `server.install`/`server.uninstall`. M8·b is a pure api wiring
+  increment.
+- **Scope:** `POST /servers` (install) + `DELETE /servers/{id}` (uninstall), both **operator-gated**, both
+  async → `202` + a `job` (reusing the M3 `JobRegistry`/`CommandRunner` — one job model, one in-flight slot,
+  one verify discipline). `install`/`uninstall` are NEW `job.Verb`s but deliberately **NOT** in the
+  `POST /servers/{id}/commands` `IsKnown` set (one creates a server, one targets the collection → dedicated
+  endpoints). Install honors **`blueprint`** (required) + **`name`** + **`origin`**; the rest of the §3·h form
+  is **accepted-but-inert** (additive-only). The backend assigns the id via kgsm `generate-id` (the §3·h "id is
+  the backend's to assign"), passed as the install `--name` (kgsm echoes an already-unique name **verbatim** →
+  `job.serverId` == the new instance == the audit/verify key — `install.sh` re-runs the same idempotent
+  generate-id internally). **Echo-path audit, NO double-write** (the lifecycle case, NOT open_ports' direct
+  write): the command stamps actor+origin, kgsm emits the event, the M5 consumer writes the row. **Verify:**
+  install → `server.patch` (the new server appears); uninstall → `server.removed` tombstone (once it leaves the
+  roster).
+- **Gate:** install — `400` missing blueprint / unusable blueprint-or-name (generate-id rejects, honest detail)
+  / bad origin; `409` an install already in flight for the resolved name; `503` engine unprovisioned. uninstall —
+  `404` unknown server (roster authority); `409` in-flight; `503` unprovisioned. No state no-op (install always
+  creates, uninstall always removes; the engine owns subtler failures → job `failed` + its real error).
+- **Built (2026-06-19):** `InstallRequest` DTO + `CommandVerb.Install/Uninstall`; `CommandRunner` install/
+  uninstall branches + `PublishServerRemovedAsync` verify (reusing the `ServerRemoved` tombstone); `ServersController`
+  `POST`/`DELETE` (+ a shared `TryResolveOrigin`). Release **0-warning**.
+- **Self-validated:** `scripts/smoke.sh` → **47/47** (+3 M8·b gate checks: no-blueprint `400`, unknown-blueprint
+  `400` against live kgsm's generate-id, unknown-server DELETE `404`; + `POST`/`DELETE /servers` added to the
+  no-token `401` sweep — all gate/rejection, **NO mutation**, exactly like M3) + **`tests/Api.Tests` 135** (+15:
+  the full gate matrix through the real pipeline with a faked engine — `400`/`404`/`503`/`401`/`403`, the `202` +
+  the install/uninstall `job` shape, the **no-double-write** proof (a completed install leaves `/audit` empty),
+  and — advisor-caught — the **model-validation `{error}` envelope** on a malformed/type-mismatched body (the
+  first typed-body endpoint; see below). The mutation happy path (a real install → `instance_installed` → `server.install` row → `server.patch`;
+  a real uninstall → `server.removed`) is a **trusted-host live-validate, owed** (a real install mutates the host
+  — like M3's mutation happy path; needs `kgsm-watchdog` up for reliable native run-state).
+- **Depends:** M3 (the job/runner/verify), M5 (the audit echo + provenance stamping), M8·a (the catalog the
+  install picker draws from).
+- **Frontend gate:** the install form (handle the "collected but inert" fields honestly) + the uninstall action.
+  **Honesty note for the gate:** `name` is honored as the **instance name** (kgsm validates it as an id and
+  falls back to an auto-generated `blueprint-suffix` if it isn't a usable unique name) — a true free-text
+  *display* name is deferred upstream (blueprint metadata curation), not silently dropped.
 
 ---
 
@@ -661,7 +704,7 @@ for the external surface and this doc for the backend's honest realization of it
 | Alert record + raise/resolve/retract | **M6·a** | `architecture.html §3·c` — **PROPOSED 2026-06-16 (built + self-validated; sign-off pending — NOT yet frozen).** **Endpoint** `GET /api/v1/alerts?status=firing\|resolved&since=24h` → **`{ data }`** (unpaginated — the feed trends empty, unlike `/audit`'s `{data,nextCursor}`; **divergence**). `status=firing` (default) = one record per live condition; `status=resolved` = the rear-view that cleared within `since` (default + **max 24h** — the rear-view ages off). **Record** = `{ id, severity:danger\|warn\|info, source, title, detail, serverId?, hostId, anchor?, status:firing\|resolved, raisedAt(Z), escalated, attempts, resolvedAt?(Z), resolution? }`. `id` is **condition-derived + stable** (`crash:<serverId>`) so a re-fire upserts and escalation re-pushes the SAME record (never a per-raise id). **`resolution`** = `{ by:"system" (always — the server observed the clear), source, reason, actionId? }`. **WS** (topic `alerts`): `alert.raise` (the full record, status `firing`; re-pushed to flip `escalated`), `alert.resolve` (`{ id, resolution }` — the client stamps `resolvedAt`), `alert.retract` (`{ id }` — gone, no rear-view). **Coalesce key = the alert id** (`AlertEntityKey`) so a resolve/retract supersedes a still-queued raise (the `ServerPatch`/`ServerRemoved` precedent, NOT audit's per-append unique key); a torn-down slow client re-hydrates via `GET /alerts` (§3·j). **Read-only** — no complete/dismiss/PATCH. **Source model (M6·a = crash only):** the watchdog's supervision state via kgsm-lib `IWatchdogClient.ListAsync()` (poll-as-authority — the poll interval IS the raise debounce; api-owned 30s resolve probation; mirrored escalation; retract on a vanished instance; honest-unknown on a blind poll; rebuilds on restart; **native instances only**). **The alert↔audit bridge** `resolution.actionId` is the `evt_` id of a `server.start`/`server.restart` audit row, set only for an **operator/api** recovery (the consumer hands it off after the write); **an autonomous watchdog restart emits no audited action** (verified against the watchdog source), so a pure auto-heal links to **null** — never fabricated (the doc's `evt_restart_mc` presumes an audited restart we don't have yet; deferred). **Divergences needing sign-off (the negotiated honest-vs-aspirational call, like M1·b / M6·b's three decisions):** (1) top-level **`hostId`** (beyond the §3·c example's `anchor.hostId`) for the SPA host filter (§4·d); (2) the unpaginated **`{data}`** envelope; (3) `source` reserves `host-monitor`/`metrics`/`assistant` but **only `watchdog` is emitted** (the rest have no honest source — never fabricated); (4) **`anchor.surface:"server"`** is a best-effort hint; (5) `alert.resolve` is `{id,resolution}` (client stamps `resolvedAt`). Gated at **viewer**. **Built + self-validated** (unit + smoke) **+ LIVE-VALIDATED 2026-06-16** (real watchdog crash on `factorio-test` → `warn` raise → 30s-probation resolve → `actionId:null` auto-heal, no flap; §8). Contract still PROPOSED — frontend sign-off pending. |
 | Assistant SSE event vocabulary (proxy vs re-wrap) | M7 | `architecture.html §5·a`; keystone O1 — **RESOLVED 2026-06-19: near-verbatim relay, §5·a shaping pushed upstream into the assistant** (`kgsm-llm/docs/m7-sse-5a-spec.md`, Phase 1 DONE `bda373a`); **fork LOCKED (a)** — confirmed commands execute via M3, `command.verified` is NOT a turn event. **Backend built & self-validated 2026-06-19** (`POST /api/v1/assistant/turn`, viewer-gated, capability-gated, trusted co-located relay auth: shared `X-Relay-Secret` + forwarded Discord identity; smoke 42/42 incl. a stub-assistant relay round-trip proving secret+identity forwarding + byte-faithful streaming, + tests 109). Only a real-model (Ollama) end-to-end remains. |
 | `LibraryEntry` DTO (the catalog) | **M8·a** | `architecture.html §3·h/§3·i` — **frozen 2026-06-19.** `GET /library?q=&category=` (viewer) → `LibraryEntry[]`: `{ id, name, type:"native"\|"container", steamAppId?, clientSteamAppId?, isSteamAccountRequired, ports[{start,end,proto}], specs{maxPlayers?,minRamMb?,recommendedRamMb?,baseDiskMb?}, cover, rawgSlug }`. Pure kgsm-lib blueprint scrape (`IBlueprintService.ListDetailed`); engine-base degrade → `[]`. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **`cover` RESERVED — always `null`** (RAWG resolution is a later increment; honesty bars a fuzzy name→RAWG match — resolve only from an exact key like `SteamAppId`→Steam CDN, never mis-attribute art); (2) **`rawgSlug` RESERVED — always `null`** (no curated slug on a blueprint; `§3·i`'s backend lookup hint); (3) `name` falls back to the blueprint `id` when metadata is uncurated (all blueprints today → `name==id`, never a guessed display name); (4) `steamAppId`/`clientSteamAppId` are **`null`** for a non-Steam blueprint (NOT the `Server` DTO's `"0"` sentinel — honest-null on this new surface); (5) `specs` keys always present, every value `null` today (uncurated upstream — `null`≠0); (6) `ports` is the blueprint's **declared default** spec, structured `[{start,end,proto}]` — emitted **directly by kgsm** on `blueprints … --json` (the 1.10.0 canonical-port-format migration extended to the blueprint surface; kgsm-lib 1.17.0 types `Blueprint.Ports` as `List<PortMapping>`), so the api never parses a port string; (7) `category` query is **reserved/inert** (no honest genre source). Gated at **viewer**. **Built + self-validated** 2026-06-19 (live 29-blueprint read proving the bash→lib→api chain + the `q` filter; smoke 44/44, tests 120). |
-| Install body (honored vs reserved) | M8·b | `architecture.html §3·h` |
+| Install body (honored vs reserved) + uninstall | **M8·b** | `architecture.html §3·h` — **frozen 2026-06-19.** `POST /servers` body `InstallRequest { blueprint(required), name?, origin?, + reserved: hostId?,version?,port?,queryPort?,slots?,dir?,password?,autostart? }` → **`202` + `{ job }`** (NOT a server — install is async; the new server appears on `/servers` with a backend-assigned id when the job settles). **Honored:** `blueprint`, `name`, `origin`; **everything else accepted-but-inert** (additive-only — sending it keeps the schema forward-compatible). `DELETE /servers/{id}` (uninstall) → `202` + `{ job }`; `origin` rides `?origin=`. Both **operator-gated**; the `job` is the frozen M3 shape with `verb:"install"`/`"uninstall"`. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **`name` is the kgsm instance name, not a free-text display label** — kgsm validates it as an id and falls back to an auto-generated `blueprint-suffix` if it isn't a usable unique name (a true display name is deferred upstream — blueprint metadata curation, never silently dropped); (2) the reserved fields are **inert, never half-applied** (`dir`/`version` would mis-map — `version` is a build channel, not a kgsm game version — so they wait for an honest mapping); (3) **`autostart` is inert** (the post-install start chain is owed). **Gate:** install `400` (missing/unusable blueprint-or-name — generate-id's real detail) · `409` (install in flight for the resolved name) · `503` (engine unprovisioned); uninstall `404` (unknown id) · `409` · `503`. **Audit:** echo-path, **no double-write** — the command stamps actor+origin, kgsm emits `instance_installed`/`instance_uninstalled`, the M5 consumer writes `server.install`/`server.uninstall` (NOT a direct write — the lifecycle case). **Verify:** install → `server.patch` (new server); uninstall → `server.removed` tombstone. Backend built & self-validated (smoke 47/47 gate-only + tests 135, incl. the no-double-write proof + the malformed/type-mismatched-body `{error}`-envelope guarantee); the **mutation happy path is a trusted-host live-validate, owed.** |
 
 ---
 
@@ -1505,3 +1548,122 @@ this host's local append-only audit log on a trusted single host (no untrusted S
 as all-null today. **Owed next:** M8·b (install `POST /servers` + the install job + uninstall) — the
 `Install` `KgsmResult`'s new-instance-id surfacing for the job→server handoff is in-api plumbing to confirm,
 not upstream.
+
+### M8·b — 2026-06-19 · install + uninstall (`POST /servers` / `DELETE /servers/{id}`) self-validated (gate); the mutation happy path is a trusted-host live-validate, owed; frontend gate pending
+
+**Status:** the create/delete write path — the panel's one CREATE op + its delete. Backend **built +
+self-validated** at the gate level (the rejection contract, no mutation — exactly M3's discipline); the
+mutation happy path is a trusted-host live-validate, owed; the frontend gate is deferred with the rest (no SPA).
+
+**No-upstream finding (the discriminating checks, advisor-prompted).** Before building, the whole chain was
+traced and confirmed already in place — M8·b is a pure api wiring increment:
+- **kgsm-lib:** `IInstanceService.Install(blueprint, installDir, version, name, actor, origin)` /
+  `Uninstall(name, actor, origin)` / `GenerateId(blueprint, customName)` all exist, all already provenance-aware.
+- **kgsm bash:** `install.sh`/`uninstall.sh` emit `instance-installed`/`instance-uninstalled`, and the
+  actor/origin stamping is at the **global** emit chokepoint (`events.sh` reads `KGSM_EVENT_ACTOR`/`_ORIGIN`
+  for *every* event), so these two inherit provenance like start/stop — not a per-verb wiring.
+- **audit:** `AuditAction.ServerInstall`/`ServerUninstall` + the `KgsmAuditConsumer` handlers for
+  `InstanceInstalled/UninstalledData` were already wired (at M5/M6·0) — the echo path is ready, no double-write.
+- **The load-bearing assumption, verified in source (not assumed):** `install.sh:127` derives the instance
+  name by calling `instances.sh generate-id <bp> --name <id>`, and `_cmd_generate_id` (`instances.sh:961`)
+  returns a **valid-unique custom name verbatim** (a duplicate *fails* with `EC_INVALID_INSTANCE`, an unknown
+  blueprint *fails* with `EC_BLUEPRINT_NOT_FOUND` — neither silently falls back). So pre-resolving the id via
+  the *same* generate-id and passing it as `--name` lands the instance at exactly that id → `job.serverId` ==
+  the new instance == the audit row's `serverId` == the verify target. Had install re-generated, the verify
+  and the bridge would have silently broken; the source read settled it before any code was built.
+
+**What was built (2026-06-19).** `InstallRequest` DTO (blueprint+name+origin honored; the §3·h form's rest
+accepted-but-inert) + `CommandVerb.Install/Uninstall` (NEW `job.Verb`s, deliberately NOT in the
+`/commands` `IsKnown` set — dedicated endpoints, not lifecycle verbs); `CommandRunner` `RunInstall`/`RunUninstall`
+branches (echo-path — NO direct audit write, the lifecycle case; a shared `Detail()` for kgsm's real failure
+text) + `PublishServerRemovedAsync` (uninstall verify: `server.removed` tombstone once gone, else `server.patch`);
+`ServersController` `POST /servers` (gate → generate-id assigns the id → `StartInstall` → `202`) + `DELETE
+/servers/{id}` (roster `404` → `StartUninstall` → `202`), with a shared `TryResolveOrigin`. The controller
+resolves `IInstanceService` optionally → `503` when the engine is unprovisioned (degrade, not a 500).
+
+**Self-validated.** `scripts/smoke.sh` → **47/47** (+3 M8·b: `POST /servers` no-blueprint → `400`,
+unknown-blueprint → `400` against **live kgsm**'s generate-id (proving the bash→api reject chain, nothing
+created), unknown-server `DELETE` → `404`; + `POST`/`DELETE /servers` added to the no-token `401` sweep) — all
+**gate/rejection, no mutation** (a valid `POST` under `AUTH_DISABLED` would *really* install, so smoke only ever
+sends the reject cases, exactly like M3). **`tests/Api.Tests` → 135** (+15 `InstallUninstallTests`, the real
+pipeline with a switch-on-input `FakeInstanceService` registered via a derived `EngineTestFactory`): the gate
+matrix — missing/unknown/bad-origin `400`, unknown-server `404`, operator-gating (`viewer`→`403`,
+no-bearer→`401`), engine-unprovisioned `503`, and the `202` + the `install`/`uninstall` `job` shape (verb +
+backend-assigned `serverId`) — plus the **no-double-write proof**: a completed install leaves `/audit` empty
+(the fake engine emits no event and the runner writes no row, so a stray direct write would surface). Release
+**0-warning**. (`AuthTestFactory` was un-sealed so the engine-backed factory can derive from it.)
+
+**Advisor-caught: the model-validation `{error}` envelope (a latent invariant-#4 gap, exposed by M8·b's first
+typed body).** `InstallRequest` is the first request body with **typed** fields (`int? port/queryPort/slots`,
+`bool? autostart`), so a malformed JSON or a wrong-typed field (`{"port":"abc"}`) trips `[ApiController]`'s
+automatic model-state validation **before the action runs** — and that path emitted the framework's
+`ValidationProblemDetails`, NOT the frozen `{error}` envelope (`SuppressMapClientErrors` only covers
+*result*-based 4xx, not the pre-action filter). **Proven by a failing test first** (the body came back as
+`tools.ietf.org/.../rfc9…` ProblemDetails), then fixed with a global `InvalidModelStateResponseFactory` in
+`Startup` that emits `{error:{code:"bad_request"…}}` (it also retroactively closes the same latent gap for
+M3/M7's bodies — M3's all-optional-string `CommandRequest` just never triggered it). 2 regression tests pin it
+(type-mismatch + malformed JSON → envelope, never ProblemDetails). The api `CLAUDE.md` gotcha that flagged this
+for "M3/M8" is now updated to "resolved." (The chosen factory over `SuppressModelStateInvalidFilter` keeps an
+honest `400` for a genuinely-unparseable body rather than silently binding it to defaults.)
+
+**The verbatim-name chain, closed in source (advisor-prompted, no live host needed).** The verify + audit
+correlation rests on `job.ServerId` (the pre-resolved id) matching the `instance_installed` event's instance
+name. Beyond `generate-id` echoing a unique name verbatim, `install.sh:153` re-captures `create`'s output —
+so `_cmd_create` was read too: it passes `--name` verbatim to `__logic_create_instance`, which uses a provided
+name **as-is** (`_instance_name="$identifier"`, `commands/handlers/instances.sh:265`) and *fails* on a collision
+(`EC_INVALID_INSTANCE`), never suffixing. So the id flows `generate-id → create → created_instance → the event`
+unchanged — the pre-resolve approach is sound end to end.
+
+**Live-validated 2026-06-19 (on `hotrod`, the dev host) — install GREEN; uninstall UPSTREAM-BLOCKED, then FIXED + re-validated GREEN.** Ran the
+real round-trip through the API (auth-disabled, bound to kgsm's `kgsm.sock` broadcast path so the audit echo
+flowed). **Install: fully proven end-to-end.** `POST /servers {blueprint:"factorio", origin:"api"}` → `202` +
+`job{verb:install, serverId:"factorio", state:queued}` → a real install (~3s, version `2.0.76`) → the new
+`factorio` appeared on `GET /servers` + `GET /servers/factorio` `200` (honest DTO, `status:stopped`) → a
+**`server.install` audit row** off the real kgsm event echo (`success`, `serverId:factorio`, `origin:api`,
+`actor:{user,dev,discord}`, `meta:{blueprint:factorio}`) — provenance stamped, **no double-write** (plus an
+honest extra `server.update` echo, `0→2.0.76`, since kgsm's install also sets the version). kgsm confirmed the
+instance really existed. **Uninstall: blocked by an UPSTREAM kgsm gap (the live run's discovery).** `DELETE
+/servers/factorio` → `202` + `job{verb:uninstall}`, but **`kgsm uninstall` is interactive-only** — `commands/uninstall.sh`
+has an unconditional `read -rp "Are you sure…(y/N)"` confirmation with **NO `--force`/`-y`/non-interactive
+bypass** (the arg parser accepts only `-h|--help`), and on no-confirmation it prints "Uninstall cancelled" and
+**returns exit 0**. So kgsm-lib's `Uninstall` (which runs `kgsm uninstall <name>` non-interactively) gets a
+*success* code, no removal happens, and no event fires → the API job reports `succeeded` while the instance
+survives. **The api code is correct** — it faithfully relays kgsm-lib and can't tell a real uninstall from a
+cancelled one because kgsm lies (0 on cancel). The **`server.uninstall` audit MAPPING is proven** anyway: the
+CLI cleanup (`echo y | kgsm uninstall factorio`, API still listening) produced a real `instance_uninstalled`
+event → a `server.uninstall` row (`warn`, `origin:null` — honestly null for a direct-CLI action, never
+fabricated). Host restored to baseline; temp DB/socket removed; the kgsm checkout untouched.
+
+**Upstream fix IMPLEMENTED + re-validated GREEN 2026-06-19 (kgsm + kgsm-lib — NO kgsm-api code change).**
+(1) **kgsm bash** (`commands/uninstall.sh`): added a `--force`/`-y`/`--yes` flag that skips the destructive
+confirmation; a **declined** interactive prompt now returns the new non-zero **`EC_CANCELLED` (31)** instead of
+masquerading as `0` (the very thing that hid this bug). The arg loop no longer `break`s on the positional, so
+`--force` is order-independent. The TUI wizard (`__logic_wizard_uninstall_instance`) now passes `--force` — it
+already confirms via `__ui_confirm_action`, and its suppressed stdout meant `uninstall.sh`'s second `read` was an
+invisible hang (a pre-existing bug, now fixed). `EC_CANCELLED=31` added to `core/errors.sh`. shellcheck clean
+(no new findings); unit `test_uninstall_commands.sh` 27/27 (+`--force`/`-y`/order-independence) and integration
+`test_install_uninstall_integration.sh` 60/60 (the cancel test updated to expect `EC_CANCELLED`; a new
+`--force`-removes-without-prompt test). (2) **kgsm-lib 1.18.0**: `IInstanceService.Uninstall` appends `--force`
+to the kgsm args (both provenance + plain paths) — a programmatic uninstall is already confirmed at the calling
+surface (the API's operator gate + SPA confirm), never a TTY prompt. Behaviour-only, AOT-safe; unit tests assert
+`--force` is passed (incl. the provenance path); the lone EventService socket flake is pre-existing. (3)
+**kgsm-api**: bumped the `TheKrystalShip.KGSM.Lib` ref `1.17.0 → 1.18.0` — **no code change** (the api faithfully
+relays kgsm-lib). Release 0-warn, tests 135/135. **⚠ Packaging gotcha hit + resolved:** the first
+`dotnet pack -c Release` reused a **stale pre-edit dll** (incremental build skipped recompiling), so the 1.18.0
+nupkg lacked `--force` and the first re-verify still ran `uninstall <name>` (no flag, exit 31). Fixed by a clean
+`rm -rf bin obj` + explicit `dotnet build -c Release` + `pack --no-build`, re-staging the nupkg, and clearing
+`~/.nuget/packages/.../1.18.0` before the api restore — verified the `--force` literal is in the consumed dll
+(UTF-16 `strings -e l`) before retrying. **Re-validate GREEN:** `POST /servers {factorio}` → install → then
+**`DELETE /servers/factorio?origin=api` → the instance was actually removed in ~4s** (`GET /servers/factorio`
+`404`, gone from the roster, kgsm confirms), and a **`server.uninstall` audit row landed with `origin:api`**
+(`warn`, `actor:dev`) — the provenance-stamped echo the blocked run could not produce (it then wrote nothing).
+Host restored to baseline, temp DB/socket removed, the kgsm checkout's working tree carries the bash changes
+(uncommitted).
+
+**Honesty note carried to the frontend gate.** `name` is honored as the kgsm **instance name** (kgsm validates
+it as an id and falls back to an auto-generated `blueprint-suffix` if it isn't usable/unique) — a true free-text
+*display* name is deferred upstream (blueprint metadata curation). The §3·h "name honored" is realized honestly,
+not over-claimed. The reserved fields (`dir`/`version`/`port`/`slots`/`password`/`autostart`) are inert, never
+half-applied.
+
+**Not committed** (no explicit request) — the working tree carries the M8·b changes for review.
