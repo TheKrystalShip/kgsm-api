@@ -797,6 +797,9 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
         self.wfile.write(b'event: text.delta\ndata: {"type":"text.delta","text":"relay ok"}\n\n')
+        # A Phase-2 card-bearing tool.result: the `result` card is an "unknown field" to the relay,
+        # so it proves the byte-copy relay (CopyToAsync) passes a structured card through untouched.
+        self.wfile.write(b'event: tool.result\ndata: {"type":"tool.result","id":"tc_0","tool":"run_health_check","summary":"factorio: passed with warnings.","result":{"tool":"run_health_check","confidence":"confirmed","subject":{"resource":"server","id":"factorio"},"data":{"overall":"warn","checks":[{"name":"updates","state":"warn","severity":"update","detail":"Update available."}],"passed":1,"total":2,"skipped":0}}}\n\n')
         self.wfile.write(('event: done\ndata: {"type":"done","relayUser":"%s"}\n\n' % user).encode())
 
 HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
@@ -811,8 +814,12 @@ if start_api_assistant "$ASSIST_URL" "$REL_SECRET"; then
     if [[ "$CODE" == 200 ]] \
        && grep -q 'event: text.delta' <<<"$BODY" \
        && grep -q 'event: done' <<<"$BODY" \
-       && grep -q '"relayUser":"dev"' <<<"$BODY"; then
-      ok "relay 200 SSE: stub gated on the secret (200 ⇒ correct X-Relay-Secret forwarded), X-Relay-User=dev echoed, §5·a frames verbatim"
+       && grep -q '"relayUser":"dev"' <<<"$BODY" \
+       && grep -q 'event: tool.result' <<<"$BODY" \
+       && grep -q '"result":{' <<<"$BODY" \
+       && grep -q '"overall":"warn"' <<<"$BODY" \
+       && grep -q '"confidence":"confirmed"' <<<"$BODY"; then
+      ok "relay 200 SSE: stub gated on the secret (200 ⇒ correct X-Relay-Secret forwarded), X-Relay-User=dev echoed, §5·a frames verbatim INCL. a Phase-2 tool.result card (result/overall/confidence survive the byte relay)"
     else
       bad "M7 stub relay (code=$CODE body=$BODY; stub log: $(cat /tmp/kgsm-api-smoke-stub-assistant.log 2>/dev/null))"
     fi
