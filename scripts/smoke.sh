@@ -854,6 +854,60 @@ sys.exit(0 if (d.get('tier')=='admin' and u.get('id')=='discord:dev'
     ok "/me 200 + {user:{id:discord:dev,...}, tier:admin, scopes:[…]} (projects the bearer claims)"
   else bad "/me shape (code=$CODE body=$BODY)"; fi
 
+  # --- M8·c integrations: outbound-notification config (admin; here the AUTH_DISABLED synthetic admin) ---
+  echo "==> M8·c integrations checks — /integrations/discord (config + masked secret; NO real Discord post)"
+
+  # 40. GET /integrations lists discord, unconfigured initially.
+  req GET /api/v1/integrations
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+disc=[x for x in d if x.get('provider')=='discord']
+sys.exit(0 if (len(disc)==1 and disc[0].get('configured') is False and disc[0].get('enabled') is False) else 1)
+" 2>/dev/null; then
+    ok "/integrations 200 + discord present, unconfigured"
+  else bad "/integrations list shape (code=$CODE body=$BODY)"; fi
+
+  # 41. GET /integrations/discord -> the §3·e record: webhook unconfigured, bot:null (one-way only),
+  #     catalog lists only deliverable events (online/crash present; resource/join honestly omitted).
+  req GET /api/v1/integrations/discord
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+ids={e['id'] for e in d.get('events',[])}
+sys.exit(0 if (d.get('webhook',{}).get('configured') is False and d.get('bot') is None
+               and 'online' in ids and 'crash' in ids
+               and 'resource' not in ids and 'join' not in ids) else 1)
+" 2>/dev/null; then
+    ok "/integrations/discord 200 + bot:null + honest catalog (resource/join omitted)"
+  else bad "/integrations/discord shape (code=$CODE body=$BODY)"; fi
+
+  # 42. POST /test with nothing configured -> 409 not_configured (honest; no real Discord call, no faked ok).
+  req POST /api/v1/integrations/discord/test
+  [[ "$CODE" == 409 ]] && grep -q '"code":"not_configured"' <<<"$BODY" \
+    && ok "POST /integrations/discord/test unconfigured → 409 not_configured (honest, no faked send)" \
+    || bad "M8·c test unconfigured 409 (code=$CODE body=$BODY)"
+
+  # 43. PATCH a (fake) webhook + label + a sparse event change -> 200; the raw secret is NEVER echoed
+  #     and the masked hint is returned. (A fake webhook URL: we never call /test after this, so no post.)
+  req PATCH /api/v1/integrations/discord -H 'Content-Type: application/json' \
+    -d '{"webhook":"https://discord.com/api/webhooks/111222333/SMOKEfaketoken","channelLabel":"#smoke-ops","events":[{"id":"backup","enabled":false}]}'
+  PATCH_CODE=$CODE; PATCH_BODY=$BODY
+  req GET /api/v1/integrations/discord
+  if [[ "$PATCH_CODE" == 200 ]] && [[ "$CODE" == 200 ]] \
+     && ! grep -q 'SMOKEfaketoken' <<<"$PATCH_BODY" && ! grep -q 'SMOKEfaketoken' <<<"$BODY" \
+     && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+wh=d.get('webhook',{})
+backup=[e for e in d.get('events',[]) if e['id']=='backup']
+sys.exit(0 if (wh.get('configured') is True and wh.get('hint','').startswith('…/webhooks/111222333/')
+               and d.get('channelLabel')=='#smoke-ops'
+               and len(backup)==1 and backup[0].get('enabled') is False) else 1)
+" 2>/dev/null; then
+    ok "PATCH /integrations/discord persists + masks the secret (hint only, raw never echoed)"
+  else bad "M8·c PATCH round-trip (patch=$PATCH_CODE get=$CODE body=$BODY)"; fi
+
   stop_api
 fi
 
@@ -937,8 +991,9 @@ start_api_auth || { echo "API never healthy (auth-enabled); log:"; tail -20 /tmp
 #     fallback + the admin gate close them, so "protect all prior endpoints" holds with no open back door.
 #     /audit (M5) + /alerts (M6·a) + /library (M8·a) are viewer reads -> also 401 with no bearer.
 #     /me (M8) is [Authorize] (any authenticated caller) -> still 401 with no bearer.
+#     /integrations (M8·c) is admin-gated -> 401 with no bearer (the tier/admin gate is in tests).
 auth_401=true
-for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/_dbcheck /api/v1/_throw; do
+for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/integrations /api/v1/integrations/discord /api/v1/_dbcheck /api/v1/_throw; do
   req GET "$p"
   if [[ "$CODE" != 401 ]] || ! grep -q '"code":"unauthorized"' <<<"$BODY" || grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY"; then
     auth_401=false; echo "    ($p -> $CODE $BODY)"
@@ -952,7 +1007,7 @@ req DELETE /api/v1/servers/x
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (DELETE /servers/{id} -> $CODE $BODY)"; }
 req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,POST assistant/turn (no open back door)" \
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,POST assistant/turn (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 32. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).

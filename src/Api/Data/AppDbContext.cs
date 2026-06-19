@@ -18,8 +18,19 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 {
     public DbSet<AuditEntry> Audit => Set<AuditEntry>();
 
+    /// <summary>M8·c — outbound-notification integration config, one row per provider (§3·e). The
+    /// first non-audit table; created by the same <c>EnsureCreated</c> (delete the dev DB once when it
+    /// lands — EnsureCreated no-ops on an existing DB).</summary>
+    public DbSet<IntegrationEntity> Integrations => Set<IntegrationEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<IntegrationEntity>(e =>
+        {
+            e.ToTable("integrations");
+            e.HasKey(i => i.Provider);
+        });
+
         modelBuilder.Entity<AuditEntry>(e =>
         {
             e.ToTable("audit");

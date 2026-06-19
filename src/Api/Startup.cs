@@ -13,6 +13,7 @@ using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Commands;
+using TheKrystalShip.Api.Services.Integrations;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.KGSM.Extensions;
@@ -105,6 +106,16 @@ public class Startup(IConfiguration configuration)
         // IBlueprintService, resolved per-request and degrading to an empty catalog (logged once) when
         // the engine is unconfigured — the same engine-is-base posture as ServerAggregator.
         services.AddSingleton<LibraryAggregator>();
+
+        // M8·c — outbound-notification integrations (§3·e). The store persists per-provider config (a
+        // second EF entity in AppDbContext, created by the same EnsureCreated). Providers are a THIN seam
+        // (INotificationProvider) resolved by id from the registered set — Discord is the first; Slack/
+        // Telegram are just another AddHttpClient<INotificationProvider, X> later. One-way webhook delivery
+        // only (the Discord view's `bot` is null — the two-way control bot stays kgsm-bot's). The delivery
+        // worker that fires on real events is Increment B; Increment A is config + a real /test send.
+        services.AddSingleton<IntegrationStore>();
+        services.AddHttpClient<INotificationProvider, DiscordNotificationProvider>(
+            c => c.Timeout = TimeSpan.FromSeconds(10));
 
         // M2 — realtime. The hub is the per-host connection registry + fan-out; the three pumps poll
         // their sources (neither the monitor nor kgsm-lib pushes) and publish only while subscribed, so

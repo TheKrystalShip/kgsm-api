@@ -644,7 +644,7 @@ wiring* lands first.
   falls back to an auto-generated `blueprint-suffix` if it isn't a usable unique name) — a true free-text
   *display* name is deferred upstream (blueprint metadata curation), not silently dropped.
 
-**M8·c — Config surfaces (`/me` · `/settings` · `/integrations/discord`).** · `partial` (`/me` built & self-validated 2026-06-19; `/settings` + `/integrations/discord` NOT started — see the honesty findings below)
+**M8·c — Config surfaces (`/me` · `/settings` · `/integrations/discord`).** · `partial` (`/me` built 2026-06-19; `/integrations/discord` **Increment A built & self-validated 2026-06-19** — config + a real test-send; the delivery worker is Increment B; `/settings` NOT started)
 - **Goal:** the panel's per-host config/identity reads — the last M8 surfaces. Split from the install/library
   write+catalog work because they're a different shape (identity + preferences + a connected integration).
 - **`GET /me` — DONE (built & self-validated 2026-06-19).** The caller's identity + tier + scopes, a pure
@@ -661,27 +661,44 @@ wiring* lands first.
   with a real source (the §3·d "Assistant endpoint & general preferences"). The assistant endpoint URL is a real
   config value; "general preferences" hit the **same no-preference-store wall** as `/me`'s PATCH half. Scope the
   honest, persistable subset before building — don't ship a settings surface backed by a store that doesn't exist.
-- **⚠ `/integrations/discord` — NOT started; a DECISION + a SUBSYSTEM, not a wiring increment (honesty finding,
-  2026-06-19).** The earlier "what's next" framing mischaracterized this as buildable-now because "the Discord
-  app/bot-token config is already live (M4·b)." That **conflated two different Discord concerns.** The M4 config
-  (`DiscordClientId/Secret`, `DiscordBotToken`, `DiscordGuildId`, role→tier maps) is **auth role-resolution** —
-  it exists only to resolve a login's tier via `GET /guilds/{guild}/members/{user}`. **§3·e `/integrations/discord`
-  is a notification-routing integration:** a stored **webhook secret** (masked on read, write-on-PATCH), a bot
-  connection + `opsRole`, an **event-routing config** (`events[]` of `{id,enabled,cadence,ping}` over a
-  server-defined catalog), and a `POST /test` that **actually posts to Discord**. A grep of `src/` confirms **zero
-  backing exists** (no webhook/integration/notification/routing code; the only EF entity is `AuditEntry`). Building
-  it honestly is a **new subsystem** — integration-config persistence (a new EF entity), the event catalog, an
-  **outbound delivery worker** that subscribes to the `servers`/`alerts`/`audit` streams and posts with the
-  cadence/ping/digest logic, plus the masking + real test-send. A read-only empty shell would imply "an integration
-  you can configure" when PATCH/test/delivery don't exist — the misleading-by-omission this project forbids.
-  **The prior decision this forces (the user's call, not a scope estimate):** a Discord *notification-delivery*
-  worker inside kgsm-api **overlaps `kgsm-bot`'s territory** (the existing Discord surface). *Does the API own
-  Discord notification routing, or does `kgsm-bot`?* That ownership question determines whether this is even
-  kgsm-api work — it must be answered before any build. **Parked pending that decision.**
-- **Depends:** M4 (the JWT identity `/me` projects). `/integrations` additionally depends on the ownership call
-  above + (if API-owned) M5's event consumer infrastructure for the delivery worker.
-- **Frontend gate:** the `/me` profile chip (read-only — no edit affordance until the preference store lands);
-  the settings + integration panels wait on the two unstarted pieces.
+- **`/integrations/discord` — a provider-agnostic notification subsystem (§3·e). DECIDED + Increment A built.**
+  §3·e is a **notification-routing integration** (NOT an endpoint wire — the M4 `ApiOptions.Discord*` is **auth
+  role-resolution only**; a grep of `src/` confirmed zero notification backing, the only EF entity was `AuditEntry`):
+  a stored **webhook secret** (masked on read, write-on-PATCH), an **event-routing config** (`events[]` of
+  `{id,enabled,cadence,ping}` over a server-defined catalog), and a `POST /test` that really posts. **Two decisions
+  (the user's call, 2026-06-19):** (1) **kgsm-api owns it**, wired **behind a provider abstraction** so Slack/
+  Telegram follow (§3·e's `/integrations/{provider}`); (2) **COEXIST with `kgsm-bot`** — kgsm-bot already posts
+  online/offline/uninstalled to *per-instance channels* via the bot gateway, so the API posts to its **own
+  configured webhook (one ops channel)** and kgsm-bot is left unchanged (no double-post unless both are aimed at one
+  channel — documented caveat). **Scope guard:** one-way webhook delivery only — the §3·e two-way control **bot** +
+  slash-commands are **out of scope** (kgsm-bot's interactive territory), so the Discord view's `bot` is honestly
+  `null`. Sliced into 3 increments:
+  - **Increment A — BUILT & self-validated 2026-06-19** (contract + config + a real test-send; **no** delivery
+    worker). `IntegrationEntity` (the first non-`AuditEntry` table) + `IntegrationStore` (the `AuditService`
+    scope-per-op + write-gate pattern); the thin `INotificationProvider` seam + `DiscordNotificationProvider`
+    (webhook POST, typed `HttpClient`) + the server-defined `NotificationCatalog`; `IntegrationsController`
+    (**admin-gated** GET list / GET `{provider}` / sparse PATCH / POST `{provider}/test`). **Honest realization
+    (frozen in §6):** `bot:null`; catalog lists only **deliverable** events (`online·offline·crash·update·installed·
+    backup`) — `resource`/`join` omitted (no honest source); webhook secret **masked on read** (hint), write-only on
+    PATCH, never echoed; `cadence` accepts `every|once|digest` but enforcement is incremental (`every`=B, `once`/
+    `digest`=C) — accepted-but-inert (the M8·b reserved-field pattern); `/test` posts for real or fails honestly
+    (409 unconfigured · 502 delivery-failed · 202 ok). Release 0-warning; smoke **52/52** (+4); tests **165** (+22:
+    11 provider unit incl. a faked-HTTP send, 11 API incl. the masked-secret round-trip + the admin gate).
+  - **Increment B — the delivery worker (LATER).** An in-process `INotificationBus` tapped by `AuditService.AppendAsync`
+    (the **always-on** path — every kgsm event is already an audit row, so it sidesteps the subscriber-gated
+    `StreamHub`; **zero** new event-socket consumers) → a `NotificationDeliveryWorker` (the `AlertEngine` skeleton)
+    that routes enabled events to providers (**`every` cadence**). Crash via the `server.crash` row first; the
+    `AlertEngine` debounce is a refinement. Live-validate with a real webhook.
+  - **Increment C — refinements (LATER).** `once` (dedup state) + `digest` (timer/accumulation) cadence; a **second
+    provider** (Slack/Telegram) to actually validate the abstraction; `resource`/`join` when an honest source lands.
+- **`/settings` — NOT started.** Needs its **honest backing scoped first**: what is genuinely settable per host
+  with a real source (the §3·d "Assistant endpoint & general preferences"). The assistant endpoint URL is a real
+  config value; "general preferences" hit the **same no-preference-store wall** as `/me`'s PATCH half. Scope the
+  honest, persistable subset before building — don't ship a settings surface backed by a store that doesn't exist.
+- **Depends:** M4 (the JWT identity `/me` projects); `/integrations` Increment B additionally taps M5's audit flow.
+- **Frontend gate:** the `/me` profile chip (read-only — no edit affordance until the preference store lands); the
+  Discord integration panel (the masked webhook + the event-routing grid — note `cadence` once/digest are
+  accepted-but-inert until Increment C); the settings panel waits on `/settings`.
 
 ---
 
@@ -745,6 +762,7 @@ for the external surface and this doc for the backend's honest realization of it
 | `LibraryEntry` DTO (the catalog) | **M8·a** | `architecture.html §3·h/§3·i` — **frozen 2026-06-19.** `GET /library?q=&category=` (viewer) → `LibraryEntry[]`: `{ id, name, type:"native"\|"container", steamAppId?, clientSteamAppId?, isSteamAccountRequired, ports[{start,end,proto}], specs{maxPlayers?,minRamMb?,recommendedRamMb?,baseDiskMb?}, cover, rawgSlug }`. Pure kgsm-lib blueprint scrape (`IBlueprintService.ListDetailed`); engine-base degrade → `[]`. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **`cover` RESERVED — always `null`** (RAWG resolution is a later increment; honesty bars a fuzzy name→RAWG match — resolve only from an exact key like `SteamAppId`→Steam CDN, never mis-attribute art); (2) **`rawgSlug` RESERVED — always `null`** (no curated slug on a blueprint; `§3·i`'s backend lookup hint); (3) `name` falls back to the blueprint `id` when metadata is uncurated (all blueprints today → `name==id`, never a guessed display name); (4) `steamAppId`/`clientSteamAppId` are **`null`** for a non-Steam blueprint (NOT the `Server` DTO's `"0"` sentinel — honest-null on this new surface); (5) `specs` keys always present, every value `null` today (uncurated upstream — `null`≠0); (6) `ports` is the blueprint's **declared default** spec, structured `[{start,end,proto}]` — emitted **directly by kgsm** on `blueprints … --json` (the 1.10.0 canonical-port-format migration extended to the blueprint surface; kgsm-lib 1.17.0 types `Blueprint.Ports` as `List<PortMapping>`), so the api never parses a port string; (7) `category` query is **reserved/inert** (no honest genre source). Gated at **viewer**. **Built + self-validated** 2026-06-19 (live 29-blueprint read proving the bash→lib→api chain + the `q` filter; smoke 44/44, tests 120). |
 | Install body (honored vs reserved) + uninstall | **M8·b** | `architecture.html §3·h` — **frozen 2026-06-19.** `POST /servers` body `InstallRequest { blueprint(required), name?, origin?, + reserved: hostId?,version?,port?,queryPort?,slots?,dir?,password?,autostart? }` → **`202` + `{ job }`** (NOT a server — install is async; the new server appears on `/servers` with a backend-assigned id when the job settles). **Honored:** `blueprint`, `name`, `origin`; **everything else accepted-but-inert** (additive-only — sending it keeps the schema forward-compatible). `DELETE /servers/{id}` (uninstall) → `202` + `{ job }`; `origin` rides `?origin=`. Both **operator-gated**; the `job` is the frozen M3 shape with `verb:"install"`/`"uninstall"`. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **`name` is the kgsm instance name, not a free-text display label** — kgsm validates it as an id and falls back to an auto-generated `blueprint-suffix` if it isn't a usable unique name (a true display name is deferred upstream — blueprint metadata curation, never silently dropped); (2) the reserved fields are **inert, never half-applied** (`dir`/`version` would mis-map — `version` is a build channel, not a kgsm game version — so they wait for an honest mapping); (3) **`autostart` is inert** (the post-install start chain is owed). **Gate:** install `400` (missing/unusable blueprint-or-name — generate-id's real detail) · `409` (install in flight for the resolved name) · `503` (engine unprovisioned); uninstall `404` (unknown id) · `409` · `503`. **Audit:** echo-path, **no double-write** — the command stamps actor+origin, kgsm emits `instance_installed`/`instance_uninstalled`, the M5 consumer writes `server.install`/`server.uninstall` (NOT a direct write — the lifecycle case). **Verify:** install → `server.patch` (new server); uninstall → `server.removed` tombstone. Backend built & self-validated (smoke 47/47 gate-only + tests 135, incl. the no-double-write proof + the malformed/type-mismatched-body `{error}`-envelope guarantee); **LIVE-VALIDATED GREEN end-to-end 2026-06-19** (real install + uninstall round-trip — surfaced + fixed an upstream `kgsm uninstall` interactive-only gap, kgsm-lib 1.18.0); committed to `main` (not pushed). |
 | `MeResponse` (the identity surface) | **M8·c** | `architecture.html §3·f` surface table (the "Profile" resource) — **frozen 2026-06-19.** `GET /me` → `MeResponse { user: SessionUser{ id, username, display, avatarUrl? }, tier, scopes[] }`. A pure projection of the session bearer's claims (no engine/leaf/DB touch): the Discord identity snapshot captured at login + the resolved authorization `tier` + the granted `scopes`. Gated at **`[Authorize]`** — any authenticated caller, NOT viewer — so a `none`-tier caller (verified identity, no role on this host) can read "who am I / why am I 403 elsewhere"; no bearer → the `401` envelope. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **read-only** — the surface table lists `/me` as GET+**PATCH** ("display name, handle, **density**"), but the editable half needs a per-panel preference store **deliberately not built** (architecture.html's statelessness note: per-user/panel prefs that follow a user across devices are out of scope), so PATCH + density are deferred, never faked; (2) the profile is the **login-time snapshot**, not a fresh live Discord fetch (the §3·f no-retained-token divergence, shared with `/auth/session`); (3) the honest **delta over `/auth/session`** (which returns `{user,scopes}`) is the **`tier`** — the one fact the SPA gates its controls on; `display`/`username` fall back to the handle, never a guessed label. **Built + self-validated** 2026-06-19 (smoke 48/48: the wire shape under the auth-disabled synthetic admin + `/me` in the no-bearer 401 sweep; tests 143 (+8 `MeTests`): tier-reflected-verbatim, the none-tier `200` reachability, refresh-as-access/wrong-signature `401`). |
+| Discord integration (`/integrations/{provider}`) | **M8·c** | `architecture.html §3·e` — **Increment A frozen 2026-06-19.** Provider-agnostic outbound notification routing (Discord first; Slack/Telegram via `/integrations/{provider}`). **Admin-gated.** `GET /integrations` → `[{ provider, configured, enabled }]`; `GET /integrations/{provider}` → the §3·e record `{ provider, webhook:{configured, hint}, channelLabel, bot, enabled, events[] }` (events = the server-defined catalog ⋈ the user's `{enabled,cadence,ping}`); sparse `PATCH /integrations/{provider}` (the `webhook` field sets/rotates the secret; a blank string clears it); `POST /integrations/{provider}/test` → `202 {ok,posted,channelLabel}` on a real send. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **`bot` is always `null`** — one-way **webhook** delivery only; the §3·e two-way control bot + slash-commands are **out of scope** (kgsm-bot's interactive surface), so honestly null, not a fabricated connection; (2) the catalog lists only **deliverable** events (`online·offline·crash·update·installed·backup`) — `resource` (no threshold-alert source) and `join` (no player tracking) are **omitted**, never faked; (3) the webhook secret is **masked on read** (a `hint`, never the URL) and **write-only on PATCH** — stored plaintext in the host-local SQLite (consistent with the env-stored bot token on this single trusted host); (4) **`cadence` (`every|once|digest`) is accepted but enforcement is incremental** — `every` lands with the delivery worker (Increment B), `once`/`digest` with Increment C (accepted-but-inert, the M8·b reserved-field pattern); (5) **coexists with `kgsm-bot`** (which posts per-instance channels via the bot gateway) — the API posts its own configured webhook, no double-post unless aimed at one channel. `/test` is honest: `409` unconfigured · `502` delivery-failed · `202` ok — never a faked ok. Gated at **admin**. **Increment A built + self-validated** 2026-06-19 (smoke 52/52 incl. the masked-secret PATCH round-trip + the honest catalog; tests 165 (+22): the provider mask/validate/test-send with faked HTTP + the API admin gate). The delivery worker (live notifications) is **Increment B**. |
 
 ---
 
@@ -1711,10 +1729,11 @@ half-applied.
 kgsm-lib `f7b2524` (1.18.0 `Uninstall --force`), kgsm-api `43f8141` (M8·b endpoints + the model-validation
 envelope fix + the kgsm-lib ref bump 1.17.0→1.18.0).
 
-### M8·c — 2026-06-19 · config surfaces: `GET /me` built & self-validated (identity + tier + scopes); `/settings` + `/integrations/discord` not started (honesty findings)
+### M8·c — 2026-06-19 · config surfaces: `GET /me` built + committed; `/integrations/discord` notification subsystem Increment A built & self-validated (config + real test-send); `/settings` not started
 
-**Status.** The first of M8's config surfaces. `GET /me` is **built + self-validated**; the other two config
-surfaces are **not started**, each for a documented honesty reason (below), so M8·c stays `partial`.
+**Status.** M8's config surfaces. `GET /me` is **built + committed** (`987c52d`). `/integrations/discord` is a
+provider-agnostic notification subsystem — **Increment A** (contract + config + a real test-send) is **built +
+self-validated**; the delivery worker is Increment B. `/settings` is **not started**. M8·c stays `partial`.
 
 **`GET /me` — built (the honest read slice).** A pure projection of the session bearer's claims — no engine,
 leaf or DB touch. `MeController` (`[ApiController]`, `[Route("api/v1/me")]`, `[Authorize]`) reads
@@ -1742,26 +1761,41 @@ the **same missing-preference-store wall** as `/me`'s PATCH half. The honest mov
 subset (and decide whether it needs the first non-audit EF entity) before building — not to ship a settings
 surface backed by a store that does not exist.
 
-**⚠ `/integrations/discord` — not started; a DECISION + a SUBSYSTEM, not a wiring increment.** An earlier
-"what's next" note mischaracterized this as buildable-now because "the Discord app/bot-token config is already
-live (M4·b)" — that **conflated two unrelated Discord concerns** and the correction is owed plainly:
-- **What exists** (`ApiOptions.Discord*`) is **auth role-resolution** — client id/secret, bot token, guild id,
-  role→tier maps, used *only* to resolve a login's tier via `GET /guilds/{guild}/members/{user}`.
-- **What §3·e asks for** is a **notification-routing integration**: a stored **webhook secret** (masked on read,
-  write-on-PATCH), a bot connection + `opsRole`, an **event-routing config** (`events[]` of
-  `{id,enabled,cadence,ping}` over a server-defined catalog), and a `POST /test` that **actually posts to
-  Discord**. A grep of `src/` confirms **zero backing** (no webhook/integration/notification/routing code; the
-  only EF entity is `AuditEntry`; `DiscordBotToken` is used only by `DiscordIdentityResolver` for the role
-  lookup).
-- **Why it can't ship as an endpoint wire.** Building it honestly is a **new subsystem** — integration-config
-  persistence (a new EF entity), the event catalog, an **outbound delivery worker** subscribing to the
-  `servers`/`alerts`/`audit` streams and posting with the cadence/ping/digest logic, plus the secret masking +
-  real test-send. A read-only empty shell would imply "an integration you can configure" when PATCH/test/delivery
-  don't exist — the misleading-by-omission this project forbids.
-- **The decision it forces (the user's call).** A Discord *notification-delivery* worker inside kgsm-api
-  **overlaps `kgsm-bot`'s territory** (the existing Discord surface, keystone §4). *Does the API own Discord
-  notification routing, or does `kgsm-bot`?* That ownership question determines whether this is kgsm-api work at
-  all, and must be answered before any build. **Parked pending that decision.**
+**`/integrations/discord` — a notification subsystem (the discriminating finding).** §3·e is NOT an endpoint
+wire: the M4 `ApiOptions.Discord*` is **auth role-resolution only** (client id/secret, bot token, guild, role→tier
+maps — used only to resolve a login's tier via `GET /guilds/{guild}/members/{user}`); §3·e asks for a
+**notification-routing integration** (a stored webhook secret masked-on-read, an `events[]` routing config over a
+server-defined catalog, a real `POST /test`). A grep of `src/` confirmed **zero backing** (only EF entity was
+`AuditEntry`). An earlier "what's next" note wrongly called it buildable-now by conflating the two — corrected.
 
-**Not committed yet** — the `/me` working-tree changes (`MeController`, `MeResponse`, `MeTests`, the smoke `/me`
-checks, these docs) await the next commit.
+**Two decisions (the user's call, 2026-06-19).** (1) **kgsm-api owns it**, wired **behind a provider abstraction**
+so Slack/Telegram follow (§3·e's `/integrations/{provider}`). (2) **COEXIST with `kgsm-bot`** — kgsm-bot already
+posts online/offline/uninstalled to *per-instance channels* via the bot gateway (a second consumer of the same
+kgsm event stream), so the API posts to its **own configured webhook** and kgsm-bot is unchanged (parallel
+surfaces; no double-post unless aimed at one channel). **Scope guard:** one-way webhook delivery only — the §3·e
+two-way control **bot** + slash-commands stay kgsm-bot's, so the Discord view's `bot` is honestly `null`.
+
+**Increment A — built + self-validated (contract + config + a real test-send; NO delivery worker).** New:
+`IntegrationEntity` (the first non-`AuditEntry` table, in the same `AppDbContext` so the existing `EnsureCreated`
+creates it — the dev DB must be deleted once) + `IntegrationStore` (the `AuditService` scope-per-op + write-gate
+pattern, JSON columns for `events`/`settings`); the **thin** `INotificationProvider` seam + `NotificationCatalog`
+(only deliverable events) + `DiscordNotificationProvider` (webhook POST via a typed `HttpClient`, the
+`DiscordIdentityResolver` pattern); `IntegrationDto`; `IntegrationsController` (**admin**-gated GET list / GET
+`{provider}` / sparse PATCH / POST `{provider}/test`). DI: `IntegrationStore` singleton +
+`AddHttpClient<INotificationProvider, DiscordNotificationProvider>`. **Honest realization (frozen §6):** `bot:null`
+(one-way only); catalog `online·offline·crash·update·installed·backup` (`resource`/`join` omitted — no source);
+webhook **masked on read** (hint), write-only on PATCH, plaintext at rest in the host-local SQLite (consistent with
+the env-stored bot token); `cadence` accepted (`every|once|digest`) but enforcement is incremental (`every`=B,
+`once`/`digest`=C — accepted-but-inert, the M8·b reserved-field pattern); `/test` honest (`409` unconfigured · `502`
+delivery-failed · `202` ok — never a faked ok). **Validated:** Release **0-warning**; `scripts/smoke.sh` → **52/52**
+(+4: the list + the `bot:null`/honest-catalog shape + the unconfigured-`409` + the masked-secret PATCH round-trip;
+plus `/integrations*` in the no-bearer 401 sweep — admin gate proven in tests, smoke runs the synthetic admin).
+`tests/Api.Tests` → **165** (+22: 11 `DiscordProviderTests` — mask/validate/test-send with a faked
+`HttpMessageHandler`, the honest catalog; 11 `IntegrationsApiTests` — the admin gate (viewer/operator `403`,
+no-token `401`), unknown-provider `404`, the masked-secret PATCH→GET round-trip never echoing the raw URL, the
+PATCH validation `400`s, the `/test` `409`/`202`). **Increment B** (the delivery worker — an `INotificationBus`
+tapped by `AuditService.AppendAsync`, the always-on path; `every` cadence) and **Increment C** (once/digest, a 2nd
+provider, resource/join) are LATER.
+
+**Committed.** `GET /me` + the M8·b header sync are committed (`987c52d`). The `/integrations` Increment A
+working-tree changes await this milestone's commit.
