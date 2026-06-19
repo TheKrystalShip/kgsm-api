@@ -60,8 +60,16 @@ the API forwards the verified caller's Discord id + `KGSM_API_ASSISTANT_RELAY_SE
 gate (absent → 404, down → 503, reject → 502) decided before the SSE commits; `OpenTurnStreamAsync` uses
 `ResponseHeadersRead` so the long stream isn't `HttpClient.Timeout`-bound. The **full relay path is stub-proven**
 (a smoke stub-assistant phase gates on the secret + echoes the user → proves `X-Relay-Secret`/`X-Relay-User`
-forwarding + byte-faithful streaming); only a **real-model (Ollama) end-to-end** remains owed)
-(`scripts/smoke.sh` **42/42** + **tests/Api.Tests 109**); M8 and the M6·a/M7 frontend gates are `planned`. **Auth is ON by default**
+forwarding + byte-faithful streaming); only a **real-model (Ollama) end-to-end** remains owed), and now
+**M8·a** (library — the installable-game catalog `GET /library`, **viewer**-gated: a pure kgsm-lib blueprint
+scrape via `IBlueprintService.ListDetailed`, mapped to the honest `LibraryEntry`; engine-base degrade → `[]`,
+the `ServerAggregator` pattern. **`cover`/`rawgSlug` reserved-`null`** — RAWG cover resolution is a later
+increment (honesty bars a fuzzy `DisplayName`→RAWG match; resolve only from an exact key like `SteamAppId`);
+`name` falls back to the blueprint `id` when uncurated; steam ids are honest-`null` not `"0"`; `specs`
+all-null today; `ports` structured `[{start,end,proto}]` via kgsm-lib's **new `FromUfwSpec`** parse-at-the-
+chokepoint (the api never re-parses the legacy blueprint port string). kgsm-lib bumped **1.15.0 → 1.16.0**)
+(`scripts/smoke.sh` **44/44** — incl. a live 29-blueprint catalog read — + **tests/Api.Tests 120**); M8·b
+(install) and the M6·a/M7/M8·a frontend gates are `planned`. **Auth is ON by default**
 — `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4
 open trust window). Trust `PLAN.md`'s per-milestone status, not assumptions.
 

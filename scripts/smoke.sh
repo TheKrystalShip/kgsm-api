@@ -321,6 +321,57 @@ req GET /api/v1/servers/does-not-exist
 [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
   && ok "/servers/{unknown} 404 → {error:{code:not_found}}" || bad "/servers unknown 404 envelope (code=$CODE body=$BODY)"
 
+# --- M8·a: GET /library (the installable-game catalog — a pure blueprint scrape) ------------
+# Phase A reads the REAL dev kgsm catalog (no monitor needed — blueprints are engine-only). Proves the
+# honest DTO end-to-end: the frozen key set, structured ports parsed at the kgsm-lib chokepoint
+# (FromUfwSpec), steam-id honesty (null for a non-Steam blueprint, never "0"), reserved cover/rawgSlug.
+echo "==> M8·a library checks — Phase A (live blueprint catalog; kgsm=${KGSM_PATH})"
+
+# 15b. GET /library — honest shape + structured ports + steam honesty + reserved cover/rawgSlug.
+req GET /api/v1/library
+if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+if not (isinstance(d,list) and len(d)>=1): sys.exit(2)   # empty catalog -> can't prove a real read
+keys={'id','name','type','steamAppId','clientSteamAppId','isSteamAccountRequired','ports','specs','cover','rawgSlug'}
+speckeys={'maxPlayers','minRamMb','recommendedRamMb','baseDiskMb'}
+saw_range=saw_steam=saw_null_steam=False
+for e in d:
+    if set(e)!=keys: sys.exit(3)
+    if e['type'] not in ('native','container'): sys.exit(4)
+    if e['cover'] is not None: sys.exit(5)               # reserved — always null at M8·a
+    if e['rawgSlug'] is not None: sys.exit(6)            # reserved
+    if set(e['specs'])!=speckeys: sys.exit(7)            # keys present (values null today, uncurated)
+    if not isinstance(e['ports'],list): sys.exit(8)
+    for p in e['ports']:
+        if set(p)!={'start','end','proto'}: sys.exit(9)
+        if not (isinstance(p['start'],int) and isinstance(p['end'],int) and p['start']<=p['end']): sys.exit(10)
+        if p['proto'] not in ('tcp','udp'): sys.exit(11)
+        if p['start']<p['end']: saw_range=True
+    if e['steamAppId'] is not None: saw_steam=True
+    else: saw_null_steam=True
+# the live catalog must exercise: a real multi-port range (FromUfwSpec range parse) and steam honesty both ways
+if not (saw_range and saw_steam and saw_null_steam): sys.exit(12)
+if 'factorio' not in {e['id'] for e in d}: sys.exit(13)  # a known blueprint -> a real engine read
+sys.exit(0)
+" 2>/dev/null; then
+  N="$(python3 -c "import json;print(len(json.load(open('/tmp/kgsm-api-smoke.body'))))" 2>/dev/null)"
+  ok "/library 200 + honest shape (n=${N}): structured ports (FromUfwSpec), steam null-honesty, cover/rawgSlug reserved-null"
+else bad "/library shape (code=$CODE body=$BODY) [empty catalog? set SMOKE_KGSM_PATH]"; fi
+
+# 15c. ?q= narrows by id/name (case-insensitive); a no-match returns [] (never a fabricated row).
+req GET '/api/v1/library?q=factorio'
+q_ok=false
+if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if (isinstance(d,list) and len(d)>=1 and all('factorio' in (e['id']+e['name']).lower() for e in d)) else 1)
+" 2>/dev/null; then
+  req GET '/api/v1/library?q=zzzznotagame'
+  [[ "$CODE" == 200 ]] && [[ "$(tr -d ' \n' < /tmp/kgsm-api-smoke.body)" == "[]" ]] && q_ok=true
+fi
+$q_ok && ok "/library?q= filters by id/name (factorio→matches, no-match→[])" || bad "/library q filter (code=$CODE body=$BODY)"
+
 stop_api
 
 # --- Phase B: embedded stub monitor → host happy path + the servers JOIN present-branch ----
@@ -839,9 +890,9 @@ start_api_auth || { echo "API never healthy (auth-enabled); log:"; tail -20 /tmp
 # 31. Protected endpoints with NO bearer -> 401 + the frozen {error} envelope (never ProblemDetails).
 #     Includes the diagnostics probes (_dbcheck touches the DB, _throw forces a 500): the secure-by-default
 #     fallback + the admin gate close them, so "protect all prior endpoints" holds with no open back door.
-#     /audit (M5) + /alerts (M6·a) are viewer reads -> also 401 with no bearer.
+#     /audit (M5) + /alerts (M6·a) + /library (M8·a) are viewer reads -> also 401 with no bearer.
 auth_401=true
-for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/_dbcheck /api/v1/_throw; do
+for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/_dbcheck /api/v1/_throw; do
   req GET "$p"
   if [[ "$CODE" != 401 ]] || ! grep -q '"code":"unauthorized"' <<<"$BODY" || grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY"; then
     auth_401=false; echo "    ($p -> $CODE $BODY)"
@@ -851,7 +902,7 @@ req POST /api/v1/servers/x/commands -H 'Content-Type: application/json' -d '{"ve
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST commands -> $CODE $BODY)"; }
 req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/_dbcheck,/_throw,POST commands,POST assistant/turn (no open back door)" \
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/_dbcheck,/_throw,POST commands,POST assistant/turn (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 32. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).

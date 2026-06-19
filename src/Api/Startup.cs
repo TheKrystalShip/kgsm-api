@@ -12,6 +12,7 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Leaves;
+using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.KGSM.Extensions;
 
 namespace TheKrystalShip.Api;
@@ -84,6 +85,11 @@ public class Startup(IConfiguration configuration)
         // server/host aggregators can depend on it unconditionally.
         services.AddSingleton<NetworkAggregator>();
         services.AddSingleton<ServerAggregator>();
+
+        // M8·a — the installable-game catalog (GET /library). A pure blueprint scrape via kgsm-lib
+        // IBlueprintService, resolved per-request and degrading to an empty catalog (logged once) when
+        // the engine is unconfigured — the same engine-is-base posture as ServerAggregator.
+        services.AddSingleton<LibraryAggregator>();
 
         // M2 — realtime. The hub is the per-host connection registry + fan-out; the three pumps poll
         // their sources (neither the monitor nor kgsm-lib pushes) and publish only while subscribed, so
