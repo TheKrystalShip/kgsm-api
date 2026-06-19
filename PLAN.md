@@ -601,7 +601,7 @@ wiring* lands first.
   `art` gradient until the RAWG increment), `specs` are all-null today, and `name == id` until metadata
   curation lands — agree these before the store swap.
 
-**M8·b — Install + uninstall (`POST /servers` / `DELETE /servers/{id}`).** · `partial` (backend built & self-validated 2026-06-19; the install/uninstall **mutation** happy path is a trusted-host live-validate, owed; frontend gate pending)
+**M8·b — Install + uninstall (`POST /servers` / `DELETE /servers/{id}`).** · `partial` (backend built, self-validated, & **LIVE-VALIDATED GREEN end-to-end 2026-06-19** — real install + uninstall round-trip; surfaced + fixed an upstream `kgsm uninstall` interactive-only gap (kgsm-lib 1.18.0); committed to `main` (not pushed); frontend gate pending)
 - **Goal:** the panel's one CREATE operation + its delete — the async install/uninstall write path.
 - **Wires:** kgsm-lib `IInstanceService.Install`/`Uninstall`/`GenerateId` (engine base — all already carry the
   `(actor, origin)` provenance params). **No upstream work needed** (verified end-to-end): kgsm already emits
@@ -635,14 +635,53 @@ wiring* lands first.
   the install/uninstall `job` shape, the **no-double-write** proof (a completed install leaves `/audit` empty),
   and — advisor-caught — the **model-validation `{error}` envelope** on a malformed/type-mismatched body (the
   first typed-body endpoint; see below). The mutation happy path (a real install → `instance_installed` → `server.install` row → `server.patch`;
-  a real uninstall → `server.removed`) is a **trusted-host live-validate, owed** (a real install mutates the host
-  — like M3's mutation happy path; needs `kgsm-watchdog` up for reliable native run-state).
+  a real uninstall → `server.removed`) is **LIVE-VALIDATED GREEN 2026-06-19** on `hotrod` (real install + uninstall
+  round-trip; the run surfaced + fixed an upstream `kgsm uninstall` interactive-only gap — see §8).
 - **Depends:** M3 (the job/runner/verify), M5 (the audit echo + provenance stamping), M8·a (the catalog the
   install picker draws from).
 - **Frontend gate:** the install form (handle the "collected but inert" fields honestly) + the uninstall action.
   **Honesty note for the gate:** `name` is honored as the **instance name** (kgsm validates it as an id and
   falls back to an auto-generated `blueprint-suffix` if it isn't a usable unique name) — a true free-text
   *display* name is deferred upstream (blueprint metadata curation), not silently dropped.
+
+**M8·c — Config surfaces (`/me` · `/settings` · `/integrations/discord`).** · `partial` (`/me` built & self-validated 2026-06-19; `/settings` + `/integrations/discord` NOT started — see the honesty findings below)
+- **Goal:** the panel's per-host config/identity reads — the last M8 surfaces. Split from the install/library
+  write+catalog work because they're a different shape (identity + preferences + a connected integration).
+- **`GET /me` — DONE (built & self-validated 2026-06-19).** The caller's identity + tier + scopes, a pure
+  projection of the session bearer's claims (no engine/leaf/DB touch). `MeResponse { user: SessionUser{ id,
+  username, display, avatarUrl? }, tier, scopes[] }`, gated `[Authorize]` (any authenticated caller — so a
+  `none`-tier caller can read its own identity, not just be 403'd). **Honest realization (frozen in §6):**
+  **read-only** — the surface table's GET+**PATCH** "Profile (display name, handle, **density**)" needs a
+  per-panel preference store that is **deliberately not built** (the statelessness trade), so PATCH + density
+  are deferred, never faked; the profile is the **login-time snapshot** (no retained Discord token to re-fetch,
+  the §3·f divergence); the honest **delta over `/auth/session`** is the **`tier`** the SPA gates on. `MeController`
+  + `MeResponse`; smoke **48/48** (+1 wire-shape under the auth-disabled synthetic admin; `/me` folded into the
+  no-bearer 401 sweep), tests **143** (+8 `MeTests`). Release 0-warning.
+- **`/settings` — NOT started.** Needs its **honest backing scoped first**: what is genuinely settable per host
+  with a real source (the §3·d "Assistant endpoint & general preferences"). The assistant endpoint URL is a real
+  config value; "general preferences" hit the **same no-preference-store wall** as `/me`'s PATCH half. Scope the
+  honest, persistable subset before building — don't ship a settings surface backed by a store that doesn't exist.
+- **⚠ `/integrations/discord` — NOT started; a DECISION + a SUBSYSTEM, not a wiring increment (honesty finding,
+  2026-06-19).** The earlier "what's next" framing mischaracterized this as buildable-now because "the Discord
+  app/bot-token config is already live (M4·b)." That **conflated two different Discord concerns.** The M4 config
+  (`DiscordClientId/Secret`, `DiscordBotToken`, `DiscordGuildId`, role→tier maps) is **auth role-resolution** —
+  it exists only to resolve a login's tier via `GET /guilds/{guild}/members/{user}`. **§3·e `/integrations/discord`
+  is a notification-routing integration:** a stored **webhook secret** (masked on read, write-on-PATCH), a bot
+  connection + `opsRole`, an **event-routing config** (`events[]` of `{id,enabled,cadence,ping}` over a
+  server-defined catalog), and a `POST /test` that **actually posts to Discord**. A grep of `src/` confirms **zero
+  backing exists** (no webhook/integration/notification/routing code; the only EF entity is `AuditEntry`). Building
+  it honestly is a **new subsystem** — integration-config persistence (a new EF entity), the event catalog, an
+  **outbound delivery worker** that subscribes to the `servers`/`alerts`/`audit` streams and posts with the
+  cadence/ping/digest logic, plus the masking + real test-send. A read-only empty shell would imply "an integration
+  you can configure" when PATCH/test/delivery don't exist — the misleading-by-omission this project forbids.
+  **The prior decision this forces (the user's call, not a scope estimate):** a Discord *notification-delivery*
+  worker inside kgsm-api **overlaps `kgsm-bot`'s territory** (the existing Discord surface). *Does the API own
+  Discord notification routing, or does `kgsm-bot`?* That ownership question determines whether this is even
+  kgsm-api work — it must be answered before any build. **Parked pending that decision.**
+- **Depends:** M4 (the JWT identity `/me` projects). `/integrations` additionally depends on the ownership call
+  above + (if API-owned) M5's event consumer infrastructure for the delivery worker.
+- **Frontend gate:** the `/me` profile chip (read-only — no edit affordance until the preference store lands);
+  the settings + integration panels wait on the two unstarted pieces.
 
 ---
 
@@ -704,7 +743,8 @@ for the external surface and this doc for the backend's honest realization of it
 | Alert record + raise/resolve/retract | **M6·a** | `architecture.html §3·c` — **PROPOSED 2026-06-16 (built + self-validated; sign-off pending — NOT yet frozen).** **Endpoint** `GET /api/v1/alerts?status=firing\|resolved&since=24h` → **`{ data }`** (unpaginated — the feed trends empty, unlike `/audit`'s `{data,nextCursor}`; **divergence**). `status=firing` (default) = one record per live condition; `status=resolved` = the rear-view that cleared within `since` (default + **max 24h** — the rear-view ages off). **Record** = `{ id, severity:danger\|warn\|info, source, title, detail, serverId?, hostId, anchor?, status:firing\|resolved, raisedAt(Z), escalated, attempts, resolvedAt?(Z), resolution? }`. `id` is **condition-derived + stable** (`crash:<serverId>`) so a re-fire upserts and escalation re-pushes the SAME record (never a per-raise id). **`resolution`** = `{ by:"system" (always — the server observed the clear), source, reason, actionId? }`. **WS** (topic `alerts`): `alert.raise` (the full record, status `firing`; re-pushed to flip `escalated`), `alert.resolve` (`{ id, resolution }` — the client stamps `resolvedAt`), `alert.retract` (`{ id }` — gone, no rear-view). **Coalesce key = the alert id** (`AlertEntityKey`) so a resolve/retract supersedes a still-queued raise (the `ServerPatch`/`ServerRemoved` precedent, NOT audit's per-append unique key); a torn-down slow client re-hydrates via `GET /alerts` (§3·j). **Read-only** — no complete/dismiss/PATCH. **Source model (M6·a = crash only):** the watchdog's supervision state via kgsm-lib `IWatchdogClient.ListAsync()` (poll-as-authority — the poll interval IS the raise debounce; api-owned 30s resolve probation; mirrored escalation; retract on a vanished instance; honest-unknown on a blind poll; rebuilds on restart; **native instances only**). **The alert↔audit bridge** `resolution.actionId` is the `evt_` id of a `server.start`/`server.restart` audit row, set only for an **operator/api** recovery (the consumer hands it off after the write); **an autonomous watchdog restart emits no audited action** (verified against the watchdog source), so a pure auto-heal links to **null** — never fabricated (the doc's `evt_restart_mc` presumes an audited restart we don't have yet; deferred). **Divergences needing sign-off (the negotiated honest-vs-aspirational call, like M1·b / M6·b's three decisions):** (1) top-level **`hostId`** (beyond the §3·c example's `anchor.hostId`) for the SPA host filter (§4·d); (2) the unpaginated **`{data}`** envelope; (3) `source` reserves `host-monitor`/`metrics`/`assistant` but **only `watchdog` is emitted** (the rest have no honest source — never fabricated); (4) **`anchor.surface:"server"`** is a best-effort hint; (5) `alert.resolve` is `{id,resolution}` (client stamps `resolvedAt`). Gated at **viewer**. **Built + self-validated** (unit + smoke) **+ LIVE-VALIDATED 2026-06-16** (real watchdog crash on `factorio-test` → `warn` raise → 30s-probation resolve → `actionId:null` auto-heal, no flap; §8). Contract still PROPOSED — frontend sign-off pending. |
 | Assistant SSE event vocabulary (proxy vs re-wrap) | M7 | `architecture.html §5·a`; keystone O1 — **RESOLVED 2026-06-19: near-verbatim relay, §5·a shaping pushed upstream into the assistant** (`kgsm-llm/docs/m7-sse-5a-spec.md`, Phase 1 DONE `bda373a`); **fork LOCKED (a)** — confirmed commands execute via M3, `command.verified` is NOT a turn event. **Backend built & self-validated 2026-06-19** (`POST /api/v1/assistant/turn`, viewer-gated, capability-gated, trusted co-located relay auth: shared `X-Relay-Secret` + forwarded Discord identity; smoke 42/42 incl. a stub-assistant relay round-trip proving secret+identity forwarding + byte-faithful streaming, + tests 109). Only a real-model (Ollama) end-to-end remains. |
 | `LibraryEntry` DTO (the catalog) | **M8·a** | `architecture.html §3·h/§3·i` — **frozen 2026-06-19.** `GET /library?q=&category=` (viewer) → `LibraryEntry[]`: `{ id, name, type:"native"\|"container", steamAppId?, clientSteamAppId?, isSteamAccountRequired, ports[{start,end,proto}], specs{maxPlayers?,minRamMb?,recommendedRamMb?,baseDiskMb?}, cover, rawgSlug }`. Pure kgsm-lib blueprint scrape (`IBlueprintService.ListDetailed`); engine-base degrade → `[]`. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **`cover` RESERVED — always `null`** (RAWG resolution is a later increment; honesty bars a fuzzy name→RAWG match — resolve only from an exact key like `SteamAppId`→Steam CDN, never mis-attribute art); (2) **`rawgSlug` RESERVED — always `null`** (no curated slug on a blueprint; `§3·i`'s backend lookup hint); (3) `name` falls back to the blueprint `id` when metadata is uncurated (all blueprints today → `name==id`, never a guessed display name); (4) `steamAppId`/`clientSteamAppId` are **`null`** for a non-Steam blueprint (NOT the `Server` DTO's `"0"` sentinel — honest-null on this new surface); (5) `specs` keys always present, every value `null` today (uncurated upstream — `null`≠0); (6) `ports` is the blueprint's **declared default** spec, structured `[{start,end,proto}]` — emitted **directly by kgsm** on `blueprints … --json` (the 1.10.0 canonical-port-format migration extended to the blueprint surface; kgsm-lib 1.17.0 types `Blueprint.Ports` as `List<PortMapping>`), so the api never parses a port string; (7) `category` query is **reserved/inert** (no honest genre source). Gated at **viewer**. **Built + self-validated** 2026-06-19 (live 29-blueprint read proving the bash→lib→api chain + the `q` filter; smoke 44/44, tests 120). |
-| Install body (honored vs reserved) + uninstall | **M8·b** | `architecture.html §3·h` — **frozen 2026-06-19.** `POST /servers` body `InstallRequest { blueprint(required), name?, origin?, + reserved: hostId?,version?,port?,queryPort?,slots?,dir?,password?,autostart? }` → **`202` + `{ job }`** (NOT a server — install is async; the new server appears on `/servers` with a backend-assigned id when the job settles). **Honored:** `blueprint`, `name`, `origin`; **everything else accepted-but-inert** (additive-only — sending it keeps the schema forward-compatible). `DELETE /servers/{id}` (uninstall) → `202` + `{ job }`; `origin` rides `?origin=`. Both **operator-gated**; the `job` is the frozen M3 shape with `verb:"install"`/`"uninstall"`. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **`name` is the kgsm instance name, not a free-text display label** — kgsm validates it as an id and falls back to an auto-generated `blueprint-suffix` if it isn't a usable unique name (a true display name is deferred upstream — blueprint metadata curation, never silently dropped); (2) the reserved fields are **inert, never half-applied** (`dir`/`version` would mis-map — `version` is a build channel, not a kgsm game version — so they wait for an honest mapping); (3) **`autostart` is inert** (the post-install start chain is owed). **Gate:** install `400` (missing/unusable blueprint-or-name — generate-id's real detail) · `409` (install in flight for the resolved name) · `503` (engine unprovisioned); uninstall `404` (unknown id) · `409` · `503`. **Audit:** echo-path, **no double-write** — the command stamps actor+origin, kgsm emits `instance_installed`/`instance_uninstalled`, the M5 consumer writes `server.install`/`server.uninstall` (NOT a direct write — the lifecycle case). **Verify:** install → `server.patch` (new server); uninstall → `server.removed` tombstone. Backend built & self-validated (smoke 47/47 gate-only + tests 135, incl. the no-double-write proof + the malformed/type-mismatched-body `{error}`-envelope guarantee); the **mutation happy path is a trusted-host live-validate, owed.** |
+| Install body (honored vs reserved) + uninstall | **M8·b** | `architecture.html §3·h` — **frozen 2026-06-19.** `POST /servers` body `InstallRequest { blueprint(required), name?, origin?, + reserved: hostId?,version?,port?,queryPort?,slots?,dir?,password?,autostart? }` → **`202` + `{ job }`** (NOT a server — install is async; the new server appears on `/servers` with a backend-assigned id when the job settles). **Honored:** `blueprint`, `name`, `origin`; **everything else accepted-but-inert** (additive-only — sending it keeps the schema forward-compatible). `DELETE /servers/{id}` (uninstall) → `202` + `{ job }`; `origin` rides `?origin=`. Both **operator-gated**; the `job` is the frozen M3 shape with `verb:"install"`/`"uninstall"`. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **`name` is the kgsm instance name, not a free-text display label** — kgsm validates it as an id and falls back to an auto-generated `blueprint-suffix` if it isn't a usable unique name (a true display name is deferred upstream — blueprint metadata curation, never silently dropped); (2) the reserved fields are **inert, never half-applied** (`dir`/`version` would mis-map — `version` is a build channel, not a kgsm game version — so they wait for an honest mapping); (3) **`autostart` is inert** (the post-install start chain is owed). **Gate:** install `400` (missing/unusable blueprint-or-name — generate-id's real detail) · `409` (install in flight for the resolved name) · `503` (engine unprovisioned); uninstall `404` (unknown id) · `409` · `503`. **Audit:** echo-path, **no double-write** — the command stamps actor+origin, kgsm emits `instance_installed`/`instance_uninstalled`, the M5 consumer writes `server.install`/`server.uninstall` (NOT a direct write — the lifecycle case). **Verify:** install → `server.patch` (new server); uninstall → `server.removed` tombstone. Backend built & self-validated (smoke 47/47 gate-only + tests 135, incl. the no-double-write proof + the malformed/type-mismatched-body `{error}`-envelope guarantee); **LIVE-VALIDATED GREEN end-to-end 2026-06-19** (real install + uninstall round-trip — surfaced + fixed an upstream `kgsm uninstall` interactive-only gap, kgsm-lib 1.18.0); committed to `main` (not pushed). |
+| `MeResponse` (the identity surface) | **M8·c** | `architecture.html §3·f` surface table (the "Profile" resource) — **frozen 2026-06-19.** `GET /me` → `MeResponse { user: SessionUser{ id, username, display, avatarUrl? }, tier, scopes[] }`. A pure projection of the session bearer's claims (no engine/leaf/DB touch): the Discord identity snapshot captured at login + the resolved authorization `tier` + the granted `scopes`. Gated at **`[Authorize]`** — any authenticated caller, NOT viewer — so a `none`-tier caller (verified identity, no role on this host) can read "who am I / why am I 403 elsewhere"; no bearer → the `401` envelope. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **read-only** — the surface table lists `/me` as GET+**PATCH** ("display name, handle, **density**"), but the editable half needs a per-panel preference store **deliberately not built** (architecture.html's statelessness note: per-user/panel prefs that follow a user across devices are out of scope), so PATCH + density are deferred, never faked; (2) the profile is the **login-time snapshot**, not a fresh live Discord fetch (the §3·f no-retained-token divergence, shared with `/auth/session`); (3) the honest **delta over `/auth/session`** (which returns `{user,scopes}`) is the **`tier`** — the one fact the SPA gates its controls on; `display`/`username` fall back to the handle, never a guessed label. **Built + self-validated** 2026-06-19 (smoke 48/48: the wire shape under the auth-disabled synthetic admin + `/me` in the no-bearer 401 sweep; tests 143 (+8 `MeTests`): tier-reflected-verbatim, the none-tier `200` reachability, refresh-as-access/wrong-signature `401`). |
 
 ---
 
@@ -1549,11 +1589,13 @@ as all-null today. **Owed next:** M8·b (install `POST /servers` + the install j
 `Install` `KgsmResult`'s new-instance-id surfacing for the job→server handoff is in-api plumbing to confirm,
 not upstream.
 
-### M8·b — 2026-06-19 · install + uninstall (`POST /servers` / `DELETE /servers/{id}`) self-validated (gate); the mutation happy path is a trusted-host live-validate, owed; frontend gate pending
+### M8·b — 2026-06-19 · install + uninstall (`POST /servers` / `DELETE /servers/{id}`) self-validated (gate) + LIVE-VALIDATED GREEN end-to-end (install + uninstall round-trip; an upstream `kgsm uninstall` interactive-only gap was surfaced + fixed); committed to `main`; frontend gate pending
 
 **Status:** the create/delete write path — the panel's one CREATE op + its delete. Backend **built +
-self-validated** at the gate level (the rejection contract, no mutation — exactly M3's discipline); the
-mutation happy path is a trusted-host live-validate, owed; the frontend gate is deferred with the rest (no SPA).
+self-validated** at the gate level (the rejection contract, no mutation — exactly M3's discipline) **and
+LIVE-VALIDATED GREEN end-to-end 2026-06-19** (real install + uninstall round-trip on `hotrod` — the live run
+surfaced + fixed an upstream `kgsm uninstall` interactive-only gap, below); committed to `main` (not pushed);
+the frontend gate is deferred with the rest (no SPA).
 
 **No-upstream finding (the discriminating checks, advisor-prompted).** Before building, the whole chain was
 traced and confirmed already in place — M8·b is a pure api wiring increment:
@@ -1657,8 +1699,7 @@ nupkg lacked `--force` and the first re-verify still ran `uninstall <name>` (no 
 **`DELETE /servers/factorio?origin=api` → the instance was actually removed in ~4s** (`GET /servers/factorio`
 `404`, gone from the roster, kgsm confirms), and a **`server.uninstall` audit row landed with `origin:api`**
 (`warn`, `actor:dev`) — the provenance-stamped echo the blocked run could not produce (it then wrote nothing).
-Host restored to baseline, temp DB/socket removed, the kgsm checkout's working tree carries the bash changes
-(uncommitted).
+Host restored to baseline, temp DB/socket removed; the kgsm + kgsm-lib changes are committed (below).
 
 **Honesty note carried to the frontend gate.** `name` is honored as the kgsm **instance name** (kgsm validates
 it as an id and falls back to an auto-generated `blueprint-suffix` if it isn't usable/unique) — a true free-text
@@ -1666,4 +1707,61 @@ it as an id and falls back to an auto-generated `blueprint-suffix` if it isn't u
 not over-claimed. The reserved fields (`dir`/`version`/`port`/`slots`/`password`/`autostart`) are inert, never
 half-applied.
 
-**Not committed** (no explicit request) — the working tree carries the M8·b changes for review.
+**Committed 2026-06-19** to `main` (not pushed) — one commit per repo: kgsm `b00f043` (`--force` + `EC_CANCELLED`),
+kgsm-lib `f7b2524` (1.18.0 `Uninstall --force`), kgsm-api `43f8141` (M8·b endpoints + the model-validation
+envelope fix + the kgsm-lib ref bump 1.17.0→1.18.0).
+
+### M8·c — 2026-06-19 · config surfaces: `GET /me` built & self-validated (identity + tier + scopes); `/settings` + `/integrations/discord` not started (honesty findings)
+
+**Status.** The first of M8's config surfaces. `GET /me` is **built + self-validated**; the other two config
+surfaces are **not started**, each for a documented honesty reason (below), so M8·c stays `partial`.
+
+**`GET /me` — built (the honest read slice).** A pure projection of the session bearer's claims — no engine,
+leaf or DB touch. `MeController` (`[ApiController]`, `[Route("api/v1/me")]`, `[Authorize]`) reads
+`SessionClaims.ReadIdentity` + `ReadTier` off `HttpContext.User` and returns `MeResponse { user:
+SessionUser{ id, username, display, avatarUrl? }, tier, scopes[] }`. The honest realization (frozen in §6):
+- **Read-only — the divergence.** The §3·f surface table lists `/me` as GET+**PATCH** ("Profile: display
+  name, handle, **density**"). The editable half needs a per-panel preference store **deliberately not built**
+  (architecture.html's statelessness note: prefs that follow a user across devices are out of scope). So PATCH
+  + density are deferred, never faked — `/me` surfaces only what the bearer already carries.
+- **`[Authorize]`, not viewer-gated.** Any authenticated caller, mirroring `/auth/session` — so a `none`-tier
+  caller (verified identity, no role on this host) can read "who am I / why am I 403 elsewhere" instead of being
+  shut out of their own identity. No bearer → the `401` envelope.
+- **The delta over `/auth/session`.** That endpoint already returns `{user, scopes}`; the one fact `/me` adds is
+  the **`tier`** — exactly what the SPA gates its controls on, and the reason `/me` earns its own resource.
+- **Validated.** Release **0-warning**; `scripts/smoke.sh` → **48/48** (+1: the `/me` wire shape — camelCase
+  `{user,tier,scopes}` — read under the auth-disabled synthetic admin (`tier:admin`, `user.id:discord:dev`); plus
+  `/me` folded into the auth-enabled no-bearer 401 sweep). `tests/Api.Tests` → **143** (+8 `MeTests`: the identity
+  snapshot + scopes projection, `tier` reflected verbatim across viewer/operator/admin, the **none-tier `200`**
+  reachability (the who-am-I behaviour that distinguishes `/me` from the viewer-gated reads), and the
+  refresh-as-access / wrong-signature `401`s through the real pipeline). Mirrors `/auth/session` + `TierMatrixTests`.
+
+**`/settings` — not started (scope its honest backing first).** §3·d is "Assistant endpoint & general
+preferences." The **assistant endpoint URL** is a real, persistable config value; the "general preferences" hit
+the **same missing-preference-store wall** as `/me`'s PATCH half. The honest move is to scope the persistable
+subset (and decide whether it needs the first non-audit EF entity) before building — not to ship a settings
+surface backed by a store that does not exist.
+
+**⚠ `/integrations/discord` — not started; a DECISION + a SUBSYSTEM, not a wiring increment.** An earlier
+"what's next" note mischaracterized this as buildable-now because "the Discord app/bot-token config is already
+live (M4·b)" — that **conflated two unrelated Discord concerns** and the correction is owed plainly:
+- **What exists** (`ApiOptions.Discord*`) is **auth role-resolution** — client id/secret, bot token, guild id,
+  role→tier maps, used *only* to resolve a login's tier via `GET /guilds/{guild}/members/{user}`.
+- **What §3·e asks for** is a **notification-routing integration**: a stored **webhook secret** (masked on read,
+  write-on-PATCH), a bot connection + `opsRole`, an **event-routing config** (`events[]` of
+  `{id,enabled,cadence,ping}` over a server-defined catalog), and a `POST /test` that **actually posts to
+  Discord**. A grep of `src/` confirms **zero backing** (no webhook/integration/notification/routing code; the
+  only EF entity is `AuditEntry`; `DiscordBotToken` is used only by `DiscordIdentityResolver` for the role
+  lookup).
+- **Why it can't ship as an endpoint wire.** Building it honestly is a **new subsystem** — integration-config
+  persistence (a new EF entity), the event catalog, an **outbound delivery worker** subscribing to the
+  `servers`/`alerts`/`audit` streams and posting with the cadence/ping/digest logic, plus the secret masking +
+  real test-send. A read-only empty shell would imply "an integration you can configure" when PATCH/test/delivery
+  don't exist — the misleading-by-omission this project forbids.
+- **The decision it forces (the user's call).** A Discord *notification-delivery* worker inside kgsm-api
+  **overlaps `kgsm-bot`'s territory** (the existing Discord surface, keystone §4). *Does the API own Discord
+  notification routing, or does `kgsm-bot`?* That ownership question determines whether this is kgsm-api work at
+  all, and must be answered before any build. **Parked pending that decision.**
+
+**Not committed yet** — the `/me` working-tree changes (`MeController`, `MeResponse`, `MeTests`, the smoke `/me`
+checks, these docs) await the next commit.

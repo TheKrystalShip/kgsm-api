@@ -833,8 +833,26 @@ sys.exit(0 if (isinstance(d.get('data'),list) and len(d['data'])==0) else 1)
     || bad "M8·b uninstall unknown-server 404 (code=$CODE body=$BODY)"
 
   echo "  (note: the 202 + install/uninstall job lifecycle + verify server.patch/server.removed + the"
-  echo "   server.install/uninstall audit echo are code-path-only in smoke — a real install mutates the host,"
-  echo "   so it is a trusted-host live-validate, like M3's mutation happy path)"
+  echo "   server.install/uninstall audit echo stay out of smoke — a real install mutates the host, so the"
+  echo "   mutation happy path was live-validated separately on the trusted host (2026-06-19), like M3's)"
+
+  # --- M8 /me: the identity surface (projects the bearer claims; here the AUTH_DISABLED synthetic admin) ---
+  echo "==> M8 /me checks — GET /api/v1/me (identity + tier + scopes projected from the bearer)"
+
+  # 39. Under AUTH_DISABLED the synthetic admin IS the caller -> 200 with its identity + tier:admin + scopes.
+  #     (The tier matrix + the none-tier/no-token cases are proven in tests/Api.Tests; the no-bearer 401 is
+  #     in the auth-enabled sweep below. Here we prove the wire shape: camelCase {user,tier,scopes}.)
+  req GET /api/v1/me
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+u=d.get('user',{})
+sys.exit(0 if (d.get('tier')=='admin' and u.get('id')=='discord:dev'
+               and u.get('username')=='dev' and isinstance(d.get('scopes'),list)
+               and 'identify' in d['scopes']) else 1)
+" 2>/dev/null; then
+    ok "/me 200 + {user:{id:discord:dev,...}, tier:admin, scopes:[…]} (projects the bearer claims)"
+  else bad "/me shape (code=$CODE body=$BODY)"; fi
 
   stop_api
 fi
@@ -918,8 +936,9 @@ start_api_auth || { echo "API never healthy (auth-enabled); log:"; tail -20 /tmp
 #     Includes the diagnostics probes (_dbcheck touches the DB, _throw forces a 500): the secure-by-default
 #     fallback + the admin gate close them, so "protect all prior endpoints" holds with no open back door.
 #     /audit (M5) + /alerts (M6·a) + /library (M8·a) are viewer reads -> also 401 with no bearer.
+#     /me (M8) is [Authorize] (any authenticated caller) -> still 401 with no bearer.
 auth_401=true
-for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/_dbcheck /api/v1/_throw; do
+for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/_dbcheck /api/v1/_throw; do
   req GET "$p"
   if [[ "$CODE" != 401 ]] || ! grep -q '"code":"unauthorized"' <<<"$BODY" || grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY"; then
     auth_401=false; echo "    ($p -> $CODE $BODY)"
@@ -933,7 +952,7 @@ req DELETE /api/v1/servers/x
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (DELETE /servers/{id} -> $CODE $BODY)"; }
 req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,POST assistant/turn (no open back door)" \
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,POST assistant/turn (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 32. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).
