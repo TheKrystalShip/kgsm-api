@@ -51,11 +51,11 @@
          (FirewallEnforcement) + the AppliedInactive outcome, so an inactive firewall reads as
          reachable (all open), never "closed" — via Firewall.Contracts 1.1.0 (brought transitively).
          Verified clean over the 1.9->1.14 breaks (no Instance.Ports / ConfigurationInfo.Ports /
-         IFileService usage here). 1.16.0 (M8·a) adds PortMappingExtensions.FromUfwSpec — the parser
-         the library catalog uses to structure a blueprint's legacy UFW port string at the chokepoint
-         (the API never re-parses an opaque port string). Never shell kgsm.sh / open the firewall
-         socket directly. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.16.0" />
+         IFileService usage here). 1.17.0 (M8·a) makes Blueprint.Ports the canonical structured
+         List<PortMapping> (kgsm now emits [{start,end,protocol}] on the blueprints JSON surface), so
+         the library catalog projects it directly — no port-string parsing anywhere. Never shell
+         kgsm.sh / open the firewall socket directly. -->
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.17.0" />
 
     <!-- The shared GET /metrics wire contract (Snapshot graph + source-gen camelCase
          JSON), built in kgsm-monitor. We deserialize the monitor scrape into these exact

@@ -356,7 +356,7 @@ if 'factorio' not in {e['id'] for e in d}: sys.exit(13)  # a known blueprint -> 
 sys.exit(0)
 " 2>/dev/null; then
   N="$(python3 -c "import json;print(len(json.load(open('/tmp/kgsm-api-smoke.body'))))" 2>/dev/null)"
-  ok "/library 200 + honest shape (n=${N}): structured ports (FromUfwSpec), steam null-honesty, cover/rawgSlug reserved-null"
+  ok "/library 200 + honest shape (n=${N}): structured ports (from kgsm, no C# parse), steam null-honesty, cover/rawgSlug reserved-null"
 else bad "/library shape (code=$CODE body=$BODY) [empty catalog? set SMOKE_KGSM_PATH]"; fi
 
 # 15c. ?q= narrows by id/name (case-insensitive); a no-match returns [] (never a fabricated row).

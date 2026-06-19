@@ -27,7 +27,12 @@ public sealed class LibraryAggregatorTests
         var bp = new Blueprint
         {
             Name = "7dtd",
-            Ports = "26900:26903/tcp|26900:26903/udp",
+            // Already structured (kgsm emits [{start,end,protocol}] on `blueprints --json`).
+            Ports =
+            [
+                new PortMapping { Start = 26900, End = 26903, Protocol = "tcp" },
+                new PortMapping { Start = 26900, End = 26903, Protocol = "udp" },
+            ],
             BlueprintType = BlueprintType.Native,
             SteamAppId = "294420",
             ClientSteamAppId = "251570",
@@ -59,7 +64,7 @@ public sealed class LibraryAggregatorTests
         var bp = new Blueprint
         {
             Name = "abioticfactor",
-            Ports = "7777/udp",
+            Ports = [new PortMapping { Start = 7777, End = 7777, Protocol = "udp" }],
             BlueprintType = BlueprintType.Container,
             SteamAppId = "",
             ClientSteamAppId = "",
@@ -80,7 +85,7 @@ public sealed class LibraryAggregatorTests
         var bp = new Blueprint
         {
             Name = "valheim",
-            Ports = "2456:2457/udp",
+            Ports = [new PortMapping { Start = 2456, End = 2457, Protocol = "udp" }],
             BlueprintType = BlueprintType.Native,
             Metadata = new BlueprintMetadata
             {
@@ -103,16 +108,21 @@ public sealed class LibraryAggregatorTests
     }
 
     [Fact]
-    public async Task A_protocol_less_blueprint_port_expands_to_tcp_and_udp()
+    public async Task Structured_blueprint_ports_project_one_to_one_to_LibraryPort()
     {
-        var bp = new Blueprint { Name = "g", Ports = "34197", BlueprintType = BlueprintType.Native };
+        // kgsm + kgsm-lib own port parsing; the catalog just projects the structured PortMapping
+        // list to the DTO. A range stays a range (not expanded per-port) on the library surface.
+        var bp = new Blueprint
+        {
+            Name = "g",
+            Ports = [new PortMapping { Start = 34197, End = 34197, Protocol = "tcp" }],
+            BlueprintType = BlueprintType.Native,
+        };
         LibraryAggregator agg = Aggregator(new FakeBlueprints(new() { ["g"] = bp }));
 
         LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, default));
 
-        Assert.Equal(
-            new[] { new LibraryPort(34197, 34197, "tcp"), new LibraryPort(34197, 34197, "udp") },
-            e.Ports);
+        Assert.Equal(new[] { new LibraryPort(34197, 34197, "tcp") }, e.Ports);
     }
 
     [Fact]
@@ -167,7 +177,7 @@ public sealed class LibraryAggregatorTests
     private static Blueprint Bp(string name, string? display = null) => new()
     {
         Name = name,
-        Ports = "1000/tcp",
+        Ports = [new PortMapping { Start = 1000, End = 1000, Protocol = "tcp" }],
         BlueprintType = BlueprintType.Native,
         Metadata = display is null ? null : new BlueprintMetadata { DisplayName = display },
     };

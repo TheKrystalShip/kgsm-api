@@ -101,12 +101,12 @@ public sealed class LibraryAggregator
             ? entryId
             : bp.Metadata!.DisplayName!;
 
-        // Structured default ports, parsed at the kgsm-lib chokepoint (the API never re-parses a port
-        // string). An empty/blank spec yields an empty list.
+        // The blueprint's declared default ports — already the canonical structured form (kgsm emits
+        // [{start,end,protocol}] on `blueprints --json`, kgsm-lib types it List<PortMapping>), so the
+        // API just projects to the DTO; it never parses a port string. Empty when none declared.
         IReadOnlyList<LibraryPort> ports =
         [
-            .. PortMappingExtensions.FromUfwSpec(bp.Ports)
-                .Select(static m => new LibraryPort(m.Start, m.End, m.Protocol)),
+            .. bp.Ports.Select(static m => new LibraryPort(m.Start, m.End, m.Protocol)),
         ];
 
         var specs = new LibrarySpecs(
