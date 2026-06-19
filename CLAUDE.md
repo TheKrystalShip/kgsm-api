@@ -66,9 +66,11 @@ scrape via `IBlueprintService.ListDetailed`, mapped to the honest `LibraryEntry`
 the `ServerAggregator` pattern. **`cover`/`rawgSlug` reserved-`null`** — RAWG cover resolution is a later
 increment (honesty bars a fuzzy `DisplayName`→RAWG match; resolve only from an exact key like `SteamAppId`);
 `name` falls back to the blueprint `id` when uncurated; steam ids are honest-`null` not `"0"`; `specs`
-all-null today; `ports` structured `[{start,end,proto}]` via kgsm-lib's **new `FromUfwSpec`** parse-at-the-
-chokepoint (the api never re-parses the legacy blueprint port string). kgsm-lib bumped **1.15.0 → 1.16.0**)
-(`scripts/smoke.sh` **44/44** — incl. a live 29-blueprint catalog read — + **tests/Api.Tests 120**); M8·b
+all-null today; `ports` structured `[{start,end,proto}]` emitted **directly by kgsm** on `blueprints` JSON
+(the 1.10.0 canonical-port-format migration extended to the blueprint surface — `Blueprint.Ports` is now
+`List<PortMapping>`), so the api never parses a port string. kgsm-lib bumped to **1.17.0** (BREAKING))
+(`scripts/smoke.sh` **44/44** — incl. a live 29-blueprint catalog read proving the bash→lib→api chain — +
+**tests/Api.Tests 120**); M8·b
 (install) and the M6·a/M7/M8·a frontend gates are `planned`. **Auth is ON by default**
 — `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4
 open trust window). Trust `PLAN.md`'s per-milestone status, not assumptions.

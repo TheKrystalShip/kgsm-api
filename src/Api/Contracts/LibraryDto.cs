@@ -57,9 +57,9 @@ public sealed record LibraryEntry(
 
 /// <summary>
 /// One contiguous default port range a blueprint declares, structured (the canonical
-/// <c>{ start, end, protocol }</c> shape — a single port has <c>start == end</c>). The blueprint
-/// surface emits ports only as the legacy UFW string; kgsm-lib's <c>FromUfwSpec</c> parses it at the
-/// chokepoint so the catalog carries structure, not an opaque string the SPA would have to split.
+/// <c>{ start, end, protocol }</c> shape — a single port has <c>start == end</c>). kgsm emits this
+/// directly on <c>blueprints … --json</c> and kgsm-lib types it as <c>List&lt;PortMapping&gt;</c>, so
+/// the catalog just projects it — no port-string parsing, not an opaque string the SPA would have to split.
 /// </summary>
 /// <param name="Start">First port of the inclusive range.</param>
 /// <param name="End">Last port of the inclusive range (== <paramref name="Start"/> for a single port).</param>

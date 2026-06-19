@@ -323,8 +323,8 @@ req GET /api/v1/servers/does-not-exist
 
 # --- M8·a: GET /library (the installable-game catalog — a pure blueprint scrape) ------------
 # Phase A reads the REAL dev kgsm catalog (no monitor needed — blueprints are engine-only). Proves the
-# honest DTO end-to-end: the frozen key set, structured ports parsed at the kgsm-lib chokepoint
-# (FromUfwSpec), steam-id honesty (null for a non-Steam blueprint, never "0"), reserved cover/rawgSlug.
+# honest DTO end-to-end: the frozen key set, structured ports emitted directly by kgsm (no C# parse),
+# steam-id honesty (null for a non-Steam blueprint, never "0"), reserved cover/rawgSlug.
 echo "==> M8·a library checks — Phase A (live blueprint catalog; kgsm=${KGSM_PATH})"
 
 # 15b. GET /library — honest shape + structured ports + steam honesty + reserved cover/rawgSlug.
@@ -350,7 +350,7 @@ for e in d:
         if p['start']<p['end']: saw_range=True
     if e['steamAppId'] is not None: saw_steam=True
     else: saw_null_steam=True
-# the live catalog must exercise: a real multi-port range (FromUfwSpec range parse) and steam honesty both ways
+# the live catalog must exercise: a real multi-port range (kgsm range-preserving) and steam honesty both ways
 if not (saw_range and saw_steam and saw_null_steam): sys.exit(12)
 if 'factorio' not in {e['id'] for e in d}: sys.exit(13)  # a known blueprint -> a real engine read
 sys.exit(0)
