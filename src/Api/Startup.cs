@@ -111,8 +111,8 @@ public class Startup(IConfiguration configuration)
         // second EF entity in AppDbContext, created by the same EnsureCreated). Providers are a THIN seam
         // (INotificationProvider) resolved by id from the registered set — Discord is the first; Slack/
         // Telegram are just another AddHttpClient<INotificationProvider, X> later. One-way webhook delivery
-        // only (the Discord view's `bot` is null — the two-way control bot stays kgsm-bot's). The delivery
-        // worker that fires on real events is Increment B; Increment A is config + a real /test send.
+        // only (the Discord view's `bot` is null — the two-way control bot stays kgsm-bot's). Increment A
+        // is config + a real /test send; Increment B (below) is the delivery worker that fires on real events.
         services.AddSingleton<IntegrationStore>();
         // RemoveAllLoggers is load-bearing, NOT cosmetic: the provider POSTs to the webhook URL, and a
         // Discord webhook URL *is* the secret (.../webhooks/{id}/{token}). The default IHttpClientFactory
@@ -122,6 +122,14 @@ public class Startup(IConfiguration configuration)
         services.AddHttpClient<INotificationProvider, DiscordNotificationProvider>(
                 c => c.Timeout = TimeSpan.FromSeconds(10))
             .RemoveAllLoggers();
+
+        // M8·c Increment B — the delivery worker. The bus is the ALWAYS-ON tap: AuditService.AppendAsync
+        // publishes every audit row to it (the bus keeps only catalog-mapped actions; the worker routes to
+        // enabled providers at `every` cadence with a per-(provider,server,event) anti-spam window). NO new
+        // event-socket consumer — it rides the existing audit flow. Singleton bus (a bounded channel) + a
+        // hosted drain loop, the always-on-hosted-service shape of the audit consumer / alert engine.
+        services.AddSingleton<INotificationBus, NotificationBus>();
+        services.AddHostedService<NotificationDeliveryWorker>();
 
         // M2 — realtime. The hub is the per-host connection registry + fan-out; the three pumps poll
         // their sources (neither the monitor nor kgsm-lib pushes) and publish only while subscribed, so

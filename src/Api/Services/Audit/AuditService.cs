@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.Api.Services.Integrations;
 
 namespace TheKrystalShip.Api.Services.Audit;
 
@@ -23,6 +24,7 @@ namespace TheKrystalShip.Api.Services.Audit;
 public sealed class AuditService(
     IServiceScopeFactory scopeFactory,
     StreamHub hub,
+    INotificationBus notifications,
     ILogger<AuditService> logger)
 {
     private readonly SemaphoreSlim _writeGate = new(1, 1);
@@ -75,6 +77,12 @@ public sealed class AuditService(
         // down by the send timeout and re-hydrates via GET /audit on reconnect (§3·j).
         hub.Publish(StreamProtocol.AuditTopic, StreamProtocol.AuditEntityKey(id),
             new StreamMessage(StreamProtocol.AuditTopic, StreamProtocol.AuditAppend, record));
+
+        // Increment B (M8·c): tap the ALWAYS-ON audit path so notifications fire on every kgsm lifecycle
+        // event regardless of WS subscribers (the StreamHub pumps are subscriber-gated; this append is
+        // not). The bus keeps only catalog-mapped actions and the delivery worker routes them; a
+        // non-notifiable action (auth.*, network.*, …) is dropped there. Never throws / never blocks.
+        notifications.Publish(record);
 
         logger.LogDebug("audit append {Id} {Action} actor={Actor} origin={Origin}",
             id, write.Action, write.Actor.Name, write.Origin ?? "(none)");
