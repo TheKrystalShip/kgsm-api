@@ -22,6 +22,17 @@
     <InternalsVisibleTo Include="Api.Tests" />
   </ItemGroup>
 
+  <!-- Scoped NuGet-audit suppression (NOT a blanket NuGetAudit=off): GHSA-2m69-gcr7-jv3q is an
+       advisory on the native SQLite lib pulled TRANSITIVELY by Microsoft.EntityFrameworkCore.Sqlite
+       (SQLitePCLRaw.lib.e_sqlite3 2.1.11). 2.1.11 is the LATEST published build of that native lib —
+       there is no fixed version to move to yet, so the only options are suppress-with-documentation or
+       break every build. Exposure here is minimal: SQLite stores only this host's local append-only
+       audit log on a trusted single host (no untrusted SQL, no network DB). Revisit and DELETE this
+       the moment a patched SQLitePCLRaw bundle ships (bump EF Core / add a patched override instead). -->
+  <ItemGroup>
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-2m69-gcr7-jv3q" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.5" />
 
