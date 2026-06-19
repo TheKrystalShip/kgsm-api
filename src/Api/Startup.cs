@@ -114,8 +114,14 @@ public class Startup(IConfiguration configuration)
         // only (the Discord view's `bot` is null — the two-way control bot stays kgsm-bot's). The delivery
         // worker that fires on real events is Increment B; Increment A is config + a real /test send.
         services.AddSingleton<IntegrationStore>();
+        // RemoveAllLoggers is load-bearing, NOT cosmetic: the provider POSTs to the webhook URL, and a
+        // Discord webhook URL *is* the secret (.../webhooks/{id}/{token}). The default IHttpClientFactory
+        // logging handler logs "Start processing HTTP request POST {uri}" at Information — i.e. it would
+        // write the token to the app log on every send. Stripping the loggers for this client keeps the
+        // "secret is never exposed" invariant on the log channel too (a regression test pins it).
         services.AddHttpClient<INotificationProvider, DiscordNotificationProvider>(
-            c => c.Timeout = TimeSpan.FromSeconds(10));
+                c => c.Timeout = TimeSpan.FromSeconds(10))
+            .RemoveAllLoggers();
 
         // M2 — realtime. The hub is the per-host connection registry + fan-out; the three pumps poll
         // their sources (neither the monitor nor kgsm-lib pushes) and publish only while subscribed, so

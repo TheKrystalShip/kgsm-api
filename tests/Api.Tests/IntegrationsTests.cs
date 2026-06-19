@@ -2,10 +2,13 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Auth;
@@ -242,6 +245,28 @@ public sealed class IntegrationsApiTests
         Assert.Equal("test", body.GetProperty("posted").GetString());
         Assert.Equal("#krystal-ops", body.GetProperty("channelLabel").GetString());
     }
+
+    // A Discord webhook URL *is* the secret (.../webhooks/{id}/{token}). The provider POSTs to it through
+    // the IHttpClientFactory client, whose DEFAULT logging handler logs "POST {uri}" at Information — i.e.
+    // it would leak the token to the app log. Production strips those loggers (Startup .RemoveAllLoggers()).
+    // This pins the invariant on the channel the body-asserting tests can't see: run the real production
+    // client pipeline (only the outbound HTTP is stubbed) at Information level and assert the token never
+    // appears in the captured logs. (Drop RemoveAllLoggers and this fails — the regression guard.)
+    [Fact]
+    public async Task Test_Send_DoesNotLeakWebhookSecretToLogs()
+    {
+        using var f = new IntegrationsLoggingFactory();
+        HttpClient c = f.CreateClient();
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(AuthTier.Admin));
+
+        const string secretToken = "TOPSECRETtoken99999";
+        await c.PatchAsJsonAsync("/api/v1/integrations/discord",
+            new { webhook = $"https://discord.com/api/webhooks/424242/{secretToken}" });
+
+        HttpResponseMessage r = await c.PostAsync("/api/v1/integrations/discord/test", null);
+        Assert.Equal(HttpStatusCode.Accepted, r.StatusCode);   // proves the primary-handler stub took (no real Discord)
+        Assert.DoesNotContain(f.Capture.Messages, m => m.Contains(secretToken, StringComparison.Ordinal));
+    }
 }
 
 /// <summary>A boot of the real app with the Discord provider's OUTBOUND HTTP swapped for a fixed-status
@@ -267,4 +292,42 @@ internal sealed class StubHandler(HttpStatusCode status) : HttpMessageHandler
 {
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
         Task.FromResult(new HttpResponseMessage(status));
+}
+
+/// <summary>Boots the app keeping the REAL production notification HttpClient (so its
+/// <c>.RemoveAllLoggers()</c> is under test), swapping ONLY the primary handler so no real Discord call
+/// is made (the named client is "INotificationProvider" — the AddHttpClient&lt;INotificationProvider,…&gt;
+/// type name). Captures all logs at Information so a test can assert the webhook token never appears.</summary>
+public sealed class IntegrationsLoggingFactory : AuthTestFactory
+{
+    public readonly CaptureLoggerProvider Capture = new();
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        base.ConfigureWebHost(builder);
+        builder.ConfigureTestServices(services =>
+            services.Configure<HttpClientFactoryOptions>("INotificationProvider", o =>
+                o.HttpMessageHandlerBuilderActions.Add(b => b.PrimaryHandler = new StubHandler(HttpStatusCode.NoContent))));
+        builder.ConfigureLogging(lb =>
+        {
+            lb.AddProvider(Capture);
+            lb.SetMinimumLevel(LogLevel.Information);
+        });
+    }
+}
+
+/// <summary>An ILoggerProvider that captures every formatted message into a queue for assertions.</summary>
+public sealed class CaptureLoggerProvider : ILoggerProvider
+{
+    public readonly ConcurrentQueue<string> Messages = new();
+    public ILogger CreateLogger(string categoryName) => new Capturing(Messages);
+    public void Dispose() { }
+
+    private sealed class Capturing(ConcurrentQueue<string> sink) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => sink.Enqueue(formatter(state, exception));
+    }
 }
