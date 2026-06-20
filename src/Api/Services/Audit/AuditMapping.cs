@@ -151,6 +151,27 @@ public static class AuditMapping
         PortsWrite(d, hostId, AuditAction.NetworkPortsClose, "closed", d.Ports);
 
     /// <summary>
+    /// Map a kgsm <c>instance_upnp_opened</c> event (the watchdog forwarded the instance's ports on
+    /// the router via upnpc, on a confirmed exit-0) to a <c>network.upnp.open</c> row. DISTINCT from
+    /// <see cref="FromPortsOpenedEvent"/>: a router NAT forward is a different fact from a host ufw
+    /// rule, so it gets its own action — a reader can tell "the router forwards it" from "the firewall
+    /// allows it". Always <c>system</c>/<c>system</c> (the autonomous daemon), handled unchanged by
+    /// <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/>. There is no api-issued UPnP command, so
+    /// this action is cleanly watchdog-echo-only.
+    /// </summary>
+    public static AuditWrite FromUpnpOpenedEvent(InstanceUpnpOpenedData d, string hostId) =>
+        UpnpWrite(d, hostId, AuditAction.NetworkUpnpOpen, "forwarded", d.Ports);
+
+    /// <summary>
+    /// Map a kgsm <c>instance_upnp_closed</c> event (the watchdog removed the router forward on a
+    /// deliberate stop, confirmed exit-0) to a <c>network.upnp.close</c> row — the close counterpart of
+    /// <see cref="FromUpnpOpenedEvent"/>, keeping the UPnP trail symmetric. A "nothing to delete" close
+    /// emits no event upstream, so this never records a removal that didn't happen.
+    /// </summary>
+    public static AuditWrite FromUpnpClosedEvent(InstanceUpnpClosedData d, string hostId) =>
+        UpnpWrite(d, hostId, AuditAction.NetworkUpnpClose, "removed", d.Ports);
+
+    /// <summary>
     /// Build the <see cref="AuditWrite"/> for the API-issued <c>open_ports</c> command (M6·b) — a
     /// <strong>direct</strong> write, the <c>auth.*</c> case: the api opens the ports through kgsm-lib's
     /// <c>IFirewallService</c>, which runs no kgsm command and emits no event, so there is no echo to read
@@ -258,6 +279,29 @@ public static class AuditMapping
             ServerId: instance,
             HostId: hostId,
             Summary: $"{verb} firewall ports for {Display(instance)}",
+            Meta: string.IsNullOrEmpty(formatted)
+                ? null
+                : new Dictionary<string, string> { ["ports"] = formatted });
+    }
+
+    // UPnP open/close differ only in action + summary verb — build the row once. Same structured
+    // ports meta as PortsWrite, but a router-forward summary ("forwarded/removed UPnP ports") so the
+    // audit feed reads distinctly from the host-firewall rows.
+    private static AuditWrite UpnpWrite(
+        EventDataBase d, string hostId, string action, string verb, IReadOnlyList<PortMapping> ports)
+    {
+        string instance = Instance(d);
+        string formatted = FormatPorts(ports);
+        return new AuditWrite(
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
+            Action: action,
+            Severity: AuditSeverity.Info,
+            Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
+            ServerId: instance,
+            HostId: hostId,
+            Summary: $"{verb} UPnP ports for {Display(instance)}",
             Meta: string.IsNullOrEmpty(formatted)
                 ? null
                 : new Dictionary<string, string> { ["ports"] = formatted });

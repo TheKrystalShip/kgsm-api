@@ -129,6 +129,15 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstancePortsClosedData>(d =>
             audit.AppendAsync(AuditMapping.FromPortsClosedEvent(d, options.HostId)));
 
+        // network.upnp.open / .close — the watchdog's ROUTER-forward echoes (kgsm-lib 1.21.0). Distinct
+        // from the firewall ports.* above: the watchdog opens/closes UPnP mappings on the IGD via upnpc
+        // on bring-up/stop and emits these (system/system) only on a confirmed upnpc-exit-0 transition.
+        // Watchdog-echo-only (no api-issued UPnP command). Pure mapper, socket-free. Engine-owned → no double-write.
+        events.RegisterHandler<InstanceUpnpOpenedData>(d =>
+            audit.AppendAsync(AuditMapping.FromUpnpOpenedEvent(d, options.HostId)));
+        events.RegisterHandler<InstanceUpnpClosedData>(d =>
+            audit.AppendAsync(AuditMapping.FromUpnpClosedEvent(d, options.HostId)));
+
         // player.join / player.leave — presence echoes (kgsm-lib 1.19.0). For our container images the
         // watchdog forwards these from the in-image detection shim (system/system); native detection is a
         // later increment. The player id/name (either nullable, at-least-one guaranteed by the shim) rides

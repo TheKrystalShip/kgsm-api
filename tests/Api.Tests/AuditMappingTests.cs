@@ -273,6 +273,54 @@ public sealed class AuditMappingTests
         Assert.Equal("2456/udp", w.Meta!["ports"]);
     }
 
+    // --- the watchdog's UPnP (router) echoes → network.upnp.open/.close, DISTINCT from ports.* --------
+    [Fact]
+    public void FromUpnpOpenedEvent_IsNetworkUpnpOpen_SystemProvenance_StructuredPortsMeta()
+    {
+        var data = new InstanceUpnpOpenedData
+        {
+            InstanceName = "valheim",
+            Actor = "system",                                       // an autonomous daemon action
+            Origin = "system",
+            Ports =
+            [
+                new PortMapping { Start = 2456, End = 2458, Protocol = "udp" },
+                new PortMapping { Start = 27015, End = 27015, Protocol = "tcp" },
+            ],
+        };
+
+        AuditWrite w = AuditMapping.FromUpnpOpenedEvent(data, hostId: "primary");
+
+        // A SEPARATE action from network.ports.open — router NAT forward, not a host ufw rule.
+        Assert.Equal(AuditAction.NetworkUpnpOpen, w.Action);
+        Assert.NotEqual(AuditAction.NetworkPortsOpen, w.Action);
+        Assert.Equal(AuditSeverity.Info, w.Severity);
+        Assert.Equal("system", w.Origin);
+        Assert.Equal(ActorKind.System, w.Actor.Kind);
+        Assert.Equal("valheim", w.ServerId);
+        Assert.Contains("forwarded UPnP ports", w.Summary);
+        Assert.Equal("2456-2458/udp, 27015/tcp", w.Meta!["ports"]); // range preserved; single not dashed
+    }
+
+    [Fact]
+    public void FromUpnpClosedEvent_IsNetworkUpnpClose_SymmetricWithOpen()
+    {
+        var data = new InstanceUpnpClosedData
+        {
+            InstanceName = "valheim",
+            Actor = "system",
+            Origin = "system",
+            Ports = [new PortMapping { Start = 2456, End = 2456, Protocol = "udp" }],
+        };
+
+        AuditWrite w = AuditMapping.FromUpnpClosedEvent(data, hostId: "primary");
+
+        Assert.Equal(AuditAction.NetworkUpnpClose, w.Action);
+        Assert.Equal(AuditSeverity.Info, w.Severity);
+        Assert.Contains("removed UPnP ports", w.Summary);
+        Assert.Equal("2456/udp", w.Meta!["ports"]);
+    }
+
     // --- player.join / player.left: presence echoes (watchdog-forwarded, system/system) --------------
     [Fact]
     public void FromPlayerJoinedEvent_IsInfoPlayerJoin_IdentityInMeta_SystemProvenance()

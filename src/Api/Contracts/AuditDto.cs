@@ -84,6 +84,15 @@ public static class AuditAction
     public const string NetworkPortsOpen = "network.ports.open";
     public const string NetworkPortsClose = "network.ports.close";
 
+    // network.upnp.* — the ROUTER door, distinct from the firewall (host) door above. The kgsm-watchdog
+    // forwards/removes each native instance's ports on the local IGD via upnpc on bring-up/stop and emits
+    // instance_upnp_opened/_closed (kgsm-lib 1.21.0), stamped system/system (an autonomous daemon action).
+    // A separate action pair (not reusing network.ports.*) because a router NAT forward is a different
+    // fact from a ufw rule — a host can have one without the other, and conflating them would erase that.
+    // Watchdog-echo-only (no api-issued UPnP command); the frontend accepts unknown actions forward-compat.
+    public const string NetworkUpnpOpen = "network.upnp.open";
+    public const string NetworkUpnpClose = "network.upnp.close";
+
     // player.* — presence echoes. kgsm raises instance_player_joined/_left (kgsm-lib 1.19.0); for our
     // container images the kgsm-watchdog forwards them from the in-image detection shim, stamped
     // system/system. Distinct join/leave actions mirror server.start/server.stop. Engine-owned (no API
