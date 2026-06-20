@@ -122,6 +122,13 @@ public class Startup(IConfiguration configuration)
         services.AddHttpClient<INotificationProvider, DiscordNotificationProvider>(
                 c => c.Timeout = TimeSpan.FromSeconds(10))
             .RemoveAllLoggers();
+        // M8·c Increment C — Slack, the second provider (validates the webhook-family abstraction). Same
+        // INotificationProvider seam, registered the same way; the worker/catalog/controller are already
+        // provider-agnostic, so it is picked up with no other change. RemoveAllLoggers for the same reason
+        // (a Slack incoming-webhook URL is also the secret).
+        services.AddHttpClient<INotificationProvider, SlackNotificationProvider>(
+                c => c.Timeout = TimeSpan.FromSeconds(10))
+            .RemoveAllLoggers();
 
         // M8·c Increment B — the delivery worker. The bus is the ALWAYS-ON tap: AuditService.AppendAsync
         // publishes every audit row to it (the bus keeps only catalog-mapped actions; the worker routes to

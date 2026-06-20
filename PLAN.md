@@ -644,7 +644,7 @@ wiring* lands first.
   falls back to an auto-generated `blueprint-suffix` if it isn't a usable unique name) — a true free-text
   *display* name is deferred upstream (blueprint metadata curation), not silently dropped.
 
-**M8·c — Config surfaces (`/me` · `/settings` · `/integrations/discord`).** · `partial` (`/me` built 2026-06-19; `/integrations/discord` **Increments A + B built & self-validated 2026-06-19** — config + a real test-send, plus the always-on delivery worker (live notifications fire on real kgsm events; live-validate with a real webhook owed); `/settings` NOT started)
+**M8·c — Config surfaces (`/me` · `/settings` · `/integrations/{discord,slack}`).** · `partial` (`/me` built 2026-06-19; `/integrations` **Increments A + B + C built & self-validated 2026-06-19** — config + a real test-send, the always-on delivery worker, and **Slack as a second provider** validating the webhook-family abstraction (live-validate with real webhooks owed); `/settings` NOT started)
 - **Goal:** the panel's per-host config/identity reads — the last M8 surfaces. Split from the install/library
   write+catalog work because they're a different shape (identity + preferences + a connected integration).
 - **`GET /me` — DONE (built & self-validated 2026-06-19).** The caller's identity + tier + scopes, a pure
@@ -711,8 +711,28 @@ wiring* lands first.
     format/ping/honest-failure, and a deterministic end-to-end — an audit row appended through `AuditService` reaches
     a recording webhook, with the rule-disabled / once-cadence / suppression gates proven via a barrier event, no
     sleeps); smoke unchanged **52/52** (B adds no HTTP endpoint — it's a background worker, proven by the e2e tests).
-  - **Increment C — refinements (LATER).** `once` (dedup state) + `digest` (timer/accumulation) cadence; a **second
-    provider** (Slack/Telegram) to actually validate the abstraction; `resource`/`join` when an honest source lands.
+  - **Increment C — the second provider (Slack) — BUILT & self-validated 2026-06-19** (the user's call: Slack
+    over Telegram; `once`/`digest` cadence **deferred**, `resource`/`join` still have **no honest source** → out).
+    The honest validation of the abstraction: extract an abstract **`WebhookNotificationProvider`** base holding
+    the genuinely-shared logic (the honest `PostAsync`, the `Test`/`Send` orchestration, the catalog⋈rules
+    `EventViews` overlay, and a `MaskWebhook(url, marker)` hint that reproduces Discord's exact committed hint),
+    refactor Discord onto it (behavior identical — guarded by its 23 + e2e tests), and add
+    **`SlackNotificationProvider`** (`hooks.slack.com`/`services/` validation, mrkdwn `*bold*`, `{text}` payload,
+    optional `Settings["pingSubteamId"]` → `<!subteam^id>`, **`&<>` escaped** in dynamic text — the Slack analog
+    of Discord's allowed_mentions care) + `SlackIntegrationView` (**no `bot` block** — Slack incoming webhooks
+    have no Discord-style control bot; inventing one would be dishonest). Registered the same way
+    (`AddHttpClient<INotificationProvider, SlackNotificationProvider>().RemoveAllLoggers()`); the worker/catalog/
+    controller were **already provider-agnostic** → picked up with no change there. **Honest framing (advisor):**
+    the base validates the **webhook-secret-URL family** (Discord, Slack); **Telegram** (a bot token + a fixed
+    endpoint + a `chat_id` — the secret is NOT the URL) would implement `INotificationProvider` directly, so it is
+    "the next real test of the interface", not covered by this base. Release 0-warning; tests **207** (+17:
+    `SlackProviderTests` mask/validate/format/escape/ping/honest-failure with a recording handler;
+    `SlackApiTests` the list-shows-both, the no-`bot` view, the admin gate, the masked PATCH round-trip); smoke
+    **54/54** (+2: `/integrations/slack` shape + masked round-trip; the list now asserts **both** providers).
+    Live-validate with a real Slack webhook **owed**.
+  - **Increment C.2 — cadence refinements (LATER, deferred by the user).** `once` (dedup/episode-reset state) +
+    `digest` (timer/accumulation) cadence — they need real semantics decisions (what `once` resets on; the digest
+    interval/persistence), so they stay **accepted-but-deliver-ZERO-and-logged** until a focused follow-up.
 - **`/settings` — NOT started.** Needs its **honest backing scoped first**: what is genuinely settable per host
   with a real source (the §3·d "Assistant endpoint & general preferences"). The assistant endpoint URL is a real
   config value; "general preferences" hit the **same no-preference-store wall** as `/me`'s PATCH half. Scope the
@@ -785,6 +805,7 @@ for the external surface and this doc for the backend's honest realization of it
 | Install body (honored vs reserved) + uninstall | **M8·b** | `architecture.html §3·h` — **frozen 2026-06-19.** `POST /servers` body `InstallRequest { blueprint(required), name?, origin?, + reserved: hostId?,version?,port?,queryPort?,slots?,dir?,password?,autostart? }` → **`202` + `{ job }`** (NOT a server — install is async; the new server appears on `/servers` with a backend-assigned id when the job settles). **Honored:** `blueprint`, `name`, `origin`; **everything else accepted-but-inert** (additive-only — sending it keeps the schema forward-compatible). `DELETE /servers/{id}` (uninstall) → `202` + `{ job }`; `origin` rides `?origin=`. Both **operator-gated**; the `job` is the frozen M3 shape with `verb:"install"`/`"uninstall"`. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **`name` is the kgsm instance name, not a free-text display label** — kgsm validates it as an id and falls back to an auto-generated `blueprint-suffix` if it isn't a usable unique name (a true display name is deferred upstream — blueprint metadata curation, never silently dropped); (2) the reserved fields are **inert, never half-applied** (`dir`/`version` would mis-map — `version` is a build channel, not a kgsm game version — so they wait for an honest mapping); (3) **`autostart` is inert** (the post-install start chain is owed). **Gate:** install `400` (missing/unusable blueprint-or-name — generate-id's real detail) · `409` (install in flight for the resolved name) · `503` (engine unprovisioned); uninstall `404` (unknown id) · `409` · `503`. **Audit:** echo-path, **no double-write** — the command stamps actor+origin, kgsm emits `instance_installed`/`instance_uninstalled`, the M5 consumer writes `server.install`/`server.uninstall` (NOT a direct write — the lifecycle case). **Verify:** install → `server.patch` (new server); uninstall → `server.removed` tombstone. Backend built & self-validated (smoke 47/47 gate-only + tests 135, incl. the no-double-write proof + the malformed/type-mismatched-body `{error}`-envelope guarantee); **LIVE-VALIDATED GREEN end-to-end 2026-06-19** (real install + uninstall round-trip — surfaced + fixed an upstream `kgsm uninstall` interactive-only gap, kgsm-lib 1.18.0); committed to `main` (not pushed). |
 | `MeResponse` (the identity surface) | **M8·c** | `architecture.html §3·f` surface table (the "Profile" resource) — **frozen 2026-06-19.** `GET /me` → `MeResponse { user: SessionUser{ id, username, display, avatarUrl? }, tier, scopes[] }`. A pure projection of the session bearer's claims (no engine/leaf/DB touch): the Discord identity snapshot captured at login + the resolved authorization `tier` + the granted `scopes`. Gated at **`[Authorize]`** — any authenticated caller, NOT viewer — so a `none`-tier caller (verified identity, no role on this host) can read "who am I / why am I 403 elsewhere"; no bearer → the `401` envelope. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **read-only** — the surface table lists `/me` as GET+**PATCH** ("display name, handle, **density**"), but the editable half needs a per-panel preference store **deliberately not built** (architecture.html's statelessness note: per-user/panel prefs that follow a user across devices are out of scope), so PATCH + density are deferred, never faked; (2) the profile is the **login-time snapshot**, not a fresh live Discord fetch (the §3·f no-retained-token divergence, shared with `/auth/session`); (3) the honest **delta over `/auth/session`** (which returns `{user,scopes}`) is the **`tier`** — the one fact the SPA gates its controls on; `display`/`username` fall back to the handle, never a guessed label. **Built + self-validated** 2026-06-19 (smoke 48/48: the wire shape under the auth-disabled synthetic admin + `/me` in the no-bearer 401 sweep; tests 143 (+8 `MeTests`): tier-reflected-verbatim, the none-tier `200` reachability, refresh-as-access/wrong-signature `401`). |
 | Discord integration (`/integrations/{provider}`) | **M8·c** | `architecture.html §3·e` — **Increment A frozen 2026-06-19.** Provider-agnostic outbound notification routing (Discord first; Slack/Telegram via `/integrations/{provider}`). **Admin-gated.** `GET /integrations` → `[{ provider, configured, enabled }]`; `GET /integrations/{provider}` → the §3·e record `{ provider, webhook:{configured, hint}, channelLabel, bot, enabled, events[] }` (events = the server-defined catalog ⋈ the user's `{enabled,cadence,ping}`); sparse `PATCH /integrations/{provider}` (the `webhook` field sets/rotates the secret; a blank string clears it); `POST /integrations/{provider}/test` → `202 {ok,posted,channelLabel}` on a real send. **Divergences (the negotiated honest-vs-aspirational call, like M1·b):** (1) **`bot` is always `null`** — one-way **webhook** delivery only; the §3·e two-way control bot + slash-commands are **out of scope** (kgsm-bot's interactive surface), so honestly null, not a fabricated connection; (2) the catalog lists only **deliverable** events (`online·offline·crash·update·installed·backup`) — `resource` (no threshold-alert source) and `join` (no player tracking) are **omitted**, never faked; (3) the webhook secret is **masked on read** (a `hint`, never the URL), **write-only on PATCH**, and **never logged** (the webhook URL *is* the secret, so the typed HttpClient is registered `.RemoveAllLoggers()` — else the factory's default handler logs `POST {uri}` at Information; pinned by a log-capture test) — stored plaintext in the host-local SQLite (consistent with the env-stored bot token on this single trusted host); (4) **`cadence` enforcement is incremental** — **`every` now ENFORCED** by the Increment B delivery worker (the always-on audit-tap → providers); `once`/`digest` are still **deferred to Increment C and deliver ZERO** (not fewer) — the skip is logged ("set 'every' to receive it"), never a silent black hole (the M8·b reserved-field pattern, made honest); (5) **coexists with `kgsm-bot`** (which posts per-instance channels via the bot gateway) — the API posts its own configured webhook, no double-post unless aimed at one channel. `/test` is honest: `409` unconfigured · `502` delivery-failed · `202` ok — never a faked ok. Gated at **admin**. **Increment A built + self-validated** 2026-06-19 (smoke 52/52 incl. the masked-secret PATCH round-trip + the honest catalog; tests 166 (+23): the provider mask/validate/test-send with faked HTTP, the API admin gate, and the advisor-caught no-token-in-logs guard). **Increment B (delivery worker) built + self-validated** 2026-06-19 (tests 190 (+24)): `AuditService.AppendAsync` → bounded `INotificationBus` (`DropOldest`, logged) → `NotificationDeliveryWorker` (scope-per-event, gates enabled+secret+rule.enabled+`every`), `INotificationProvider.SendAsync` (Discord per-action formatting + optional `Settings["pingRoleId"]` ping with `allowed_mentions` scoped to that role). **Two B-frozen behaviors:** **`server.restart` also maps to `online`** (a completed restart = back up — closes the crash↔back-online pairing incl. the watchdog auto-heal), and a **per-`(provider,server,catalog)` 60s anti-spam window** coalesces a crash-loop (mass-reboot is N distinct keys → not suppressed, bounded by host server count). Live-validate with a real webhook **owed**. |
+| Slack integration (`/integrations/slack`) | **M8·c** | `architecture.html §3·e` `/integrations/{provider}` — **Increment C frozen 2026-06-19.** The **second provider**, validating the webhook-family abstraction. `GET/PATCH /integrations/slack` → `SlackIntegrationView { provider, webhook:{configured,hint}, channelLabel, enabled, events[] }` — the **same** masked-webhook + catalog⋈rules shape as Discord, but with **no `bot` block** (Slack incoming webhooks have no Discord-style two-way control bot — omitted, not a fabricated null; the frontend renders per `provider`). Secret = a `hooks.slack.com/services/...` URL (validated, masked `…/services/{T}/{B}/{tok}***`, write-only, never logged — same `.RemoveAllLoggers()` care). Message is Slack mrkdwn (`*bold*`) with `&<>` escaped; an optional ops ping via `Settings["pingSubteamId"]` → `<!subteam^id>`. Same admin gate, same `every`-cadence delivery (the worker is provider-agnostic). **Honest scope (advisor):** the shared `WebhookNotificationProvider` base validates the **webhook-secret-URL family** (Discord + Slack); **Telegram** (bot token + fixed endpoint + `chat_id`) would implement `INotificationProvider` directly — it is the next real test of the interface, not this base. **Built + self-validated** 2026-06-19 (tests 207 (+17); smoke 54/54 (+2): the list asserts both providers, the no-`bot` view, the masked round-trip). Live-validate with a real Slack webhook **owed**. |
 
 ---
 
@@ -1751,13 +1772,14 @@ half-applied.
 kgsm-lib `f7b2524` (1.18.0 `Uninstall --force`), kgsm-api `43f8141` (M8·b endpoints + the model-validation
 envelope fix + the kgsm-lib ref bump 1.17.0→1.18.0).
 
-### M8·c — 2026-06-19 · config surfaces: `GET /me` built + committed; `/integrations/discord` notification subsystem Increments A (config + real test-send) + B (always-on delivery worker) built & self-validated; `/settings` not started
+### M8·c — 2026-06-19 · config surfaces: `GET /me` built + committed; `/integrations` notification subsystem Increments A (config + real test-send) + B (always-on delivery worker) + C (Slack, the 2nd provider) built & self-validated; `/settings` not started
 
-**Status.** M8's config surfaces. `GET /me` is **built + committed** (`987c52d`). `/integrations/discord` is a
+**Status.** M8's config surfaces. `GET /me` is **built + committed** (`987c52d`). `/integrations` is a
 provider-agnostic notification subsystem — **Increment A** (contract + config + a real test-send) is **built +
-committed** (`32e410d` + log-leak fix `8f2fbe1`) and **Increment B** (the always-on delivery worker — live
-notifications fire on real kgsm events) is **built + self-validated** (working tree, a real-webhook live-validate
-owed). `/settings` is **not started**. M8·c stays `partial`.
+committed** (`32e410d` + log-leak fix `8f2fbe1`), **Increment B** (the always-on delivery worker — live
+notifications fire on real kgsm events) is **built + committed** (`0205ecc`), and **Increment C** (Slack, the
+second provider, validating the webhook-family abstraction) is **built + self-validated** (working tree). A
+real-webhook live-validate (Discord + Slack) is **owed**. `/settings` is **not started**. M8·c stays `partial`.
 
 **`GET /me` — built (the honest read slice).** A pure projection of the session bearer's claims — no engine,
 leaf or DB touch. `MeController` (`[ApiController]`, `[Route("api/v1/me")]`, `[Authorize]`) reads
@@ -1852,9 +1874,32 @@ the action→catalog map; `DiscordSendTests` the `SendAsync` format/ping/honest-
 `NotificationDeliveryE2ETests` — an audit row appended through the real `AuditService` reaches a recording webhook,
 with the rule-disabled / once-cadence / suppression gates proven **deterministically** via a barrier event + a
 `SemaphoreSlim` arrival latch, no sleeps); smoke unchanged **52/52** (B adds no HTTP endpoint — a background worker,
-proven by the e2e tests). **Owed:** a real-webhook live-validate (smoke must never post to real Discord). **Increment
-C** (once/digest cadence, a 2nd provider, resource/join) is LATER.
+proven by the e2e tests). **Owed:** a real-webhook live-validate (smoke must never post to real Discord).
 
-**Committed.** `GET /me` + the M8·b header sync (`987c52d`), and `/integrations` **Increment A** (`32e410d` + the
-log-leak fix `8f2fbe1`) are committed on `main` (not pushed). **Increment B** working-tree changes await this
-milestone's commit (on user request).
+**Increment C — Slack, the second provider — built + self-validated (the user's call: Slack over Telegram;
+once/digest cadence deferred; resource/join still out — no honest source).** This is the honest validation of the
+abstraction you asked for. Extracted an abstract **`WebhookNotificationProvider`** base holding the genuinely-shared
+logic — the honest `PostAsync` (Discord returns `204`, Slack `200`; both `IsSuccessStatusCode`), the `Test`/`Send`
+orchestration, the catalog⋈rules `EventViews` overlay, and a `MaskWebhook(url, marker)` hint that **reproduces
+Discord's exact committed hint** (`marker:"webhooks"` → `…/webhooks/{id}/{tok}***`). Refactored
+`DiscordNotificationProvider` onto it (behavior identical — its 23 unit + e2e tests stayed green through the move),
+then added **`SlackNotificationProvider`** (`hooks.slack.com` exact-host + `/services/` validation — not `EndsWith`,
+which would accept `notslack.com`; mrkdwn `*bold*`; `{text}` payload; optional `Settings["pingSubteamId"]` →
+`<!subteam^id>`; **`&<>` escaped** in dynamic text — the Slack analog of Discord's allowed_mentions care) +
+`SlackIntegrationView` (**no `bot` block** — Slack incoming webhooks have no Discord-style control bot; omitting it is
+honest, a fabricated null would not be). Registered identically
+(`AddHttpClient<INotificationProvider, SlackNotificationProvider>().RemoveAllLoggers()`); the worker, bus, catalog,
+and controller were **already provider-agnostic**, so Slack is picked up with **zero** change there — the abstraction
+held. **Honest framing (advisor):** the base validates the **webhook-secret-URL family** (Discord + Slack); a provider
+whose secret is NOT the URL — **Telegram** (a bot token, a fixed `api.telegram.org/bot<token>/sendMessage` endpoint,
+a `chat_id` from settings) — would implement `INotificationProvider` directly, so it is the next real test of the
+interface, not of this base. **Validated:** Release **0-warning**; `tests/Api.Tests` → **207** (+17: `SlackProviderTests`
+— mask/validate/format/escape/subteam-ping/honest-failure with a recording handler; `SlackApiTests` — the list now
+shows **both** providers (the abstraction wired), the no-`bot` view, the admin gate, the masked PATCH round-trip);
+smoke → **54/54** (+2: `/integrations/slack` shape + masked round-trip; the list asserts both providers). **Owed:** a
+real Slack-webhook live-validate. **Increment C.2** (the `once`/`digest` cadences — they need real semantics
+decisions) stays deferred; `resource`/`join` stay out (no honest source).
+
+**Committed.** `GET /me` + the M8·b header sync (`987c52d`), `/integrations` **Increment A** (`32e410d` + the
+log-leak fix `8f2fbe1`), and **Increment B** (`0205ecc`) are committed on `main` (not pushed). **Increment C**
+working-tree changes await this milestone's commit (on user request).

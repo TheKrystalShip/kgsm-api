@@ -34,6 +34,16 @@ public sealed record DiscordIntegrationView(
     bool Enabled,
     IReadOnlyList<IntegrationEventView> Events);
 
+/// <summary>GET/PATCH /integrations/slack — Slack's webhook-only record (M8·c Increment C). <b>No <c>bot</c>
+/// block:</b> Slack incoming webhooks have no Discord-style two-way control bot, so inventing one would be
+/// dishonest — the frontend renders per <c>provider</c>. Same masked-webhook + catalog-events shape otherwise.</summary>
+public sealed record SlackIntegrationView(
+    string Provider,
+    WebhookView Webhook,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ChannelLabel,
+    bool Enabled,
+    IReadOnlyList<IntegrationEventView> Events);
+
 /// <summary>POST /integrations/{provider}/test — 202 on a real send (architecture.html §3·e).</summary>
 public sealed record IntegrationTestResponse(bool Ok, string Posted,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ChannelLabel);

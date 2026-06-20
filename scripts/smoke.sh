@@ -855,17 +855,19 @@ sys.exit(0 if (d.get('tier')=='admin' and u.get('id')=='discord:dev'
   else bad "/me shape (code=$CODE body=$BODY)"; fi
 
   # --- M8·c integrations: outbound-notification config (admin; here the AUTH_DISABLED synthetic admin) ---
-  echo "==> M8·c integrations checks — /integrations/discord (config + masked secret; NO real Discord post)"
+  echo "==> M8·c integrations checks — /integrations (discord + slack; config + masked secret; NO real post)"
 
-  # 40. GET /integrations lists discord, unconfigured initially.
+  # 40. GET /integrations lists BOTH providers (the Increment C abstraction is wired — discord + slack),
+  #     each unconfigured initially.
   req GET /api/v1/integrations
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
-disc=[x for x in d if x.get('provider')=='discord']
-sys.exit(0 if (len(disc)==1 and disc[0].get('configured') is False and disc[0].get('enabled') is False) else 1)
+by={x.get('provider'): x for x in d}
+sys.exit(0 if ('discord' in by and 'slack' in by
+               and all(by[p].get('configured') is False and by[p].get('enabled') is False for p in ('discord','slack'))) else 1)
 " 2>/dev/null; then
-    ok "/integrations 200 + discord present, unconfigured"
+    ok "/integrations 200 + discord AND slack present, unconfigured (the abstraction is wired)"
   else bad "/integrations list shape (code=$CODE body=$BODY)"; fi
 
   # 41. GET /integrations/discord -> the §3·e record: webhook unconfigured, bot:null (one-way only),
@@ -907,6 +909,36 @@ sys.exit(0 if (wh.get('configured') is True and wh.get('hint','').startswith('�
 " 2>/dev/null; then
     ok "PATCH /integrations/discord persists + masks the secret (hint only, raw never echoed)"
   else bad "M8·c PATCH round-trip (patch=$PATCH_CODE get=$CODE body=$BODY)"; fi
+
+  # 44. GET /integrations/slack (Increment C, the second provider) -> the webhook-only record: NO `bot`
+  #     block (Slack has no Discord-style control bot — honest), same masked-webhook + honest catalog shape.
+  req GET /api/v1/integrations/slack
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+ids={e['id'] for e in d.get('events',[])}
+sys.exit(0 if (d.get('provider')=='slack' and d.get('webhook',{}).get('configured') is False and 'bot' not in d
+               and 'online' in ids and 'crash' in ids and 'resource' not in ids and 'join' not in ids) else 1)
+" 2>/dev/null; then
+    ok "/integrations/slack 200 + no bot field + honest catalog (webhook-family abstraction validated)"
+  else bad "/integrations/slack shape (code=$CODE body=$BODY)"; fi
+
+  # 45. PATCH a (fake) Slack webhook -> 200; the raw secret is NEVER echoed, the masked hint is returned.
+  req PATCH /api/v1/integrations/slack -H 'Content-Type: application/json' \
+    -d '{"webhook":"https://hooks.slack.com/services/T0SMOKE/B0SMOKE/SMOKEfakeslacktoken","channelLabel":"#smoke-ops"}'
+  PATCH_CODE=$CODE; PATCH_BODY=$BODY
+  req GET /api/v1/integrations/slack
+  if [[ "$PATCH_CODE" == 200 ]] && [[ "$CODE" == 200 ]] \
+     && ! grep -q 'SMOKEfakeslacktoken' <<<"$PATCH_BODY" && ! grep -q 'SMOKEfakeslacktoken' <<<"$BODY" \
+     && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+wh=d.get('webhook',{})
+sys.exit(0 if (wh.get('configured') is True and wh.get('hint','').startswith('…/services/T0SMOKE/B0SMOKE/')
+               and d.get('channelLabel')=='#smoke-ops') else 1)
+" 2>/dev/null; then
+    ok "PATCH /integrations/slack persists + masks the secret (hint only, raw never echoed)"
+  else bad "M8·c slack PATCH round-trip (patch=$PATCH_CODE get=$CODE body=$BODY)"; fi
 
   stop_api
 fi
@@ -993,7 +1025,7 @@ start_api_auth || { echo "API never healthy (auth-enabled); log:"; tail -20 /tmp
 #     /me (M8) is [Authorize] (any authenticated caller) -> still 401 with no bearer.
 #     /integrations (M8·c) is admin-gated -> 401 with no bearer (the tier/admin gate is in tests).
 auth_401=true
-for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/integrations /api/v1/integrations/discord /api/v1/_dbcheck /api/v1/_throw; do
+for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/integrations /api/v1/integrations/discord /api/v1/integrations/slack /api/v1/_dbcheck /api/v1/_throw; do
   req GET "$p"
   if [[ "$CODE" != 401 ]] || ! grep -q '"code":"unauthorized"' <<<"$BODY" || grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY"; then
     auth_401=false; echo "    ($p -> $CODE $BODY)"
