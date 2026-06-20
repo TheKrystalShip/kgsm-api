@@ -68,21 +68,22 @@ public sealed class AuthController(
     public async Task<IActionResult> Callback([FromQuery] string? code, [FromQuery] string? state, CancellationToken ct)
     {
         if (!options.DiscordConfigured)
-            return Error(StatusCodes.Status503ServiceUnavailable, "auth_unconfigured",
+            return Fail(StatusCodes.Status503ServiceUnavailable, "auth_unconfigured",
                 "Discord auth is not configured on this host.");
 
         // CSRF gate: the state Discord echoes back must equal the nonce we set in the cookie at
         // /start. The cookie is one-time — clear it whatever the outcome (no replay). A missing
         // cookie (expired/never-started) or a mismatch is a forged/stale login -> 400, never a grant.
+        // This runs BEFORE any redirect or exchange — the redirect handoff never weakens the gate.
         string? expectedState = Request.Cookies[StateCookie];
         if (expectedState is not null)
             Response.Cookies.Delete(StateCookie, StateCookieOptions());
         if (!StateMatches(state, expectedState))
-            return Error(StatusCodes.Status400BadRequest, "invalid_state",
+            return Fail(StatusCodes.Status400BadRequest, "invalid_state",
                 "the OAuth state did not validate (possible CSRF, or the login expired — start again).");
 
         if (string.IsNullOrWhiteSpace(code))
-            return Error(StatusCodes.Status400BadRequest, "bad_request", "missing authorization code");
+            return Fail(StatusCodes.Status400BadRequest, "bad_request", "missing authorization code");
 
         ResolvedPrincipal? resolved;
         try
@@ -93,21 +94,23 @@ public sealed class AuthController(
         {
             // Couldn't reach/parse Discord — an honest upstream error, NEVER a default grant.
             logger.LogWarning(ex, "Discord auth exchange failed.");
-            return Error(StatusCodes.Status502BadGateway, "auth_provider_error",
+            return Fail(StatusCodes.Status502BadGateway, "auth_provider_error",
                 "Could not complete authentication with Discord.");
         }
 
         // The code couldn't be exchanged into a verified identity (bad/expired/reused).
         if (resolved is null)
-            return Error(StatusCodes.Status401Unauthorized, "login_required",
+            return Fail(StatusCodes.Status401Unauthorized, "login_required",
                 "The authorization code was invalid or expired.");
 
         string userHandle = $"discord:{resolved.Identity.UserId}";
 
         // Verified identity, but no role on this host -> terminal 403 (never auto-re-authed).
         if (resolved.Tier == AuthTier.None)
-            return StatusCode(StatusCodes.Status403Forbidden,
-                new CallbackResult("denied", null, null, null, userHandle));
+            return options.FrontendRedirectEnabled
+                ? FrontendRedirect(Frag(("error", "denied")))
+                : StatusCode(StatusCodes.Status403Forbidden,
+                    new CallbackResult("denied", null, null, null, userHandle));
 
         string access = tokens.MintAccess(resolved.Identity, resolved.Tier);
         string refresh = tokens.MintRefresh(resolved.Identity, resolved.Tier);
@@ -117,7 +120,39 @@ public sealed class AuthController(
         await RecordAuthAsync(AuditAction.AuthLogin, resolved.Identity, resolved.Tier,
             $"{resolved.Identity.Display} logged in", ct);
 
-        return Ok(new CallbackResult("ok", AuthTiers.ToWire(resolved.Tier), access, refresh, userHandle));
+        // SPA handoff (when a frontend URL is configured): 302 to the SPA with the tokens in the URL
+        // FRAGMENT — never the query, so they don't reach access logs or the Referer header. The SPA
+        // reads them, adopts the session, and strips the fragment. Otherwise return the JSON contract
+        // (API-only deployments + the auth tests). The redirect target is the single configured URL.
+        return options.FrontendRedirectEnabled
+            ? FrontendRedirect(Frag(("access", access), ("refresh", refresh)))
+            : Ok(new CallbackResult("ok", AuthTiers.ToWire(resolved.Tier), access, refresh, userHandle));
+    }
+
+    /// <summary>302 the SPA with the OAuth outcome in the URL fragment. The target is the single
+    /// configured <see cref="ApiOptions.AuthFrontendUrl"/> — never a request-supplied URL, so there is
+    /// no open-redirect surface.</summary>
+    private IActionResult FrontendRedirect(string fragment) =>
+        Redirect($"{options.AuthFrontendUrl}#{fragment}");
+
+    /// <summary>A failed/denied/unconfigured outcome: when the SPA handoff is on, redirect with
+    /// <c>#error=&lt;code&gt;</c>; otherwise the unchanged JSON error envelope.</summary>
+    private IActionResult Fail(int status, string code, string message) =>
+        options.FrontendRedirectEnabled
+            ? FrontendRedirect(Frag(("error", code)))
+            : Error(status, code, message);
+
+    /// <summary>Build a URL fragment <c>k=v&amp;k=v</c>, percent-encoding values and dropping empties.</summary>
+    private static string Frag(params (string Key, string? Value)[] parts)
+    {
+        var sb = new System.Text.StringBuilder();
+        foreach ((string key, string? value) in parts)
+        {
+            if (string.IsNullOrEmpty(value)) continue;
+            if (sb.Length > 0) sb.Append('&');
+            sb.Append(key).Append('=').Append(Uri.EscapeDataString(value!));
+        }
+        return sb.ToString();
     }
 
     /// <summary>

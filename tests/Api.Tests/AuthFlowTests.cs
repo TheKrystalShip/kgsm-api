@@ -2,7 +2,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using TheKrystalShip.Api.Services.Auth;
 
 namespace TheKrystalShip.Api.Tests;
@@ -109,6 +111,51 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
             .GetAsync("/auth/discord/callback?code=operator&state=whatever");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"invalid_state\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    // --- /auth/discord/callback — SPA fragment handoff (KGSM_API_AUTH_FRONTEND_URL set) -----------
+    // With a frontend URL configured the callback 302s the browser back to the SPA carrying the outcome
+    // in the URL FRAGMENT (never the query — tokens must not reach access logs or the Referer header),
+    // instead of the JSON contract. The redirect target is the single configured URL (no open-redirect).
+    private WebApplicationFactory<Program> FrontendFactory() =>
+        factory.WithWebHostBuilder(b => b.ConfigureAppConfiguration((_, c) =>
+            c.AddInMemoryCollection(new Dictionary<string, string?> { ["KGSM_API_AUTH_FRONTEND_URL"] = "https://panel.test" })));
+
+    private static async Task<(HttpClient Client, string State)> BeginLoginOn(WebApplicationFactory<Program> f)
+    {
+        HttpClient c = f.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        HttpResponseMessage start = await c.GetAsync("/auth/discord/start");
+        string query = start.Headers.Location!.Query.TrimStart('?');
+        string state = query.Split('&').First(kv => kv.StartsWith("state=")).Substring("state=".Length);
+        return (c, state);
+    }
+
+    [Fact]
+    public async Task Callback_FrontendConfigured_Authorized_302_TokensInFragment()
+    {
+        using WebApplicationFactory<Program> f = FrontendFactory();
+        (HttpClient c, string state) = await BeginLoginOn(f);
+        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=operator&state={state}");
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
+        Uri loc = resp.Headers.Location!;
+        Assert.StartsWith("https://panel.test", loc.ToString());
+        // Tokens ride the FRAGMENT, not the query — the whole point (no leak to logs / Referer).
+        Assert.Equal("", loc.Query);
+        Assert.Contains("access=", loc.Fragment);
+        Assert.Contains("refresh=", loc.Fragment);
+    }
+
+    [Fact]
+    public async Task Callback_FrontendConfigured_Denied_302_ErrorInFragment()
+    {
+        using WebApplicationFactory<Program> f = FrontendFactory();
+        (HttpClient c, string state) = await BeginLoginOn(f);
+        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=none&state={state}");
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
+        Uri loc = resp.Headers.Location!;
+        Assert.StartsWith("https://panel.test", loc.ToString());
+        Assert.Contains("error=denied", loc.Fragment);
+        Assert.DoesNotContain("access=", loc.ToString());
     }
 
     // --- /auth/session — the login-time profile snapshot behind the bearer -------------------------

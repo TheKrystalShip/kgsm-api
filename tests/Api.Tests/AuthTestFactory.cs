@@ -35,6 +35,10 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 ["KGSM_API_AUTH_DISCORD_REDIRECT_URI"] = "https://host.test/auth/discord/callback",
                 ["KGSM_API_AUTH_DISCORD_BOT_TOKEN"] = "test-bot-token",
                 ["KGSM_API_AUTH_DISCORD_GUILD_ID"] = "1234567890",
+                // Callback returns JSON by default (the contract these tests assert). The fragment-
+                // handoff variant overrides this per-test. Pin it empty so a dev appsettings value
+                // (KGSM_API_AUTH_FRONTEND_URL) can't flip the base suite to redirect.
+                ["KGSM_API_AUTH_FRONTEND_URL"] = "",
                 // No engine / monitor — reads degrade to 200, no external dependency.
                 ["KGSM_API_KGSM_PATH"] = "",
                 ["KGSM_API_MONITOR_SOCKET"] = "/tmp/kgsm-api-tests-no-monitor.sock",

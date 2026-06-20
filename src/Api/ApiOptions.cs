@@ -128,6 +128,16 @@ public sealed class ApiOptions
     /// <summary>The Discord guild whose roles authorize this host (<c>KGSM_API_AUTH_DISCORD_GUILD_ID</c>).</summary>
     public required string DiscordGuildId { get; init; }
 
+    /// <summary>
+    /// The SPA origin/URL the OAuth callback hands the session back to
+    /// (<c>KGSM_API_AUTH_FRONTEND_URL</c>). When set, <c>/auth/discord/callback</c> 302s the browser
+    /// here with the result in the URL <b>fragment</b> (<c>#access=…&amp;refresh=…</c> on success,
+    /// <c>#error=…</c> otherwise) instead of returning JSON — the SPA token handoff. The redirect target
+    /// is THIS single configured value, never a request-supplied one (no open-redirect). Blank → the
+    /// callback keeps returning JSON (API-only deployments, and the test default).
+    /// </summary>
+    public required string AuthFrontendUrl { get; init; }
+
     /// <summary>Discord role ids granting the <c>admin</c> tier (comma-separated;
     /// <c>KGSM_API_AUTH_ROLE_ADMIN</c>).</summary>
     public required IReadOnlyList<string> RoleAdminIds { get; init; }
@@ -151,6 +161,10 @@ public sealed class ApiOptions
         && !string.IsNullOrWhiteSpace(DiscordRedirectUri)
         && !string.IsNullOrWhiteSpace(DiscordBotToken)
         && !string.IsNullOrWhiteSpace(DiscordGuildId);
+
+    /// <summary>Whether the OAuth callback redirects the session back to the SPA (fragment handoff)
+    /// rather than returning JSON. True iff a frontend URL is configured.</summary>
+    public bool FrontendRedirectEnabled => !string.IsNullOrWhiteSpace(AuthFrontendUrl);
 
     public static ApiOptions FromConfiguration(IConfiguration configuration)
     {
@@ -181,6 +195,7 @@ public sealed class ApiOptions
             DiscordRedirectUri = Defaulted(configuration["KGSM_API_AUTH_DISCORD_REDIRECT_URI"], ""),
             DiscordBotToken = Defaulted(configuration["KGSM_API_AUTH_DISCORD_BOT_TOKEN"], ""),
             DiscordGuildId = Defaulted(configuration["KGSM_API_AUTH_DISCORD_GUILD_ID"], ""),
+            AuthFrontendUrl = Defaulted(configuration["KGSM_API_AUTH_FRONTEND_URL"], ""),
             RoleAdminIds = Csv(configuration["KGSM_API_AUTH_ROLE_ADMIN"]),
             RoleOperatorIds = Csv(configuration["KGSM_API_AUTH_ROLE_OPERATOR"]),
             RoleViewerIds = Csv(configuration["KGSM_API_AUTH_ROLE_VIEWER"]),
