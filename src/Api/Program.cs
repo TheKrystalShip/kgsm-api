@@ -31,5 +31,14 @@ public class Program
                 string urls = config.Build()["KGSM_API_URLS"] ?? DefaultUrls;
                 config.AddInMemoryCollection(new Dictionary<string, string?> { [ServerUrlsKey] = urls });
             })
+            // Ecosystem-standard logging (see ../tks/logging-convention.md): one journald-native
+            // SystemdConsole sink (the <N> syslog priority prefix lets `journalctl -p` filter by level).
+            // CreateDefaultBuilder already binds the "Logging" appsettings section + env overrides; this
+            // only swaps the default Simple/Debug/EventSource providers for the single Systemd sink.
+            .ConfigureLogging((_, logging) =>
+            {
+                logging.ClearProviders();
+                logging.AddSystemdConsole();
+            })
             .ConfigureWebHostDefaults(webBuilder => webBuilder.UseStartup<Startup>());
 }
