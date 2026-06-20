@@ -128,6 +128,15 @@ public sealed class KgsmAuditConsumer(
             audit.AppendAsync(AuditMapping.FromPortsOpenedEvent(d, options.HostId)));
         events.RegisterHandler<InstancePortsClosedData>(d =>
             audit.AppendAsync(AuditMapping.FromPortsClosedEvent(d, options.HostId)));
+
+        // player.join / player.leave — presence echoes (kgsm-lib 1.19.0). For our container images the
+        // watchdog forwards these from the in-image detection shim (system/system); native detection is a
+        // later increment. The player id/name (either nullable, at-least-one guaranteed by the shim) rides
+        // in meta. Pure mapper (AuditMapping.FromPlayer*Event), socket-free. Engine-owned → no double-write.
+        events.RegisterHandler<InstancePlayerJoinedData>(d =>
+            audit.AppendAsync(AuditMapping.FromPlayerJoinedEvent(d, options.HostId)));
+        events.RegisterHandler<InstancePlayerLeftData>(d =>
+            audit.AppendAsync(AuditMapping.FromPlayerLeftEvent(d, options.HostId)));
     }
 
     private Task WriteServer(

@@ -273,6 +273,90 @@ public sealed class AuditMappingTests
         Assert.Equal("2456/udp", w.Meta!["ports"]);
     }
 
+    // --- player.join / player.left: presence echoes (watchdog-forwarded, system/system) --------------
+    [Fact]
+    public void FromPlayerJoinedEvent_IsInfoPlayerJoin_IdentityInMeta_SystemProvenance()
+    {
+        var data = new InstancePlayerJoinedData
+        {
+            InstanceName = "factorio-01",
+            Actor = "system",
+            Origin = "system",
+            PlayerId = "76561198000000000",
+            PlayerName = "haru",
+        };
+
+        AuditWrite w = AuditMapping.FromPlayerJoinedEvent(data, hostId: "primary");
+
+        Assert.Equal(AuditAction.PlayerJoin, w.Action);
+        Assert.Equal(AuditSeverity.Info, w.Severity);
+        Assert.Equal("system", w.Origin);                         // autonomous observation
+        Assert.Equal(ActorKind.System, w.Actor.Kind);
+        Assert.Equal(ActorProvider.System, w.Actor.Provider);
+        Assert.Equal("factorio-01", w.ServerId);
+        Assert.Equal(AuditTargetKind.Server, w.Target!.Kind);     // scoped to the server, not a player kind
+        Assert.Equal("factorio-01", w.Target.Id);
+        Assert.Equal("haru joined factorio-01", w.Summary);       // named by display name
+        Assert.Equal("76561198000000000", w.Meta!["playerId"]);
+        Assert.Equal("haru", w.Meta["playerName"]);
+    }
+
+    [Fact]
+    public void FromPlayerLeftEvent_NameOnly_SummaryByName_NoIdMeta()
+    {
+        // A name-only source: id is honestly null → omitted from meta, never stored as "".
+        var data = new InstancePlayerLeftData
+        {
+            InstanceName = "factorio-01",
+            Actor = "system",
+            Origin = "system",
+            PlayerId = null,
+            PlayerName = "haru",
+        };
+
+        AuditWrite w = AuditMapping.FromPlayerLeftEvent(data, hostId: "primary");
+
+        Assert.Equal(AuditAction.PlayerLeave, w.Action);
+        Assert.Equal(AuditSeverity.Info, w.Severity);
+        Assert.Equal("haru left factorio-01", w.Summary);
+        Assert.False(w.Meta!.ContainsKey("playerId"));            // null id omitted, never ""
+        Assert.Equal("haru", w.Meta["playerName"]);
+    }
+
+    [Fact]
+    public void FromPlayerJoinedEvent_IdOnly_SummaryFallsBackToId()
+    {
+        // An id-only source (e.g. a steam handshake before the name resolves): the summary uses the id,
+        // and only playerId lands in meta — the name is honestly absent, never fabricated.
+        var data = new InstancePlayerJoinedData
+        {
+            InstanceName = "valheim",
+            Actor = "system",
+            Origin = "system",
+            PlayerId = "76561198000000000",
+            PlayerName = null,
+        };
+
+        AuditWrite w = AuditMapping.FromPlayerJoinedEvent(data, hostId: "primary");
+
+        Assert.Equal("76561198000000000 joined valheim", w.Summary);
+        Assert.Equal("76561198000000000", w.Meta!["playerId"]);
+        Assert.False(w.Meta.ContainsKey("playerName"));
+    }
+
+    [Fact]
+    public void FromPlayerEvent_BothIdentitiesAbsent_GenericSummary_NullMeta()
+    {
+        // Defensive: the shim guarantees at-least-one-non-null, but if a {null,null} ever arrives the
+        // mapper must NOT fabricate an identity — generic summary, no meta (never an empty-string id/name).
+        var data = new InstancePlayerLeftData { InstanceName = "rust", Actor = "system", Origin = "system" };
+
+        AuditWrite w = AuditMapping.FromPlayerLeftEvent(data, hostId: "primary");
+
+        Assert.Equal("a player left rust", w.Summary);
+        Assert.Null(w.Meta);
+    }
+
     [Theory]
     [InlineData(2456, 2456, "udp", "2456/udp")]          // single port → no dash
     [InlineData(2456, 2458, "udp", "2456-2458/udp")]     // range → dashed

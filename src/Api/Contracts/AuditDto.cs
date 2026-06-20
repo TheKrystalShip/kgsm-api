@@ -84,6 +84,15 @@ public static class AuditAction
     public const string NetworkPortsOpen = "network.ports.open";
     public const string NetworkPortsClose = "network.ports.close";
 
+    // player.* — presence echoes. kgsm raises instance_player_joined/_left (kgsm-lib 1.19.0); for our
+    // container images the kgsm-watchdog forwards them from the in-image detection shim, stamped
+    // system/system. Distinct join/leave actions mirror server.start/server.stop. Engine-owned (no API
+    // double-write); the player identity (id/name, either nullable) rides in meta, the action is scoped
+    // to the server (no player target kind). Beyond the doc's vocabulary — now honestly sourceable
+    // (player-presence Increment 1); the frontend accepts unknown actions forward-compat.
+    public const string PlayerJoin = "player.join";
+    public const string PlayerLeave = "player.leave";
+
     // auth.* — API-internal (no kgsm event → written directly, no double-write risk).
     public const string AuthLogin = "auth.login";
     public const string AuthLogout = "auth.logout";

@@ -191,6 +191,57 @@ public static class AuditMapping
             Meta: meta);
     }
 
+    /// <summary>
+    /// Map a kgsm <c>instance_player_joined</c> event to a <c>player.join</c> row at
+    /// <see cref="AuditSeverity.Info"/>. For our container images this is forwarded by the watchdog from
+    /// the in-image detection shim (provenance <c>system</c>/<c>system</c> off the envelope, handled
+    /// unchanged by <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/>). The player identity
+    /// (<c>playerId</c>/<c>playerName</c>, either nullable) rides in <c>meta</c>; the row is scoped to the
+    /// server (no player target kind), mirroring the crash mapper. Never fabricates the missing half.
+    /// </summary>
+    public static AuditWrite FromPlayerJoinedEvent(InstancePlayerJoinedData d, string hostId) =>
+        PlayerWrite(d, hostId, AuditAction.PlayerJoin, "joined", d.PlayerId, d.PlayerName);
+
+    /// <summary>
+    /// Map a kgsm <c>instance_player_left</c> event to a <c>player.leave</c> row — the leave counterpart of
+    /// <see cref="FromPlayerJoinedEvent"/>, identical provenance/identity rules.
+    /// </summary>
+    public static AuditWrite FromPlayerLeftEvent(InstancePlayerLeftData d, string hostId) =>
+        PlayerWrite(d, hostId, AuditAction.PlayerLeave, "left", d.PlayerId, d.PlayerName);
+
+    // Join/left differ only in action + summary verb — build the row once. The summary names the player
+    // by display name, falling back to the stable id, then a generic label (never fabricates an identity;
+    // at-least-one-non-null is the emitting shim's guarantee, this is defensive).
+    private static AuditWrite PlayerWrite(
+        EventDataBase d, string hostId, string action, string verb, string? playerId, string? playerName)
+    {
+        string instance = Instance(d);
+        string who = !string.IsNullOrEmpty(playerName) ? playerName!
+            : !string.IsNullOrEmpty(playerId) ? playerId!
+            : "a player";
+        return new AuditWrite(
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
+            Action: action,
+            Severity: AuditSeverity.Info,
+            Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
+            ServerId: instance,
+            HostId: hostId,
+            Summary: $"{who} {verb} {Display(instance)}",
+            Meta: PlayerMeta(playerId, playerName));
+    }
+
+    // Meta off a player event (id/name, either nullable); empties dropped, null when neither is present —
+    // never store "". The honest identity, never fabricated.
+    private static IReadOnlyDictionary<string, string>? PlayerMeta(string? id, string? name)
+    {
+        Dictionary<string, string>? meta = null;
+        if (!string.IsNullOrEmpty(id)) (meta ??= [])["playerId"] = id!;
+        if (!string.IsNullOrEmpty(name)) (meta ??= [])["playerName"] = name!;
+        return meta;
+    }
+
     // Open/close differ only in action + summary verb — build the row once.
     private static AuditWrite PortsWrite(
         EventDataBase d, string hostId, string action, string verb, IReadOnlyList<PortMapping> ports)
