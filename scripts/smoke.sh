@@ -293,7 +293,7 @@ if [[ "$CODE" == 200 ]] && EXP="$HOST_ID" python3 -c "
 import json,os,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 if not (isinstance(d,list) and len(d)>=1): sys.exit(2)   # empty roster -> can't prove a real read
-keys={'id','name','blueprint','status','version','runtime','hostId','steamAppId','clientSteamAppId','isSteamAccountRequired','metrics'}
+keys={'id','name','blueprint','status','version','runtime','hostId','steamAppId','clientSteamAppId','isSteamAccountRequired','metrics','updateAvailable','startedAt'}
 for s in d:
     if set(s)!=keys: sys.exit(3)
     if s['status'] not in ('running','stopped','unknown'): sys.exit(4)
@@ -392,10 +392,21 @@ sock_path = sys.argv[1]
 sid = os.environ.get('SNAP_ID', 'x')
 snap = {
   "ts": 1718400000000, "intervalMs": 1000, "hostname": "smoke-stub", "uptimeSec": 12345,
-  "cpu": {"totalPct": 12.5, "perCore": [10.0, 15.0], "load": {"one": 0.4, "five": 0.5, "fifteen": 0.6}},
-  "mem": {"totalKb": 32768000, "availableKb": 16384000, "usedKb": 16384000, "usedPct": 50.0, "swapTotalKb": 0, "swapUsedKb": 0},
-  "disk": {"mounts": [{"mount": "/", "fs": "ext4", "totalBytes": 500000000000, "usedBytes": 250000000000, "usedPct": 50.0}], "io": {"readBps": 1000, "writeBps": 2000}},
-  "net": {"ifaces": [{"name": "eth0", "rxBps": 100, "txBps": 200, "rxPps": 1, "txPps": 2}]},
+  # cpu.info is the Monitor.Contracts 1.1.0 STATIC identity (rides the Host view only, not the metrics tick).
+  "cpu": {"totalPct": 12.5, "perCore": [10.0, 15.0], "load": {"one": 0.4, "five": 0.5, "fifteen": 0.6},
+          "info": {"model": "AMD Ryzen 7 3800X 8-Core Processor", "cores": 8, "threads": 16, "maxFreqGhz": 3.9}},
+  # cachedKb/buffersKb are the 1.1.0 mem-depth fields (KiB → GiB on the wire, like the other mem figures).
+  "mem": {"totalKb": 32768000, "availableKb": 16384000, "usedKb": 16384000, "usedPct": 50.0,
+          "swapTotalKb": 0, "swapUsedKb": 0, "cachedKb": 4194304, "buffersKb": 1048576},
+  # device is the 1.1.0 backing-disk MODEL string (rides the shared DiskCapacity shape → both Host + tick).
+  "disk": {"mounts": [{"mount": "/", "fs": "ext4", "totalBytes": 500000000000, "usedBytes": 250000000000,
+                       "usedPct": 50.0, "device": "Samsung SSD 990 EVO Plus 1TB"}], "io": {"readBps": 1000, "writeBps": 2000}},
+  # mac/errors are the 1.1.0 iface-depth fields; errors:0 is a GENUINE zero (never conflated with unknown null).
+  "net": {"ifaces": [{"name": "eth0", "rxBps": 100, "txBps": 200, "rxPps": 1, "txPps": 2,
+                      "mac": "aa:bb:cc:dd:ee:ff", "errors": 0}]},
+  # sensors is the 1.1.0 hwmon list — a non-nullable array in the contract; the stub serves one real row so the
+  # Host/tick mapping is exercised (an empty array is the honest no-hwmon case, never an invented row).
+  "sensors": [{"chip": "k10temp", "label": "Tctl", "valueC": 42.5}],
   "servers": [{"id": sid, "name": sid, "kind": "native",
                "cpuPctCore": float(os.environ['SNAP_CPU']), "memBytes": int(os.environ['SNAP_MEM']),
                "ioReadBps": int(os.environ['SNAP_IOREAD']), "ioWriteBps": None, "pids": int(os.environ['SNAP_PIDS'])}],
@@ -438,10 +449,17 @@ ok = (d['capabilities']['metrics']['status']=='operational'
       and d.get('diskIo')=={'readBps':1000,'writeBps':2000}
       and isinstance(d.get('interfaces'),list) and d['interfaces'][0]['name']=='eth0'
       and d.get('hostname')=='smoke-stub' and d.get('uptimeSec')==12345
-      and d.get('sampleTs')==1718400000000)
+      and d.get('sampleTs')==1718400000000
+      # M-diag depth (Monitor.Contracts 1.1.0): cached/buffers KiB→GiB, cpu-info passthrough (maxFreq already
+      # GHz), iface mac + GENUINE errors:0, disk device model, and the hwmon sensor row — all honest passthrough.
+      and d['mem'].get('cached')==4.0 and d['mem'].get('buffers')==1.0          # 4194304 KiB=4 GiB, 1048576=1 GiB
+      and d.get('cpu')=={'model':'AMD Ryzen 7 3800X 8-Core Processor','cores':8,'threads':16,'maxFreqGhz':3.9}
+      and d['interfaces'][0].get('mac')=='aa:bb:cc:dd:ee:ff' and d['interfaces'][0].get('errors')==0
+      and d['disks'][0].get('device')=='Samsung SSD 990 EVO Plus 1TB'
+      and d.get('sensors')==[{'chip':'k10temp','label':'Tctl','valueC':42.5}])
 sys.exit(0 if ok else 1)
 " 2>/dev/null; then
-    ok "host metrics operational + capacity + M-diag telemetry present (stub snapshot)"
+    ok "host metrics operational + capacity + M-diag telemetry + 1.1.0 depth (cpu-info/sensors/mem-cached/mac/device) present (stub snapshot)"
   else bad "host happy-path capacity (code=$CODE body=$BODY)"; fi
 
   # 17. The JOIN present-branch (detail path): the monitor row is carried through VERBATIM, keyed by id.

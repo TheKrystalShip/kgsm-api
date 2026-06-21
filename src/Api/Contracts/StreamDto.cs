@@ -9,8 +9,13 @@ namespace TheKrystalShip.Api.Contracts;
 /// the shared <c>MetricsMapping</c>, so a tick is byte-identical to the REST capacity figures.
 /// <para>The M-diag enrichment adds the rest of the honestly-measured snapshot the diagnostics deep-dive
 /// reads — per-core CPU, load average, host-aggregate block-IO, per-interface throughput, hostname, uptime,
-/// and the sample timestamp (<see cref="SampleTs"/>, the honest freshness source). Still nothing fabricated:
-/// the snapshot has no temperature/sensor/ip/mac/error counters, so those never appear here.</para>
+/// and the sample timestamp (<see cref="SampleTs"/>, the honest freshness source). The Monitor.Contracts 1.1.0
+/// depth adds the DYNAMIC fields: mem cached/buffers (on <see cref="MemCapacity"/>), per-interface mac/errors
+/// (on <see cref="InterfaceSample"/>), and the hwmon <see cref="Sensors"/> list — all measured, honest-null/empty
+/// when absent. The STATIC CPU identity and per-mount disk device are constant per frame: cpu-info rides the
+/// <see cref="Host"/> view only (not this tick); disk device rides the shared <see cref="DiskCapacity"/> shape
+/// (so it appears here too — the byte-identical <c>Host.Disks == tick.Disks</c> invariant, as <c>Fs</c> already
+/// does). Still nothing fabricated: the snapshot has no ip address, so that never appears.</para>
 /// </summary>
 public sealed record HostMetricsDto(
     double CpuPct,
@@ -22,7 +27,11 @@ public sealed record HostMetricsDto(
     IReadOnlyList<InterfaceSample> Interfaces,
     string Hostname,
     long UptimeSec,
-    long SampleTs);
+    long SampleTs,
+    // M-diag depth (Monitor.Contracts 1.1.0) — the DYNAMIC sensor temperatures, mirrored from the Host view so a
+    // WS tick stays byte-identical to the REST element (cached/buffers + mac/errors ride MemCapacity/InterfaceSample
+    // above). Empty array when no hwmon chip reports (never invented); on the tick a snapshot always exists.
+    IReadOnlyList<SensorSample> Sensors);
 
 /// <summary>
 /// The roster-removal tombstone pushed on the <c>servers</c> topic as <c>server.removed</c> (M2):

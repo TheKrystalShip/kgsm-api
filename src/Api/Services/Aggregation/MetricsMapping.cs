@@ -25,7 +25,10 @@ internal static class MetricsMapping
                 KibToGib(s.Mem.UsedKb), KibToGib(s.Mem.TotalKb),
                 Available: KibToGib(s.Mem.AvailableKb),
                 SwapUsed: KibToGib(s.Mem.SwapUsedKb),
-                SwapTotal: KibToGib(s.Mem.SwapTotalKb)),
+                SwapTotal: KibToGib(s.Mem.SwapTotalKb),
+                // M-diag depth — kernel page cache + buffers, KiB→GiB to match the other mem figures.
+                Cached: KibToGib(s.Mem.CachedKb),
+                Buffers: KibToGib(s.Mem.BuffersKb)),
             MapDisks(s.Disk.Mounts),
             PerCore: RoundEach(s.Cpu.PerCore),
             Load: new LoadSample(s.Cpu.Load.One, s.Cpu.Load.Five, s.Cpu.Load.Fifteen),
@@ -33,13 +36,20 @@ internal static class MetricsMapping
             Interfaces: MapIfaces(s.Net.Ifaces),
             Hostname: s.Hostname,
             UptimeSec: s.UptimeSec,
-            SampleTs: s.Ts);
+            SampleTs: s.Ts,
+            // M-diag depth — the DYNAMIC sensor temperatures (mac/errors ride MapIfaces above; cached/buffers
+            // ride MemCapacity above) so this tick mirrors the Host view exactly. Static cpu-info is NOT on the
+            // tick (it rides the Host view via ToCpuInfo).
+            Sensors: MapSensors(s.Sensors));
 
     public static IReadOnlyList<DiskCapacity> MapDisks(Snap.MountUsage[] mounts)
     {
         var disks = new List<DiskCapacity>(mounts.Length);
         foreach (Snap.MountUsage m in mounts)
-            disks.Add(new DiskCapacity(m.Mount, BytesToGib(m.UsedBytes), BytesToGib(m.TotalBytes), Fs: m.Fs));
+            // Fs + Device both static-per-mount but ride this shared shape (so Device appears on the tick too,
+            // exactly as Fs does — keeps Host.Disks byte-identical to tick.Disks). Device null when unresolvable.
+            disks.Add(new DiskCapacity(m.Mount, BytesToGib(m.UsedBytes), BytesToGib(m.TotalBytes),
+                Fs: m.Fs, Device: m.Device));
         return disks;
     }
 
@@ -47,9 +57,34 @@ internal static class MetricsMapping
     {
         var list = new List<InterfaceSample>(ifaces.Length);
         foreach (Snap.InterfaceRate i in ifaces)
-            list.Add(new InterfaceSample(i.Name, i.RxBps, i.TxBps, i.RxPps, i.TxPps));
+            // mac null when unreadable; errors null ONLY when neither counter file reads — a genuine 0 stays 0,
+            // never conflated with unknown (passed through 1:1, never coerced).
+            list.Add(new InterfaceSample(i.Name, i.RxBps, i.TxBps, i.RxPps, i.TxPps, Mac: i.Mac, Errors: i.Errors));
         return list;
     }
+
+    // hwmon temperatures — empty array when no chip reports (never an invented row). Null-tolerant: the
+    // Snapshot's Sensors is non-nullable, but a hand-built/stub snapshot may leave it null → treat as empty
+    // rather than NRE the read path.
+    private static IReadOnlyList<SensorSample> MapSensors(Snap.SensorReading[]? sensors)
+    {
+        if (sensors is null || sensors.Length == 0) return [];
+        var list = new List<SensorSample>(sensors.Length);
+        foreach (Snap.SensorReading r in sensors)
+            // Pass chip/label/valueC through 1:1 — the monitor already produced the °C value; don't re-round.
+            list.Add(new SensorSample(r.Chip, r.Label, r.ValueC));
+        return list;
+    }
+
+    /// <summary>The STATIC CPU identity for the <see cref="Host"/> view (NOT the metrics tick — it's constant
+    /// per frame). Null when the snapshot has no cpu-info; each field passes through 1:1 (MaxFreqGhz is already
+    /// GHz from the monitor — only rounded, never re-converted).</summary>
+    public static CpuInfoSample? ToCpuInfo(Snap.CpuInfo? info) =>
+        info is null
+            ? null
+            : new CpuInfoSample(
+                info.Model, info.Cores, info.Threads,
+                info.MaxFreqGhz is { } ghz ? Math.Round(ghz, 2) : null);
 
     private static IReadOnlyList<double> RoundEach(double[] cores)
     {

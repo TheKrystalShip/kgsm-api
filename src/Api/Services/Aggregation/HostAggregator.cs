@@ -49,7 +49,12 @@ public sealed class HostAggregator(
             SampleTs: capacity?.SampleTs,
             // The panel running on this host IS this api — its honest in-process version (shared with
             // the GET /api/v1 handshake). A build-time constant, present regardless of the metrics snapshot.
-            PanelVersion: ApiInfo.ApiVersion);
+            PanelVersion: ApiInfo.ApiVersion,
+            // M-diag depth: STATIC cpu identity comes straight off the snapshot (not on the metrics tick),
+            // null when there is no snapshot; DYNAMIC sensors ride the shared capacity DTO (so the Host view
+            // and a metrics tick carry the same hwmon list). Honest-null/empty when not measurable.
+            Cpu: snapshot is null ? null : MetricsMapping.ToCpuInfo(snapshot.Cpu.Info),
+            Sensors: capacity?.Sensors);
     }
 
     /// <summary>
