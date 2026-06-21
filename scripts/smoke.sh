@@ -823,6 +823,37 @@ sys.exit(0 if (isinstance(d.get('data'),list) and len(d['data'])==0) else 1)
   echo "   proven in tests/Api.Tests/AlertEngineTests; the live watchdog-crash → alert path is a trusted-host"
   echo "   live-validate, needing kgsm-watchdog up + a forced crash, like M3's mutation happy path)"
 
+  # --- #8 console scrollback: GET /servers/{id}/console?tail=N (the REST hydrate half) --------
+  echo "==> #8 console checks — GET /servers/{id}/console?tail=N (scrollback REST; watchdog ABSENT here)"
+
+  # 36·c. No watchdog is provisioned in smoke (KGSM_API_WATCHDOG_SOCKET unset) → no console source → the
+  #       endpoint degrades to { lines: [] } (degrade gracefully, NEVER a 500). Proves the frozen shape +
+  #       the absent-watchdog degrade. ?tail= is accepted (clamped 0..5000); the value is inert with no source.
+  req GET "/api/v1/servers/${FIRST_ID}/console?tail=50"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if (isinstance(d.get('lines'),list) and len(d['lines'])==0) else 1)
+" 2>/dev/null; then
+    ok "/servers/{id}/console?tail=50 200 + { lines: [] } (watchdog absent → honest empty; never a 500)"
+  else bad "#8 console scrollback degrade (code=$CODE body=$BODY)"; fi
+
+  # 36·d. The default (no ?tail=) is the same honest empty here — proves the param is optional + the shape holds.
+  req GET "/api/v1/servers/${FIRST_ID}/console"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if (isinstance(d.get('lines'),list) and len(d['lines'])==0) else 1)
+" 2>/dev/null; then
+    ok "/servers/{id}/console (no ?tail=, default 200) 200 + { lines: [] }"
+  else bad "#8 console scrollback default (code=$CODE body=$BODY)"; fi
+
+  echo "  (note: the live WS follow on servers/{id}/console — opening a shared watchdog tail-bridge per native"
+  echo "   instance and streaming console.line frames with monotonic seq — is OWED-TO-HUMAN: it needs a real"
+  echo "   running kgsm-watchdog + a native instance producing stdout. The bridge open/close/unique-seq/"
+  echo "   not-capable-no-retry logic is proven in tests/Api.Tests/ConsoleBridgeTests; the controller happy/"
+  echo "   absent/down paths in tests/Api.Tests/ConsoleControllerTests.)"
+
   # --- M7 assistant turn relay: the gates that run before any upstream call ------
   echo "==> M7 assistant relay checks — POST /api/v1/assistant/turn (auth + capability gates, no upstream)"
 
@@ -1058,7 +1089,7 @@ start_api_auth || { echo "API never healthy (auth-enabled); log:"; tail -20 /tmp
 #     /me (M8) is [Authorize] (any authenticated caller) -> still 401 with no bearer.
 #     /integrations (M8·c) is admin-gated -> 401 with no bearer (the tier/admin gate is in tests).
 auth_401=true
-for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/integrations /api/v1/integrations/discord /api/v1/integrations/slack /api/v1/_dbcheck /api/v1/_throw; do
+for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/servers/x/console /api/v1/integrations /api/v1/integrations/discord /api/v1/integrations/slack /api/v1/_dbcheck /api/v1/_throw; do
   req GET "$p"
   if [[ "$CODE" != 401 ]] || ! grep -q '"code":"unauthorized"' <<<"$BODY" || grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY"; then
     auth_401=false; echo "    ($p -> $CODE $BODY)"
@@ -1072,7 +1103,7 @@ req DELETE /api/v1/servers/x
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (DELETE /servers/{id} -> $CODE $BODY)"; }
 req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,POST assistant/turn (no open back door)" \
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,POST assistant/turn (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 32. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).

@@ -151,6 +151,16 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<LeafHealthMonitor>();
         services.AddHostedService(sp => sp.GetRequiredService<LeafHealthMonitor>());
 
+        // #8 — the live console bridge (the follow-only servers/{id}/console topic). Always-running reconcile
+        // loop (~2s, AlertEngine-shaped, NOT a per-source pump): while a console topic has subscribers it opens
+        // exactly ONE shared watchdog tail-bridge per native instance and fans each appended line out as a
+        // console.line; it closes a bridge when the last subscriber leaves / the instance vanishes / on
+        // shutdown (cancelling the unbounded follow). The REST scrollback (GET /servers/{id}/console?tail=N,
+        // ServerConsoleController) hydrates history; this streams the live tail. The watchdog client is resolved
+        // optionally — absent => the loop logs once and stays silent (degrade gracefully, never a 500).
+        services.AddSingleton<ConsoleBridgeManager>();
+        services.AddHostedService(sp => sp.GetRequiredService<ConsoleBridgeManager>());
+
         // M3 — commands (the first write path). The registry holds in-memory job state + the
         // one-in-flight-per-server guard; the runner executes admitted verbs off-request (its own DI
         // scope per job, since ILifecycleService is transient/process-based) and streams job.patch +

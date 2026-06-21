@@ -25,6 +25,20 @@ public static class StreamProtocol
     /// <summary>One server's per-instance metric ticks: <c>servers/{id}/metrics</c>.</summary>
     public static string ServerMetricsTopic(string id) => $"servers/{id}/metrics";
 
+    /// <summary>One server's live console (stdout) tail: <c>servers/{id}/console</c> (#8). A
+    /// <strong>follow-only</strong> topic — the client hydrates scrollback via the REST
+    /// <c>GET /servers/{id}/console?tail=N</c> and applies the live lines pushed here from the next line on
+    /// (the patch-only, no-snapshot-on-subscribe rule, §3·j). <see cref="ConsoleBridgeManager"/> opens exactly
+    /// one shared watchdog tail-bridge per instance while it has subscribers and closes it when the last one
+    /// leaves. NATIVE instances only (a container's stdout is Docker's — out of scope).</summary>
+    public static string ServerConsoleTopic(string id) => $"servers/{id}/console";
+
+    /// <summary>Does <paramref name="topic"/> name some <c>servers/{id}/console</c> topic? Lets the bridge
+    /// manager gate all enumeration on <see cref="StreamHub.AnySubscription"/> so an idle stream costs
+    /// nothing (no watchdog list, no bridges) — the metric-pump subscriber-gate discipline.</summary>
+    public static bool IsServerConsoleTopic(string topic) =>
+        topic.StartsWith("servers/", StringComparison.Ordinal) && topic.EndsWith("/console", StringComparison.Ordinal);
+
     /// <summary>One server's firewall/ports block: <c>servers/{id}/network</c> (M6·b). The fresh
     /// <see cref="Contracts.ServerNetwork"/> is pushed here after an <c>open_ports</c> command verifies —
     /// kept off the <see cref="ServersTopic"/> so <see cref="ServerPatch"/> stays the frozen M1·b
@@ -59,6 +73,21 @@ public static class StreamProtocol
     /// <summary>The per-connection coalesce key for a server's network block on
     /// <see cref="ServerNetworkTopic"/>: a slow client gets the newest re-probe, never a backlog.</summary>
     public static string ServerNetworkEntityKey(string id) => $"servers-network:{id}";
+
+    // --- console (#8 — the follow-only stdout stream) ---
+    /// <summary>One live console line on a <see cref="ServerConsoleTopic"/>: <c>data = { id, seq, line }</c>.
+    /// <para><b>Best-effort tail (the honest contract, mirroring the audit-topic precedent).</b> Lines may
+    /// drop on a slow/torn client — the per-line coalesce key (<see cref="ConsoleEntityKey"/>) bounds the
+    /// outbound queue and a stalled send is torn down (<c>StreamConnection.SendTimeout</c>); the client then
+    /// re-hydrates recent context via <c>GET /servers/{id}/console?tail=N</c> on reconnect. The durable
+    /// record is the watchdog's LogFile. Console output is NEVER fabricated.</para></summary>
+    public const string ConsoleLine = "console.line";
+
+    /// <summary>The per-connection coalesce key for a console line: <c>console:{id}:{seq}</c> — <b>UNIQUE per
+    /// line</b> (the <c>audit</c>-append precedent, NOT the supersede-by-latest server/metric key), so distinct
+    /// lines each occupy their own outbound slot and never collapse into the latest. A slow client drops some
+    /// lines under backpressure but never silently fuses two into one.</summary>
+    public static string ConsoleEntityKey(string id, long seq) => $"console:{id}:{seq}";
 
     // --- jobs (M3 — the command write path) ---
     /// <summary>Command/job progress + completion (host-wide): <c>jobs</c> (architecture.html §5·d).</summary>
