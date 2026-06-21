@@ -30,11 +30,12 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done. Coverage = where the sour
 > **⚠ LIVE READ-CHECK (against real kgsm on `hotrod`) split the six into working vs engine-blocked:**
 > - ✅ **config GET** (200, real values), **panelVersion** (`"v1"`), **updateAvailable**/**startedAt**
 >   (wired, honest `null`) — **work live.**
-> - ❌ **backups (list/create/restore) + `update`** — kgsm-lib execs `instances backups`/`create-backup`/
->   `restore-backup`/`update`/`check-update`, but the deployed kgsm's `instances` command only has
->   `remove/info/status/find/config-get/config-set/help` → **`Unknown command`** (503). The API code is
->   correct and degrades honestly; it stays non-functional until kgsm exposes those subcommands (see the
->   **kgsm `instances` subcommand gap** under Tier 2 / Findings). Committed anyway per the chosen plan.
+> - ✅ **backups (list/create/restore) + `update`** — were engine-blocked at the read-check (the deployed
+>   kgsm's `instances` command lacked these → `Unknown command` 503), now **FIXED in kgsm 2026-06-21**:
+>   `instances backups`/`create-backup`/`restore-backup`/`update`/`check-update` added (CLI + per-instance
+>   management scripts), emitting the events the API already audits. **Live-validated** — `GET
+>   /servers/factorio-test/backups` now returns **200** with snapshots parsed (was 503); functional once the
+>   deployed kgsm + management files are updated. No kgsm-lib/kgsm-api change. See Findings.
 >
 > **Verified caveats (honest, not bugs to fix in this slice):**
 > - **config-set is un-audited** — kgsm emits no `config.*` event today, so the API writes no row
@@ -56,11 +57,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done. Coverage = where the sour
   - Coverage: kgsm-lib `IInstanceService.GetInstanceConfigValue(name,key)` + `SetInstanceConfigValue(name,key,value,actor,origin)` ✓ · kgsm `instances config-get/config-set` ✓ (protected/identity keys refused by the engine — surface that as a 4xx, don't bypass).
   - Unblocks: **ServerSettings** page (100% mock today) + the assistant's `set_config` verb.
   - Notes: write = Operator tier + `origin` provenance (mirror the command endpoint). No double-write audit (kgsm echo owns it). Read = Viewer.
-- [~] **2. `update` command verb** — add `update` to the command verb set (`POST /servers/{id}/commands {verb:"update"}`) — ⚠ code committed, **engine-blocked** (kgsm has no `instances update`; see Findings)
+- [x] **2. `update` command verb** — add `update` to the command verb set (`POST /servers/{id}/commands {verb:"update"}`) — ✅ code committed; **engine gap now fixed** (kgsm gained `instances update`, 2026-06-21; functional once deployed — see Findings)
   - Coverage: kgsm-lib `IInstanceService.Update(name,actor,origin)` ✓ · kgsm per-instance `update` (scriptable) ✓.
   - Unblocks: the ServerHero **Update chip** (disabled in LIVE today).
   - Notes: long-running → a `job` like start/stop (mirror `CommandRunner`). kgsm refuses update on a running instance — surface honestly.
-- [~] **3. Backups: list + create + restore** — `GET /servers/{id}/backups`, a `backup` create + `restore` action — ⚠ code committed, **engine-blocked** (kgsm has no `instances backups`/`create-backup`/`restore-backup`; see Findings)
+- [x] **3. Backups: list + create + restore** — `GET /servers/{id}/backups`, a `backup` create + `restore` action — ✅ code committed; **engine gap now fixed** (kgsm gained `instances backups`/`create-backup`/`restore-backup`, 2026-06-21; `GET /backups` live-validated 200 — see Findings)
   - Coverage: kgsm-lib `GetBackups(name)` / `CreateBackup(name,actor,origin)` / `RestoreBackup(name,backupName,actor,origin)` ✓ · kgsm `backup list/create/restore` ✓.
   - Unblocks: **BackupsList** page (100% mock today).
   - Notes: list = Viewer; create/restore = Operator + provenance. Decide create/restore as command verbs vs dedicated routes (mirror whichever fits; restore takes a `backupName`).
@@ -109,17 +110,26 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done. Coverage = where the sour
 ---
 
 ## Findings (surfaced during Tier-1 implementation, 2026-06-21)
-- **🚧 BLOCKER — the kgsm `instances` CLI is missing the backup/update subcommands kgsm-lib calls.**
-  kgsm-lib 1.21.0 execs `instances backups` / `instances create-backup` / `instances restore-backup` /
-  `instances update` / `instances check-update`, but the deployed kgsm's `instances` command only supports
-  `remove / info / status / find / config-get / config-set / help` (verified live: `Unknown command: backups`).
-  kgsm *has* the backup/update logic, but only on the per-instance **management script**
-  (`<mgmt> backup list|create|restore`, `<mgmt> update`), not surfaced as top-level `kgsm.sh instances`
-  subcommands. So kgsm-lib is ahead of the engine's CLI. **This blocks Tier-1 #2 (`update`) and #3 (backups),
-  and a future real `updateAvailable` (needs `check-update`).** Fix = wire those `instances` subcommands in
-  kgsm to the existing management-script functions (then no kgsm-lib/kgsm-api change needed — the API already
-  calls them). Tracked as the next upstream task. The committed API endpoints degrade honestly (503 + the real
-  engine error) until then.
+- **✅ RESOLVED (kgsm, 2026-06-21) — the kgsm `instances` CLI now exposes the backup/update subcommands
+  kgsm-lib calls.** Originally a 🚧 BLOCKER: kgsm-lib 1.21.0 execs `instances backups` / `instances
+  create-backup` / `instances restore-backup` / `instances update` / `instances check-update`, but the
+  deployed kgsm's `instances` command only had `remove / info / status / find / config-get / config-set /
+  help` (verified live: `Unknown command: backups`). **Fix landed in kgsm** (working tree on `main`, see the
+  kgsm changeset): the per-instance management scripts gained the dash-free commands `backups` /
+  `create-backup` / `restore-backup` / `check-update` (templates `manage.{native,container}.d/12-commands` +
+  `13-dispatch` + `02-help`), and the top-level `commands/instances.sh` gained matching subcommands that
+  forward 1:1 to the management file (+ `update`, which every management file already had). The CLI emits the
+  existing `instance_version_updated` / `instance_backup_created` / `instance_backup_restored` events on
+  success, so the API's echo-path audit fires with **no double-write**. `backups` output is normalized
+  one-per-line in `instances.sh` (the contract this API parses). An honest capability gate handles older
+  un-regenerated management files (regenerate via `kgsm files management create <instance>`).
+  **No kgsm-lib / kgsm-api code change** — the API already called these strings. **Live-validated 2026-06-21**:
+  read paths (`backups`, `check-update`) + write path (real `create-backup`) work on `factorio-test`, and the
+  original failing case `GET /servers/factorio-test/backups` now returns **HTTP 200** with both snapshots
+  parsed (was 503). Tier-1 #2/#3 are now functional once the deployed kgsm + management files are updated.
+  (Adjacent, still deferred: `instances version --installed/--latest` — kgsm-lib's `GetInstalledVersion`/
+  `GetLatestVersion` — is the same class of CLI gap but not on the Tier-1 path; `updateAvailable` comes from
+  `instances status --json`.)
 - **kgsm `process.start_time` is non-ISO and the kgsm-lib status model can't parse it** — kgsm emits it as a
   local-time string (container: RFC3339 with the offset stripped, e.g. `2026-06-16 14:23:01`; native `ps lstart`:
   `Sun Jun 21 20:17:17 2026`). The referenced kgsm-lib (1.21.0) maps `start_time` to a `System.Text.Json DateTime?`
