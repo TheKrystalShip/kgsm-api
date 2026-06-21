@@ -230,6 +230,36 @@ public static class AuditMapping
     public static AuditWrite FromPlayerLeftEvent(InstancePlayerLeftData d, string hostId) =>
         PlayerWrite(d, hostId, AuditAction.PlayerLeave, "left", d.PlayerId, d.PlayerName);
 
+    /// <summary>
+    /// Map a kgsm <c>instance_config_changed</c> event (kgsm-lib 1.22.0) to a <c>config.set</c> row at
+    /// <see cref="AuditSeverity.Info"/>. The PATCH <c>/servers/{id}/config</c> path stamps actor+origin
+    /// onto <c>SetInstanceConfigValue</c>, so this echo carries provenance off the envelope (handled
+    /// unchanged by <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/>) — engine-owned, no double-write.
+    /// Only the changed <see cref="InstanceConfigChangedData.Key"/> rides in <c>meta</c>; the new
+    /// <em>value</em> is intentionally never carried by the event (secret hygiene — instance config can hold
+    /// passwords/tokens), so this row can never leak one. A blank key degrades to a key-less summary + null
+    /// meta (defensive — the event guarantees a non-null key), never a fabricated placeholder.
+    /// </summary>
+    public static AuditWrite FromConfigChangedEvent(InstanceConfigChangedData d, string hostId)
+    {
+        string instance = Instance(d);
+        string key = string.IsNullOrEmpty(d.Key) ? "" : d.Key;
+        return new AuditWrite(
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
+            Action: AuditAction.ConfigSet,
+            Severity: AuditSeverity.Info,
+            Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
+            ServerId: instance,
+            HostId: hostId,
+            Summary: string.IsNullOrEmpty(key)
+                ? $"config changed for {Display(instance)}"
+                : $"set config '{key}' for {Display(instance)}",
+            // KEY ONLY — never the value (the event doesn't carry it; this is the secret-hygiene guard).
+            Meta: string.IsNullOrEmpty(key) ? null : new Dictionary<string, string> { ["key"] = key });
+    }
+
     // Join/left differ only in action + summary verb — build the row once. The summary names the player
     // by display name, falling back to the stable id, then a generic label (never fabricates an identity;
     // at-least-one-non-null is the emitting shim's guarantee, this is defensive).

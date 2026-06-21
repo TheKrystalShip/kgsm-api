@@ -18,8 +18,12 @@ namespace TheKrystalShip.Api.Controllers;
 /// (<see cref="ServerConfigMapping.IsEditableKey"/> mirrors that protected set). The PATCH validates every
 /// key against the editable set BEFORE applying any (a stricter pre-check, never a bypass), then applies them
 /// via kgsm-lib's per-key <c>SetInstanceConfigValue</c>; a key the engine still refuses surfaces its real
-/// <c>4xx</c> detail. No audit row is written here — kgsm's <c>config-set</c> emits no event today, so an
-/// invented <c>config.*</c> action would be a fabrication; this is the honest boundary.
+/// <c>4xx</c> detail. The controller still writes <strong>no audit row directly</strong> (no double-write) —
+/// but the row is no longer absent: kgsm now emits <c>instance_config_changed</c> per key (kgsm-lib 1.22.0),
+/// and because the PATCH stamps actor+origin onto each <c>SetInstanceConfigValue</c>, the engine echo carries
+/// provenance → <see cref="Services.Audit.KgsmAuditConsumer"/> writes one <c>config.set</c> row per event
+/// (a multi-key PATCH ⇒ N events ⇒ N rows). The changed <em>value</em> is never carried (secret hygiene) —
+/// only the key lands in the audit <c>meta</c>.
 /// </para>
 /// </summary>
 [ApiController]

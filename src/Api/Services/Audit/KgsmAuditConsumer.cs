@@ -146,6 +146,13 @@ public sealed class KgsmAuditConsumer(
             audit.AppendAsync(AuditMapping.FromPlayerJoinedEvent(d, options.HostId)));
         events.RegisterHandler<InstancePlayerLeftData>(d =>
             audit.AppendAsync(AuditMapping.FromPlayerLeftEvent(d, options.HostId)));
+
+        // config.set — instance config edits (kgsm-lib 1.22.0). The PATCH /servers/{id}/config path stamps
+        // actor+origin onto SetInstanceConfigValue, so this echo carries provenance; engine-owned → no
+        // double-write (plain AppendAsync, NOT WriteServerAndBridge — a config edit is not a recovery action).
+        // KEY ONLY in meta (the event never carries the value — secret hygiene). Pure mapper, socket-free.
+        events.RegisterHandler<InstanceConfigChangedData>(d =>
+            audit.AppendAsync(AuditMapping.FromConfigChangedEvent(d, options.HostId)));
     }
 
     private Task WriteServer(

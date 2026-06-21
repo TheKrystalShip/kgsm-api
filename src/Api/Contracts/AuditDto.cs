@@ -102,6 +102,11 @@ public static class AuditAction
     public const string PlayerJoin = "player.join";
     public const string PlayerLeave = "player.leave";
 
+    // config.set — sourced from instance_config_changed (kgsm-lib 1.22.0). KEY ONLY in meta; the value is
+    // never carried (secret hygiene). Engine-owned echo (no double-write — the PATCH /servers/{id}/config
+    // path already stamps actor+origin onto SetInstanceConfigValue).
+    public const string ConfigSet = "config.set";
+
     // auth.* — API-internal (no kgsm event → written directly, no double-write risk).
     public const string AuthLogin = "auth.login";
     public const string AuthLogout = "auth.logout";
