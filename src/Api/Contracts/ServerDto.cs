@@ -24,6 +24,11 @@ namespace TheKrystalShip.Api.Contracts;
 ///     <c>ram.max</c> (no memory limit), <c>ip</c> (not resolved), <c>updatedAt</c> (no state-change
 ///     tracking until the M2 stream), and the curated <c>game</c> display name (we emit the real
 ///     <c>blueprint</c> id instead — blueprint metadata curation is deferred, never guessed).</description></item>
+///   <item><description><c>updateAvailable</c> + <c>startedAt</c> are <strong>wired but honestly null
+///     in practice</strong> (see their per-field notes): the former because the roster status is read in
+///     fast mode (no per-poll networked update check), the latter because the referenced kgsm-lib can't
+///     parse kgsm's non-ISO <c>start_time</c>. Both are present-as-null so the SPA binds a stable shape,
+///     and neither is ever fabricated.</description></item>
 /// </list>
 /// Keys are always present with explicit <c>null</c> values (honest unknown over omission), so the
 /// SPA binds a stable shape.
@@ -55,6 +60,24 @@ public sealed record Server(
     // or has no sample for this instance (e.g. a stopped server has no cgroup/process tree). Null
     // here is the honest "not measurable now" — never a fabricated zero.
     ServerMetricsDto? Metrics,
+    // Whether a newer version is available, from the instance status reading's VersionInfo.UpdatesAvailable.
+    // This is a NETWORKED check kgsm skips in --fast mode, and the api reads the roster status fast
+    // (a fleet-wide network probe per poll would be far too expensive) — so updateAvailable is honestly
+    // null today on BOTH the list and the detail view (kgsm-lib reports UpdatesAvailable null when
+    // Version.Checked is false). It is wired so a future dedicated, throttled update-check surface can
+    // populate it; it is NEVER a fabricated false ("no update") for an unchecked instance.
+    bool? UpdateAvailable = null,
+    // When the running process started (from the instance status reading's process.start_time), or null
+    // when stopped/unknown. ⚠ Null in practice today: the referenced kgsm-lib (1.21.0) maps start_time to
+    // a System.Text.Json DateTime?, but kgsm emits it as a non-ISO local-time string which STJ cannot parse
+    // — a container's start_time (docker's RFC3339 stripped of its offset → "2026-06-16 14:23:01") always
+    // throws on deserialization, and a native's `ps lstart` ("Sun Jun 21 20:17:17 2026") throws WHEN a
+    // local pid file populates it (a watchdog-spawned native with no local pid file emits null, which parses
+    // fine). A throw is swallowed upstream into an empty roster (ServerAggregator.ReadDomain). So the only
+    // value that ever reaches this field is a parseable ISO-UTC one. Surfaced honestly (the SPA derives
+    // uptime from a start timestamp); the upstream parse gap is flagged for a kgsm-lib/kgsm fix (emit ISO,
+    // and/or a start_time converter), out of scope for this read slice. Never a guessed timezone.
+    DateTimeOffset? StartedAt = null,
     // The firewall/ports cross-reference (M6·b) — populated ONLY on the GET /servers/{id} detail view
     // (and the servers/{id}/network WS patch); omitted entirely on the list + the `servers` stream, so
     // those stay byte-identical to the frozen M1·b shape (detail ≠ list, the first such split). See

@@ -46,7 +46,10 @@ public sealed class HostAggregator(
             Interfaces: capacity?.Interfaces,
             Hostname: capacity?.Hostname,
             UptimeSec: capacity?.UptimeSec,
-            SampleTs: capacity?.SampleTs);
+            SampleTs: capacity?.SampleTs,
+            // The panel running on this host IS this api — its honest in-process version (shared with
+            // the GET /api/v1 handshake). A build-time constant, present regardless of the metrics snapshot.
+            PanelVersion: ApiInfo.ApiVersion);
     }
 
     /// <summary>

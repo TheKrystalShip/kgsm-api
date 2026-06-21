@@ -37,6 +37,11 @@ public sealed record Host(
     string? Hostname = null,
     long? UptimeSec = null,
     long? SampleTs = null,
+    // The Control Panel API's own in-process version (== ApiInfo.ApiVersion) — the host's "panel"
+    // is this api. Always present (it's a build-time constant, not a measured value), and sourced
+    // from the same shared const as the GET /api/v1 handshake so the two can't drift. NOT the host
+    // OS / kernel version (those have no honest source today and stay client-side "—").
+    string? PanelVersion = null,
     // The host-wide open-ports grid (M6·b) — populated ONLY on the GET /hosts/{id} detail view; omitted
     // on the GET /hosts list (this block stays detail-only; the metrics telemetry above rides both). Null
     // when the firewall can't answer (absent/unreachable/unknown); an empty OpenPorts means the firewall

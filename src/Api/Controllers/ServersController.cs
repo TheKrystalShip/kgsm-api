@@ -51,16 +51,17 @@ public sealed class ServersController(
     }
 
     /// <summary>
-    /// Issue a command (M3 lifecycle + M6·b ports, architecture.html §5·d/§3·g). The body is intent only —
-    /// <c>{ "verb": "start"|"stop"|"restart"|"open_ports" }</c>, a closed set; <c>open_ports</c> in
-    /// particular carries <strong>no port list</strong> (the server derives the target from the instance's
+    /// Issue a command (M3 lifecycle + update + M6·b ports, architecture.html §5·d/§3·g). The body is intent
+    /// only — <c>{ "verb": "start"|"stop"|"restart"|"update"|"open_ports" }</c>, a closed set; <c>open_ports</c>
+    /// in particular carries <strong>no port list</strong> (the server derives the target from the instance's
     /// own ports). The verb is admitted (state guards, permissions), a <see cref="Job"/> is created, and the
     /// work runs off-request; the <c>202</c> returns the job and progress arrives on the <c>jobs</c> WS topic.
     /// <list type="bullet">
     /// <item><c>400</c> — unknown/missing verb (the closed set is server-defined).</item>
     /// <item><c>404</c> — unknown server id.</item>
-    /// <item><c>409</c> — an obvious no-op against the real status (start-when-running /
-    /// stop-when-stopped; <c>open_ports</c> is always admissible), or a command already in flight.</item>
+    /// <item><c>409</c> — an obvious no-op/illegal transition against the real status (start-when-running /
+    /// stop-when-stopped / update-when-running; <c>open_ports</c> is always admissible), or a command already
+    /// in flight.</item>
     /// <item><c>202</c> — accepted: <c>{ job }</c>.</item>
     /// </list>
     /// </summary>
@@ -71,7 +72,7 @@ public sealed class ServersController(
         string? verb = body?.Verb?.Trim().ToLowerInvariant();
         if (!CommandVerb.IsKnown(verb))
             return Error(StatusCodes.Status400BadRequest, "bad_request",
-                "unknown or missing verb; expected one of: start, stop, restart, open_ports");
+                "unknown or missing verb; expected one of: start, stop, restart, update, open_ports");
 
         // Provenance to stamp on the engine command (M5) so the resulting kgsm event — and the audit row
         // the consumer writes from it — records the driving surface. Caller-declared, validated against

@@ -13,5 +13,5 @@ namespace TheKrystalShip.Api.Controllers;
 public sealed class MetaController : ControllerBase
 {
     [HttpGet]
-    public ApiInfo Get() => new("kgsm-api", "v1", DateTimeOffset.UtcNow);
+    public ApiInfo Get() => new("kgsm-api", ApiInfo.ApiVersion, DateTimeOffset.UtcNow);
 }

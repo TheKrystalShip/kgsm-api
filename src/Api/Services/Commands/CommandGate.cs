@@ -22,6 +22,11 @@ public static class CommandGate
     {
         CommandVerb.Start when observedStatus == ServerStatus.Running => "server is already running",
         CommandVerb.Stop when observedStatus == ServerStatus.Stopped => "server is already stopped",
+        // kgsm refuses to update a RUNNING instance (the files are in use) — surface that synchronously as
+        // a 409 against the observed status, rather than accepting a job that is bound to fail. Unknown
+        // status never blocks (we cannot honestly call it a no-op), and a stopped server is admissible; the
+        // engine refusal remains the backstop for any subtler case the observed status cannot see.
+        CommandVerb.Update when observedStatus == ServerStatus.Running => "server must be stopped before updating",
         _ => null,
     };
 }

@@ -10,7 +10,8 @@ namespace TheKrystalShip.Api.Services.Commands;
 
 /// <summary>
 /// Executes an admitted command job off the request path (M3 lifecycle + M6·b <c>open_ports</c> + M8·b
-/// <c>install</c>/<c>uninstall</c>). The controller returns <c>202</c> immediately; this runner drives the
+/// <c>install</c>/<c>uninstall</c> + Tier-1 ops <c>update</c>/<c>backup_create</c>/<c>backup_restore</c>).
+/// The controller returns <c>202</c> immediately; this runner drives the
 /// verb to completion on a background task, streaming each state transition as <c>job.patch</c> on the
 /// <c>jobs</c> topic and, on settle, a fresh verify patch — <c>server.patch</c> (run-state for the
 /// lifecycle verbs; the newly-created instance for <c>install</c>), <c>server.removed</c> (the tombstone
@@ -52,7 +53,7 @@ public sealed class CommandRunner(
     /// <c>open_ports</c>, onto the direct audit row this runner writes.
     /// </summary>
     public void Start(Job job, string? actor = null, string? origin = null) =>
-        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null));
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName: null));
 
     /// <summary>
     /// Fire-and-forget an <c>install</c> job (M8·b — <c>POST /servers</c>). <paramref name="blueprint"/> is
@@ -62,7 +63,7 @@ public sealed class CommandRunner(
     /// kgsm's <c>instance_installed</c> echo carries the stamped provenance (the lifecycle case).
     /// </summary>
     public void StartInstall(Job job, string blueprint, string? actor = null, string? origin = null) =>
-        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint));
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint, backupName: null));
 
     /// <summary>
     /// Fire-and-forget an <c>uninstall</c> job (M8·b — <c>DELETE /servers/{id}</c>). Same echo-path
@@ -70,9 +71,26 @@ public sealed class CommandRunner(
     /// instance leaves the roster.
     /// </summary>
     public void StartUninstall(Job job, string? actor = null, string? origin = null) =>
-        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null));
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName: null));
 
-    private async Task ExecuteAsync(Job job, string? actor, string? origin, string? blueprint)
+    /// <summary>
+    /// Fire-and-forget a <c>backup_create</c> job (Tier-1 ops — <c>POST /servers/{id}/backups</c>). Same
+    /// echo-path discipline as the lifecycle verbs: kgsm's <c>instance_backup_created</c> echo carries the
+    /// stamped provenance, so no audit row is written here. The verify pushes a fresh <c>server.patch</c>.
+    /// </summary>
+    public void StartBackupCreate(Job job, string? actor = null, string? origin = null) =>
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName: null));
+
+    /// <summary>
+    /// Fire-and-forget a <c>backup_restore</c> job (Tier-1 ops — <c>POST /servers/{id}/backups/restore</c>).
+    /// <paramref name="backupName"/> is the snapshot to restore (carried into the closure, the
+    /// <see cref="StartInstall"/> pattern for a param-bearing job since <see cref="Job"/> has no slot for it).
+    /// Echo-path audited via kgsm's <c>instance_backup_restored</c> → <c>backup.restore</c>; no write here.
+    /// </summary>
+    public void StartBackupRestore(Job job, string backupName, string? actor = null, string? origin = null) =>
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName));
+
+    private async Task ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName)
     {
         bool ok = false;
         string? error = null;
@@ -88,6 +106,12 @@ public sealed class CommandRunner(
                 CommandVerb.OpenPorts => await RunOpenPortsAsync(scope, job, actor, origin).ConfigureAwait(false),
                 CommandVerb.Install => RunInstall(scope, job, blueprint!, actor, origin),
                 CommandVerb.Uninstall => RunUninstall(scope, job, actor, origin),
+                // update / backup_* live on IInstanceService, NOT ILifecycleService — they get their own
+                // cases so they never fall through to RunLifecycle (whose inner switch would fail them as an
+                // "unknown verb"). The lifecycle verbs (start/stop/restart) are the only `_` here.
+                CommandVerb.Update => RunUpdate(scope, job, actor, origin),
+                CommandVerb.BackupCreate => RunBackupCreate(scope, job, actor, origin),
+                CommandVerb.BackupRestore => RunBackupRestore(scope, job, backupName!, actor, origin),
                 _ => RunLifecycle(scope, job, actor, origin),
             };
         }
@@ -178,6 +202,48 @@ public sealed class CommandRunner(
             return (false, "engine not provisioned");
 
         KgsmResult result = instances.Uninstall(job.ServerId, actor, origin);
+        return result.IsSuccess ? (true, null) : (false, Detail(result));
+    }
+
+    // update (Tier-1 ops) — update the instance to the latest version. On IInstanceService (NOT lifecycle),
+    // so it needs its own case. Provenance rides the engine call → kgsm's instance_version_updated echo →
+    // the server.update audit row (KgsmAuditConsumer). NO audit row here (the echo path, like install). The
+    // controller already 409s an update-on-running synchronously; a subtler engine refusal lands as a failed
+    // job + the real stderr.
+    private (bool ok, string? error) RunUpdate(IServiceScope scope, Job job, string? actor, string? origin)
+    {
+        var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
+        if (instances is null)
+            return (false, "engine not provisioned");
+
+        KgsmResult result = instances.Update(job.ServerId, actor, origin);
+        return result.IsSuccess ? (true, null) : (false, Detail(result));
+    }
+
+    // backup_create (Tier-1 ops) — snapshot the instance. Echo-path discipline: kgsm emits
+    // instance_backup_created → KgsmAuditConsumer writes the backup.create row with the stamped provenance.
+    // No audit write here.
+    private (bool ok, string? error) RunBackupCreate(IServiceScope scope, Job job, string? actor, string? origin)
+    {
+        var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
+        if (instances is null)
+            return (false, "engine not provisioned");
+
+        KgsmResult result = instances.CreateBackup(job.ServerId, actor, origin);
+        return result.IsSuccess ? (true, null) : (false, Detail(result));
+    }
+
+    // backup_restore (Tier-1 ops) — restore from a named snapshot (backupName threaded through the closure;
+    // Job has no slot for it). Echo-path: kgsm emits instance_backup_restored → the backup.restore row. No
+    // audit write here. An unknown backup name surfaces as kgsm's real stderr on a failed job.
+    private (bool ok, string? error) RunBackupRestore(
+        IServiceScope scope, Job job, string backupName, string? actor, string? origin)
+    {
+        var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
+        if (instances is null)
+            return (false, "engine not provisioned");
+
+        KgsmResult result = instances.RestoreBackup(job.ServerId, backupName, actor, origin);
         return result.IsSuccess ? (true, null) : (false, Detail(result));
     }
 

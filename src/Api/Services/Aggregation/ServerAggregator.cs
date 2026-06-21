@@ -157,6 +157,8 @@ public sealed class ServerAggregator
     {
         string status = ServerStatus.Unknown;
         string? version = null;
+        bool? updateAvailable = null;
+        DateTimeOffset? startedAt = null;
         if (statuses.TryGetValue(id, out Reading<InstanceRuntimeStatus>? reading)
             && reading is { IsMeasured: true, Value: { } runtimeStatus })
         {
@@ -164,6 +166,19 @@ public sealed class ServerAggregator
             version = string.IsNullOrWhiteSpace(runtimeStatus.Version.Current)
                 ? null
                 : runtimeStatus.Version.Current;
+
+            // Honest update flag: kgsm-lib reports UpdatesAvailable null unless it actually ran the
+            // (networked) check (Version.Checked). The roster status is read fast (no per-poll network
+            // probe), so this is null in practice today — never a fabricated "false" for an unchecked
+            // instance. See Server.UpdateAvailable for the cost rationale.
+            updateAvailable = runtimeStatus.Version.UpdatesAvailable;
+
+            // Process start time → an honest start timestamp (the SPA derives uptime from it). Only a
+            // UTC-kind value is defensible: kgsm emits start_time as a non-ISO local string the lib can't
+            // parse, so the only non-null that reaches here is a parseable ISO-UTC one. An Unspecified/Local
+            // kind would be an unknown offset → null, never a guessed zone. See Server.StartedAt.
+            DateTime? start = runtimeStatus.Process.StartTime;
+            startedAt = start is { Kind: DateTimeKind.Utc } utc ? new DateTimeOffset(utc) : null;
         }
 
         // Metrics only when the monitor produced a row for this id; otherwise honest null. The shared
@@ -183,7 +198,9 @@ public sealed class ServerAggregator
             SteamAppId: string.IsNullOrWhiteSpace(instance.SteamAppId) ? "0" : instance.SteamAppId,
             ClientSteamAppId: string.IsNullOrWhiteSpace(instance.ClientSteamAppId) ? "0" : instance.ClientSteamAppId,
             IsSteamAccountRequired: instance.IsSteamAccountRequired,
-            Metrics: metrics);
+            Metrics: metrics,
+            UpdateAvailable: updateAvailable,
+            StartedAt: startedAt);
     }
 
     // The clean blueprint id, e.g. "factorio" from ".../factorio.bp.yaml". Unified blueprints are
