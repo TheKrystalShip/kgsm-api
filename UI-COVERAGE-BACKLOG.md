@@ -19,6 +19,29 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done. Coverage = where the sour
 
 ---
 
+## Upstream queue (cross-tier — needs an upstream build before the dependent UI is honest)
+
+These are **not API work** — each needs a change in **kgsm / kgsm-lib / kgsm-watchdog / kgsm-monitor**
+*first*, then a (usually small) API change to consume it. Consolidated here so they aren't buried in
+per-item notes. **None started** (2026-06-21). Detail lives in the linked section.
+
+| # | Blocks (UI) | Build in | Scope | Detail |
+|---|---|---|---|---|
+| **G1** | #6 `startedAt`/`uptime` (Server DTO) | **kgsm** only (templates `manage.{native,container}.d/11-status`; regenerate per instance) | Emit `process.start_time` as **ISO-8601-`Z`**: native via `date -d "$lstart" -u +%Y-%m-%dT%H:%M:%SZ`; container by **not** stripping docker's already-`Z` `StartedAt`. The API already accepts only a `Kind==Utc` value → **no API change**. ⚠ A running instance currently risks blanking its *whole* status read (kgsm-lib STJ `DateTime?` **throws** on the non-ISO string, swallowed into an empty reading). Optional resilience add-on (separate decision): a tolerant kgsm-lib `DateTime?` converter (null-on-unparseable instead of throw; costs a lib bump + repin). | § Findings |
+| **G2** | #1 `config-set` audit row | **kgsm** (emit `instance_config_changed`) + **kgsm-api** (one pure audit-consumer handler) | No `config.*` event exists today, so `config-set` leaves no audit trail (the API refuses to fabricate one). | § Findings |
+| **#8** | ConsolePanel / LogConsole (`console` WS) | **kgsm-watchdog** (`/logs` SSE) + **kgsm-lib** (`IWatchdogClient` method) + kgsm-api topic | The watchdog writes instance stdout to its `LogFile` but exposes **no** tail/stream endpoint; kgsm has no console query. (Alternative: a fragile native-only filesystem tail.) | Tier 2 #8 |
+| **#9** | Host diagnostics depth (process list, sensors/temp, cpu model/threads/freq, ram cached/buffers, disk/SMART, iface ip/mac/errors) | **kgsm-monitor** (new collectors) → **`Monitor.Contracts`** bump → kgsm-api mapping | All absent from the monitor `Snapshot` (aggregates + throughput only). Cheap subset: cpu-static, ram cached/buffers, iface ip/mac. Bigger: per-process list, sensors, SMART. | Tier 2 #9 |
+
+> **#7 (player roster) is NOT in this queue** — it's API-buildable now (a stateful aggregator on the
+> `player.join`/`leave` events the API already audits). Its *data* depends on per-game presence-detection
+> patterns being live (Increment 2 native detection is built; real Factorio/Minecraft patterns still owed),
+> so PlayersTab reads honest-empty for any game without configured patterns even after #7 ships.
+>
+> Tier 3 (#10–#12) also need new stores/decisions but are **architectural choices**, not a queued upstream
+> build — left in Tier 3.
+
+---
+
 ## Tier 1 — pure API work (kgsm-lib 1.21.0 already exposes it; add endpoint/verb/field)
 
 > **STATUS — IMPLEMENTED + VALIDATED + MERGED to `main` 2026-06-21.** Combined **0-warn Release build +
