@@ -38,14 +38,43 @@ public static class AuditQueries
         string? severity,
         string? serverId,
         string? actor,
+        string? since,
+        string? category,
         CancellationToken ct)
     {
         IQueryable<AuditEntry> q = db.Audit.AsNoTracking();
 
         if (cursor is { } c) q = q.Where(a => a.RowId < c);
-        if (!string.IsNullOrWhiteSpace(severity)) q = q.Where(a => a.Severity == severity);
+
+        // severity accepts a comma-separated set (the UI's "attention" = "warn,danger");
+        // a single value keeps the indexed equality. Blank/whitespace entries are dropped.
+        if (!string.IsNullOrWhiteSpace(severity))
+        {
+            string[] sevs = severity.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (sevs.Length == 1) q = q.Where(a => a.Severity == sevs[0]);
+            else if (sevs.Length > 1) q = q.Where(a => sevs.Contains(a.Severity));
+        }
         if (!string.IsNullOrWhiteSpace(serverId)) q = q.Where(a => a.ServerId == serverId);
         if (!string.IsNullOrWhiteSpace(actor)) q = q.Where(a => a.ActorName == actor);
+
+        // since: only rows at/after this instant (the UI's time-range tabs → ?since=ISO).
+        // RowId order is a monotonic proxy for time, so this rides the keyset scan. An
+        // unparseable value is ignored (no filter) — never a silently empty page.
+        if (!string.IsNullOrWhiteSpace(since)
+            && DateTimeOffset.TryParse(since, CultureInfo.InvariantCulture,
+                DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out DateTimeOffset sinceTs))
+        {
+            q = q.Where(a => a.Ts >= sinceTs);
+        }
+
+        // category: the action group = the dotted prefix (server.* / player.* / backup.* …),
+        // matching the FE's actionCategory(). The trailing dot stops "server" matching a
+        // hypothetical "serverfoo.x".
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            string prefix = category.Trim() + ".";
+            q = q.Where(a => a.Action.StartsWith(prefix));
+        }
 
         List<AuditEntry> rows = await q
             .OrderByDescending(a => a.RowId)

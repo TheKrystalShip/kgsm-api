@@ -121,6 +121,68 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         Assert.Equal(2, byActor.GetProperty("data").GetArrayLength()); // both rows share the unique actor
     }
 
+    // --- severity accepts a comma set (the UI's "attention" = warn,danger) -------------------------
+    [Fact]
+    public async Task GetAudit_MultiSeverity_OrsTheSet()
+    {
+        string sid = $"sev-{Guid.NewGuid():N}";
+        await Audit.AppendAsync(ServerWrite(AuditAction.ServerStart, sid, severity: AuditSeverity.Info));
+        await Audit.AppendAsync(ServerWrite(AuditAction.ServerStop, sid, severity: AuditSeverity.Warn));
+        await Audit.AppendAsync(ServerWrite(AuditAction.ServerCrash, sid, severity: AuditSeverity.Danger));
+
+        // "attention" pushes down as warn,danger → the two, never the info row.
+        JsonElement att = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn,danger"));
+        string?[] actions = att.GetProperty("data").EnumerateArray().Select(x => x.GetProperty("action").GetString()).ToArray();
+        Assert.Equal(2, actions.Length);
+        Assert.Contains(AuditAction.ServerStop, actions);
+        Assert.Contains(AuditAction.ServerCrash, actions);
+        Assert.DoesNotContain(AuditAction.ServerStart, actions); // info excluded
+
+        // a stray/whitespace entry in the set is dropped, not matched as a blank severity.
+        JsonElement spaced = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn,%20,danger"));
+        Assert.Equal(2, spaced.GetProperty("data").GetArrayLength());
+    }
+
+    // --- since: an ISO lower bound (the time-range tabs) -------------------------------------------
+    [Fact]
+    public async Task GetAudit_Since_LowerBounds()
+    {
+        string sid = $"since-{Guid.NewGuid():N}";
+        DateTimeOffset old = DateTimeOffset.UtcNow.AddDays(-10);
+        // a backdated row + a fresh one (ServerWrite stamps UtcNow)
+        await Audit.AppendAsync(new AuditWrite(old, AuditOrigin.Ui,
+            new AuditActor(ActorKind.User, "haru", ActorProvider.Discord),
+            AuditAction.ServerStart, AuditSeverity.Info,
+            new AuditTarget(AuditTargetKind.Server, sid, sid), sid, AuthTestFactory.HostId, "old", null));
+        await Audit.AppendAsync(ServerWrite(AuditAction.ServerStop, sid));
+
+        string since = DateTimeOffset.UtcNow.AddDays(-1).ToString("o");
+        JsonElement body = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&since={Uri.EscapeDataString(since)}"));
+        Assert.Equal(1, body.GetProperty("data").GetArrayLength());
+        Assert.Equal(AuditAction.ServerStop, body.GetProperty("data")[0].GetProperty("action").GetString());
+
+        // a garbage since is ignored (no filter), never a silently empty page.
+        JsonElement all = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&since=not-a-date"));
+        Assert.Equal(2, all.GetProperty("data").GetArrayLength());
+    }
+
+    // --- category: the action-group prefix (server.* / backup.* …) ---------------------------------
+    [Fact]
+    public async Task GetAudit_Category_PrefixMatches()
+    {
+        string actor = $"cat-{Guid.NewGuid():N}";
+        await Audit.AppendAsync(ServerWrite(AuditAction.ServerStart, $"s-{Guid.NewGuid():N}", actor));
+        await Audit.AppendAsync(ServerWrite(AuditAction.BackupCreate, $"b-{Guid.NewGuid():N}", actor));
+
+        JsonElement backups = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}&category=backup"));
+        Assert.Equal(1, backups.GetProperty("data").GetArrayLength());
+        Assert.Equal(AuditAction.BackupCreate, backups.GetProperty("data")[0].GetProperty("action").GetString());
+
+        JsonElement servers = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}&category=server"));
+        Assert.Equal(1, servers.GetProperty("data").GetArrayLength());
+        Assert.Equal(AuditAction.ServerStart, servers.GetProperty("data")[0].GetProperty("action").GetString());
+    }
+
     // --- The API-internal write path, end-to-end (no kgsm event): a real login -> auth.login row ---
     [Fact]
     public async Task Login_WritesAuthLoginAudit_Readable()

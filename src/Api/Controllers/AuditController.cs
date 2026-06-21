@@ -24,10 +24,13 @@ namespace TheKrystalShip.Api.Controllers;
 public sealed class AuditController(AppDbContext db) : ControllerBase
 {
     /// <summary>
-    /// <c>GET /audit?cursor=&amp;limit=50&amp;severity=&amp;serverId=&amp;actor=</c> — newest first.
-    /// Returns <c>{ data, nextCursor }</c>; pass <c>nextCursor</c> back as <c>?cursor=</c> for the next
-    /// page (null ⇒ no older rows). The filters map 1:1 to indexed columns; an absent/garbage cursor
-    /// starts from the newest row, and <c>limit</c> is clamped to a sane maximum.
+    /// <c>GET /audit?cursor=&amp;limit=50&amp;severity=&amp;serverId=&amp;actor=&amp;since=&amp;category=</c> —
+    /// newest first. Returns <c>{ data, nextCursor }</c>; pass <c>nextCursor</c> back as <c>?cursor=</c>
+    /// for the next page (null ⇒ no older rows). Filters narrow the keyset walk so older matching rows
+    /// stay reachable without paging the whole log: <c>severity</c> takes a comma-separated set
+    /// (the UI's "attention" = <c>warn,danger</c>), <c>since</c> is an ISO instant lower bound (time-range
+    /// tabs), and <c>category</c> is the action group prefix (<c>server</c> → <c>server.*</c>). An
+    /// absent/garbage cursor starts from the newest row; <c>limit</c> is clamped to a sane maximum.
     /// </summary>
     [HttpGet]
     public Task<AuditPage> GetAudit(
@@ -36,6 +39,8 @@ public sealed class AuditController(AppDbContext db) : ControllerBase
         [FromQuery] string? severity,
         [FromQuery] string? serverId,
         [FromQuery] string? actor,
+        [FromQuery] string? since,
+        [FromQuery] string? category,
         CancellationToken ct) =>
         AuditQueries.PageAsync(
             db,
@@ -44,5 +49,7 @@ public sealed class AuditController(AppDbContext db) : ControllerBase
             severity,
             serverId,
             actor,
+            since,
+            category,
             ct);
 }

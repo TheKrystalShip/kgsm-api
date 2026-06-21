@@ -39,6 +39,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(a => a.RowId).ValueGeneratedOnAdd();
             e.HasIndex(a => a.Id).IsUnique();
 
+            // Store Ts as UTC ticks (long). SQLite has no date type and EF Core can't translate a
+            // DateTimeOffset `>=` comparison (it stores it as TEXT but emits no comparison SQL) — which
+            // the `?since=` time-range filter needs. As ticks the comparison is a plain INTEGER `>=`,
+            // fully translatable, and the value round-trips to a UTC DateTimeOffset on read (every audit
+            // timestamp is UTC). Ordering is unaffected (keyset is on RowId, not Ts).
+            e.Property(a => a.Ts).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+
             // Scope/filter indexes, each descending on RowId so a keyset page (RowId < cursor,
             // newest-first) is index-friendly — mirrors the §3·d CREATE INDEX … (col, rowid DESC) set.
             e.HasIndex(a => new { a.ServerId, a.RowId }).IsDescending(false, true);
