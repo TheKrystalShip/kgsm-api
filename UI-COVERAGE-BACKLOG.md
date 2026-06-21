@@ -21,16 +21,31 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done. Coverage = where the sour
 
 ## Upstream queue (cross-tier — needs an upstream build before the dependent UI is honest)
 
-These are **not API work** — each needs a change in **kgsm / kgsm-lib / kgsm-watchdog / kgsm-monitor**
-*first*, then a (usually small) API change to consume it. Consolidated here so they aren't buried in
-per-item notes. **None started** (2026-06-21). Detail lives in the linked section.
+These were **not API work** — each needed a change in **kgsm / kgsm-lib / kgsm-watchdog / kgsm-monitor**
+first, then a (usually small) API change to consume it. **BUILT + TESTED + COMMITTED on `main` across 5 repos
+2026-06-22 (not pushed)** — orchestrated as parallel leaf builds (kgsm, watchdog, monitor) → one coordinated
+kgsm-lib **1.22.0** bump → kgsm-api integration. Live host e2e where it needs a deployed daemon/instance is
+owed (see "Owed-to-human" below).
 
-| # | Blocks (UI) | Build in | Scope | Detail |
-|---|---|---|---|---|
-| **G1** | #6 `startedAt`/`uptime` (Server DTO) | **kgsm** only (templates `manage.{native,container}.d/11-status`; regenerate per instance) | Emit `process.start_time` as **ISO-8601-`Z`**: native via `date -d "$lstart" -u +%Y-%m-%dT%H:%M:%SZ`; container by **not** stripping docker's already-`Z` `StartedAt`. The API already accepts only a `Kind==Utc` value → **no API change**. ⚠ A running instance currently risks blanking its *whole* status read (kgsm-lib STJ `DateTime?` **throws** on the non-ISO string, swallowed into an empty reading). Optional resilience add-on (separate decision): a tolerant kgsm-lib `DateTime?` converter (null-on-unparseable instead of throw; costs a lib bump + repin). | § Findings |
-| **G2** | #1 `config-set` audit row | **kgsm** (emit `instance_config_changed`) + **kgsm-api** (one pure audit-consumer handler) | No `config.*` event exists today, so `config-set` leaves no audit trail (the API refuses to fabricate one). | § Findings |
-| **#8** | ConsolePanel / LogConsole (`console` WS) | **kgsm-watchdog** (`/logs` SSE) + **kgsm-lib** (`IWatchdogClient` method) + kgsm-api topic | The watchdog writes instance stdout to its `LogFile` but exposes **no** tail/stream endpoint; kgsm has no console query. (Alternative: a fragile native-only filesystem tail.) | Tier 2 #8 |
-| **#9** | Host diagnostics depth (process list, sensors/temp, cpu model/threads/freq, ram cached/buffers, disk/SMART, iface ip/mac/errors) | **kgsm-monitor** (new collectors) → **`Monitor.Contracts`** bump → kgsm-api mapping | All absent from the monitor `Snapshot` (aggregates + throughput only). Cheap subset: cpu-static, ram cached/buffers, iface ip/mac. Bigger: per-process list, sensors, SMART. | Tier 2 #9 |
+| # | Blocks (UI) | Status — commits (all `main`, not pushed) | Result |
+|---|---|---|---|
+| **G1** | #6 `startedAt`/`uptime` | ✅ kgsm `a639908` (ISO-8601-`Z` emit, 3 call sites) + kgsm-lib `f9df267` (tolerant `DateTime?` converter — null-on-unparseable, never throws) | start_time now ISO-8601-UTC; the whole-roster-blanking parse throw is fixed. **No kgsm-api change** (already accepts `Kind==Utc`). ⚠ See the watchdog-overlay finding below — native `startedAt` is still null for watchdog-supervised instances; the fix lands `startedAt` for **containers**. |
+| **G2** | #1 `config-set` audit row | ✅ kgsm `fc5f03d` (`instance_config_changed`, **key only**) + kgsm-lib `f9df267` (`InstanceConfigChangedData`) + kgsm-api `8c713e2` (`config.set` audit) | config-set writes a `config.set` audit row carrying the **key only** (never the value — secret hygiene, live-proven). Echo-path, no double-write. |
+| **#8** | ConsolePanel / LogConsole (`console` WS) | ✅ kgsm-watchdog `ae36f49` (`/console/{name}` tail + `/follow`) + kgsm-lib `f9df267` (`GetConsoleTailAsync`/`FollowConsoleAsync`) + kgsm-api `37b81c8` (REST `?tail=N` + follow-only WS topic `servers/{id}/console`) | **Full REST + WS split** (matches the patch-only Realtime contract). Native-only; raw-text transport (no fabricated per-line structure); degrades to `{lines:[]}` when watchdog absent. |
+| **#9** | Host diagnostics depth | ✅ kgsm-monitor `50c770e` (Contracts **1.1.0**) + kgsm-api `247936c` (Host DTO mapping) | **Slice 1 (incl. sensors):** cpu model/cores/threads/maxFreq, ram cached/buffers, iface mac/errors, sensors/temp, disk device-model. **Deferred** (honest reasons): iface **IP** (needs `getifaddrs` P/Invoke), **SMART** (no smartctl → would fabricate), **per-process list** (heavy + tick-cadence decision). |
+
+**New upstream finding (surfaced during the build) — native `startedAt` has a *second* gap:** for a
+**watchdog-supervised native** instance, `instances status --json` returns `start_time: null` because the
+watchdog owns the cgroup process and doesn't write the management-script pid file, and `instances.sh` overlays
+the watchdog's pid/active but **not** start_time. G1 is still correct (it fixes the format + the roster-blanking
+and lands container `startedAt`); surfacing native `startedAt` would need the watchdog overlay to also carry
+start_time — a **new candidate upstream item**, not yet queued.
+
+**Owed-to-human (live host e2e needing a deployed daemon/instance — in-process behavior is test-proven):**
+deploy updated **kgsm** + regenerate per-instance management scripts (`kgsm files management create <name>`);
+redeploy **kgsm-watchdog** (for the live WS console follow against a real native instance's stdout);
+redeploy **kgsm-monitor** (so the new #9 fields actually serve on `/metrics`); G2 live `config-set` → `GET /audit`
+round-trip with the api listening. The kgsm-api consumes kgsm-lib **1.22.0** + Monitor.Contracts **1.1.0** from local-nuget.
 
 > **#7 (player roster) is NOT in this queue** — it's API-buildable now (a stateful aggregator on the
 > `player.join`/`leave` events the API already audits). Its *data* depends on per-game presence-detection
@@ -104,11 +119,10 @@ per-item notes. **None started** (2026-06-21). Detail lives in the linked sectio
 - [ ] **7. Player roster + live count** — a `players` topic / `GET /servers/{id}/players` + Server `players{current,max}`
   - Verified: **no roster anywhere** — kgsm & watchdog *emit* `player.join`/`player.leave` only; the watchdog ingester is stateless; kgsm-lib has event *types* only. The API already **audits** join/leave, so the roster aggregator belongs in the API (stateful, like `AlertEngine`).
   - Caveat: lossy across restarts (roster-flush) → honest `unknown`, never a fabricated count. Unblocks **PlayersTab** + `players`.
-- [ ] **8. Console stream** — a `console` WS topic
-  - Verified: the watchdog writes instance stdout to its `LogFile` but exposes **no tail/stream** endpoint; kgsm has no console query. Needs a new watchdog `/logs` SSE + a kgsm-lib `IWatchdogClient` method (or a fragile native-only filesystem tail). Unblocks **ConsolePanel/LogConsole**.
-- [ ] **9. Host diagnostics depth (monitor slices)** — process list, sensors/temp, cpu model/threads/freq, ram cached/buffers, disk device/SMART, iface ip/mac/errors
-  - Verified: **all absent from the monitor Snapshot** (aggregates + throughput only; never `/proc/cpuinfo`, no per-process list, no sensors, no SMART, no iface ip/mac). Each needs a new monitor collector → `Monitor.Contracts` bump → API mapping.
-  - Cheap: cpu-static, ram cached/buffers, iface ip/mac/errors. Bigger: per-process list, sensors, SMART.
+- [x] **8. Console stream** — `console` WS topic + REST scrollback — ✅ **BUILT 2026-06-22** (watchdog `ae36f49` / kgsm-lib `f9df267` / kgsm-api `37b81c8`). Full REST `?tail=N` + follow-only WS split; native-only; raw-text; degrades to `{lines:[]}`. Live WS follow e2e owed (needs deployed watchdog + running native instance). See the Upstream queue.
+  - Verified: the watchdog writes instance stdout to its `LogFile` but exposed **no tail/stream** endpoint; kgsm has no console query. Built: watchdog `/console/{name}` (tail) + `/follow`, kgsm-lib `IWatchdogClient.GetConsoleTailAsync`/`FollowConsoleAsync`, kgsm-api `ConsoleBridgeManager` + topic. Unblocks **ConsolePanel/LogConsole**.
+- [x] **9. Host diagnostics depth (monitor slices)** — ✅ **SLICE 1 BUILT 2026-06-22** (monitor `50c770e` Contracts 1.1.0 / kgsm-api `247936c`): cpu model/threads/freq, ram cached/buffers, iface mac/errors, sensors/temp, disk device-model.
+  - Verified: all were **absent from the monitor Snapshot**; each needed a new monitor collector → `Monitor.Contracts` bump → API mapping. **Deferred** (honest reasons): iface **IP** (`getifaddrs` P/Invoke), **SMART** (no smartctl → would fabricate), **per-process list** (heavy + tick-cadence decision). Live `/metrics` serve of the new fields needs the redeployed monitor.
 
 ---
 
