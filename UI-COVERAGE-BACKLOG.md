@@ -127,9 +127,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done. Coverage = where the sour
   read paths (`backups`, `check-update`) + write path (real `create-backup`) work on `factorio-test`, and the
   original failing case `GET /servers/factorio-test/backups` now returns **HTTP 200** with both snapshots
   parsed (was 503). Tier-1 #2/#3 are now functional once the deployed kgsm + management files are updated.
-  (Adjacent, still deferred: `instances version --installed/--latest` — kgsm-lib's `GetInstalledVersion`/
-  `GetLatestVersion` — is the same class of CLI gap but not on the Tier-1 path; `updateAvailable` comes from
-  `instances status --json`.)
+  (Adjacent gap **also now wired in kgsm**: `instances version <i> --installed`/`--latest` — kgsm-lib's
+  `GetInstalledVersion`/`GetLatestVersion` — added as a top-level read-only `version` subcommand forwarding to
+  the management file (bare/`--installed` → installed, `--latest` → latest); live-verified on factorio-test
+  (`2.0.76`). Not on the Tier-1 path — `updateAvailable` still comes from `instances status --json` — but the
+  kgsm-lib↔CLI version contract is now complete.)
 - **kgsm `process.start_time` is non-ISO and the kgsm-lib status model can't parse it** — kgsm emits it as a
   local-time string (container: RFC3339 with the offset stripped, e.g. `2026-06-16 14:23:01`; native `ps lstart`:
   `Sun Jun 21 20:17:17 2026`). The referenced kgsm-lib (1.21.0) maps `start_time` to a `System.Text.Json DateTime?`
