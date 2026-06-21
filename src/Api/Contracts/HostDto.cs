@@ -23,16 +23,52 @@ public sealed record Host(
     MemCapacity? Mem,
     IReadOnlyList<DiskCapacity>? Disks,
     HostCapabilities Capabilities,
+    // M-diag additive host telemetry — the rest of the monitor Snapshot the diagnostics deep-dive needs:
+    // per-core CPU %, load average, host-aggregate block-IO, per-interface throughput, the hostname, uptime,
+    // and the sample timestamp (for honest, server-sourced freshness). Present on BOTH the list and the
+    // detail view: unlike the Network block below (an on-demand firewall probe), these come straight from the
+    // already-cached metrics snapshot at zero marginal cost, so the "keep the list lean" rationale doesn't
+    // apply. All null when the metrics capability isn't operational (honest-unknown, never fabricated), and
+    // emitted as explicit null rather than omitted so the SPA binds one stable shape.
+    IReadOnlyList<double>? PerCore = null,
+    LoadSample? Load = null,
+    DiskIoSample? DiskIo = null,
+    IReadOnlyList<InterfaceSample>? Interfaces = null,
+    string? Hostname = null,
+    long? UptimeSec = null,
+    long? SampleTs = null,
     // The host-wide open-ports grid (M6·b) — populated ONLY on the GET /hosts/{id} detail view; omitted
-    // on the GET /hosts list (which stays the M1·a shape). Null when the firewall can't answer
-    // (absent/unreachable/unknown); an empty OpenPorts means the firewall answered and owns no rules.
+    // on the GET /hosts list (this block stays detail-only; the metrics telemetry above rides both). Null
+    // when the firewall can't answer (absent/unreachable/unknown); an empty OpenPorts means the firewall
+    // answered and owns no rules.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] HostNetwork? Network = null);
 
-/// <summary>Host memory capacity, in GiB (matching the §4·a contract unit).</summary>
-public sealed record MemCapacity(double Used, double Total);
+/// <summary>
+/// Host memory capacity, in GiB (matching the §4·a contract unit). <see cref="Used"/>/<see cref="Total"/>
+/// are the frozen M1·a summary; <see cref="Available"/>/<see cref="SwapUsed"/>/<see cref="SwapTotal"/> are the
+/// M-diag additive breakdown — null when constructed without a snapshot (honest-unknown, never a fabricated 0).
+/// </summary>
+public sealed record MemCapacity(
+    double Used,
+    double Total,
+    double? Available = null,
+    double? SwapUsed = null,
+    double? SwapTotal = null);
 
-/// <summary>One mounted filesystem's capacity, in GiB.</summary>
-public sealed record DiskCapacity(string Mount, double Used, double Total);
+/// <summary>One mounted filesystem's capacity, in GiB. <see cref="Fs"/> (filesystem type, e.g. <c>ext4</c>) is
+/// the M-diag additive field — null when not sourced.</summary>
+public sealed record DiskCapacity(string Mount, double Used, double Total, string? Fs = null);
+
+/// <summary>Host load average over the last 1/5/15 minutes (monitor <c>LoadAvg</c>). Diagnostics-only.</summary>
+public sealed record LoadSample(double One, double Five, double Fifteen);
+
+/// <summary>Host-aggregate block-IO throughput in bytes/sec (monitor <c>DiskIo</c>).</summary>
+public sealed record DiskIoSample(long ReadBps, long WriteBps);
+
+/// <summary>One network interface's throughput (monitor <c>InterfaceRate</c>): bytes/sec and packets/sec in
+/// each direction. The monitor measures throughput only — it sources no ip/mac/error counters, so those stay
+/// honest-unknown on the client (rendered "—", never fabricated).</summary>
+public sealed record InterfaceSample(string Name, long RxBps, long TxBps, long RxPps, long TxPps);
 
 /// <summary>
 /// The per-host capability block (architecture §4·b). Each optionally-exposed backend

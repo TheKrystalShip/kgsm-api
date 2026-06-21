@@ -274,8 +274,10 @@ if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 m=d['capabilities']['metrics']['status']
-present = d['cpuPct'] is not None and d['mem'] is not None and d['disks'] is not None
-# present ⇒ operational  (equivalently: not-operational ⇒ capacity null)
+# ANY honestly-measured field present (the M1·a capacity trio + the M-diag telemetry) ⇒ operational
+# (equivalently: a non-operational metrics capability REQUIRES every one of them null — no fabricated leak).
+present = any(d.get(k) is not None for k in
+              ('cpuPct','mem','disks','perCore','load','diskIo','interfaces','hostname','uptimeSec','sampleTs'))
 sys.exit(0 if (m=='operational' or not present) else 1)
 " 2>/dev/null; then
   STATUS="$(python3 -c "import json;print(json.load(open('/tmp/kgsm-api-smoke.body'))['capabilities']['metrics']['status'])" 2>/dev/null)"
@@ -426,10 +428,20 @@ PYEOF
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
-sys.exit(0 if (d['capabilities']['metrics']['status']=='operational'
-               and d['cpuPct'] is not None and d['mem'] is not None and d['disks'] is not None) else 1)
+ok = (d['capabilities']['metrics']['status']=='operational'
+      and d['cpuPct'] is not None and d['mem'] is not None and d['disks'] is not None
+      # M-diag enriched telemetry carried through verbatim from the stub snapshot:
+      and d.get('perCore')==[10.0,15.0]
+      and d.get('load')=={'one':0.4,'five':0.5,'fifteen':0.6}
+      and d['mem'].get('available') is not None and d['mem'].get('swapTotal') is not None
+      and d['disks'][0].get('fs')=='ext4'
+      and d.get('diskIo')=={'readBps':1000,'writeBps':2000}
+      and isinstance(d.get('interfaces'),list) and d['interfaces'][0]['name']=='eth0'
+      and d.get('hostname')=='smoke-stub' and d.get('uptimeSec')==12345
+      and d.get('sampleTs')==1718400000000)
+sys.exit(0 if ok else 1)
 " 2>/dev/null; then
-    ok "host metrics operational + capacity present (stub snapshot)"
+    ok "host metrics operational + capacity + M-diag telemetry present (stub snapshot)"
   else bad "host happy-path capacity (code=$CODE body=$BODY)"; fi
 
   # 17. The JOIN present-branch (detail path): the monitor row is carried through VERBATIM, keyed by id.
@@ -574,9 +586,12 @@ ticks=[r['msg'] for r in (json.loads(l) for l in open(os.environ['LOG']) if l.st
        and r['msg'].get('topic')==topic and r['msg'].get('type')=='host.metrics']
 if not ticks: sys.exit(1)
 d=ticks[0].get('data') or {}
-sys.exit(0 if (d.get('cpuPct') is not None and d.get('mem') and d.get('disks')) else 2)
+# The enriched HostMetricsDto rides the WS tick too (the shared MetricsMapping → byte-identical to REST):
+sys.exit(0 if (d.get('cpuPct') is not None and d.get('mem') and d.get('disks')
+               and d.get('perCore')==[10.0,15.0] and d.get('hostname')=='smoke-stub'
+               and d.get('sampleTs')==1718400000000 and isinstance(d.get('interfaces'),list)) else 2)
 " 2>/dev/null; then
-    ok "WS host.metrics on hosts/{id}/metrics (capacity present)"
+    ok "WS host.metrics on hosts/{id}/metrics (capacity + M-diag telemetry present)"
   else bad "WS host metric ticks (see $WS_LOG)"; fi
 
   # 22. The servers topic carries STATUS/ROSTER only — NOT the 1s metric firehose. With status stable,

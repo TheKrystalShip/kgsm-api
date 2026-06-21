@@ -38,7 +38,15 @@ public sealed class HostAggregator(
             CpuPct: capacity?.CpuPct,
             Mem: capacity?.Mem,
             Disks: capacity?.Disks,
-            Capabilities: health.Current);
+            Capabilities: health.Current,
+            // M-diag telemetry — same null-when-no-snapshot honesty as the capacity trio above.
+            PerCore: capacity?.PerCore,
+            Load: capacity?.Load,
+            DiskIo: capacity?.DiskIo,
+            Interfaces: capacity?.Interfaces,
+            Hostname: capacity?.Hostname,
+            UptimeSec: capacity?.UptimeSec,
+            SampleTs: capacity?.SampleTs);
     }
 
     /// <summary>
