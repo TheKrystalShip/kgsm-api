@@ -41,11 +41,13 @@ the watchdog's pid/active but **not** start_time. G1 is still correct (it fixes 
 and lands container `startedAt`); surfacing native `startedAt` would need the watchdog overlay to also carry
 start_time — a **new candidate upstream item**, not yet queued.
 
-**Owed-to-human (live host e2e needing a deployed daemon/instance — in-process behavior is test-proven):**
-deploy updated **kgsm** + regenerate per-instance management scripts (`kgsm files management create <name>`);
-redeploy **kgsm-watchdog** (for the live WS console follow against a real native instance's stdout);
-redeploy **kgsm-monitor** (so the new #9 fields actually serve on `/metrics`); G2 live `config-set` → `GET /audit`
-round-trip with the api listening. The kgsm-api consumes kgsm-lib **1.22.0** + Monitor.Contracts **1.1.0** from local-nuget.
+**LIVE-VALIDATED end-to-end on `hotrod` 2026-06-22.** Deployed: **kgsm-watchdog** new build → `/opt/kgsm-watchdog/kgsm-watchdog` (old → `.pre-console.bak`, `systemctl restart`); **kgsm-monitor** new build (Contracts 1.1.0) on `/tmp/kgsm-monitor-slice6.sock`; **kgsm-api** new build on `:8097` (auth-disabled dev run, consuming kgsm-lib **1.22.0** + Monitor.Contracts **1.1.0** from local-nuget, watchdog/monitor/event sockets wired). kgsm runs from the dev checkout (no deploy). Proven live:
+- **#9** — `GET /hosts/hotrod` returns real cpu-info (`AMD Ryzen 7 3800X` 8c/16t/4.56GHz), 8 sensors, mem cached/buffers GiB, iface mac+errors (enp4s0/wlp5s0/docker0), disk `/` → `Samsung SSD 990 EVO Plus 1TB`.
+- **G1** — `GET /servers` roster reads cleanly (no blanking); native `startedAt` honest-`null`.
+- **G2** — CLI `config-set` → `config.set` audit row (`meta.key` only); a distinctive sentinel **value appears 0 times** in `/audit` (key-only secret hygiene).
+- **#8** — `GET /servers/factorio-test/console?tail=N` returns real factorio startup lines (`Hosting game at IP ADDR`), AND a WS subscriber on `servers/factorio-test/console` received a `console.line` frame (`seq:0`, follow-only, exact envelope).
+
+Still owed: container `startedAt` *populated* path — both host instances are native, so it's untested (native stays null per the watchdog-overlay finding above); needs a container instance.
 
 > **#7 (player roster) is NOT in this queue** — it's API-buildable now (a stateful aggregator on the
 > `player.join`/`leave` events the API already audits). Its *data* depends on per-game presence-detection
