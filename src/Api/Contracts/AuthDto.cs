@@ -21,7 +21,10 @@ public sealed record CallbackResult(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UserId);
 
 // POST /auth/session/refresh — a freshly minted access token (no Discord round-trip).
-public sealed record RefreshResponse(string Token);
+// `tier` rides along (from the refresh token's own claims, not a re-check) so a client
+// that rotates a session WITHOUT a /me round-trip — e.g. a returning visitor whose
+// in-memory tier is gone after a browser close — still knows its role for UI gating.
+public sealed record RefreshResponse(string Token, string Tier);
 
 // GET /auth/session — the profile snapshot behind the bearer (captured at login), or 401.
 public sealed record SessionResponse(SessionUser User, IReadOnlyList<string> Scopes);

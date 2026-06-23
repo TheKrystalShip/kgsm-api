@@ -8,10 +8,14 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
 
 ## Locked decisions (do not relitigate)
 
-- **Bearer = stateless JWT.** HMAC-SHA256; access ~15 min + refresh with an **8h absolute cap**.
+- **Bearer = stateless JWT.** HMAC-SHA256; access ~15 min + refresh with a **30-day absolute cap**
+  (was 8h; widened 2026-06-23 by user directive — a trusted, role-restricted friends group values
+  staying signed in for weeks over a strict refresh window; the access TTL still bounds privilege).
   **No session table, no user row** — honors §3·f "no user row anywhere" and keeps M5 the first EF
   migration. Don't add a `sessions` entity or a server-side token store. Trade accepted: no instant
-  revocation (bounded by the short access TTL).
+  revocation (bounded by the short access TTL). ⚠ A multi-week refresh token only actually survives
+  if `KGSM_API_AUTH_SIGNING_KEY` is **stable** — an ephemeral per-process key invalidates every token
+  on restart (the ctor logs a warning).
 - **`IDiscordIdentityResolver` is the seam — the one chokepoint to `discord.com`.** Everything that
   talks to Discord goes through it. **Never** call `discord.com` from anywhere else. This is exactly
   what makes the whole 401/403/tier matrix testable in-process with a fake (`tests/Api.Tests`).

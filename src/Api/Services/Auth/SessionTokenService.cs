@@ -16,7 +16,13 @@ public sealed class SessionTokenService : ISessionTokenService
 {
     private const string Issuer = "kgsm-api";
     private static readonly TimeSpan AccessTtl = TimeSpan.FromMinutes(15);
-    private static readonly TimeSpan RefreshTtl = TimeSpan.FromHours(8); // the absolute cap
+    // The absolute session cap: how long a user can stay signed in (and silently rotate access
+    // tokens) before a fresh Discord login is required. Deliberately long — this is a trusted,
+    // role-restricted friends group, so the convenience of not re-authorizing for weeks outweighs
+    // a strict refresh window (user directive 2026-06-23). ⚠ A refresh token only survives this
+    // long if the signing key is STABLE (KGSM_API_AUTH_SIGNING_KEY set) — an ephemeral per-process
+    // key invalidates every token on restart, see the ctor warning below.
+    private static readonly TimeSpan RefreshTtl = TimeSpan.FromDays(30);
 
     private readonly string _host;
     private readonly SymmetricSecurityKey _key;

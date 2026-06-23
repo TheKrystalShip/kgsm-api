@@ -174,7 +174,7 @@ public sealed class AuthController(
                 "the refresh token is invalid or expired");
 
         string access = tokens.MintAccess(claims.Identity, claims.Tier);
-        return Ok(new RefreshResponse(access));
+        return Ok(new RefreshResponse(access, AuthTiers.ToWire(claims.Tier)));
     }
 
     /// <summary>
