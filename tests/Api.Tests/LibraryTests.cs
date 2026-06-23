@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Headers;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.KGSM.Core.Interfaces;
@@ -41,7 +44,7 @@ public sealed class LibraryAggregatorTests
         };
         LibraryAggregator agg = Aggregator(new FakeBlueprints(new() { ["7dtd"] = bp }));
 
-        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, default));
+        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, BaseUrl, default));
 
         Assert.Equal("7dtd", e.Id);
         Assert.Equal("7dtd", e.Name);                 // no DisplayName → id fallback, never guessed
@@ -54,8 +57,13 @@ public sealed class LibraryAggregatorTests
             e.Ports);
         Assert.Null(e.Specs.MaxPlayers);              // uncurated metadata → null, never 0
         Assert.Null(e.Specs.MinRamMb);
-        Assert.Null(e.Cover);                         // reserved (RAWG resolver is a later increment)
-        Assert.Null(e.RawgSlug);                      // reserved
+        // No cached RAWG row → cover/hero null, genres/tags [] (honest empty, never null), no slug curated.
+        Assert.Null(e.Cover);
+        Assert.Null(e.Hero);
+        Assert.Null(e.Description);
+        Assert.Empty(e.Genres);
+        Assert.Empty(e.Tags);
+        Assert.Null(e.RawgSlug);
     }
 
     [Fact]
@@ -71,7 +79,7 @@ public sealed class LibraryAggregatorTests
         };
         LibraryAggregator agg = Aggregator(new FakeBlueprints(new() { ["abioticfactor"] = bp }));
 
-        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, default));
+        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, BaseUrl, default));
 
         Assert.Equal("container", e.Type);
         Assert.Null(e.SteamAppId);                    // honest null, not the Server DTO's "0" sentinel
@@ -98,7 +106,7 @@ public sealed class LibraryAggregatorTests
         };
         LibraryAggregator agg = Aggregator(new FakeBlueprints(new() { ["valheim"] = bp }));
 
-        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, default));
+        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, BaseUrl, default));
 
         Assert.Equal("Valheim", e.Name);              // curated display name wins over the id
         Assert.Equal(10, e.Specs.MaxPlayers);
@@ -120,7 +128,7 @@ public sealed class LibraryAggregatorTests
         };
         LibraryAggregator agg = Aggregator(new FakeBlueprints(new() { ["g"] = bp }));
 
-        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, default));
+        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, BaseUrl, default));
 
         Assert.Equal(new[] { new LibraryPort(34197, 34197, "tcp") }, e.Ports);
     }
@@ -135,10 +143,10 @@ public sealed class LibraryAggregatorTests
             ["minecraft"] = Bp("minecraft", display: "Minecraft Java"),
         }));
 
-        Assert.Equal(new[] { "factorio" }, (await agg.GetLibraryAsync("FACT", default)).Select(e => e.Id));
+        Assert.Equal(new[] { "factorio" }, (await agg.GetLibraryAsync("FACT", BaseUrl, default)).Select(e => e.Id));
         // matches the display name even though the id is "minecraft"
-        Assert.Equal(new[] { "minecraft" }, (await agg.GetLibraryAsync("java", default)).Select(e => e.Id));
-        Assert.Empty(await agg.GetLibraryAsync("zzz", default));
+        Assert.Equal(new[] { "minecraft" }, (await agg.GetLibraryAsync("java", BaseUrl, default)).Select(e => e.Id));
+        Assert.Empty(await agg.GetLibraryAsync("zzz", BaseUrl, default));
     }
 
     [Fact]
@@ -151,28 +159,128 @@ public sealed class LibraryAggregatorTests
             ["minecraft"] = Bp("minecraft"),
         }));
 
-        Assert.Equal(new[] { "ark", "minecraft", "valheim" }, (await agg.GetLibraryAsync(null, default)).Select(e => e.Id));
+        Assert.Equal(new[] { "ark", "minecraft", "valheim" }, (await agg.GetLibraryAsync(null, BaseUrl, default)).Select(e => e.Id));
     }
 
     [Fact]
     public async Task Engine_unconfigured_degrades_to_an_empty_catalog()
     {
         // No IBlueprintService resolvable — the engine-is-base degrade, not a 500.
-        var agg = new LibraryAggregator(new StubProvider(null), NullLogger<LibraryAggregator>.Instance);
-        Assert.Empty(await agg.GetLibraryAsync(null, default));
+        var agg = new LibraryAggregator(new StubProvider(null), NewStore(), NullLogger<LibraryAggregator>.Instance);
+        Assert.Empty(await agg.GetLibraryAsync(null, BaseUrl, default));
     }
 
     [Fact]
     public async Task A_failing_blueprint_read_degrades_to_an_empty_catalog()
     {
         LibraryAggregator agg = Aggregator(new FakeBlueprints(throwOnList: true));
-        Assert.Empty(await agg.GetLibraryAsync(null, default));
+        Assert.Empty(await agg.GetLibraryAsync(null, BaseUrl, default));
+    }
+
+    [Fact]
+    public async Task A_seeded_RAWG_row_drives_cover_hero_description_genres_tags_as_absolute_urls()
+    {
+        var bp = new Blueprint
+        {
+            Name = "factorio",
+            Ports = [new PortMapping { Start = 34197, End = 34197, Protocol = "udp" }],
+            BlueprintType = BlueprintType.Native,
+            Metadata = new BlueprintMetadata { RawgSlug = "factorio" }, // curated slug surfaces on the wire
+        };
+        RawgStore store = NewStore();
+        await store.UpsertAsync(new RawgEntry
+        {
+            BlueprintId = "factorio",
+            Slug = "factorio",
+            Description = "Build and maintain factories.",
+            Genres = RawgStore.SerializeList(["Strategy", "Simulation"]),
+            Tags = RawgStore.SerializeList(["Automation", "Crafting"]),
+            CoverFile = "factorio_cover.jpg",
+            HeroFile = "factorio_hero.jpg",
+            FetchedAt = DateTimeOffset.UtcNow,
+            Status = "ok",
+        });
+        var agg = new LibraryAggregator(
+            new StubProvider(new FakeBlueprints(new() { ["factorio"] = bp })),
+            store, NullLogger<LibraryAggregator>.Instance);
+
+        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, BaseUrl, default));
+
+        Assert.Equal("factorio", e.RawgSlug);
+        // Absolute, directly-renderable serving URLs (not a media.rawg.io hotlink).
+        Assert.Equal($"{BaseUrl}/api/v1/library/factorio/cover", e.Cover);
+        Assert.Equal($"{BaseUrl}/api/v1/library/factorio/hero", e.Hero);
+        Assert.Equal("Build and maintain factories.", e.Description);
+        Assert.Equal(new[] { "Strategy", "Simulation" }, e.Genres);
+        Assert.Equal(new[] { "Automation", "Crafting" }, e.Tags);
+    }
+
+    [Fact]
+    public async Task A_row_with_no_cover_file_keeps_cover_null_but_still_surfaces_metadata()
+    {
+        // RAWG had description/genres but no image (unreleased game) → metadata shows, cover/hero stay null.
+        var bp = new Blueprint { Name = "romestead", Ports = [], BlueprintType = BlueprintType.Native,
+            Metadata = new BlueprintMetadata { RawgSlug = "romestead" } };
+        RawgStore store = NewStore();
+        await store.UpsertAsync(new RawgEntry
+        {
+            BlueprintId = "romestead", Slug = "romestead",
+            Description = "An upcoming settlement builder.",
+            Genres = RawgStore.SerializeList(["Strategy"]), Tags = RawgStore.SerializeList([]),
+            CoverFile = null, HeroFile = null, FetchedAt = DateTimeOffset.UtcNow, Status = "ok",
+        });
+        var agg = new LibraryAggregator(
+            new StubProvider(new FakeBlueprints(new() { ["romestead"] = bp })),
+            store, NullLogger<LibraryAggregator>.Instance);
+
+        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, BaseUrl, default));
+        Assert.Null(e.Cover);
+        Assert.Null(e.Hero);
+        Assert.Equal("An upcoming settlement builder.", e.Description);
+        Assert.Equal(new[] { "Strategy" }, e.Genres);
+        Assert.Empty(e.Tags);
+    }
+
+    [Fact]
+    public async Task Curated_blueprint_description_wins_over_the_RAWG_row()
+    {
+        // Description precedence: curated blueprint metadata.description → RAWG → null.
+        var bp = new Blueprint { Name = "valheim", Ports = [], BlueprintType = BlueprintType.Native,
+            Metadata = new BlueprintMetadata { Description = "Curated blurb.", RawgSlug = "valheim" } };
+        RawgStore store = NewStore();
+        await store.UpsertAsync(new RawgEntry
+        {
+            BlueprintId = "valheim", Slug = "valheim", Description = "RAWG blurb.",
+            Genres = RawgStore.SerializeList([]), Tags = RawgStore.SerializeList([]),
+            FetchedAt = DateTimeOffset.UtcNow, Status = "ok",
+        });
+        var agg = new LibraryAggregator(
+            new StubProvider(new FakeBlueprints(new() { ["valheim"] = bp })),
+            store, NullLogger<LibraryAggregator>.Instance);
+
+        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, BaseUrl, default));
+        Assert.Equal("Curated blurb.", e.Description);
     }
 
     // --- helpers -----------------------------------------------------------------------------------
 
+    private const string BaseUrl = "http://test-host:8080";
+
     private static LibraryAggregator Aggregator(IBlueprintService blueprints) =>
-        new(new StubProvider(blueprints), NullLogger<LibraryAggregator>.Instance);
+        new(new StubProvider(blueprints), NewStore(), NullLogger<LibraryAggregator>.Instance);
+
+    // A RawgStore over a fresh per-call on-disk temp SQLite DB (the project's "tests use a fresh temp DB"
+    // convention — parallel-safe, no shared state). EnsureCreated builds the rawg_entry table on first use;
+    // an empty store is the no-cache case the bare-shape tests exercise. The file is left in the OS temp dir
+    // (tiny; cleaned by the OS) — the same throwaway posture as smoke's SMOKE_DB.
+    private static RawgStore NewStore()
+    {
+        string dbPath = Path.Combine(Path.GetTempPath(), $"rawgtest-{Guid.NewGuid():N}.db");
+        var sp = new ServiceCollection()
+            .AddDbContext<AppDbContext>(o => o.UseSqlite($"Data Source={dbPath}"))
+            .BuildServiceProvider();
+        return new RawgStore(sp.GetRequiredService<IServiceScopeFactory>());
+    }
 
     private static Blueprint Bp(string name, string? display = null) => new()
     {
@@ -248,5 +356,35 @@ public sealed class LibraryEndpointTests(AuthTestFactory factory) : IClassFixtur
         HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).GetAsync("/api/v1/library");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal("[]", (await resp.Content.ReadAsStringAsync()).Trim());
+    }
+
+    [Fact]
+    public async Task Cover_NoBearer_404_not_401()
+    {
+        // The image endpoints are [AllowAnonymous] (a CSS background:url / <img> never sends the bearer) —
+        // so with NO token they 404 (no cached image) rather than 401. That 404-not-401 is the proof the
+        // anonymous override beat the class [Authorize] + the global FallbackPolicy.
+        HttpResponseMessage cover = await Client().GetAsync("/api/v1/library/nope/cover");
+        Assert.Equal(HttpStatusCode.NotFound, cover.StatusCode);
+
+        HttpResponseMessage hero = await Client().GetAsync("/api/v1/library/nope/hero");
+        Assert.Equal(HttpStatusCode.NotFound, hero.StatusCode);
+    }
+
+    [Theory]
+    // The {id} is untrusted on the anonymous route; a traversal must never escape the cache root. ASP.NET
+    // routing blocks most of these, but the controller's path-containment guard is the belt-and-braces (it
+    // returns NotFound, indistinguishable from a genuine miss — no info leak). All must be 404, never a file.
+    [InlineData("/api/v1/library/..%2f..%2f..%2fetc%2fpasswd/cover")]
+    [InlineData("/api/v1/library/%2e%2e%2f%2e%2e%2fappsettings/cover")]
+    [InlineData("/api/v1/library/..%5c..%5cwindows/hero")]
+    public async Task Image_path_traversal_attempts_404(string url)
+    {
+        HttpResponseMessage resp = await Client().GetAsync(url);
+        // 404 (guarded / no such image) — crucially NOT 200 with file bytes.
+        Assert.True(
+            resp.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.BadRequest,
+            $"expected 404/400 for {url}, got {(int)resp.StatusCode}");
+        Assert.NotEqual(HttpStatusCode.OK, resp.StatusCode);
     }
 }

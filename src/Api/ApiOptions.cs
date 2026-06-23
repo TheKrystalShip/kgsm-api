@@ -81,6 +81,35 @@ public sealed class ApiOptions
     /// </summary>
     public required string KgsmSocketPath { get; init; }
 
+    // --- Library RAWG.io cover-art / metadata (the M8·a library increment) ------------------------
+
+    /// <summary>
+    /// RAWG.io API key (<c>KGSM_API_RAWG_API_KEY</c>). <strong>Opt-in: blank by default</strong> → the
+    /// hydration worker no-ops and the library's cover/hero stay null (the SPA's gradient fallback),
+    /// genres/tags <c>[]</c>. Set it to enable cover-art/metadata hydration. <strong>A secret</strong>:
+    /// the RAWG client's <c>HttpClient</c> uses <c>RemoveAllLoggers()</c> so the <c>?key=…</c> never logs.
+    /// </summary>
+    public required string RawgApiKey { get; init; }
+
+    /// <summary>
+    /// Directory the self-hosted cover/hero <c>.jpg</c>s are written to and served from
+    /// (<c>KGSM_API_RAWG_CACHE_DIR</c>). Default: a <c>covers/</c> dir beside the SQLite DB
+    /// (<c>/var/lib/kgsm-api/covers</c> on a deployed host). The worker creates it on first write.
+    /// </summary>
+    public required string RawgCacheDir { get; init; }
+
+    /// <summary>
+    /// Optional public base URL (<c>KGSM_API_PUBLIC_BASE_URL</c>, e.g. <c>https://panel.example.com</c>) the
+    /// absolute cover/hero URLs are built from for a reverse-proxy deployment. Blank (the default) ⇒ the URLs
+    /// are derived from the incoming request (<c>{scheme}://{host}</c>), which resolves per-host for the
+    /// multi-host SPA registry. Any trailing slash is trimmed.
+    /// </summary>
+    public required string PublicBaseUrl { get; init; }
+
+    /// <summary>Whether RAWG hydration is enabled (a non-blank <see cref="RawgApiKey"/>). When false the
+    /// worker no-ops and the library degrades to null cover/hero (opt-in).</summary>
+    public bool RawgProvisioned => !string.IsNullOrWhiteSpace(RawgApiKey);
+
     public bool MetricsProvisioned => !string.IsNullOrWhiteSpace(MonitorSocketPath);
     public bool WatchdogProvisioned => !string.IsNullOrWhiteSpace(WatchdogSocketPath);
     public bool AssistantProvisioned => !string.IsNullOrWhiteSpace(AssistantBaseUrl);
@@ -187,6 +216,17 @@ public sealed class ApiOptions
             KgsmPath = Defaulted(configuration["KGSM_API_KGSM_PATH"], "/usr/bin/kgsm"),
             KgsmSocketPath = Defaulted(configuration["KGSM_API_KGSM_SOCKET"], "/usr/share/kgsm/kgsm.sock"),
 
+            // Library RAWG cover/metadata. Opt-in (blank key => worker no-ops). The cache dir always resolves
+            // to a concrete path: an explicit KGSM_API_RAWG_CACHE_DIR wins, else (unset OR blank — the
+            // appsettings.json default is "") a covers/ subdir beside the SQLite DB, so it lands in the
+            // StateDirectory the deployed unit sets. (BlankFallback, not Defaulted — a blank must NOT stay
+            // blank here: Path.* would throw on an empty cache dir.)
+            RawgApiKey = Defaulted(configuration["KGSM_API_RAWG_API_KEY"], ""),
+            RawgCacheDir = BlankFallback(
+                configuration["KGSM_API_RAWG_CACHE_DIR"],
+                DefaultCacheDir(configuration["KGSM_API_DB"])),
+            PublicBaseUrl = Defaulted(configuration["KGSM_API_PUBLIC_BASE_URL"], "").TrimEnd('/'),
+
             // Auth (M4·a). On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = Flag(configuration["KGSM_API_AUTH_DISABLED"]),
             SigningKey = Defaulted(configuration["KGSM_API_AUTH_SIGNING_KEY"], ""),
@@ -202,10 +242,24 @@ public sealed class ApiOptions
         };
     }
 
+    // The default RAWG image cache dir: a covers/ subdir beside the SQLite DB (so it inherits the
+    // StateDirectory the systemd unit sets via KGSM_API_DB). With no DB path (the bare default
+    // "kgsm-api.db" — relative, no dir) it falls back to a relative "covers" dir in the cwd.
+    private static string DefaultCacheDir(string? dbPath)
+    {
+        string? dir = string.IsNullOrWhiteSpace(dbPath) ? null : Path.GetDirectoryName(dbPath.Trim());
+        return string.IsNullOrEmpty(dir) ? "covers" : Path.Combine(dir, "covers");
+    }
+
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     // null key (unset) -> fallback; present key (even empty) -> the given value, trimmed.
     private static string Defaulted(string? value, string fallback) => value is null ? fallback : value.Trim();
+
+    // null OR blank/whitespace -> fallback; otherwise the trimmed value. For a value that must never be empty
+    // (e.g. a filesystem path Path.* will throw on), where the appsettings.json default is a blank "".
+    private static string BlankFallback(string? value, string fallback) =>
+        string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
     // Truthy env flag: "1"/"true"/"yes"/"on" (case-insensitive) -> true; anything else -> false.
     private static bool Flag(string? value) =>

@@ -23,12 +23,29 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// lands — EnsureCreated no-ops on an existing DB).</summary>
     public DbSet<IntegrationEntity> Integrations => Set<IntegrationEntity>();
 
+    /// <summary>The library RAWG.io metadata cache, one row per blueprint (cover/hero/description/genres/
+    /// tags — the M8·a library increment). Created by the same <c>EnsureCreated</c>; the deployed DB needs a
+    /// one-time wipe when it lands.</summary>
+    public DbSet<RawgEntry> RawgEntries => Set<RawgEntry>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<IntegrationEntity>(e =>
         {
             e.ToTable("integrations");
             e.HasKey(i => i.Provider);
+        });
+
+        modelBuilder.Entity<RawgEntry>(e =>
+        {
+            e.ToTable("rawg_entry");
+            e.HasKey(r => r.BlueprintId);
+            // Store FetchedAt as UTC ticks (long) so the worker's 30-day-old comparison is a translatable
+            // INTEGER >= (the same posture as AuditEntry.Ts — SQLite has no date type / EF can't translate a
+            // DateTimeOffset comparison stored as TEXT). Round-trips to a UTC DateTimeOffset on read.
+            e.Property(r => r.FetchedAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
         });
 
         modelBuilder.Entity<AuditEntry>(e =>

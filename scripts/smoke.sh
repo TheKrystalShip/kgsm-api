@@ -324,42 +324,54 @@ req GET /api/v1/servers/does-not-exist
 [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
   && ok "/servers/{unknown} 404 → {error:{code:not_found}}" || bad "/servers unknown 404 envelope (code=$CODE body=$BODY)"
 
-# --- M8·a: GET /library (the installable-game catalog — a pure blueprint scrape) ------------
+# --- M8·a: GET /library (the installable-game catalog — blueprint scrape ⋈ RAWG cover/metadata) -----
 # Phase A reads the REAL dev kgsm catalog (no monitor needed — blueprints are engine-only). Proves the
 # honest DTO end-to-end: the frozen key set, structured ports emitted directly by kgsm (no C# parse),
-# steam-id honesty (null for a non-Steam blueprint, never "0"), reserved cover/rawgSlug.
+# steam-id honesty (null for a non-Steam blueprint, never "0"). RAWG hydration is OPT-IN and the smoke runs
+# with NO key, so cover/hero stay null and genres/tags []; rawgSlug is now POPULATED from the curated
+# blueprints (Phase 1 wrote 29 slugs) — so we assert string-or-null and that at least one is non-null.
 echo "==> M8·a library checks — Phase A (live blueprint catalog; kgsm=${KGSM_PATH})"
 
-# 15b. GET /library — honest shape + structured ports + steam honesty + reserved cover/rawgSlug.
+# 15b. GET /library — honest shape + structured ports + steam honesty + RAWG fields (offline: cover/hero
+#      null, genres/tags [], rawgSlug populated from the blueprints).
 req GET /api/v1/library
 if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 if not (isinstance(d,list) and len(d)>=1): sys.exit(2)   # empty catalog -> can't prove a real read
-keys={'id','name','type','steamAppId','clientSteamAppId','isSteamAccountRequired','ports','specs','cover','rawgSlug'}
+keys={'id','name','type','steamAppId','clientSteamAppId','isSteamAccountRequired','ports','specs',
+      'cover','hero','description','genres','tags','rawgSlug'}
 speckeys={'maxPlayers','minRamMb','recommendedRamMb','baseDiskMb'}
-saw_range=saw_steam=saw_null_steam=False
+saw_range=saw_steam=saw_null_steam=saw_slug=False
 for e in d:
     if set(e)!=keys: sys.exit(3)
     if e['type'] not in ('native','container'): sys.exit(4)
-    if e['cover'] is not None: sys.exit(5)               # reserved — always null at M8·a
-    if e['rawgSlug'] is not None: sys.exit(6)            # reserved
-    if set(e['specs'])!=speckeys: sys.exit(7)            # keys present (values null today, uncurated)
-    if not isinstance(e['ports'],list): sys.exit(8)
+    if e['cover'] is not None: sys.exit(5)               # opt-in (no key) -> cover null offline
+    if e['hero'] is not None: sys.exit(6)                # opt-in (no key) -> hero null offline
+    if e['description'] is not None and not isinstance(e['description'],str): sys.exit(7)
+    if e['genres']!=[]: sys.exit(8)                      # opt-in -> genres [] offline (honest empty, not null)
+    if e['tags']!=[]: sys.exit(9)                        # opt-in -> tags [] offline
+    if e['rawgSlug'] is not None:
+        if not isinstance(e['rawgSlug'],str): sys.exit(10)
+        saw_slug=True
+    if set(e['specs'])!=speckeys: sys.exit(11)           # keys present (values null today, uncurated)
+    if not isinstance(e['ports'],list): sys.exit(12)
     for p in e['ports']:
-        if set(p)!={'start','end','proto'}: sys.exit(9)
-        if not (isinstance(p['start'],int) and isinstance(p['end'],int) and p['start']<=p['end']): sys.exit(10)
-        if p['proto'] not in ('tcp','udp'): sys.exit(11)
+        if set(p)!={'start','end','proto'}: sys.exit(13)
+        if not (isinstance(p['start'],int) and isinstance(p['end'],int) and p['start']<=p['end']): sys.exit(14)
+        if p['proto'] not in ('tcp','udp'): sys.exit(15)
         if p['start']<p['end']: saw_range=True
     if e['steamAppId'] is not None: saw_steam=True
     else: saw_null_steam=True
 # the live catalog must exercise: a real multi-port range (kgsm range-preserving) and steam honesty both ways
-if not (saw_range and saw_steam and saw_null_steam): sys.exit(12)
-if 'factorio' not in {e['id'] for e in d}: sys.exit(13)  # a known blueprint -> a real engine read
+if not (saw_range and saw_steam and saw_null_steam): sys.exit(16)
+# at least one blueprint carries a curated rawg_slug -> proves Phase 2 (lib 1.23.0) -> Phase 3 wiring
+if not saw_slug: sys.exit(17)
+if 'factorio' not in {e['id'] for e in d}: sys.exit(18)  # a known blueprint -> a real engine read
 sys.exit(0)
 " 2>/dev/null; then
   N="$(python3 -c "import json;print(len(json.load(open('/tmp/kgsm-api-smoke.body'))))" 2>/dev/null)"
-  ok "/library 200 + honest shape (n=${N}): structured ports (from kgsm, no C# parse), steam null-honesty, cover/rawgSlug reserved-null"
+  ok "/library 200 + honest shape (n=${N}): structured ports (from kgsm, no C# parse), steam null-honesty, rawgSlug populated, cover/hero null + genres/tags [] (RAWG opt-in, no key)"
 else bad "/library shape (code=$CODE body=$BODY) [empty catalog? set SMOKE_KGSM_PATH]"; fi
 
 # 15c. ?q= narrows by id/name (case-insensitive); a no-match returns [] (never a fabricated row).
@@ -1109,6 +1121,18 @@ req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
 $auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,POST assistant/turn (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
+
+# 31b. The library cover/hero image endpoints are [AllowAnonymous] (a CSS background:url / <img> never sends
+#      the bearer, and game art isn't sensitive). So with NO bearer they must 404 (no cached image), NEVER
+#      401 — the 404-not-401 is the proof the anonymous override beat the class [Authorize] + the global
+#      FallbackPolicy. (They are deliberately ABSENT from the 401 sweep above.)
+anon_ok=true
+for p in /api/v1/library/nope/cover /api/v1/library/nope/hero; do
+  req GET "$p"
+  [[ "$CODE" == 404 ]] || { anon_ok=false; echo "    ($p -> $CODE $BODY [expected 404, not 401])"; }
+done
+$anon_ok && ok "library cover/hero [AllowAnonymous]: no-bearer -> 404 (not 401) — game art renders without a token" \
+  || bad "library cover/hero anonymous override (see above)"
 
 # 32. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).
 req GET /health; H=$CODE

@@ -15,10 +15,11 @@ namespace TheKrystalShip.Api.Contracts;
 ///     present, else the blueprint <c>id</c> — the honest fallback, never a guessed display name
 ///     (blueprint metadata curation is deferred upstream, so every blueprint's metadata is null
 ///     today and <c>name == id</c>).</description></item>
-///   <item><description><c>cover</c> is <strong>RESERVED — always null</strong> at M8·a. Cover-art
-///     resolution (RAWG, server-side, key off-browser — <c>§3·i</c>) is its own later increment;
-///     resolving only from an <em>exact</em> key (Steam App ID → Steam CDN) is honest, a fuzzy
-///     name→RAWG match would mis-attribute the wrong game's art (fabrication-by-misattribution).</description></item>
+///   <item><description><c>cover</c>/<c>hero</c> are <strong>absolute, directly-renderable image URLs</strong>
+///     (or null) pointing at this API's own <c>GET /library/{id}/cover</c> / <c>/hero</c> endpoints. They are
+///     resolved server-side from RAWG.io — keyed off the blueprint's curated <c>rawg_slug</c> (an exact id,
+///     never a fuzzy name match that would mis-attribute the wrong game's art), self-hosted on disk, and
+///     opt-in: with no <c>KGSM_API_RAWG_API_KEY</c> they stay <c>null</c> (the SPA's gradient fallback).</description></item>
 ///   <item><description><c>steamAppId</c>/<c>clientSteamAppId</c> are <c>null</c> for a non-Steam
 ///     blueprint (honest unknown over the <c>Server</c> DTO's <c>"0"</c> sentinel — a deliberate,
 ///     frozen choice for this new surface).</description></item>
@@ -40,9 +41,16 @@ namespace TheKrystalShip.Api.Contracts;
 /// chokepoint from the legacy UFW spec string — the API never re-parses an opaque port string).
 /// Empty when the blueprint declares none.</param>
 /// <param name="Specs">Advisory game specs from blueprint metadata (all <c>null</c> today).</param>
-/// <param name="Cover">Resolved cover-art URL — RESERVED, always <c>null</c> at M8·a (see remarks).</param>
-/// <param name="RawgSlug">The backend's RAWG lookup hint (<c>§3·i</c>) — RESERVED, always <c>null</c>
-/// (no curated <c>rawg_slug</c> on the blueprint yet); the SPA ignores it.</param>
+/// <param name="Cover">Absolute, directly-renderable cover-art URL (RAWG <c>background_image</c>, self-hosted at
+/// <c>GET /library/{id}/cover</c>), or <c>null</c> when none is cached (opt-in / unresolved).</param>
+/// <param name="Hero">Absolute, directly-renderable hero/screenshot URL (RAWG <c>background_image_additional</c>,
+/// self-hosted at <c>GET /library/{id}/hero</c>), or <c>null</c> when none is cached.</param>
+/// <param name="Description">A short blurb: the curated blueprint description, else the cleaned/truncated RAWG
+/// description, else <c>null</c> (the precedence chain — never fabricated).</param>
+/// <param name="Genres">RAWG genres (<c>genres[].name</c>); <c>[]</c> when none/unresolved.</param>
+/// <param name="Tags">RAWG tags (<c>tags[].name</c>, top ~8–12); <c>[]</c> when none/unresolved.</param>
+/// <param name="RawgSlug">The blueprint's curated RAWG lookup hint (<c>metadata.rawg_slug</c>), or <c>null</c>
+/// when the blueprint declares none — the slug the backend resolves cover/metadata from.</param>
 public sealed record LibraryEntry(
     string Id,
     string Name,
@@ -53,6 +61,10 @@ public sealed record LibraryEntry(
     IReadOnlyList<LibraryPort> Ports,
     LibrarySpecs Specs,
     string? Cover,
+    string? Hero,
+    string? Description,
+    IReadOnlyList<string> Genres,
+    IReadOnlyList<string> Tags,
     string? RawgSlug);
 
 /// <summary>

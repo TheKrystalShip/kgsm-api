@@ -102,10 +102,23 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<NetworkAggregator>();
         services.AddSingleton<ServerAggregator>();
 
-        // M8·a — the installable-game catalog (GET /library). A pure blueprint scrape via kgsm-lib
-        // IBlueprintService, resolved per-request and degrading to an empty catalog (logged once) when
-        // the engine is unconfigured — the same engine-is-base posture as ServerAggregator.
+        // M8·a — the installable-game catalog (GET /library). A blueprint scrape via kgsm-lib
+        // IBlueprintService (resolved per-request, degrading to an empty catalog (logged once) when the engine
+        // is unconfigured — the engine-is-base posture as ServerAggregator), joined with this host's cached
+        // RAWG.io cover/metadata. RawgStore is the single reader/writer of the rawg_entry table (own DI scope
+        // per op, like IntegrationStore); the LibraryAggregator reads it per-request, degrading cover/hero to
+        // null INDEPENDENTLY of the blueprint read on a cache failure.
+        services.AddSingleton<RawgStore>();
         services.AddSingleton<LibraryAggregator>();
+        // The RAWG client is a typed HttpClient. RemoveAllLoggers() is load-bearing, NOT cosmetic (the same as
+        // the Discord/Slack webhook clients): the request URL carries ?key=<RAWG api key> — a secret — and the
+        // default IHttpClientFactory logging handler would write it to the app log on every request. Stripping
+        // the loggers keeps the key off the log channel. ~10s timeout per the plan.
+        services.AddHttpClient<IRawgClient, RawgClient>(c => c.Timeout = TimeSpan.FromSeconds(10))
+            .RemoveAllLoggers();
+        // The hydration worker: hydrate-once-on-boot + ~30-day refresh. Opt-in — a blank KGSM_API_RAWG_API_KEY
+        // makes it no-op (cover/hero stay null). Runs off the request path; never blocks startup.
+        services.AddHostedService<RawgHydrationWorker>();
 
         // M8·c — outbound-notification integrations (§3·e). The store persists per-provider config (a
         // second EF entity in AppDbContext, created by the same EnsureCreated). Providers are a THIN seam
