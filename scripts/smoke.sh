@@ -68,6 +68,10 @@ KGSM_SOCK="${SMOKE_KGSM_SOCKET:-/tmp/kgsm-api-smoke-events.sock}"; rm -f "$KGSM_
 # so they exercise the domain contracts unchanged; the auth boundary itself gets its own ENABLED
 # instance + no-token sweep at the end (and the full tier matrix lives in tests/Api.Tests).
 export KGSM_API_AUTH_DISABLED=1
+# Steam covers are keyless + ON by default, so without this the worker would fetch real Steam capsules over
+# the network and the offline "cover null (no RAWG key)" assertions below would flake. Disable it here so the
+# smoke stays offline + deterministic; the Steam-primary/RAWG-fallback logic is unit-tested with fakes.
+export KGSM_API_STEAM_COVERS_DISABLED=1
 # Unix socket for the embedded stub monitor (Phase B — proves the join's present-branch).
 STUB_SOCK="/tmp/kgsm-api-smoke-stub-monitor.sock"; rm -f "$STUB_SOCK"
 # Canned per-server metric values the stub serves; the join must carry these through verbatim.
@@ -327,9 +331,10 @@ req GET /api/v1/servers/does-not-exist
 # --- M8·a: GET /library (the installable-game catalog — blueprint scrape ⋈ RAWG cover/metadata) -----
 # Phase A reads the REAL dev kgsm catalog (no monitor needed — blueprints are engine-only). Proves the
 # honest DTO end-to-end: the frozen key set, structured ports emitted directly by kgsm (no C# parse),
-# steam-id honesty (null for a non-Steam blueprint, never "0"). RAWG hydration is OPT-IN and the smoke runs
-# with NO key, so cover/hero stay null and genres/tags []; rawgSlug is now POPULATED from the curated
-# blueprints (Phase 1 wrote 29 slugs) — so we assert string-or-null and that at least one is non-null.
+# steam-id honesty (null for a non-Steam blueprint, never "0"). Cover hydration is OFF in this run — no RAWG
+# key AND KGSM_API_STEAM_COVERS_DISABLED=1 (set above so the keyless Steam source can't reach the network) —
+# so cover/hero stay null and genres/tags []; rawgSlug is still POPULATED from the curated blueprints
+# (Phase 1 wrote 29 slugs) — so we assert string-or-null and that at least one is non-null.
 echo "==> M8·a library checks — Phase A (live blueprint catalog; kgsm=${KGSM_PATH})"
 
 # 15b. GET /library — honest shape + structured ports + steam honesty + RAWG fields (offline: cover/hero
@@ -386,6 +391,15 @@ sys.exit(0 if (isinstance(d,list) and len(d)>=1 and all('factorio' in (e['id']+e
   [[ "$CODE" == 200 ]] && [[ "$(tr -d ' \n' < /tmp/kgsm-api-smoke.body)" == "[]" ]] && q_ok=true
 fi
 $q_ok && ok "/library?q= filters by id/name (factorio→matches, no-match→[])" || bad "/library q filter (code=$CODE body=$BODY)"
+
+# 15d. POST /library/refresh — the admin on-demand re-fetch trigger. Under the dev escape hatch (synthetic
+#      admin) it returns 202 (the sweep runs off the request thread; with no RAWG key + Steam disabled here it
+#      finds nothing to fetch and no-ops). A second immediate call may 202 (prior finished) or 409 (still in
+#      flight) — both are honest, so accept either.
+req POST /api/v1/library/refresh
+[[ "$CODE" == 202 ]] \
+  && ok "POST /library/refresh → 202 (admin on-demand refresh accepted, runs off the request thread)" \
+  || bad "/library/refresh (code=$CODE body=$BODY)"
 
 stop_api
 
@@ -1119,7 +1133,9 @@ req DELETE /api/v1/servers/x
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (DELETE /servers/{id} -> $CODE $BODY)"; }
 req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,POST assistant/turn (no open back door)" \
+req POST /api/v1/library/refresh
+[[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST library/refresh -> $CODE $BODY)"; }
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,POST assistant/turn,POST library/refresh (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 31b. The library cover/hero image endpoints are [AllowAnonymous] (a CSS background:url / <img> never sends

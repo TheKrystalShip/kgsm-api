@@ -153,7 +153,8 @@ public sealed class LibraryAggregator
             BaseDiskMb: bp.Metadata?.BaseDiskMb);
 
         // cover/hero: an absolute serving URL only when the cache row recorded a landed image file; else null
-        // (opt-in / unresolved / RAWG had none) — never a media.rawg.io hotlink.
+        // (no source / unresolved) — never a steam-cdn or media.rawg.io hotlink. The cover came from Steam
+        // (capsule) or RAWG (fallback); either way the byte serving is the same self-hosted endpoint.
         string? cover = string.IsNullOrWhiteSpace(row?.CoverFile)
             ? null
             : ImageUrl(baseUrl, entryId, RawgCache.CoverSlot);

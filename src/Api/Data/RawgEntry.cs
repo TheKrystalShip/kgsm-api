@@ -46,8 +46,10 @@ public sealed class RawgEntry
     public string? Tags { get; set; }
 
     /// <summary>The on-disk cover-art file name (<c>{id}_cover.jpg</c> under the cache dir), or null if the
-    /// cover bytes never landed (RAWG had no <c>background_image</c>, or the download failed). The PRESENCE of
-    /// this value is the "we have a cover" signal the aggregator builds the absolute serving URL from.</summary>
+    /// cover bytes never landed. The cover is sourced <b>Steam-first</b> (the <c>library_600x900.jpg</c> capsule
+    /// keyed by the blueprint's <c>client_steam_app_id</c>) with RAWG <c>background_image</c> as the fallback; this
+    /// file name is the same regardless of which source supplied it (the source is logged, not persisted). The
+    /// PRESENCE of this value is the "we have a cover" signal the aggregator builds the absolute serving URL from.</summary>
     public string? CoverFile { get; set; }
 
     /// <summary>The on-disk hero (screenshot) file name (<c>{id}_hero.jpg</c>), or null if none landed.</summary>
@@ -71,7 +73,10 @@ public sealed class RawgEntry
     /// <summary>When this row was last (re)fetched from RAWG (UTC). Drives the ~30-day refresh window.</summary>
     public DateTimeOffset FetchedAt { get; set; }
 
-    /// <summary>The last fetch outcome (<c>ok | not_found | error</c>) — honest provenance: a sparse row from a
-    /// 404 reads <c>not_found</c>, not a fabricated success.</summary>
+    /// <summary>The last fetch outcome — honest provenance, never a fabricated success:
+    /// <c>ok</c> (RAWG metadata fetched), <c>not_found</c> (RAWG was queried and 404'd/failed), or
+    /// <c>cover_only</c> (a Steam-only hydration — no RAWG key or no slug, so only the cover landed; a later
+    /// RAWG key triggers a refresh to fill the rest). The cover may still be present on a <c>not_found</c>/
+    /// <c>cover_only</c> row when Steam supplied it.</summary>
     public string Status { get; set; } = "";
 }

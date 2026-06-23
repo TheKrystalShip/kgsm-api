@@ -17,9 +17,11 @@ namespace TheKrystalShip.Api.Contracts;
 ///     today and <c>name == id</c>).</description></item>
 ///   <item><description><c>cover</c>/<c>hero</c> are <strong>absolute, directly-renderable image URLs</strong>
 ///     (or null) pointing at this API's own <c>GET /library/{id}/cover</c> / <c>/hero</c> endpoints. They are
-///     resolved server-side from RAWG.io — keyed off the blueprint's curated <c>rawg_slug</c> (an exact id,
-///     never a fuzzy name match that would mis-attribute the wrong game's art), self-hosted on disk, and
-///     opt-in: with no <c>KGSM_API_RAWG_API_KEY</c> they stay <c>null</c> (the SPA's gradient fallback).</description></item>
+///     resolved server-side and self-hosted on disk. <c>cover</c> is the Steam library capsule (the 2:3
+///     portrait) keyed off the blueprint's <c>client_steam_app_id</c>, falling back to RAWG's landscape
+///     <c>background_image</c> (keyed off the curated <c>rawg_slug</c>, an exact id — never a fuzzy name match
+///     that would mis-attribute the wrong game's art); <c>hero</c> is RAWG-only. With neither source available
+///     they stay <c>null</c> (the SPA's gradient fallback).</description></item>
 ///   <item><description><c>steamAppId</c>/<c>clientSteamAppId</c> are <c>null</c> for a non-Steam
 ///     blueprint (honest unknown over the <c>Server</c> DTO's <c>"0"</c> sentinel — a deliberate,
 ///     frozen choice for this new surface).</description></item>
@@ -41,8 +43,9 @@ namespace TheKrystalShip.Api.Contracts;
 /// chokepoint from the legacy UFW spec string — the API never re-parses an opaque port string).
 /// Empty when the blueprint declares none.</param>
 /// <param name="Specs">Advisory game specs from blueprint metadata (all <c>null</c> today).</param>
-/// <param name="Cover">Absolute, directly-renderable cover-art URL (RAWG <c>background_image</c>, self-hosted at
-/// <c>GET /library/{id}/cover</c>), or <c>null</c> when none is cached (opt-in / unresolved).</param>
+/// <param name="Cover">Absolute, directly-renderable cover-art URL — the Steam library capsule (2:3 portrait)
+/// when the game is on Steam, else RAWG <c>background_image</c>; self-hosted at <c>GET /library/{id}/cover</c>,
+/// or <c>null</c> when none is cached (no source / unresolved).</param>
 /// <param name="Hero">Absolute, directly-renderable hero/screenshot URL (RAWG <c>background_image_additional</c>,
 /// self-hosted at <c>GET /library/{id}/hero</c>), or <c>null</c> when none is cached.</param>
 /// <param name="Description">A short blurb: the curated blueprint description, else the cleaned/truncated RAWG

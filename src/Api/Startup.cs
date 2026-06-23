@@ -116,9 +116,16 @@ public class Startup(IConfiguration configuration)
         // the loggers keeps the key off the log channel. ~10s timeout per the plan.
         services.AddHttpClient<IRawgClient, RawgClient>(c => c.Timeout = TimeSpan.FromSeconds(10))
             .RemoveAllLoggers();
-        // The hydration worker: hydrate-once-on-boot + ~30-day refresh. Opt-in — a blank KGSM_API_RAWG_API_KEY
-        // makes it no-op (cover/hero stay null). Runs off the request path; never blocks startup.
-        services.AddHostedService<RawgHydrationWorker>();
+        // The Steam cover client — a SEPARATE, decoupled typed HttpClient (the cover authority). No secret in
+        // its URL (the appid is public) so its loggers stay intact. Keyless: it hydrates Steam covers regardless
+        // of whether RAWG is configured; RAWG is only the cover fallback + the other-metadata authority.
+        services.AddHttpClient<ISteamCoverClient, SteamCoverClient>(c => c.Timeout = TimeSpan.FromSeconds(10));
+        // The hydration worker: boot sweep + a configurable periodic refresh (weekly by default, at a local
+        // hour). Runs if EITHER source is on (Steam is on by default — keyless; RAWG is opt-in via
+        // KGSM_API_RAWG_API_KEY). Off the request path; never blocks startup. Registered singleton + hosted
+        // (same instance) like the other pumps, so the admin POST /library/refresh can force an immediate sweep.
+        services.AddSingleton<RawgHydrationWorker>();
+        services.AddHostedService(sp => sp.GetRequiredService<RawgHydrationWorker>());
 
         // M8·c — outbound-notification integrations (§3·e). The store persists per-provider config (a
         // second EF entity in AppDbContext, created by the same EnsureCreated). Providers are a THIN seam

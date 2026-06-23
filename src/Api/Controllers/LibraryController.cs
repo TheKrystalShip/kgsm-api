@@ -18,8 +18,23 @@ namespace TheKrystalShip.Api.Controllers;
 [ApiController]
 [Route("api/v1/library")]
 [Authorize(Policy = AuthPolicy.Viewer)] // reads — viewer and up (M4·a)
-public sealed class LibraryController(LibraryAggregator aggregator, ApiOptions options) : ControllerBase
+public sealed class LibraryController(
+    LibraryAggregator aggregator, ApiOptions options, RawgHydrationWorker refresher) : ControllerBase
 {
+    /// <summary>
+    /// <c>POST /library/refresh</c> — force an immediate full re-fetch of every blueprint's cover + metadata
+    /// from Steam/RAWG (the on-demand counterpart to the periodic worker — handy right after a blueprint's
+    /// Steam App ID / rawg_slug is corrected, instead of waiting for the next scheduled run). <strong>Admin</strong>:
+    /// it spends the RAWG budget and rewrites the cache. Returns <c>202</c> (the sweep runs off the request
+    /// thread) or <c>409</c> when a sweep is already in flight (the boot/periodic sweep, or a prior refresh).
+    /// </summary>
+    [HttpPost("refresh")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public IActionResult Refresh() =>
+        refresher.RequestRefresh()
+            ? Accepted()
+            : Error(StatusCodes.Status409Conflict, "conflict", "a library refresh is already in progress");
+
     /// <summary>
     /// <c>GET /library?q=&amp;category=</c> — the installable games. <paramref name="q"/> is an optional
     /// case-insensitive substring filter over id + name. <paramref name="category"/> is accepted for
@@ -84,4 +99,7 @@ public sealed class LibraryController(LibraryAggregator aggregator, ApiOptions o
         !string.IsNullOrWhiteSpace(options.PublicBaseUrl)
             ? options.PublicBaseUrl
             : $"{Request.Scheme}://{Request.Host}";
+
+    private ObjectResult Error(int statusCode, string code, string message) =>
+        StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
 }

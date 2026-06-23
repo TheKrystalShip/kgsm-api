@@ -106,9 +106,42 @@ public sealed class ApiOptions
     /// </summary>
     public required string PublicBaseUrl { get; init; }
 
+    /// <summary>
+    /// Base URL the Steam library-capsule cover (<c>{base}/{appId}/library_600x900.jpg</c> — the 2:3 portrait
+    /// art Steam shows in the library view) is fetched from (<c>KGSM_API_STEAM_CDN_BASE</c>). Default: Steam's
+    /// public store-asset CDN. Any trailing slash is trimmed. <strong>Steam is the cover authority</strong> —
+    /// keyed by the blueprint's <c>client_steam_app_id</c>, fully <b>decoupled from RAWG</b> (no key needed);
+    /// RAWG's <c>background_image</c> is only the fallback when a game isn't on Steam / has no capsule.
+    /// </summary>
+    public required string SteamCdnBaseUrl { get; init; }
+
+    /// <summary>Kill-switch for the keyless Steam cover source (<c>KGSM_API_STEAM_COVERS_DISABLED</c>). Off by
+    /// default (Steam covers ON — they need no key); set to disable so the cover falls back to RAWG only (and,
+    /// with no RAWG key either, the worker no-ops — the offline/test posture the smoke pins).</summary>
+    public bool SteamCoversDisabled { get; init; }
+
+    /// <summary>
+    /// How stale (in days) a cached library row may get before the periodic worker re-fetches it from
+    /// Steam/RAWG (<c>KGSM_API_LIBRARY_REFRESH_INTERVAL_DAYS</c>, default 7 = weekly). Cover/metadata for a
+    /// fixed game catalog is near-static, so this is the per-game refresh cadence; <c>0</c> (or negative)
+    /// disables the periodic wake entirely (boot sweep + the admin <c>POST /library/refresh</c> only). The
+    /// boot sweep also honours it (a frequent restart doesn't re-hammer fresh rows).
+    /// </summary>
+    public required int LibraryRefreshIntervalDays { get; init; }
+
+    /// <summary>The <b>local</b> hour-of-day (0–23) the periodic refresh wakes to check
+    /// (<c>KGSM_API_LIBRARY_REFRESH_HOUR</c>, default 6 = 06:00 local — a quiet window). The worker wakes at
+    /// this hour each day and re-fetches any row older than <see cref="LibraryRefreshIntervalDays"/>; the wake
+    /// itself is cheap (a DB read) when nothing is stale.</summary>
+    public required int LibraryRefreshHour { get; init; }
+
     /// <summary>Whether RAWG hydration is enabled (a non-blank <see cref="RawgApiKey"/>). When false the
-    /// worker no-ops and the library degrades to null cover/hero (opt-in).</summary>
+    /// worker skips RAWG (hero/description/genres/tags + the cover fallback); Steam covers are unaffected.</summary>
     public bool RawgProvisioned => !string.IsNullOrWhiteSpace(RawgApiKey);
+
+    /// <summary>Whether the Steam cover source is active (not disabled and a non-blank CDN base). Independent of
+    /// <see cref="RawgProvisioned"/> — Steam covers hydrate even with no RAWG key (Steam is the cover authority).</summary>
+    public bool SteamCoversProvisioned => !SteamCoversDisabled && !string.IsNullOrWhiteSpace(SteamCdnBaseUrl);
 
     public bool MetricsProvisioned => !string.IsNullOrWhiteSpace(MonitorSocketPath);
     public bool WatchdogProvisioned => !string.IsNullOrWhiteSpace(WatchdogSocketPath);
@@ -227,6 +260,19 @@ public sealed class ApiOptions
                 DefaultCacheDir(configuration["KGSM_API_DB"])),
             PublicBaseUrl = Defaulted(configuration["KGSM_API_PUBLIC_BASE_URL"], "").TrimEnd('/'),
 
+            // Steam library-capsule cover (the 2:3 portrait). The cover AUTHORITY, decoupled from RAWG: keyless,
+            // so it defaults ON (BlankFallback keeps a concrete CDN base even if the appsettings default is "").
+            // KGSM_API_STEAM_COVERS_DISABLED forces RAWG-only (the offline smoke sets it so cover stays null).
+            SteamCdnBaseUrl = BlankFallback(
+                configuration["KGSM_API_STEAM_CDN_BASE"],
+                "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps").TrimEnd('/'),
+            SteamCoversDisabled = Flag(configuration["KGSM_API_STEAM_COVERS_DISABLED"]),
+            // Periodic refresh of the cover/metadata cache (in-process, off the request path). Weekly by
+            // default; runs at a configurable local hour (a quiet window). Clamped: interval >= 0 (0 disables
+            // the periodic wake), hour into 0..23.
+            LibraryRefreshIntervalDays = Math.Max(0, IntOr(configuration["KGSM_API_LIBRARY_REFRESH_INTERVAL_DAYS"], 7)),
+            LibraryRefreshHour = Math.Clamp(IntOr(configuration["KGSM_API_LIBRARY_REFRESH_HOUR"], 6), 0, 23),
+
             // Auth (M4·a). On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = Flag(configuration["KGSM_API_AUTH_DISABLED"]),
             SigningKey = Defaulted(configuration["KGSM_API_AUTH_SIGNING_KEY"], ""),
@@ -252,6 +298,10 @@ public sealed class ApiOptions
     }
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    // Parse an integer config value; blank/unset/garbage -> the fallback (callers clamp the range).
+    private static int IntOr(string? value, int fallback) =>
+        int.TryParse(value?.Trim(), out int n) ? n : fallback;
 
     // null key (unset) -> fallback; present key (even empty) -> the given value, trimmed.
     private static string Defaulted(string? value, string fallback) => value is null ? fallback : value.Trim();
