@@ -1,0 +1,52 @@
+[Unit]
+Description=KGSM Control Panel API
+Documentation=https://github.com/TheKrystalShip
+# The API aggregates the monitor's metrics; start after it (Wants, not Requires — the API
+# degrades gracefully when the monitor is absent, so a monitor failure must not stop the API).
+After=network.target kgsm-monitor.service
+Wants=kgsm-monitor.service
+
+[Service]
+Type=simple
+# Runs as the KGSM user: it spawns kgsm.sh (must be the user that owns the instances) and
+# reads the monitor's socket (created by kgsm-monitor running as the same user). uid/gid 1000.
+User=heisen
+Group=heisen
+
+# Self-contained, single-folder publish — NO .NET runtime dependency on the host:
+#   dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --self-contained -p:PublishReadyToRun=true
+ExecStart=/opt/kgsm-api/kgsm-api
+# REQUIRED: the .NET content root defaults to the process working dir. Without this it is "/"
+# and appsettings.json / appsettings.Development.json (shipped next to the binary) are NOT
+# loaded — Discord/role config silently goes missing and login 503s. Pin it to the app dir.
+WorkingDirectory=/opt/kgsm-api
+
+# Operational config (bind + paths). Secrets and host specifics live in the EnvironmentFile
+# below, which is read AFTER these and therefore overrides them.
+Environment=KGSM_API_URLS=http://0.0.0.0:8080
+Environment=KGSM_API_KGSM_PATH=/home/heisen/tks/kgsm/kgsm.sh
+Environment=KGSM_API_KGSM_SOCKET=/run/kgsm-api/kgsm-events.sock
+Environment=KGSM_API_MONITOR_SOCKET=/run/kgsm-monitor/metrics.sock
+Environment=KGSM_API_DB=/var/lib/kgsm-api/kgsm-api.db
+# Production by default; a host may flip this to Development in the env file to load Discord
+# creds from a co-located appsettings.Development.json instead of the env file.
+Environment=ASPNETCORE_ENVIRONMENT=Production
+
+# Secrets + host overrides: KGSM_API_AUTH_SIGNING_KEY (a STABLE random key — required so
+# sessions/refresh tokens survive a restart), the Discord OAuth app/guild/bot + role->tier map,
+# KGSM_API_CORS_ORIGINS (the SPA origin), KGSM_API_AUTH_FRONTEND_URL. See deploy/kgsm-api.env.example.
+EnvironmentFile=-/etc/kgsm-api/kgsm-api.env
+
+# systemd creates these owned by the service user: the DB lives under StateDirectory, the
+# audit-event socket the API binds under RuntimeDirectory.
+StateDirectory=kgsm-api
+StateDirectoryMode=0750
+RuntimeDirectory=kgsm-api
+RuntimeDirectoryMode=0750
+
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
