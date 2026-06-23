@@ -14,7 +14,7 @@ internal static class MetricsMapping
 {
     /// <summary>One instance's resource sample, mapped 1:1 from the monitor's <c>ServerMetrics</c>.</summary>
     public static ServerMetricsDto ToServerMetrics(Snap.ServerMetrics m) =>
-        new(Math.Round(m.CpuPctCore, 1), m.MemBytes, m.IoReadBps, m.IoWriteBps, m.Pids);
+        new(Math.Round(m.CpuPctCore, 1), m.MemBytes, m.IoReadBps, m.IoWriteBps, m.Pids, m.DiskBytes);
 
     /// <summary>The host's capacity figures (the mutable, measured portion of the <c>Host</c> view). The M-diag
     /// enrichment surfaces the rest of the already-scraped snapshot — per-core, load, swap, fs, disk-IO,

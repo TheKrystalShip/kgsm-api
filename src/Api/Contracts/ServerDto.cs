@@ -97,12 +97,17 @@ public sealed record Server(
 /// not accounted for this kind (the monitor's own nullable — passed through, never coerced to 0).</param>
 /// <param name="IoWriteBps">Block-IO write rate, or <c>null</c> (see <paramref name="IoReadBps"/>).</param>
 /// <param name="Pids">Live process/thread count.</param>
+/// <param name="DiskBytes">On-disk footprint of the instance's files (bytes) — the monitor's
+/// slow-cadence working-dir walk. <c>null</c> when not yet measured / unreadable (passed through,
+/// never coerced to 0). A filesystem figure, not a cgroup counter; per-server <em>network</em> has
+/// no honest source for native servers and is deliberately not emitted (see the monitor contract).</param>
 public sealed record ServerMetricsDto(
     double CpuPctCore,
     long MemBytes,
     long? IoReadBps,
     long? IoWriteBps,
-    int Pids);
+    int Pids,
+    long? DiskBytes);
 
 /// <summary>
 /// The honest run-state vocabulary (M1·b). Derived from kgsm-lib's

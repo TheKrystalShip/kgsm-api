@@ -72,6 +72,7 @@ export KGSM_API_AUTH_DISABLED=1
 STUB_SOCK="/tmp/kgsm-api-smoke-stub-monitor.sock"; rm -f "$STUB_SOCK"
 # Canned per-server metric values the stub serves; the join must carry these through verbatim.
 STUB_CPU=142.5; STUB_MEM=3422552064; STUB_IO_READ=4096; STUB_PIDS=12  # ioWrite is null (nullable passthrough)
+STUB_DISK=293172125  # diskBytes (Contracts 1.2.0): per-server on-disk footprint, passed through verbatim
 # M2 realtime: the stdlib WebSocket client + where it logs the frames it receives.
 WS_PY="/tmp/kgsm-api-smoke-ws.py"
 WS_LOG="/tmp/kgsm-api-smoke-ws.log"
@@ -407,9 +408,11 @@ snap = {
   # sensors is the 1.1.0 hwmon list — a non-nullable array in the contract; the stub serves one real row so the
   # Host/tick mapping is exercised (an empty array is the honest no-hwmon case, never an invented row).
   "sensors": [{"chip": "k10temp", "label": "Tctl", "valueC": 42.5}],
+  # diskBytes is the 1.2.0 per-server on-disk footprint (slow-cadence working-dir walk); carried through 1:1.
   "servers": [{"id": sid, "name": sid, "kind": "native",
                "cpuPctCore": float(os.environ['SNAP_CPU']), "memBytes": int(os.environ['SNAP_MEM']),
-               "ioReadBps": int(os.environ['SNAP_IOREAD']), "ioWriteBps": None, "pids": int(os.environ['SNAP_PIDS'])}],
+               "ioReadBps": int(os.environ['SNAP_IOREAD']), "ioWriteBps": None, "pids": int(os.environ['SNAP_PIDS']),
+               "diskBytes": int(os.environ['SNAP_DISK'])}],
 }
 body = json.dumps(snap).encode()
 resp = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body
@@ -427,7 +430,7 @@ while True:
 PYEOF
 
   echo "  starting stub monitor (join keyed to '${FIRST_ID}')"
-  SNAP_ID="$FIRST_ID" SNAP_CPU="$STUB_CPU" SNAP_MEM="$STUB_MEM" SNAP_IOREAD="$STUB_IO_READ" SNAP_PIDS="$STUB_PIDS" \
+  SNAP_ID="$FIRST_ID" SNAP_CPU="$STUB_CPU" SNAP_MEM="$STUB_MEM" SNAP_IOREAD="$STUB_IO_READ" SNAP_PIDS="$STUB_PIDS" SNAP_DISK="$STUB_DISK" \
     python3 "$STUB_PY" "$STUB_SOCK" >/tmp/kgsm-api-smoke-stub.log 2>&1 &
   STUB_PID=$!; PIDS+=("$STUB_PID")
   for _ in $(seq 1 40); do [[ -S "$STUB_SOCK" ]] && break; sleep 0.1; done
@@ -465,7 +468,7 @@ sys.exit(0 if ok else 1)
   # 17. The JOIN present-branch (detail path): the monitor row is carried through VERBATIM, keyed by id.
   req GET "/api/v1/servers/${FIRST_ID}"
   if [[ "$CODE" == 200 ]] && \
-     CPU="$STUB_CPU" MEM="$STUB_MEM" IOREAD="$STUB_IO_READ" PIDS_E="$STUB_PIDS" python3 -c "
+     CPU="$STUB_CPU" MEM="$STUB_MEM" IOREAD="$STUB_IO_READ" PIDS_E="$STUB_PIDS" DISK="$STUB_DISK" python3 -c "
 import json,os,sys
 m=json.load(open('/tmp/kgsm-api-smoke.body')).get('metrics')
 if m is None: sys.exit(1)
@@ -473,9 +476,10 @@ sys.exit(0 if (abs(m['cpuPctCore']-float(os.environ['CPU']))<1e-6
                and m['memBytes']==int(os.environ['MEM'])
                and m['ioReadBps']==int(os.environ['IOREAD'])
                and m['ioWriteBps'] is None
-               and m['pids']==int(os.environ['PIDS_E'])) else 2)
+               and m['pids']==int(os.environ['PIDS_E'])
+               and m['diskBytes']==int(os.environ['DISK'])) else 2)
 " 2>/dev/null; then
-    ok "/servers/{id} JOIN present-branch (cpuPctCore>100 + null ioWrite carried through, keyed by id)"
+    ok "/servers/{id} JOIN present-branch (cpuPctCore>100 + null ioWrite + diskBytes carried through, keyed by id)"
   else bad "/servers/{id} join present-branch (code=$CODE body=$BODY)"; fi
 
   # 18. Server-side metrics<->presence coupling on the LIST path: the joined server has metrics.
@@ -575,7 +579,7 @@ PYEOF
   kill "$STUB_PID" 2>/dev/null; wait "$STUB_PID" 2>/dev/null
   sleep 7                                              # let the down flip emit + the outage silence settle
   echo "  restarting stub monitor (recover: operational flip + ticks resume)"
-  SNAP_ID="$FIRST_ID" SNAP_CPU="$STUB_CPU" SNAP_MEM="$STUB_MEM" SNAP_IOREAD="$STUB_IO_READ" SNAP_PIDS="$STUB_PIDS" \
+  SNAP_ID="$FIRST_ID" SNAP_CPU="$STUB_CPU" SNAP_MEM="$STUB_MEM" SNAP_IOREAD="$STUB_IO_READ" SNAP_PIDS="$STUB_PIDS" SNAP_DISK="$STUB_DISK" \
     python3 "$STUB_PY" "$STUB_SOCK" >>/tmp/kgsm-api-smoke-stub.log 2>&1 &
   STUB_PID=$!; PIDS+=("$STUB_PID")
   wait "$WS_CLIENT_PID" 2>/dev/null                    # client runs out its window through the recovery
