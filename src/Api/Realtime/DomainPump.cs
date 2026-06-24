@@ -17,17 +17,22 @@ namespace TheKrystalShip.Api.Realtime;
 /// primed to current with no emit — the client already hydrated via REST (§3·j), so subscribing must not
 /// replay the whole roster as patches. The slow kgsm-lib poll (process spawns) runs only while subscribed.</para>
 /// </remarks>
-public sealed class DomainPump(StreamHub hub, ServerAggregator servers, ILogger<DomainPump> logger)
+public sealed class DomainPump(StreamHub hub, ServerAggregator servers, ApiOptions options, ILogger<DomainPump> logger)
     : BackgroundService
 {
-    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(3); // status changes are rare; the poll spawns kgsm.sh
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Configurable + relaxed by default (KGSM_API_DOMAIN_POLL_MS, 5s): status changes are rare and the
+        // poll spawns kgsm.sh. Operator actions push an immediate verify patch off the command path, so this
+        // is the safety net for out-of-band changes only.
+        TimeSpan interval = TimeSpan.FromMilliseconds(options.DomainPollMs);
+        logger.LogInformation("domain pump: started (interval={IntervalMs}ms — instance roster/run-state poll)",
+            options.DomainPollMs);
+
         Dictionary<string, Server> last = new(StringComparer.Ordinal);
         bool primed = false;
 
-        using var timer = new PeriodicTimer(Interval);
+        using var timer = new PeriodicTimer(interval);
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))

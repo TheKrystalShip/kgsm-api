@@ -33,9 +33,13 @@ frozen in `PLAN.md §6` (WS stream row) + `§8` (M2 log). This file is the local
 - **Honesty: monitor-down → metric topics go silent**, never a replayed stale frame. The
   `hosts/{id}/capabilities` `down` flip (with `provisioned:true` — capability never "lost") is what
   *explains* the silence. Never synthesize a tick to fill a gap.
-- **The pumps:** `MetricsPump` ~1s + `DomainPump` ~3s are **gated on subscribers** (idle stream costs
-  nothing); `LeafHealthMonitor` is **always-on** (~2s) — the single source feeding both this stream's
-  `capabilities.patch` and the REST `GET /hosts` capability block, so they can't disagree.
+- **The pumps:** `MetricsPump` (live monitor scrape) + `DomainPump` (instance roster/run-state) are
+  **gated on subscribers** (idle stream costs nothing). Both intervals are **configurable** (`ApiOptions`):
+  `KGSM_API_METRICS_POLL_MS` (default **1s** — the live charts feed, keep it tight) and
+  `KGSM_API_DOMAIN_POLL_MS` (default **5s**, relaxed — each tick spawns `kgsm.sh` and the roster changes
+  rarely; operator actions push an immediate verify patch off the command path, so this only catches
+  out-of-band changes). `LeafHealthMonitor` is **always-on** (~2s) — the single source feeding both this
+  stream's `capabilities.patch` and the REST `GET /hosts` capability block, so they can't disagree.
 
 ## Auth (M4·a)
 

@@ -20,12 +20,14 @@ namespace TheKrystalShip.Api.Realtime;
 public sealed class MetricsPump(StreamHub hub, MonitorClient monitor, ApiOptions options, ILogger<MetricsPump> logger)
     : BackgroundService
 {
-    private static readonly TimeSpan Interval = TimeSpan.FromSeconds(1); // ~the monitor's own self-tick cadence
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Configurable (KGSM_API_METRICS_POLL_MS) but defaults to ~the monitor's own 1s self-tick: this is
+        // the live resource feed, not the instance poll — keep it tight or the SPA's charts get choppy.
         string hostTopic = StreamProtocol.HostMetricsTopic(options.HostId);
-        using var timer = new PeriodicTimer(Interval);
+        logger.LogInformation("metrics pump: started (interval={IntervalMs}ms — live monitor scrape)",
+            options.MetricsPollMs);
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(options.MetricsPollMs));
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))

@@ -158,6 +158,30 @@ public sealed class ApiOptions
     /// </summary>
     public bool KgsmProvisioned => !string.IsNullOrWhiteSpace(KgsmPath);
 
+    // --- Realtime pump cadences (M2) — the background poll intervals the WS pumps tick at ----------
+
+    /// <summary>
+    /// How often the <see cref="Realtime.DomainPump"/> re-fetches the instance roster + run-state from
+    /// kgsm (<c>KGSM_API_DOMAIN_POLL_MS</c>, default 5000 = 5s, floor 1000). This is the poll the
+    /// <c>servers</c> WS topic rides — each tick spawns <c>kgsm.sh</c> (a process), so it is deliberately
+    /// relaxed: instances change rarely, the SPA has a manual refresh, and every operator-initiated
+    /// start/stop/install already pushes an immediate verify <c>server.patch</c> off the command path, so
+    /// this poll only catches out-of-band changes (a crash, an external edit). Gated on subscribers — an
+    /// idle stream never spawns kgsm. <strong>Blueprints have no separate poll</strong>: the library
+    /// catalog (<c>GET /library</c>) is read live per request, not on a timer.
+    /// </summary>
+    public required int DomainPollMs { get; init; }
+
+    /// <summary>
+    /// How often the <see cref="Realtime.MetricsPump"/> scrapes the monitor socket and fans the live
+    /// resource tick out to the <c>*/metrics</c> topics (<c>KGSM_API_METRICS_POLL_MS</c>, default 1000 =
+    /// 1s, floor 250). This is the live performance feed (≈ the monitor's own self-tick), <b>not</b> the
+    /// instance/blueprint poll — relaxing it makes the SPA's performance charts choppy, so it stays at 1s
+    /// by default. Gated on subscribers. Distinct from <see cref="MetricsPersistMs"/> (the durable-history
+    /// sampler cadence).
+    /// </summary>
+    public required int MetricsPollMs { get; init; }
+
     // --- Metrics history (M9) — durable tiered metrics store (metrics.db) -------------------------
 
     /// <summary>Master switch for the metrics history store (<c>KGSM_API_METRICS_HISTORY_ENABLED</c>,
@@ -292,6 +316,13 @@ public sealed class ApiOptions
             FirewallSocketPath = Defaulted(configuration["KGSM_API_FIREWALL_SOCKET"], ""),
             KgsmPath = Defaulted(configuration["KGSM_API_KGSM_PATH"], "/usr/bin/kgsm"),
             KgsmSocketPath = Defaulted(configuration["KGSM_API_KGSM_SOCKET"], "/usr/share/kgsm/kgsm.sock"),
+
+            // Realtime pump cadences (M2). The domain (instance) poll is relaxed by default (5s) — it
+            // spawns kgsm.sh and the roster changes rarely (the SPA also has a manual refresh); floored at
+            // 1s. The metrics tick stays at the monitor's ~1s self-tick (the live charts feed); floored at
+            // 250ms. Blueprints have no poll — GET /library reads them live per request.
+            DomainPollMs = Math.Max(1000, IntOr(configuration["KGSM_API_DOMAIN_POLL_MS"], 5000)),
+            MetricsPollMs = Math.Max(250, IntOr(configuration["KGSM_API_METRICS_POLL_MS"], 1000)),
 
             // Library RAWG cover/metadata. Opt-in (blank key => worker no-ops). The cache dir always resolves
             // to a concrete path: an explicit KGSM_API_RAWG_CACHE_DIR wins, else (unset OR blank — the
