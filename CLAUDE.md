@@ -115,7 +115,23 @@ dotnet run --project src/Api/Api.csproj    # run locally (binds KGSM_API_URLS, d
 scripts/smoke.sh                           # build Release + run the HTTP contract checks (the "mock frontend")
 # self-contained deploy artifact (per-host drop-in, no runtime install):
 dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --self-contained -p:PublishReadyToRun=true
+./deploy/deploy.sh                         # build + (re)deploy the live systemd service in one go (see below)
 ```
+
+### Deploying / redeploying the live service
+
+**To (re)deploy the API to its systemd service, run `./deploy/deploy.sh` — do NOT run the
+individual publish/`systemctl` steps by hand.** It is the one-go path: publishes as the
+invoking (service-owning) user, then `sudo`s **only** the systemd steps — stops the unit,
+`rsync`s the binary tree into `/opt/kgsm-api`, refreshes the unit only if it changed,
+`enable --now`, and verifies with a real `HTTP 200` from `/health` (it does not claim
+success on the launch exit code alone). Idempotent; the env file (`/etc/kgsm-api/kgsm-api.env`)
+and DB (`/var/lib/kgsm-api`) live outside `/opt` and are never touched.
+
+**It needs `sudo` for the systemd steps, and the prompt is non-interactive under Claude
+Code — so ASK THE USER for their sudo/root password before running it** (e.g. run it with
+`SUDO='sudo -A'` + a `SUDO_ASKPASS` helper, or have the user run the script themselves).
+Never hard-code the password into the script or the repo.
 
 `scripts/smoke.sh` is the **stand-in for the frontend** until the SPA can reach a host —
 it asserts every M0/M1/M2/M3 contract (and the M4·a no-token sweep) — **31/31**. The M0–M3 checks
