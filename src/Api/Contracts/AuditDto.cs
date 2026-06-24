@@ -107,6 +107,11 @@ public static class AuditAction
     // path already stamps actor+origin onto SetInstanceConfigValue).
     public const string ConfigSet = "config.set";
 
+    // file.write — API-internal (the file browser saves an instance file; kgsm runs nothing and emits no
+    // event, so this is written DIRECTLY, the auth.* case — no echo, no double-write risk). meta carries
+    // the path/size/sha256 ONLY, NEVER the content (configs hold rcon passwords/tokens/webhook URLs).
+    public const string FileWrite = "file.write";
+
     // auth.* — API-internal (no kgsm event → written directly, no double-write risk).
     public const string AuthLogin = "auth.login";
     public const string AuthLogout = "auth.logout";

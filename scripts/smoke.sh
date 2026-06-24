@@ -884,6 +884,76 @@ sys.exit(0 if (isinstance(d.get('lines'),list) and len(d['lines'])==0) else 1)
   echo "   not-capable-no-retry logic is proven in tests/Api.Tests/ConsoleBridgeTests; the controller happy/"
   echo "   absent/down paths in tests/Api.Tests/ConsoleControllerTests.)"
 
+  # --- File browser (Tier 3 #12): GET/PUT /servers/{id}/files… (real working dir) ---------------
+  echo "==> file browser checks — GET/PUT /servers/{id}/files (list/read/jail/save; real working dir)"
+
+  # 1. LIST the instance root → 200 + entries[], dirs sorted before files (deterministic truncation order).
+  req GET "/api/v1/servers/${FIRST_ID}/files"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+es=d.get('entries'); assert isinstance(es,list) and d.get('path')==''
+seen_file=False
+for e in es:
+    if e['kind']!='dir': seen_file=True
+    elif seen_file: sys.exit(1)   # a dir AFTER a file ⇒ ordering broken
+sys.exit(0)
+" 2>/dev/null; then
+    ok "/servers/{id}/files 200 + entries[] (dirs-first ordering)"
+  else bad "file list (code=$CODE body=$BODY)"; fi
+
+  # 2. READ the instance config (kgsm layout: <id>.config.ini) → 200 + raw UTF-8 + sha256 etag. Stash the
+  #    content+etag so the save round-trip can rewrite IDENTICAL bytes (non-destructive).
+  CFG="${FIRST_ID}.config.ini"
+  req GET "/api/v1/servers/${FIRST_ID}/files/content?path=${CFG}"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+ok = isinstance(d.get('content'),str) and str(d.get('etag','')).startswith('sha256:') and d.get('encoding')=='utf-8'
+if ok: open('/tmp/kgsm-api-smoke-fb.json','w').write(json.dumps({'content':d['content'],'etag':d['etag'],'origin':'ui'}))
+sys.exit(0 if ok else 1)
+" 2>/dev/null; then
+    ok "/servers/{id}/files/content 200 + raw text + sha256 etag"
+  else bad "file read (code=$CODE body=$BODY)"; fi
+
+  # 3. Jail: a traversal escape is refused (404 — never leaks the host fs).
+  req GET "/api/v1/servers/${FIRST_ID}/files/content?path=../../../../etc/passwd"
+  [[ "$CODE" == 404 ]] && ok "file read traversal escape → 404 (jail holds)" || bad "file traversal (code=$CODE)"
+
+  # 4. SAVE-BACK identical bytes with the etag → 200 + sha256 etag (the full PUT path, NON-DESTRUCTIVE —
+  #    same content ⇒ same sha256). Proves the atomic write + audit (file.write) end-to-end.
+  if [[ -f /tmp/kgsm-api-smoke-fb.json ]]; then
+    req PUT "/api/v1/servers/${FIRST_ID}/files/content?path=${CFG}" -H 'Content-Type: application/json' -d @/tmp/kgsm-api-smoke-fb.json
+    if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if str(d.get('etag','')).startswith('sha256:') else 1)
+" 2>/dev/null; then
+      ok "/servers/{id}/files/content PUT identical bytes → 200 + sha256 etag (save path, non-destructive)"
+    else bad "file save round-trip (code=$CODE body=$BODY)"; fi
+  else echo "  (skip save round-trip — config read did not yield a body to echo back)"; fi
+
+  # 5. Stale-etag PUT → 412 (optimistic concurrency).
+  req PUT "/api/v1/servers/${FIRST_ID}/files/content?path=${CFG}" -H 'Content-Type: application/json' -d '{"content":"x","etag":"sha256:deadbeef"}'
+  [[ "$CODE" == 412 ]] && ok "file save stale etag → 412 (optimistic concurrency)" || bad "file save 412 (code=$CODE body=$BODY)"
+
+  # 6. Save to a non-existent file → 404 (v1 = save-existing only, no create).
+  req PUT "/api/v1/servers/${FIRST_ID}/files/content?path=temp/does-not-exist-smoke.txt" -H 'Content-Type: application/json' -d '{"content":"x"}'
+  [[ "$CODE" == 404 ]] && ok "file save non-existent → 404 (save-existing only, no create)" || bad "file save 404 (code=$CODE body=$BODY)"
+
+  # 7. The file.write audit row landed with path/size/sha256 — and NEVER the content (secret hygiene).
+  req GET "/api/v1/audit?serverId=${FIRST_ID}"
+  if python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+rows=[r for r in d.get('data',[]) if r.get('action')=='file.write']
+assert rows, 'no file.write row'
+m=rows[0].get('meta') or {}
+sys.exit(0 if ('path' in m and 'sizeBytes' in m and str(m.get('sha256','')).startswith('sha256:') and 'content' not in m) else 1)
+" 2>/dev/null; then
+    ok "audit: file.write row carries path/size/sha256 — NEVER the content (secret hygiene)"
+  else bad "file.write audit row (code=$CODE body=$BODY)"; fi
+
   # --- M7 assistant turn relay: the gates that run before any upstream call ------
   echo "==> M7 assistant relay checks — POST /api/v1/assistant/turn (auth + capability gates, no upstream)"
 
@@ -1119,7 +1189,7 @@ start_api_auth || { echo "API never healthy (auth-enabled); log:"; tail -20 /tmp
 #     /me (M8) is [Authorize] (any authenticated caller) -> still 401 with no bearer.
 #     /integrations (M8·c) is admin-gated -> 401 with no bearer (the tier/admin gate is in tests).
 auth_401=true
-for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/servers/x/console /api/v1/integrations /api/v1/integrations/discord /api/v1/integrations/slack /api/v1/_dbcheck /api/v1/_throw; do
+for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/servers/x/console /api/v1/servers/x/files "/api/v1/servers/x/files/content?path=y" /api/v1/integrations /api/v1/integrations/discord /api/v1/integrations/slack /api/v1/_dbcheck /api/v1/_throw; do
   req GET "$p"
   if [[ "$CODE" != 401 ]] || ! grep -q '"code":"unauthorized"' <<<"$BODY" || grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY"; then
     auth_401=false; echo "    ($p -> $CODE $BODY)"
@@ -1131,11 +1201,13 @@ req POST /api/v1/servers -H 'Content-Type: application/json' -d '{"blueprint":"f
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST /servers install -> $CODE $BODY)"; }
 req DELETE /api/v1/servers/x
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (DELETE /servers/{id} -> $CODE $BODY)"; }
+req PUT "/api/v1/servers/x/files/content?path=y" -H 'Content-Type: application/json' -d '{"content":"x"}'
+[[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (PUT files/content -> $CODE $BODY)"; }
 req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
 req POST /api/v1/library/refresh
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST library/refresh -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,POST assistant/turn,POST library/refresh (no open back door)" \
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/servers/{id}/files(+content),/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,PUT files/content,POST assistant/turn,POST library/refresh (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 31b. The library cover/hero image endpoints are [AllowAnonymous] (a CSS background:url / <img> never sends

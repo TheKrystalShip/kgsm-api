@@ -158,6 +158,23 @@ public sealed class ApiOptions
     /// </summary>
     public bool KgsmProvisioned => !string.IsNullOrWhiteSpace(KgsmPath);
 
+    // --- File browser (Tier 3 #12) — the GET/PUT /servers/{id}/files surface ----------------------
+
+    /// <summary>
+    /// Max directory entries a single <c>GET /servers/{id}/files</c> returns before truncating with a
+    /// <c>truncated:true</c> signal (<c>KGSM_API_FILES_MAX_ENTRIES</c>, default 200). The constraint is
+    /// FRONTEND rendering (one DOM node per entry, not virtualized) — a save subdir with thousands of map
+    /// chunks janks the tree, not the API. Truncation is always signaled, never a silent refusal (plan §5).
+    /// </summary>
+    public required int FilesMaxEntries { get; init; }
+
+    /// <summary>
+    /// Max file size (bytes) the editor will open or save (<c>KGSM_API_FILES_MAX_EDIT_BYTES</c>, default
+    /// ~2 MiB). A read past this returns <c>file_too_large</c> (the SPA shows "can't open" honestly rather
+    /// than rendering megabytes of text); a save past it is refused. Hashing ≤ this for the etag is trivial.
+    /// </summary>
+    public required long FilesMaxEditBytes { get; init; }
+
     // --- Auth (M4·a) — Discord per-host, Model A (architecture.html §3·f, keystone O5) -----------
     // Identity is a global Discord SSO anchor; authorization is a short-lived host-scoped bearer
     // this host mints after verifying identity once and resolving the role via the host's bot.
@@ -273,6 +290,11 @@ public sealed class ApiOptions
             LibraryRefreshIntervalDays = Math.Max(0, IntOr(configuration["KGSM_API_LIBRARY_REFRESH_INTERVAL_DAYS"], 7)),
             LibraryRefreshHour = Math.Clamp(IntOr(configuration["KGSM_API_LIBRARY_REFRESH_HOUR"], 6), 0, 23),
 
+            // File browser (Tier 3 #12). Entry cap is a frontend-render bound; edit ceiling guards the
+            // editor against megabyte blobs. Clamped sane: at least 1 entry, at least 1 KiB.
+            FilesMaxEntries = Math.Max(1, IntOr(configuration["KGSM_API_FILES_MAX_ENTRIES"], 200)),
+            FilesMaxEditBytes = Math.Max(1024, LongOr(configuration["KGSM_API_FILES_MAX_EDIT_BYTES"], 2 * 1024 * 1024)),
+
             // Auth (M4·a). On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = Flag(configuration["KGSM_API_AUTH_DISABLED"]),
             SigningKey = Defaulted(configuration["KGSM_API_AUTH_SIGNING_KEY"], ""),
@@ -302,6 +324,10 @@ public sealed class ApiOptions
     // Parse an integer config value; blank/unset/garbage -> the fallback (callers clamp the range).
     private static int IntOr(string? value, int fallback) =>
         int.TryParse(value?.Trim(), out int n) ? n : fallback;
+
+    // Parse a long config value; blank/unset/garbage -> the fallback (callers clamp the range).
+    private static long LongOr(string? value, long fallback) =>
+        long.TryParse(value?.Trim(), out long n) ? n : fallback;
 
     // null key (unset) -> fallback; present key (even empty) -> the given value, trimmed.
     private static string Defaulted(string? value, string fallback) => value is null ? fallback : value.Trim();

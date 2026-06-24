@@ -13,6 +13,7 @@ using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Commands;
+using TheKrystalShip.Api.Services.Files;
 using TheKrystalShip.Api.Services.Integrations;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
@@ -197,6 +198,11 @@ public class Startup(IConfiguration configuration)
         // migrations — the schema is EnsureCreated (greenfield/dev authority; PLAN M5).
         services.AddSingleton<AuditService>();
         services.AddHostedService<KgsmAuditConsumer>();
+
+        // File browser (Tier 3 #12) — the jailed content I/O for GET/PUT /servers/{id}/files. No leaf, no
+        // capability axis (engine-base, like config/backups): the jail root comes from kgsm-lib
+        // (Instance.WorkingDir) and the read/write is host filesystem. Pure/stateless → singleton.
+        services.AddSingleton<IInstanceFileService, InstanceFileService>();
 
         // M6·a — alerts (the condition-mirror). The engine is ALWAYS-ON (like LeafHealthMonitor, not gated
         // on WS subscribers): GET /alerts must serve fresh truth regardless of who is listening. It polls

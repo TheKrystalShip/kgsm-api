@@ -319,6 +319,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
         RawgApiKey = "test-key", RawgCacheDir = cacheDir, PublicBaseUrl = "",
         SteamCdnBaseUrl = "https://steamcdn.test/apps", // inert here: the worker uses the injected ISteamCoverClient fake
         LibraryRefreshIntervalDays = 7, LibraryRefreshHour = 6,
+        FilesMaxEntries = 200, FilesMaxEditBytes = 2 * 1024 * 1024,
 
         AuthDisabled = true, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
         DiscordRedirectUri = "", DiscordBotToken = "", DiscordGuildId = "", AuthFrontendUrl = "",
