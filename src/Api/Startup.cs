@@ -17,6 +17,7 @@ using TheKrystalShip.Api.Services.Files;
 using TheKrystalShip.Api.Services.Integrations;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
+using TheKrystalShip.Api.Services.Metrics;
 using TheKrystalShip.KGSM.Extensions;
 
 namespace TheKrystalShip.Api;
@@ -75,6 +76,13 @@ public class Startup(IConfiguration configuration)
         // resolve it optionally and report 'absent' when the leaf is not declared on this host.
         ApiOptions apiOptions = ApiOptions.FromConfiguration(configuration);
         services.AddSingleton(apiOptions);
+
+        // M9 — metrics history (a SEPARATE metrics.db, D4). The MetricsDbContext is registered
+        // alongside AppDbContext; its own EnsureCreated creates the sample+rollup tables. WAL +
+        // auto_vacuum configured at creation time by MetricsHistoryStore.
+        services.AddDbContext<MetricsDbContext>(options =>
+            options.UseSqlite($"Data Source={apiOptions.MetricsHistoryDb}"));
+
         services.AddSingleton<MonitorClient>();
         services.AddSingleton<AssistantClient>();
         services.AddSingleton<HostAggregator>();
@@ -188,6 +196,16 @@ public class Startup(IConfiguration configuration)
         // the verify server.patch. Both singletons.
         services.AddSingleton<JobRegistry>();
         services.AddSingleton<CommandRunner>();
+
+        // M9 — metrics history (the durable tiered store behind KGSM_API_METRICS_HISTORY_DISABLED).
+        // The store is always registered (the read endpoint needs it even to return empty); the sampler
+        // and maintenance worker only start when history is enabled AND the monitor is provisioned.
+        services.AddSingleton<MetricsHistoryStore>();
+        if (apiOptions.MetricsHistoryEnabled && apiOptions.MetricsProvisioned)
+        {
+            services.AddHostedService<MetricsSampler>();
+            services.AddHostedService<MetricsMaintenanceService>();
+        }
 
         // M5 — audit log (append-only, downstream of the stateless engine). AuditService is the single
         // writer (own DI scope per write, serialized); the consumer subscribes to kgsm events via

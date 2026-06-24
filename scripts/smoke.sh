@@ -49,6 +49,7 @@ PORT="${SMOKE_PORT:-8099}"
 BASE="http://127.0.0.1:${PORT}"
 DLL="${REPO_ROOT}/src/Api/bin/Release/net10.0/kgsm-api.dll"
 DB="${SMOKE_DB:-/tmp/kgsm-api-smoke.db}"; rm -f "$DB"
+METRICS_DB="${SMOKE_METRICS_DB:-/tmp/kgsm-api-smoke-metrics.db}"; rm -f "$METRICS_DB"
 
 # M1·a leaf wiring (deterministic defaults: no monitor, no watchdog, no assistant).
 HOST_ID="${SMOKE_HOST_ID:-smoke-host}"
@@ -112,7 +113,8 @@ trap cleanup EXIT
 
 # start_api MONITOR_SOCKET — launch the API with the given monitor socket; wait for /health.
 start_api() {
-  KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" \
+  KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" KGSM_API_METRICS_HISTORY_DB="$METRICS_DB" \
+  KGSM_API_METRICS_PERSIST_MS="${SMOKE_METRICS_PERSIST_MS:-5000}" \
   KGSM_API_HOST_ID="$HOST_ID" KGSM_API_MONITOR_SOCKET="$1" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" \
   KGSM_API_KGSM_PATH="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
     dotnet "$DLL" >/tmp/kgsm-api-smoke.log 2>&1 &
@@ -126,7 +128,8 @@ stop_api() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
 # unconfigured (ephemeral signing key). Used by the M4·a no-token sweep.
 start_api_auth() {
   env -u KGSM_API_AUTH_DISABLED \
-    KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" KGSM_API_HOST_ID="$HOST_ID" \
+    KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" KGSM_API_METRICS_HISTORY_DB="$METRICS_DB" \
+    KGSM_API_HOST_ID="$HOST_ID" \
     KGSM_API_MONITOR_SOCKET="$MON_SOCK" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" KGSM_API_KGSM_PATH="$KGSM_PATH" \
     KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
     dotnet "$DLL" >/tmp/kgsm-api-smoke-auth.log 2>&1 &
@@ -824,6 +827,65 @@ sys.exit(0 if 'network' not in json.load(open('/tmp/kgsm-api-smoke.body')) else 
   echo "   network.ports.open audit + the servers/{id}/network verify patch — is a trusted-host live-validate,"
   echo "   needing the kgsm-firewall daemon + kgsm-group socket access, like M3's mutation happy path)"
 
+  # --- M9 metrics history: the durable tiered store + read endpoint --------
+  echo "==> M9 metrics history checks — GET /{servers,hosts}/{id}/metrics/history + durability"
+
+  # Server history unknown id → 404
+  req GET /api/v1/servers/nonexistent/metrics/history
+  if [[ "$CODE" == 404 ]]; then ok "server history unknown id → 404"
+  else bad "M9 server history 404 (code=$CODE)"; fi
+
+  # Host history unknown id → 404
+  req GET /api/v1/hosts/nonexistent/metrics/history
+  if [[ "$CODE" == 404 ]]; then ok "host history unknown id → 404"
+  else bad "M9 host history 404 (code=$CODE)"; fi
+
+  # Durability: the sampler is running with the stub monitor (KGSM_API_METRICS_PERSIST_MS=5000).
+  # Wait > one persist interval, then assert rows landed. The stub monitor serves a host snapshot
+  # + a per-server row keyed to 'factorio' → both host AND server history should be non-empty.
+  echo "  waiting ~8s for ≥1 metrics persist interval (sampler → metrics.db)…"
+  sleep 8
+
+  # Host history: the sampler should have persisted host metrics.
+  req GET "/api/v1/hosts/$HOST_ID/metrics/history?range=1h"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+series=d.get('series',{})
+has_data=any(len(v)>0 for v in series.values())
+sys.exit(0 if d.get('kind')=='host' and d.get('tier') in ('raw','rollup') and has_data else 1)
+" 2>/dev/null; then
+    ok "host history 200 + NON-EMPTY series (sampler → metrics.db durable write proven)"
+  else bad "M9 host history durability (code=$CODE body=$(cat /tmp/kgsm-api-smoke.body 2>/dev/null | head -c 300))"; fi
+
+  # Server history: the sampler should have persisted per-server metrics for 'factorio'
+  req GET "/api/v1/servers/factorio/metrics/history?range=1h"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+series=d.get('series',{})
+has_data=any(len(v)>0 for v in series.values())
+sys.exit(0 if d.get('kind')=='server' and d.get('tier') in ('raw','rollup') and has_data else 1)
+" 2>/dev/null; then
+    ok "server history 200 + NON-EMPTY series (per-server sampler → metrics.db durable write proven)"
+  else bad "M9 server history durability (code=$CODE body=$(cat /tmp/kgsm-api-smoke.body 2>/dev/null | head -c 300))"; fi
+
+  # Durability across restart: stop the API, start it again (same metrics.db), assert data persists
+  stop_api
+  start_api "$STUB_SOCK" || { echo "API restart failed (Phase B M9 restart); log:"; tail -20 /tmp/kgsm-api-smoke.log; exit 2; }
+  wait_caps_warm
+
+  req GET "/api/v1/hosts/$HOST_ID/metrics/history?range=1h"
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+series=d.get('series',{})
+has_data=any(len(v)>0 for v in series.values())
+sys.exit(0 if has_data else 1)
+" 2>/dev/null; then
+    ok "host history survives API restart (D1 durability — metrics.db is the system of record)"
+  else bad "M9 durability after restart (code=$CODE body=$(cat /tmp/kgsm-api-smoke.body 2>/dev/null | head -c 300))"; fi
+
   # --- M6·a alerts: the condition-mirror read surface (watchdog ABSENT here → empty feed) ------
   echo "==> M6·a alerts checks — GET /alerts (the condition-mirror read; empty here — no watchdog in smoke)"
 
@@ -1189,7 +1251,7 @@ start_api_auth || { echo "API never healthy (auth-enabled); log:"; tail -20 /tmp
 #     /me (M8) is [Authorize] (any authenticated caller) -> still 401 with no bearer.
 #     /integrations (M8·c) is admin-gated -> 401 with no bearer (the tier/admin gate is in tests).
 auth_401=true
-for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/servers/x/console /api/v1/servers/x/files "/api/v1/servers/x/files/content?path=y" /api/v1/integrations /api/v1/integrations/discord /api/v1/integrations/slack /api/v1/_dbcheck /api/v1/_throw; do
+for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/servers/x/console /api/v1/servers/x/files "/api/v1/servers/x/files/content?path=y" /api/v1/integrations /api/v1/integrations/discord /api/v1/integrations/slack /api/v1/_dbcheck /api/v1/_throw /api/v1/servers/x/metrics/history /api/v1/hosts/x/metrics/history; do
   req GET "$p"
   if [[ "$CODE" != 401 ]] || ! grep -q '"code":"unauthorized"' <<<"$BODY" || grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY"; then
     auth_401=false; echo "    ($p -> $CODE $BODY)"
@@ -1207,7 +1269,7 @@ req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
 req POST /api/v1/library/refresh
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST library/refresh -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/servers/{id}/files(+content),/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,PUT files/content,POST assistant/turn,POST library/refresh (no open back door)" \
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/servers/{id}/files(+content),/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,PUT files/content,POST assistant/turn,POST library/refresh,metrics/history (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 31b. The library cover/hero image endpoints are [AllowAnonymous] (a CSS background:url / <img> never sends

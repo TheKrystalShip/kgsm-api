@@ -158,6 +158,33 @@ public sealed class ApiOptions
     /// </summary>
     public bool KgsmProvisioned => !string.IsNullOrWhiteSpace(KgsmPath);
 
+    // --- Metrics history (M9) — durable tiered metrics store (metrics.db) -------------------------
+
+    /// <summary>Master switch for the metrics history store (<c>KGSM_API_METRICS_HISTORY_ENABLED</c>,
+    /// default true). When false the sampler is inert and the read endpoint returns empty series.</summary>
+    public bool MetricsHistoryEnabled { get; init; } = true;
+
+    /// <summary>Path to the dedicated metrics SQLite file (<c>KGSM_API_METRICS_HISTORY_DB</c>, default
+    /// <c>metrics.db</c> beside the audit DB). Separate from the audit DB (D4).</summary>
+    public required string MetricsHistoryDb { get; init; }
+
+    /// <summary>Tier-1 persist cadence in ms (<c>KGSM_API_METRICS_PERSIST_MS</c>, default 15000, floor
+    /// 5000). Decoupled from the 1 Hz live stream.</summary>
+    public required int MetricsPersistMs { get; init; }
+
+    /// <summary>Tier-1 raw retention in hours (<c>KGSM_API_METRICS_RAW_RETENTION_HOURS</c>, default 24).</summary>
+    public required int MetricsRawRetentionHours { get; init; }
+
+    /// <summary>Tier-2 rollup bucket width in minutes (<c>KGSM_API_METRICS_ROLLUP_STEP_MIN</c>, default 5).</summary>
+    public required int MetricsRollupStepMin { get; init; }
+
+    /// <summary>Tier-2 rollup retention in days (<c>KGSM_API_METRICS_ROLLUP_RETENTION_DAYS</c>, default 30).</summary>
+    public required int MetricsRollupRetentionDays { get; init; }
+
+    /// <summary>How often the maintenance job rolls up + prunes, in ms
+    /// (<c>KGSM_API_METRICS_MAINT_MS</c>, default 60000).</summary>
+    public required int MetricsMaintenanceMs { get; init; }
+
     // --- File browser (Tier 3 #12) — the GET/PUT /servers/{id}/files surface ----------------------
 
     /// <summary>
@@ -290,6 +317,18 @@ public sealed class ApiOptions
             LibraryRefreshIntervalDays = Math.Max(0, IntOr(configuration["KGSM_API_LIBRARY_REFRESH_INTERVAL_DAYS"], 7)),
             LibraryRefreshHour = Math.Clamp(IntOr(configuration["KGSM_API_LIBRARY_REFRESH_HOUR"], 6), 0, 23),
 
+            // Metrics history (M9). The dedicated DB beside the audit DB; persist cadence floored at 5s;
+            // retention/step clamped sane.
+            MetricsHistoryEnabled = !Flag(configuration["KGSM_API_METRICS_HISTORY_DISABLED"]),
+            MetricsHistoryDb = BlankFallback(
+                configuration["KGSM_API_METRICS_HISTORY_DB"],
+                DefaultMetricsDb(configuration["KGSM_API_DB"])),
+            MetricsPersistMs = Math.Max(5000, IntOr(configuration["KGSM_API_METRICS_PERSIST_MS"], 15000)),
+            MetricsRawRetentionHours = Math.Max(1, IntOr(configuration["KGSM_API_METRICS_RAW_RETENTION_HOURS"], 24)),
+            MetricsRollupStepMin = Math.Max(1, IntOr(configuration["KGSM_API_METRICS_ROLLUP_STEP_MIN"], 5)),
+            MetricsRollupRetentionDays = Math.Max(1, IntOr(configuration["KGSM_API_METRICS_ROLLUP_RETENTION_DAYS"], 30)),
+            MetricsMaintenanceMs = Math.Max(10000, IntOr(configuration["KGSM_API_METRICS_MAINT_MS"], 60000)),
+
             // File browser (Tier 3 #12). Entry cap is a frontend-render bound; edit ceiling guards the
             // editor against megabyte blobs. Clamped sane: at least 1 entry, at least 1 KiB.
             FilesMaxEntries = Math.Max(1, IntOr(configuration["KGSM_API_FILES_MAX_ENTRIES"], 200)),
@@ -308,6 +347,13 @@ public sealed class ApiOptions
             RoleOperatorIds = Csv(configuration["KGSM_API_AUTH_ROLE_OPERATOR"]),
             RoleViewerIds = Csv(configuration["KGSM_API_AUTH_ROLE_VIEWER"]),
         };
+    }
+
+    // The default metrics DB path: metrics.db beside the audit DB (same StateDirectory reasoning).
+    private static string DefaultMetricsDb(string? dbPath)
+    {
+        string? dir = string.IsNullOrWhiteSpace(dbPath) ? null : Path.GetDirectoryName(dbPath.Trim());
+        return string.IsNullOrEmpty(dir) ? "metrics.db" : Path.Combine(dir, "metrics.db");
     }
 
     // The default RAWG image cache dir: a covers/ subdir beside the SQLite DB (so it inherits the
