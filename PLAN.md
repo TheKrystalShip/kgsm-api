@@ -45,7 +45,7 @@ join's present-branch by id, honest ticks streamed, and a full kill→restart de
 parked in `legacy/` for harvest (keystone O4). Pending: the live frontend handshake + venue.
 The two read-side inputs it aggregates are `built` and ready: kgsm-lib 1.6.0 (domain +
 run-state façade + `IWatchdogClient`) and kgsm-monitor (host + per-instance metrics over
-`/run/kgsm-monitor.sock`), the latter now consumed through the shared
+`/run/kgsm-monitor/metrics.sock`), the latter now consumed through the shared
 `TheKrystalShip.KGSM.Monitor.Contracts` package (§7). The assistant is `partial`.
 
 ---

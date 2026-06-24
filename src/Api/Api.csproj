@@ -10,11 +10,18 @@
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
-         See docs/m0-aot-spike-findings.md and PLAN.md §8 for the decision record.
-         Deploy is self-contained (publish with -r linux-x64 and the self-contained flag),
-         so the per-host "drop-in, no runtime install" story still holds — just a larger
-         artifact than the AOT binary would have been. ReadyToRun enabled at publish time. -->
+         See docs/m0-aot-spike-findings.md and PLAN.md §8 for the decision record. -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- Deploy as a FRAMEWORK-DEPENDENT single file: the host has the .NET 10 + ASP.NET Core
+         shared runtime installed (the ecosystem assumption), so we do NOT bundle the runtime —
+         that keeps the artifact small. These are publish-only properties (build/test ignore
+         them); the RID is supplied at publish time (deploy/deploy.sh passes -r linux-x64).
+         Native libs that can't be embedded (SQLitePCLRaw's e_sqlite3) are published BESIDE the
+         binary rather than self-extracted — simpler, and avoids a runtime extraction step. The
+         artifact is: the `kgsm-api` binary + appsettings.json + a couple of .so files. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
 
   <!-- The test project drives the AlertEngine's internal Tick/timing seam directly (M6·a). -->

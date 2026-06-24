@@ -41,6 +41,12 @@ PUBLISH_DIR="$REPO_DIR/artifacts/publish"
 RID="${RID:-linux-x64}"
 SVC_USER="${KGSM_API_USER:-$(id -un)}"
 
+# The umbrella tks/ checkout — the sibling repos (kgsm-lib, kgsm-monitor) live here. This repo
+# consumes them as PACKAGES from a local folder feed (src/Api/nuget.config → $LOCAL_NUGET), so a
+# fresh clone needs those packages packed before restore can succeed (bootstrapped below).
+WORKSPACE="$(cd "$REPO_DIR/.." && pwd)"
+LOCAL_NUGET="${LOCAL_NUGET:-/home/heisen/local-nuget}"
+
 # Privileged-call indirection: real users get a normal sudo prompt; an automated run can
 # set SUDO='sudo -A' + SUDO_ASKPASS=... to inject the password. Never hard-code it here.
 SUDO="${SUDO:-sudo}"
@@ -91,8 +97,35 @@ fi
 [[ -f "$PROJECT" ]] || { err "project not found: $PROJECT"; exit 1; }
 
 # ── 1. Build (as the invoking user — no privilege, fail fast before any disruption) ──
-log "publishing self-contained (${RID}) → ${PUBLISH_DIR}"
-dotnet publish "$PROJECT" -c Release -r "$RID" --self-contained -p:PublishReadyToRun=true -o "$PUBLISH_DIR"
+# Framework-dependent single-file: the host must have the .NET 10 + ASP.NET Core SHARED runtime
+# (we deliberately do NOT bundle it — that keeps the artifact ~9 MB instead of ~90 MB). Verify it
+# up front so a missing runtime fails here, not after we've stopped the live service.
+if ! dotnet --list-runtimes 2>/dev/null | grep -q 'Microsoft.AspNetCore.App 10\.'; then
+    err "the .NET 10 ASP.NET Core shared runtime is not installed (need 'Microsoft.AspNetCore.App 10.x')."
+    err "install the .NET 10 runtime (or SDK), then re-run. Check: dotnet --list-runtimes"
+    exit 1
+fi
+
+# Bootstrap the local NuGet feed. This repo consumes the sibling kgsm-lib + monitor-contracts as
+# PACKAGES (src/Api/nuget.config → $LOCAL_NUGET), not project refs, so on a fresh umbrella checkout
+# those packages aren't packed yet. Pack them from the siblings if absent — pack-if-MISSING only, so
+# an already-published version is never repacked (avoids the same-version stale-dll NuGet-cache trap).
+pkg_ver() { grep -oP "Include=\"$1\"\s+Version=\"\K[^\"]+" "$PROJECT"; }
+ensure_pkg() {  # csproj  package-id  version
+    local csproj="$1" id="$2" ver="$3"
+    [[ -n "$ver" ]] || { err "could not read $id version from $PROJECT"; exit 1; }
+    [[ -f "$LOCAL_NUGET/${id}.${ver}.nupkg" ]] && return 0
+    [[ -f "$csproj" ]] || { err "need $id $ver, but $LOCAL_NUGET lacks it and the sibling source is missing:"; err "  $csproj"; err "clone the full tks workspace (umbrella checkout) so kgsm-lib + kgsm-monitor are present."; exit 1; }
+    log "packing $id $ver → $LOCAL_NUGET (from $(basename "$(dirname "$csproj")"))"
+    dotnet pack "$csproj" -c Release -o "$LOCAL_NUGET"
+}
+mkdir -p "$LOCAL_NUGET"
+ensure_pkg "$WORKSPACE/kgsm-lib/kgsm-lib/kgsm-lib.csproj"                            TheKrystalShip.KGSM.Lib               "$(pkg_ver TheKrystalShip.KGSM.Lib)"
+ensure_pkg "$WORKSPACE/kgsm-monitor/src/Monitor.Contracts/Monitor.Contracts.csproj" TheKrystalShip.KGSM.Monitor.Contracts "$(pkg_ver TheKrystalShip.KGSM.Monitor.Contracts)"
+
+log "publishing framework-dependent single-file (${RID}) → ${PUBLISH_DIR}"
+rm -rf "$PUBLISH_DIR"
+dotnet publish "$PROJECT" -c Release -r "$RID" --no-self-contained -o "$PUBLISH_DIR"
 
 # ── 2. Privileged prep (no service disruption yet) ────────────────────────────
 # Ensure the install dir exists and is owned by the service user (so the swap below needs

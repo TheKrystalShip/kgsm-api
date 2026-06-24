@@ -77,7 +77,9 @@ public sealed class ApiOptions
     /// <summary>
     /// Path to the kgsm event socket. A <em>registration formality</em> for M1·b — kgsm-lib's
     /// <c>IInstanceService</c> is process-based (it shells <see cref="KgsmPath"/>); only the
-    /// event consumer (M5) opens this socket. Default: <c>/usr/share/kgsm/kgsm.sock</c>.
+    /// event consumer (M5) opens this socket. Default: <c>/run/kgsm-api/kgsm-events.sock</c>
+    /// (the API's own systemd <c>RuntimeDirectory=kgsm-api</c> — a DEDICATED path the listener
+    /// owns, matching the deployed unit).
     /// </summary>
     public required string KgsmSocketPath { get; init; }
 
@@ -308,14 +310,14 @@ public sealed class ApiOptions
             // For socket/url defaults we distinguish "unset" (use the default) from
             // "set to empty" (deliberately mark the capability absent): a present-but-empty
             // value stays empty, an absent key falls back to the standard path.
-            MonitorSocketPath = Defaulted(configuration["KGSM_API_MONITOR_SOCKET"], "/run/kgsm-monitor.sock"),
+            MonitorSocketPath = Defaulted(configuration["KGSM_API_MONITOR_SOCKET"], "/run/kgsm-monitor/metrics.sock"),
             WatchdogSocketPath = Defaulted(configuration["KGSM_API_WATCHDOG_SOCKET"], "/run/kgsm-watchdog/control.sock"),
             AssistantBaseUrl = Defaulted(configuration["KGSM_API_ASSISTANT_URL"], ""),
             AssistantRelaySecret = Defaulted(configuration["KGSM_API_ASSISTANT_RELAY_SECRET"], ""),
             // Opt-in (blank = absent): the firewall authority is a separate optional install.
             FirewallSocketPath = Defaulted(configuration["KGSM_API_FIREWALL_SOCKET"], ""),
             KgsmPath = Defaulted(configuration["KGSM_API_KGSM_PATH"], "/usr/bin/kgsm"),
-            KgsmSocketPath = Defaulted(configuration["KGSM_API_KGSM_SOCKET"], "/usr/share/kgsm/kgsm.sock"),
+            KgsmSocketPath = Defaulted(configuration["KGSM_API_KGSM_SOCKET"], "/run/kgsm-api/kgsm-events.sock"),
 
             // Realtime pump cadences (M2). The domain (instance) poll is relaxed by default (5s) — it
             // spawns kgsm.sh and the roster changes rarely (the SPA also has a manual refresh); floored at

@@ -41,7 +41,7 @@
 #         SMOKE_PORT=9001 scripts/smoke.sh
 #         SMOKE_SKIP_BUILD=1 scripts/smoke.sh   # reuse the existing Release build
 #         SMOKE_KGSM_PATH=/path/to/kgsm.sh scripts/smoke.sh   # engine on another host
-#         SMOKE_MONITOR_SOCKET=/run/kgsm-monitor.sock scripts/smoke.sh   # live monitor in Phase A
+#         SMOKE_MONITOR_SOCKET=/run/kgsm-monitor/metrics.sock scripts/smoke.sh   # live monitor in Phase A
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -60,7 +60,7 @@ WD_SOCK="${SMOKE_WATCHDOG_SOCKET:-}"                                    # empty 
 # GET /servers reads a real roster. Override with SMOKE_KGSM_PATH on another host.
 KGSM_PATH="${SMOKE_KGSM_PATH:-/home/heisen/tks/kgsm/kgsm.sh}"
 # M5 event socket: a DEDICATED temp path the audit consumer binds — NEVER the shared default
-# (/usr/share/kgsm/kgsm.sock), since the listener deletes any file at its path before binding and
+# (/run/kgsm-api/kgsm-events.sock), since the listener deletes any file at its path before binding and
 # could clobber another consumer's live socket. Smoke fires no kgsm events, so this just proves the
 # consumer wires up without touching anything real.
 KGSM_SOCK="${SMOKE_KGSM_SOCKET:-/tmp/kgsm-api-smoke-events.sock}"; rm -f "$KGSM_SOCK"

@@ -206,7 +206,7 @@ exactly one correct access path:
   and the audit row M5 writes from it — carries who/through-what; the API never writes an audit row for
   its own command (kgsm owns `server.*` → no double-write, see §5 below).
 - **Monitor** (host + per-instance metrics) → **scrape its unix socket**
-  (`/run/kgsm-monitor.sock`, `GET /metrics`) directly — that's the monitor's neutral public
+  (`/run/kgsm-monitor/metrics.sock`, `GET /metrics`) directly — that's the monitor's neutral public
   output; reuse the watchdog client's `SocketsHttpHandler.ConnectCallback` pattern (done in
   `Services/Leaves/MonitorClient.cs`, M1·a). M2 added `CheckHealthAsync` (`GET /health`) as the
   liveness signal, **separate from the data scrape** (a warming monitor is operational with no

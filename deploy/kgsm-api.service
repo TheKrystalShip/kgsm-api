@@ -13,8 +13,10 @@ Type=simple
 User=heisen
 Group=heisen
 
-# Self-contained, single-folder publish — NO .NET runtime dependency on the host:
-#   dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --self-contained -p:PublishReadyToRun=true
+# Framework-dependent single-file publish — REQUIRES the .NET 10 + ASP.NET Core shared runtime
+# on the host (deploy/deploy.sh checks for it). Smaller artifact than self-contained; the binary,
+# appsettings.json and libe_sqlite3.so are published into /opt/kgsm-api by the deploy script:
+#   dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --no-self-contained
 ExecStart=/opt/kgsm-api/kgsm-api
 # REQUIRED: the .NET content root defaults to the process working dir. Without this it is "/"
 # and appsettings.json / appsettings.Development.json (shipped next to the binary) are NOT
