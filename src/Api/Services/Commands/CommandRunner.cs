@@ -97,6 +97,8 @@ public sealed class CommandRunner(
         try
         {
             Publish(registry.Update(job with { State = JobState.Running }));
+            logger.LogInformation("command job {JobId} running: {Verb} {ServerId}",
+                job.Id, job.Verb, job.ServerId);
 
             // Own scope — the request scope is long gone; the kgsm-lib services are transient/process-based
             // (lifecycle/install) or conditionally-registered (firewall), so resolve them here, never capture them.
@@ -130,6 +132,17 @@ public sealed class CommandRunner(
                 Error = error,
             });
             Publish(settled);
+
+            // The job outcome — Information on success, Warning on a (non-throwing) failure carrying
+            // the engine's real error detail. This is the formerly-silent path: a kgsm/watchdog refusal
+            // returns a failed KgsmResult (ok=false) rather than throwing, so without this it surfaced
+            // only as a jobs-WS patch with nothing in the service log.
+            if (ok)
+                logger.LogInformation("command job {JobId} succeeded: {Verb} {ServerId}",
+                    job.Id, job.Verb, job.ServerId);
+            else
+                logger.LogWarning("command job {JobId} FAILED: {Verb} {ServerId}: {Error}",
+                    job.Id, job.Verb, job.ServerId, error ?? "(no detail)");
         }
 
         // Verify: re-read authoritative state and reflect it. Best-effort — if the read fails, the next

@@ -26,7 +26,8 @@ namespace TheKrystalShip.Api.Controllers;
 public sealed class ServersController(
     ServerAggregator aggregator,
     JobRegistry jobs,
-    CommandRunner runner) : ControllerBase
+    CommandRunner runner,
+    ILogger<ServersController> logger) : ControllerBase
 {
     [HttpGet]
     public async Task<IReadOnlyList<Server>> GetAll(CancellationToken ct) =>
@@ -107,6 +108,11 @@ public sealed class ServersController(
 
         // actor = the bearer identity (discord:<username>), or null → kgsm's own OS-user fallback.
         string? actor = AuditPrincipal.ActorString(User);
+        // Log the accepted command so the action is visible in the service log even before the engine
+        // echo lands an audit row — the job outcome (success/failure) is logged by the CommandRunner.
+        logger.LogInformation(
+            "command accepted: {Verb} {ServerId} job={JobId} (actor={Actor}, origin={Origin})",
+            verb, id, job.Id, actor ?? "(none)", origin);
         runner.Start(job, actor, origin);
         return StatusCode(StatusCodes.Status202Accepted, new CommandAccepted(job));
     }
