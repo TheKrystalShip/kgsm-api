@@ -66,8 +66,10 @@
          shell kgsm.sh / open the firewall socket directly. 1.24.0 adds the instance_input_sent
          event (InstanceInputSentData: InstanceName + verbatim Command) the audit consumer maps to
          console.input, and the (actor, origin) provenance params on IInstanceService.SendInput so the
-         console-input command path stamps who/through-what onto that echoed event (no direct write). -->
-    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.24.0" />
+         console-input command path stamps who/through-what onto that echoed event (no direct write).
+         1.25.0 fixes a pre-existing ProcessRunner bug where args with spaces (a multi-word console
+         command) were mangled by a space-joined Arguments string — now ArgumentList (verbatim argv). -->
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.25.0" />
 
     <!-- The shared GET /metrics wire contract (Snapshot graph + source-gen camelCase
          JSON), built in kgsm-monitor. We deserialize the monitor scrape into these exact
