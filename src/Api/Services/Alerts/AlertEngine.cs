@@ -264,11 +264,27 @@ public sealed class AlertEngine : BackgroundService
     private Alert BuildFiring(string serverId, Observed obs, DateTimeOffset raisedAt)
     {
         string severity = obs.Escalated ? AlertSeverity.Danger : AlertSeverity.Warn;
-        string title = obs.Escalated ? $"{serverId} keeps crashing" : $"{serverId} crashed";
-        string detail = obs.Escalated
-            ? $"Supervisor gave up after {obs.Attempts} restart(s)."
-                + (string.IsNullOrEmpty(obs.Reason) ? "" : $" Last: {obs.Reason}")
-            : (string.IsNullOrEmpty(obs.Reason) ? "Auto-restarting." : obs.Reason);
+
+        // Escalated = the supervisor is in its terminal "gave up" state. Distinguish a start that NEVER
+        // succeeded (0 restarts — it never ran, so it never "crashed") from a crash-loop whose retries the
+        // supervisor exhausted. Framing a failed first start as "keeps crashing … after 0 restart(s)" is the
+        // self-contradictory wording we refuse to ship: it never crashed and it never restarted.
+        string title;
+        string detail;
+        if (obs.Escalated)
+        {
+            bool neverStarted = obs.Attempts == 0;
+            title = neverStarted ? $"{serverId} failed to start" : $"{serverId} keeps crashing";
+            string lead = neverStarted
+                ? "Supervisor could not start it."
+                : $"Supervisor gave up after {obs.Attempts} restart(s).";
+            detail = lead + (string.IsNullOrEmpty(obs.Reason) ? "" : $" Last: {obs.Reason}");
+        }
+        else
+        {
+            title = $"{serverId} crashed";
+            detail = string.IsNullOrEmpty(obs.Reason) ? "Auto-restarting." : obs.Reason;
+        }
 
         return new Alert(
             Id: AlertId(serverId),

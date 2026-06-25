@@ -81,6 +81,46 @@ public sealed class AlertEngineTests
     }
 
     [Fact]
+    public void Failed_WithZeroRestarts_IsAStartFailure_NotACrashLoop()
+    {
+        AlertEngine engine = Engine();
+
+        // An instance whose initial spawn failed: Phase=failed, 0 restarts. It never ran, so it never
+        // "crashed" and the supervisor never "gave up after N restart(s)". Still escalated/danger (terminal),
+        // but the wording must be honest — and the watchdog's now name-safe reason carries through with no gap.
+        engine.Tick(
+            [Failed("does-not-exist", restarts: 0,
+                reason: "start failed: instance descriptor is empty (kgsm returned no usable info)")],
+            T0);
+
+        Alert a = Assert.Single(engine.Firing);
+        Assert.Equal(AlertSeverity.Danger, a.Severity);
+        Assert.True(a.Escalated);
+        Assert.Equal(0, a.Attempts);
+        Assert.Equal("does-not-exist failed to start", a.Title);
+        Assert.DoesNotContain("keeps crashing", a.Title);
+        Assert.DoesNotContain("0 restart(s)", a.Detail);          // the self-contradictory phrasing is gone
+        Assert.Contains("could not start", a.Detail);
+        Assert.Contains("instance descriptor is empty", a.Detail); // honest reason carried through verbatim
+        Assert.DoesNotContain(": :", a.Detail);                    // no empty interpolated field
+    }
+
+    [Fact]
+    public void Failed_WithRestarts_StillReadsAsACrashLoopGiveUp()
+    {
+        AlertEngine engine = Engine();
+
+        // The genuine crash-loop give-up keeps its wording (and stays danger/escalated).
+        engine.Tick([Failed("mc", restarts: 5, reason: "crashed (exit 1)")], T0);
+
+        Alert a = Assert.Single(engine.Firing);
+        Assert.Equal(AlertSeverity.Danger, a.Severity);
+        Assert.True(a.Escalated);
+        Assert.Equal("mc keeps crashing", a.Title);
+        Assert.Equal("Supervisor gave up after 5 restart(s). Last: crashed (exit 1)", a.Detail);
+    }
+
+    [Fact]
     public void Clear_DoesNotResolveBeforeProbation_ThenResolvesWithBridgeActionId()
     {
         AlertEngine engine = Engine();
