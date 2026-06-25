@@ -63,8 +63,11 @@
          the library catalog projects it directly — no port-string parsing anywhere. 1.23.0 adds
          BlueprintMetadata.RawgSlug (the RAWG cover/metadata lookup hint kgsm curates on a blueprint),
          which the library catalog's RAWG hydration (cover/hero/description/genres/tags) keys off. Never
-         shell kgsm.sh / open the firewall socket directly. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.23.0" />
+         shell kgsm.sh / open the firewall socket directly. 1.24.0 adds the instance_input_sent
+         event (InstanceInputSentData: InstanceName + verbatim Command) the audit consumer maps to
+         console.input, and the (actor, origin) provenance params on IInstanceService.SendInput so the
+         console-input command path stamps who/through-what onto that echoed event (no direct write). -->
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.24.0" />
 
     <!-- The shared GET /metrics wire contract (Snapshot graph + source-gen camelCase
          JSON), built in kgsm-monitor. We deserialize the monitor scrape into these exact

@@ -476,4 +476,62 @@ public sealed class AuditMappingTests
         Assert.False(w.Meta!.ContainsKey("ports"));
         Assert.Null(w.Origin);
     }
+
+    [Fact]
+    public void FromInputSentEvent_IsInfoConsoleInput_FullCommandInMeta_ProvenanceRoundTrip()
+    {
+        // The POST /console path stamps actor+origin, so the echo carries them: discord:haru → user/haru/
+        // discord (the load-bearing round-trip), origin "ui" preserved. The FULL command rides in meta.
+        var data = new InstanceInputSentData
+        {
+            InstanceName = "factorio-01",
+            Actor = "discord:haru",
+            Origin = "ui",
+            Command = "/ban griefer123",
+        };
+
+        AuditWrite w = AuditMapping.FromInputSentEvent(data, hostId: "primary");
+
+        Assert.Equal(AuditAction.ConsoleInput, w.Action);
+        Assert.Equal(AuditSeverity.Info, w.Severity);
+        Assert.Equal("ui", w.Origin);
+        Assert.Equal(ActorKind.User, w.Actor.Kind);
+        Assert.Equal("haru", w.Actor.Name);
+        Assert.Equal(ActorProvider.Discord, w.Actor.Provider);
+        Assert.Equal("factorio-01", w.ServerId);
+        Assert.Equal(AuditTargetKind.Server, w.Target!.Kind);
+        Assert.Equal("factorio-01", w.Target.Id);
+        Assert.Equal("ran '/ban griefer123' on factorio-01", w.Summary);
+        Assert.Equal("/ban griefer123", w.Meta!["command"]);          // FULL command, unlike config.set's key-only
+    }
+
+    [Fact]
+    public void FromInputSentEvent_LongCommand_SummaryTruncated_MetaKeepsFull()
+    {
+        // A long command: the one-line summary is truncated (…) but meta carries the verbatim full text —
+        // the trail never loses what was run.
+        string full = new string('x', 200);
+        var data = new InstanceInputSentData { InstanceName = "valheim", Command = full };
+
+        AuditWrite w = AuditMapping.FromInputSentEvent(data, hostId: "primary");
+
+        Assert.Contains("…", w.Summary);
+        Assert.True(w.Summary.Length < full.Length);
+        Assert.Equal(full, w.Meta!["command"]);                       // full, untruncated
+        Assert.Null(w.Origin);                                        // none declared → null, never fabricated
+    }
+
+    [Fact]
+    public void FromInputSentEvent_BlankCommand_CommandLessSummary_NullMeta()
+    {
+        // Defensive — the event guarantees a non-empty command, but a blank degrades to a command-less
+        // summary + null meta, never a fabricated placeholder.
+        var data = new InstanceInputSentData { InstanceName = "valheim", Command = "" };
+
+        AuditWrite w = AuditMapping.FromInputSentEvent(data, hostId: "primary");
+
+        Assert.Equal(AuditAction.ConsoleInput, w.Action);
+        Assert.Equal("sent a console command to valheim", w.Summary);
+        Assert.Null(w.Meta);
+    }
 }

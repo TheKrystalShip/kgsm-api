@@ -272,7 +272,7 @@ public sealed class InstallUninstallTests
         public KgsmResult CreateBackup(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult RestoreBackup(string instanceName, string backupName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult Save(string instanceName) => throw new NotImplementedException();
-        public KgsmResult SendInput(string instanceName, string command) => throw new NotImplementedException();
+        public KgsmResult SendInput(string instanceName, string command, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult FindConfigPath(string instanceName) => throw new NotImplementedException();
         public KgsmResult GetInstanceConfigValue(string instanceName, string key) => throw new NotImplementedException();
         public KgsmResult SetInstanceConfigValue(string instanceName, string key, string value, string? actor = null, string? origin = null) => throw new NotImplementedException();

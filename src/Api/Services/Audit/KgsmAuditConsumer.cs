@@ -153,6 +153,13 @@ public sealed class KgsmAuditConsumer(
         // KEY ONLY in meta (the event never carries the value — secret hygiene). Pure mapper, socket-free.
         events.RegisterHandler<InstanceConfigChangedData>(d =>
             audit.AppendAsync(AuditMapping.FromConfigChangedEvent(d, options.HostId)));
+
+        // console.input — an arbitrary console command sent to a running native instance (kgsm-lib 1.24.0).
+        // The POST /servers/{id}/console path stamps actor+origin onto SendInput, so this echo carries
+        // provenance; engine-owned → no double-write (plain AppendAsync — not a recovery action). Unlike
+        // config.set, the FULL command text rides in meta (recording what was run — see AuditAction.ConsoleInput).
+        events.RegisterHandler<InstanceInputSentData>(d =>
+            audit.AppendAsync(AuditMapping.FromInputSentEvent(d, options.HostId)));
     }
 
     private Task WriteServer(

@@ -260,6 +260,37 @@ public static class AuditMapping
             Meta: string.IsNullOrEmpty(key) ? null : new Dictionary<string, string> { ["key"] = key });
     }
 
+    /// <summary>
+    /// Map a kgsm <c>instance_input_sent</c> event (kgsm-lib 1.24.0) to a <c>console.input</c> row at
+    /// <see cref="AuditSeverity.Info"/>. The POST <c>/servers/{id}/console</c> path stamps actor+origin
+    /// onto <c>SendInput</c>, so this echo carries provenance off the envelope (handled unchanged by
+    /// <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/>) — engine-owned, no double-write. UNLIKE
+    /// <see cref="FromConfigChangedEvent"/> (key only), the FULL command text rides in <c>meta.command</c>
+    /// and a truncated form in the summary, on purpose: the trail records exactly what an operator ran
+    /// (console commands are admin-level). A blank command degrades to a command-less summary + null meta
+    /// (defensive — the event guarantees a non-empty command), never a fabricated placeholder.
+    /// </summary>
+    public static AuditWrite FromInputSentEvent(InstanceInputSentData d, string hostId)
+    {
+        string instance = Instance(d);
+        string command = string.IsNullOrEmpty(d.Command) ? "" : d.Command;
+        string shown = command.Length > 80 ? command[..79] + "…" : command;
+        return new AuditWrite(
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
+            Action: AuditAction.ConsoleInput,
+            Severity: AuditSeverity.Info,
+            Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
+            ServerId: instance,
+            HostId: hostId,
+            Summary: string.IsNullOrEmpty(command)
+                ? $"sent a console command to {Display(instance)}"
+                : $"ran '{shown}' on {Display(instance)}",
+            // FULL command (untruncated) — the deliberate divergence from config.set's key-only rule.
+            Meta: string.IsNullOrEmpty(command) ? null : new Dictionary<string, string> { ["command"] = command });
+    }
+
     // Join/left differ only in action + summary verb — build the row once. The summary names the player
     // by display name, falling back to the stable id, then a generic label (never fabricates an identity;
     // at-least-one-non-null is the emitting shim's guarantee, this is defensive).

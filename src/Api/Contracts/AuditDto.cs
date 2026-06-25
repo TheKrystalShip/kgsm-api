@@ -107,6 +107,14 @@ public static class AuditAction
     // path already stamps actor+origin onto SetInstanceConfigValue).
     public const string ConfigSet = "config.set";
 
+    // console.input — sourced from instance_input_sent (kgsm-lib 1.24.0): an arbitrary console command was
+    // delivered to a running NATIVE instance. Engine-owned echo (no double-write — the POST /servers/{id}/
+    // console path stamps actor+origin onto SendInput so the echoed event carries provenance). Unlike
+    // config.set's key-only rule, the FULL command text rides in meta on purpose — the trail's value is
+    // recording exactly what an operator ran (console commands are admin-level: ban/kick/op/…); a command
+    // can contain a secret, accepted because the surface is operator-gated.
+    public const string ConsoleInput = "console.input";
+
     // file.write — API-internal (the file browser saves an instance file; kgsm runs nothing and emits no
     // event, so this is written DIRECTLY, the auth.* case — no echo, no double-write risk). meta carries
     // the path/size/sha256 ONLY, NEVER the content (configs hold rcon passwords/tokens/webhook URLs).
