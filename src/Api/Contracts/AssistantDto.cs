@@ -10,4 +10,9 @@ namespace TheKrystalShip.Api.Contracts;
 public sealed record AssistantTurnRequest(
     string? Prompt,
     bool? Think = null,
-    IReadOnlyList<string>? Tools = null);
+    IReadOnlyList<string>? Tools = null,
+    // The per-turn "let the assistant act" toggle from the SPA chat. INTENT only — the API folds it
+    // with the caller's verified tier (operator+) and forwards a single trusted decision to the
+    // assistant (X-Relay-Can-Act). A viewer setting this true cannot escalate: the tier gate zeroes it,
+    // and command execution itself is still the operator-gated M3 path (fork (a)).
+    bool? Actions = null);

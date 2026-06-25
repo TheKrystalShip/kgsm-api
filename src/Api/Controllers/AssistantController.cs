@@ -62,16 +62,25 @@ public sealed class AssistantController(
 
         // Forward the verified caller's Discord identity (NEVER client-supplied): the assistant builds
         // its principal from it and keys per-user memory on web:<userId>.
-        DiscordIdentity? identity = User.Identity is ClaimsIdentity ci ? SessionClaims.ReadIdentity(ci) : null;
+        ClaimsIdentity? ci = User.Identity as ClaimsIdentity;
+        DiscordIdentity? identity = ci is not null ? SessionClaims.ReadIdentity(ci) : null;
         if (identity is null)
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no verified identity");
+
+        // Resolve whether THIS turn may perform actions, the AUTHORITY decision the API owns: the
+        // user's per-turn toggle (intent) AND their verified tier being operator+ (only operators run
+        // commands — same gate as the M3 command path). We forward a single trusted boolean to the
+        // assistant (X-Relay-Can-Act); a viewer who sets actions:true is zeroed here, and even a
+        // proposed command can only execute through the operator-gated M3 path (fork (a)).
+        bool canAct = (body.Actions ?? false)
+            && ci is not null && SessionClaims.ReadTier(ci) >= AuthTier.Operator;
 
         var turnBody = new { prompt = body!.Prompt, think = body.Think, tools = body.Tools };
 
         HttpResponseMessage? upstream;
         try
         {
-            upstream = await assistant.OpenTurnStreamAsync(turnBody, identity.UserId, identity.Display, ct);
+            upstream = await assistant.OpenTurnStreamAsync(turnBody, identity.UserId, identity.Display, canAct, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

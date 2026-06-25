@@ -52,8 +52,10 @@ public sealed class AssistantClient : HttpClient
     /// <summary>
     /// Opens the assistant's <c>POST /turn</c> as an SSE stream on a verified end-user's behalf (M7):
     /// posts <paramref name="turnBody"/> with <c>Accept: text/event-stream</c> and the trusted-relay
-    /// headers — the shared <c>X-Relay-Secret</c> plus the forwarded Discord identity (<c>X-Relay-User</c>
-    /// / <c>X-Relay-User-Name</c>) — and returns the upstream response with <em>headers read only</em>, so
+    /// headers — the shared <c>X-Relay-Secret</c>, the forwarded Discord identity (<c>X-Relay-User</c>
+    /// / <c>X-Relay-User-Name</c>), and the API's per-turn action-authority decision
+    /// (<c>X-Relay-Can-Act</c>, from <paramref name="canAct"/>) — and returns the upstream response
+    /// with <em>headers read only</em>, so
     /// the caller can relay the body frames verbatim. The caller <strong>owns disposal</strong>: disposing
     /// the response aborts the upstream request, which makes the assistant abort generation. Returns
     /// <see langword="null"/> when the assistant isn't provisioned on this host.
@@ -65,7 +67,7 @@ public sealed class AssistantClient : HttpClient
     /// <paramref name="ct"/> and tears the whole chain down.
     /// </remarks>
     public async Task<HttpResponseMessage?> OpenTurnStreamAsync(
-        object turnBody, string relayUserId, string relayDisplayName, CancellationToken ct)
+        object turnBody, string relayUserId, string relayDisplayName, bool canAct, CancellationToken ct)
     {
         if (!IsProvisioned)
             return null;
@@ -77,6 +79,9 @@ public sealed class AssistantClient : HttpClient
         request.Headers.Accept.ParseAdd("text/event-stream");
         if (!string.IsNullOrEmpty(_relaySecret))
             request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
+        // The API's action-authority decision for this turn (the user's toggle ∧ operator+ tier). The
+        // assistant trusts it ONLY because X-Relay-Secret matched; "false" (or absent) never grants.
+        request.Headers.TryAddWithoutValidation("X-Relay-Can-Act", canAct ? "true" : "false");
         // The user id is a Discord snowflake the API set at login (not free text); the display name is a
         // user-controlled Discord value crossing a trust boundary, so strip control chars (CR/LF) — defense
         // in depth against header injection, and it also avoids a weird display name throwing on send.

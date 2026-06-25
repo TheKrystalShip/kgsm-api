@@ -1206,6 +1206,8 @@ class H(BaseHTTPRequestHandler):
         if self.headers.get("X-Relay-Secret") != SECRET:
             self.send_response(401); self.end_headers(); return
         user = self.headers.get("X-Relay-User", "")
+        # Echo the API's action-authority decision so the smoke can assert toggle ∧ tier folding.
+        canact = self.headers.get("X-Relay-Can-Act", "")
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
@@ -1213,7 +1215,7 @@ class H(BaseHTTPRequestHandler):
         # A Phase-2 card-bearing tool.result: the `result` card is an "unknown field" to the relay,
         # so it proves the byte-copy relay (CopyToAsync) passes a structured card through untouched.
         self.wfile.write(b'event: tool.result\ndata: {"type":"tool.result","id":"tc_0","tool":"run_health_check","summary":"factorio: passed with warnings.","result":{"tool":"run_health_check","confidence":"confirmed","subject":{"resource":"server","id":"factorio"},"data":{"overall":"warn","checks":[{"name":"updates","state":"warn","severity":"update","detail":"Update available."}],"passed":1,"total":2,"skipped":0}}}\n\n')
-        self.wfile.write(('event: done\ndata: {"type":"done","relayUser":"%s"}\n\n' % user).encode())
+        self.wfile.write(('event: done\ndata: {"type":"done","relayUser":"%s","canAct":"%s"}\n\n' % (user, canact)).encode())
 
 HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
 PYEOF
@@ -1236,6 +1238,18 @@ if start_api_assistant "$ASSIST_URL" "$REL_SECRET"; then
     else
       bad "M7 stub relay (code=$CODE body=$BODY; stub log: $(cat /tmp/kgsm-api-smoke-stub-assistant.log 2>/dev/null))"
     fi
+
+    # X-Relay-Can-Act folding: the toggle (body.actions) ∧ the caller's tier (admin under auth-disabled).
+    # No actions flag ⇒ toggle off ⇒ canAct=false even for an admin (intent gates).
+    req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
+    grep -q '"canAct":"false"' <<<"$BODY" \
+      && ok "relay action authority: actions omitted → X-Relay-Can-Act=false (the toggle gates intent)" \
+      || bad "M7 canAct (expected false; body=$BODY)"
+    # actions:true + admin tier (auth-disabled synthetic admin) ⇒ canAct=true.
+    req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi","actions":true}'
+    grep -q '"canAct":"true"' <<<"$BODY" \
+      && ok "relay action authority: actions:true + operator+ tier → X-Relay-Can-Act=true (toggle ∧ tier folded server-side)" \
+      || bad "M7 canAct (expected true; body=$BODY)"
   else
     bad "M7 stub relay: assistant capability never went operational (api log: $(tail -5 /tmp/kgsm-api-smoke-m7.log 2>/dev/null))"
   fi
