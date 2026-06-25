@@ -22,11 +22,38 @@
          artifact is: the `kgsm-api` binary + appsettings.json + a couple of .so files. -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
+
+    <!-- Memory footprint: Workstation GC, NOT the Web SDK's default Server GC. On a many-core
+         host (16 here) Server GC allocates one heap + one GC thread PER CORE, sizes those heaps
+         generously, and retains freed segments as a standby cache rather than returning them to
+         the OS — so this idle, low-throughput single-host control-panel API crept to ~230 MB and
+         never gave it back. Workstation GC = one heap that releases at idle; measured ~50 MB RSS
+         / ~18 MB PSS lower AND flat (no creep), with no throughput cost at this RPS (the box
+         serves one SPA + a few WebSockets + the background poll loops). This is NOT the AOT
+         debate (we are deliberately JIT — CLAUDE.md §stack); it is the orthogonal, unambiguous
+         call that a memory-sensitive single-host service wants Workstation GC. The two GC knobs
+         with no MSBuild property — System.GC.ConserveMemory (aggressive decommit/compaction) and
+         System.GC.RetainVM=false (hand freed pages back) — live in runtimeconfig.template.json
+         next to this file; the SDK auto-merges it into the generated runtimeconfig.json at
+         build/publish (and PublishSingleFile embeds that in the binary, so it survives a deploy).
+         These three together match the host env file (DOTNET_gcServer=0 / GCConserveMemory=9 /
+         GCRetainVM=0) the change was live-validated under on 2026-06-26. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
   </PropertyGroup>
 
   <!-- The test project drives the AlertEngine's internal Tick/timing seam directly (M6·a). -->
   <ItemGroup>
     <InternalsVisibleTo Include="Api.Tests" />
+  </ItemGroup>
+
+  <!-- runtimeconfig.template.json is a BUILD INPUT (the SDK merges it into the generated
+       kgsm-api.runtimeconfig.json by filename convention, independent of any Content item), so
+       it must NOT ship in the publish tree. The Web SDK globs **/*.json into Content by default,
+       which would copy it to /opt/kgsm-api on deploy — drop it so the artifact stays exactly the
+       binary + appsettings.json + the .so. Removing it from Content does not affect the merge. -->
+  <ItemGroup>
+    <Content Remove="runtimeconfig.template.json" />
+    <None Include="runtimeconfig.template.json" />
   </ItemGroup>
 
   <!-- Scoped NuGet-audit suppression (NOT a blanket NuGetAudit=off): GHSA-2m69-gcr7-jv3q is an
