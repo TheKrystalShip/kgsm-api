@@ -133,7 +133,12 @@ Still owed: container `startedAt` *populated* path — both host instances are n
 - [ ] **10. Metrics history** (PerformanceTab graphs)
   - Verified: the monitor serves **latest point-in-time only** (no ring/persistence). But per-server `metrics.tick` WS **already exists**. Cheapest: FE session-local ring off the live tick (no cold history). A real history store cuts against "domain live-scraped, never stored" → needs sign-off. **Recommend the FE ring.**
 - [ ] **11. Global `/settings`** — no preference store anywhere (`/me` PATCH profile half also deferred). New API store.
-- [ ] **12. File browser** — no file read/write API in kgsm or kgsm-lib. Security-sensitive; lowest priority.
+- [~] **12. File browser + editor** — `GET /servers/{id}/files?path=` (lazy dir listing) · `GET|PUT /servers/{id}/files/content?path=` (read / save existing). **PLANNED — design agreed 2026-06-22; spec at `docs/file-browser-plan.md`** (not built).
+  - Decision: **API-side, NO upstream change.** The jail root is already on kgsm-lib's `Instance.WorkingDir` (verified on `factorio-test`: `working_dir` is the umbrella, `install/saves/logs/backups/temp` are children, a live `.sock` sits inside) — the only domain question goes through the chokepoint; file *content* is host I/O, not kgsm's domain (same shape as the monitor reading `/proc`). New kgsm-api `InstanceFileService`; **do not** touch kgsm-lib's `IFileService` (that's the management-file generator).
+  - Locked v1 scope: list (lazy, one dir/req) · read text · save **existing** text. Deferred: create/delete/rename/upload, binary download, search/pagination.
+  - Security: realpath jail + **symlink-target containment** (game dirs are full of symlinks), special-files not-openable (`lstat`), binary/size gate **at open not list** (listing is `lstat`-only, no content reads), atomic temp+rename write, `etag=sha256` optimistic concurrency (`412` on mismatch), **direct `file.write` audit row (path/size/hash, never content)** — no double-write. Large dirs (Project-Zomboid map chunks): **cap + honest truncation signal** (`KGSM_API_FILES_MAX_ENTRIES` default 200), never a silent refusal.
+  - Auth: read **and** write are **Operator** (not viewer — configs hold secrets); FE already gates the Files tab on `SERVER_OPERATE`.
+  - FE delta: raw-text content + client-side highlighting (drop the fixture `{c,k}` line model), lazy fetch-on-expand (drop the recursive fixture), truncation banner, wire Save (`PUT`+etag) / Reset, `sizeBytes` formatting.
 
 ---
 
