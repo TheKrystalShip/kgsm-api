@@ -56,7 +56,9 @@ public sealed class AssistantClient : HttpClient
     /// / <c>X-Relay-User-Name</c>), and the API's per-turn action-authority decision
     /// (<c>X-Relay-Can-Act</c>, from <paramref name="canAct"/>, the authority to PROPOSE; and
     /// <c>X-Relay-Auto-Act</c>, from <paramref name="autoAct"/>, the admin-only authority to AUTO-RUN
-    /// lifecycle commands without confirmation) — and returns the upstream response
+    /// lifecycle commands without confirmation), and the optional per-chat <c>X-Relay-Conversation-Id</c>
+    /// (from <paramref name="conversationId"/>) that sub-scopes the user's assistant memory so each SPA
+    /// chat is a fresh context window — and returns the upstream response
     /// with <em>headers read only</em>, so
     /// the caller can relay the body frames verbatim. The caller <strong>owns disposal</strong>: disposing
     /// the response aborts the upstream request, which makes the assistant abort generation. Returns
@@ -69,7 +71,8 @@ public sealed class AssistantClient : HttpClient
     /// <paramref name="ct"/> and tears the whole chain down.
     /// </remarks>
     public async Task<HttpResponseMessage?> OpenTurnStreamAsync(
-        object turnBody, string relayUserId, string relayDisplayName, bool canAct, bool autoAct, CancellationToken ct)
+        object turnBody, string relayUserId, string relayDisplayName, bool canAct, bool autoAct,
+        string? conversationId, CancellationToken ct)
     {
         if (!IsProvisioned)
             return null;
@@ -95,6 +98,14 @@ public sealed class AssistantClient : HttpClient
         string displayName = HeaderSafe(relayDisplayName);
         if (!string.IsNullOrEmpty(displayName))
             request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
+        // The per-chat conversation id — a SUB-scope of THIS user's assistant memory
+        // (web:<userId>:<id>), so a "new chat" in the SPA is a fresh context window. NOT an identity:
+        // the assistant always prefixes the verified X-Relay-User, so this can only partition the
+        // caller's own history. Already bounded to [A-Za-z0-9_-] by the controller; omitted when null ⇒
+        // the assistant keeps the bare per-user conversation (the prior single-context behaviour).
+        string conv = HeaderSafe(conversationId ?? string.Empty);
+        if (!string.IsNullOrEmpty(conv))
+            request.Headers.TryAddWithoutValidation("X-Relay-Conversation-Id", conv);
 
         return await SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
     }

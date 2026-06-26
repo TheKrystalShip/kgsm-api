@@ -1206,8 +1206,13 @@ class H(BaseHTTPRequestHandler):
         if self.headers.get("X-Relay-Secret") != SECRET:
             self.send_response(401); self.end_headers(); return
         user = self.headers.get("X-Relay-User", "")
-        # Echo the API's action-authority decision so the smoke can assert toggle ∧ tier folding.
+        # Echo BOTH authority decisions so the smoke can assert the split: canAct (PROPOSE, operator+
+        # tier, toggle-INDEPENDENT) vs autoAct (AUTO-RUN, admin tier ∧ the per-turn actions toggle).
         canact = self.headers.get("X-Relay-Can-Act", "")
+        autoact = self.headers.get("X-Relay-Auto-Act", "")
+        # Echo the per-chat conversation id so the smoke can assert the API forwards it (the fresh-
+        # context-window plumbing: body.conversationId -> sanitise -> X-Relay-Conversation-Id).
+        conv = self.headers.get("X-Relay-Conversation-Id", "")
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
@@ -1215,7 +1220,7 @@ class H(BaseHTTPRequestHandler):
         # A Phase-2 card-bearing tool.result: the `result` card is an "unknown field" to the relay,
         # so it proves the byte-copy relay (CopyToAsync) passes a structured card through untouched.
         self.wfile.write(b'event: tool.result\ndata: {"type":"tool.result","id":"tc_0","tool":"run_health_check","summary":"factorio: passed with warnings.","result":{"tool":"run_health_check","confidence":"confirmed","subject":{"resource":"server","id":"factorio"},"data":{"overall":"warn","checks":[{"name":"updates","state":"warn","severity":"update","detail":"Update available."}],"passed":1,"total":2,"skipped":0}}}\n\n')
-        self.wfile.write(('event: done\ndata: {"type":"done","relayUser":"%s","canAct":"%s"}\n\n' % (user, canact)).encode())
+        self.wfile.write(('event: done\ndata: {"type":"done","relayUser":"%s","canAct":"%s","autoAct":"%s","conv":"%s"}\n\n' % (user, canact, autoact, conv)).encode())
 
 HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
 PYEOF
@@ -1239,17 +1244,32 @@ if start_api_assistant "$ASSIST_URL" "$REL_SECRET"; then
       bad "M7 stub relay (code=$CODE body=$BODY; stub log: $(cat /tmp/kgsm-api-smoke-stub-assistant.log 2>/dev/null))"
     fi
 
-    # X-Relay-Can-Act folding: the toggle (body.actions) ∧ the caller's tier (admin under auth-disabled).
-    # No actions flag ⇒ toggle off ⇒ canAct=false even for an admin (intent gates).
+    # Action authority is TWO axes (folded server-side from the caller's verified tier ∧ the toggle):
+    #   canAct  = may PROPOSE — operator+ tier, toggle-INDEPENDENT (proposing is a tier capability).
+    #   autoAct = may AUTO-RUN without confirmation — admin tier ∧ the per-turn `actions` toggle.
+    # No actions flag: an admin (auth-disabled synthetic admin) can still PROPOSE (canAct=true), but
+    # auto-run is OFF (autoAct=false) — the toggle gates auto-run, not proposing.
     req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
-    grep -q '"canAct":"false"' <<<"$BODY" \
-      && ok "relay action authority: actions omitted → X-Relay-Can-Act=false (the toggle gates intent)" \
-      || bad "M7 canAct (expected false; body=$BODY)"
-    # actions:true + admin tier (auth-disabled synthetic admin) ⇒ canAct=true.
+    { grep -q '"canAct":"true"' <<<"$BODY" && grep -q '"autoAct":"false"' <<<"$BODY"; } \
+      && ok "relay action authority: actions omitted → canAct=true (operator+ may propose), autoAct=false (toggle gates auto-run)" \
+      || bad "M7 authority/no-toggle (expected canAct=true+autoAct=false; body=$BODY)"
+    # actions:true + admin tier ⇒ both: canAct=true AND autoAct=true (auto-run unlocked).
     req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi","actions":true}'
-    grep -q '"canAct":"true"' <<<"$BODY" \
-      && ok "relay action authority: actions:true + operator+ tier → X-Relay-Can-Act=true (toggle ∧ tier folded server-side)" \
-      || bad "M7 canAct (expected true; body=$BODY)"
+    { grep -q '"canAct":"true"' <<<"$BODY" && grep -q '"autoAct":"true"' <<<"$BODY"; } \
+      && ok "relay action authority: actions:true + admin tier → canAct=true AND autoAct=true (toggle ∧ tier folded server-side)" \
+      || bad "M7 authority/toggle-on (expected canAct=true+autoAct=true; body=$BODY)"
+    # Per-chat conversation id: body.conversationId → sanitised → X-Relay-Conversation-Id, so the
+    # assistant scopes memory web:<userId>:<chatId> (each "new chat" = a fresh context window). The "."
+    # is stripped by the [A-Za-z0-9_-] sanitiser, proving the bound is applied (chat.7 → chat7).
+    req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi","conversationId":"chat.7"}'
+    grep -q '"conv":"chat7"' <<<"$BODY" \
+      && ok "relay conversation scope: body.conversationId → X-Relay-Conversation-Id forwarded + sanitised (chat.7→chat7; per-chat fresh context)" \
+      || bad "M7 conversationId forward (expected conv=chat7; body=$BODY)"
+    # Omitted conversationId ⇒ no header ⇒ the assistant keeps the bare per-user key (back-compat).
+    req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
+    grep -q '"conv":""' <<<"$BODY" \
+      && ok "relay conversation scope: omitted conversationId → no X-Relay-Conversation-Id (bare per-user key, back-compat)" \
+      || bad "M7 conversationId omitted (expected empty conv; body=$BODY)"
   else
     bad "M7 stub relay: assistant capability never went operational (api log: $(tail -5 /tmp/kgsm-api-smoke-m7.log 2>/dev/null))"
   fi

@@ -80,12 +80,17 @@ public sealed class AssistantController(
         bool canAct = tier >= AuthTier.Operator;
         bool autoAct = (body.Actions ?? false) && tier >= AuthTier.Admin;
 
+        // The per-chat conversation id from the SPA (the "new chat" identity). Forwarded to the assistant
+        // as a SUB-scope of the verified user's memory key (web:<userId>:<chatId>) so each chat is a fresh
+        // context window; the user-id prefix stays server-authoritative, so this can never cross users.
+        string? conversationId = SanitizeConversationId(body.ConversationId);
+
         var turnBody = new { prompt = body!.Prompt, think = body.Think, tools = body.Tools };
 
         HttpResponseMessage? upstream;
         try
         {
-            upstream = await assistant.OpenTurnStreamAsync(turnBody, identity.UserId, identity.Display, canAct, autoAct, ct);
+            upstream = await assistant.OpenTurnStreamAsync(turnBody, identity.UserId, identity.Display, canAct, autoAct, conversationId, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -142,4 +147,24 @@ public sealed class AssistantController(
     // before the SSE response is committed.
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
+
+    // Reduce a client-supplied chat id to a safe, bounded key segment ([A-Za-z0-9_-], ≤64 chars). The
+    // assistant re-sanitises (it owns the key); this just keeps the forwarded header tidy and bounded so
+    // a tampered client can't push an oversized/odd value. Blank/all-stripped ⇒ null ⇒ the assistant
+    // uses the bare per-user key (one conversation), preserving the pre-fix behaviour.
+    private static string? SanitizeConversationId(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return null;
+        Span<char> buf = stackalloc char[64];
+        int n = 0;
+        foreach (char c in raw)
+        {
+            if (n == buf.Length)
+                break;
+            if (char.IsAsciiLetterOrDigit(c) || c == '-' || c == '_')
+                buf[n++] = c;
+        }
+        return n == 0 ? null : new string(buf[..n]);
+    }
 }
