@@ -56,6 +56,18 @@
     <None Include="runtimeconfig.template.json" />
   </ItemGroup>
 
+  <!-- Keep appsettings.Development.json OUT of the publish tree. The Web SDK globs **/*.json
+       into Content, which would otherwise rsync this (gitignored) local-dev file — holding the
+       REAL Discord client secret + bot token — onto the production host at /opt/kgsm-api on every
+       deploy. It is inert there (ASPNETCORE_ENVIRONMENT=Production never loads it), but a plaintext
+       secret-at-rest leak regardless. Prod creds come from /etc/kgsm-api/kgsm-api.env, never a
+       committed/published appsettings file. Dev still loads it normally (it stays in the project
+       dir; only the publish copy is dropped). Demote it from Content to None. -->
+  <ItemGroup>
+    <Content Remove="appsettings.Development.json" />
+    <None Include="appsettings.Development.json" Condition="Exists('appsettings.Development.json')" />
+  </ItemGroup>
+
   <!-- Scoped NuGet-audit suppression (NOT a blanket NuGetAudit=off): GHSA-2m69-gcr7-jv3q is an
        advisory on the native SQLite lib pulled TRANSITIVELY by Microsoft.EntityFrameworkCore.Sqlite
        (SQLitePCLRaw.lib.e_sqlite3 2.1.11). 2.1.11 is the LATEST published build of that native lib —

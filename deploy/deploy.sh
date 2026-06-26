@@ -127,6 +127,31 @@ log "publishing framework-dependent single-file (${RID}) → ${PUBLISH_DIR}"
 rm -rf "$PUBLISH_DIR"
 dotnet publish "$PROJECT" -c Release -r "$RID" --no-self-contained -o "$PUBLISH_DIR"
 
+# ── 1b. Bundle the Control Panel SPA (Kestrel serves it same-origin) ───────────
+# kgsm-api serves the SPA at / on the SAME origin as the API (one domain, no CORS). Build the
+# sibling kgsm-web checkout and drop its dist/ into the publish wwwroot, where UseStaticFiles +
+# the SPA fallback serve it. VITE_API_BASE=self makes the bundle talk to whatever origin served
+# it (no baked domain). Skip with SKIP_SPA=1 for an API-only deploy (the API runs fine with no
+# SPA — Startup's serveSpa gate no-ops when wwwroot has no index.html).
+SPA_DIR="${KGSM_WEB_DIR:-$WORKSPACE/kgsm-web}"
+if [[ "${SKIP_SPA:-0}" == "1" ]]; then
+    log "SKIP_SPA=1 → not bundling the SPA (API-only deploy)"
+elif [[ -f "$SPA_DIR/package.json" ]]; then
+    command -v npm >/dev/null 2>&1 || { err "npm not found, but the SPA build needs it (set SKIP_SPA=1 to skip)"; exit 1; }
+    log "building the SPA (${SPA_DIR}) → bundling into wwwroot"
+    (
+        cd "$SPA_DIR" || exit 1
+        [[ -d node_modules ]] || npm ci
+        VITE_API_BASE=self npm run build
+    )
+    rm -rf "$PUBLISH_DIR/wwwroot"
+    mkdir -p "$PUBLISH_DIR/wwwroot"
+    cp -a "$SPA_DIR/dist/." "$PUBLISH_DIR/wwwroot/"
+else
+    err "SPA checkout not found at ${SPA_DIR} — deploying API-only (no SPA served)."
+    err "set KGSM_WEB_DIR=/path/to/kgsm-web, or SKIP_SPA=1 to silence this."
+fi
+
 # ── 2. Privileged prep (no service disruption yet) ────────────────────────────
 # Ensure the install dir exists and is owned by the service user (so the swap below needs
 # no sudo and ownership stays consistent).

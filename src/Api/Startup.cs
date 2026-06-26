@@ -337,7 +337,40 @@ public class Startup(IConfiguration configuration)
                 "Auth is ON but Discord is not fully configured — the /auth/discord/* login endpoints "
                 + "will 503 until KGSM_API_AUTH_DISCORD_* are set. Protected endpoints require a bearer (401).");
 
+        // Same-origin SPA delivery: when the Control Panel SPA's built bundle is present in the web root
+        // (the deploy drops kgsm-web's dist/ into wwwroot), Kestrel serves it at / on the SAME origin as
+        // the API — one domain, no CORS. Gated on the bundle actually being there, so a dev run (no
+        // wwwroot; the SPA on the Vite dev server) and an API-only deploy both no-op cleanly here.
+        string? spaWebRoot = env.WebRootPath;
+        bool serveSpa = !string.IsNullOrEmpty(spaWebRoot) && File.Exists(Path.Combine(spaWebRoot, "index.html"));
+        if (serveSpa)
+            startupLog.LogInformation("Serving the Control Panel SPA from {WebRoot} (same-origin).", spaWebRoot);
+
         app.UseExceptionHandler(); // unhandled -> 500 error envelope (ApiExceptionHandler)
+
+        // HTTP → HTTPS upgrade (production posture: NO bare HTTP on the internet). Any plain-HTTP
+        // request that arrives on a PUBLIC interface is permanently redirected (308 — it preserves the
+        // method + body, so a POST upgrades cleanly instead of being silently turned into a GET) to its
+        // https:// equivalent on the standard port (the inbound :80 is dropped → :443). The SOLE allowed
+        // plain-HTTP surface is the LOOPBACK ops/health port (127.0.0.1:8097, never internet-exposed): the
+        // deploy probe and a local `curl http://127.0.0.1:8097/health` don't speak TLS and the cert isn't
+        // valid for 127.0.0.1, so those must pass through un-redirected. We gate on the RECEIVING interface
+        // (a loopback local address ⇒ an ops call) rather than a hard-coded port, so it stays correct if the
+        // ops port ever changes. For an external http:// to reach here at all, KGSM_API_URLS must include a
+        // plain-http public bind (http://0.0.0.0:80); without one, bare http simply refuses the connection.
+        app.Use(async (context, next) =>
+        {
+            System.Net.IPAddress local = context.Connection.LocalIpAddress ?? System.Net.IPAddress.Loopback;
+            if (!context.Request.IsHttps && !System.Net.IPAddress.IsLoopback(local))
+            {
+                string target = $"https://{context.Request.Host.Host}{context.Request.PathBase}{context.Request.Path}{context.Request.QueryString}";
+                // permanent + preserveMethod => 308 (NOT 301): a 301 lets a client silently retry a POST as
+                // GET; 308 keeps the method + body, so a bare-http POST upgrades to the identical https POST.
+                context.Response.Redirect(target, permanent: true, preserveMethod: true);
+                return;
+            }
+            await next();
+        });
 
         // Status-only responses with no body (unmatched 404 now; 401/403 once M4 auth lands)
         // get the error envelope too, so the contract is uniform across the whole surface.
@@ -354,6 +387,12 @@ public class Startup(IConfiguration configuration)
             await ApiErrors.WriteAsync(http, http.Response.StatusCode, code, message);
         });
 
+        // Serve the SPA's hashed static assets (JS/CSS/fonts) from the web root. Before routing so a
+        // matching asset short-circuits; the API endpoints under /api/v1 are unaffected. Public by
+        // design — the bundle (incl. the login page) must load before auth; the DATA stays [Authorize]-gated.
+        if (serveSpa)
+            app.UseStaticFiles();
+
         // Enable WebSocket upgrades before routing so the /api/v1/stream endpoint (M2) can accept them.
         app.UseWebSockets();
 
@@ -364,6 +403,31 @@ public class Startup(IConfiguration configuration)
         // tier policies. A 401/403 here flows through UseStatusCodePages above into the {error} envelope.
         app.UseAuthentication();
         app.UseAuthorization();
-        app.UseEndpoints(endpoints => endpoints.MapControllers());
+        app.UseEndpoints(endpoints =>
+        {
+            endpoints.MapControllers();
+
+            // SPA fallback: a client-routed GET (deep link / refresh — no file extension, matched no
+            // controller) boots the app by returning index.html. EXCLUDE /api/* so a bogus API path stays
+            // a JSON 404 ({error} envelope, invariant #4) rather than a 200 HTML page. Asset files (with
+            // extensions) were already served by UseStaticFiles, so they never reach this :nonfile fallback.
+            // .AllowAnonymous() is LOAD-BEARING: without it the endpoint inherits the global
+            // RequireAuthenticatedUser fallback policy and returns 401 for the SPA shell — i.e. nobody could
+            // even load the login page. The bundle is a PUBLIC static site; the DATA under /api/v1 stays gated.
+            if (serveSpa)
+            {
+                string indexFile = Path.Combine(spaWebRoot!, "index.html");
+                endpoints.MapFallback(async context =>
+                {
+                    if (context.Request.Path.StartsWithSegments("/api"))
+                    {
+                        context.Response.StatusCode = StatusCodes.Status404NotFound;
+                        return;
+                    }
+                    context.Response.ContentType = "text/html; charset=utf-8";
+                    await context.Response.SendFileAsync(indexFile);
+                }).AllowAnonymous();
+            }
+        });
     }
 }

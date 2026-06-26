@@ -50,5 +50,15 @@ Restart=always
 RestartSec=2
 NoNewPrivileges=true
 
+# Kestrel terminates TLS directly (NO reverse proxy) and binds the privileged ports 80 (the
+# http->https redirect) + 443 (TLS). To do that as a NON-root service, grant exactly one capability —
+# CAP_NET_BIND_SERVICE (bind ports <1024) — and bound the set to nothing else. The prod env file sets
+# KGSM_API_URLS=http://0.0.0.0:80;https://0.0.0.0:443 + the Kestrel cert paths (see
+# deploy/kgsm-api.env.example); these lines are harmless when the unit's default http://0.0.0.0:8080
+# bind is used instead. Works alongside NoNewPrivileges (systemd grants ambient caps at exec; the
+# process never escalates).
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
 [Install]
 WantedBy=multi-user.target

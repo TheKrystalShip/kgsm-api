@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Server.Kestrel.Core;
+
 namespace TheKrystalShip.Api;
 
 /// <summary>
@@ -40,5 +42,17 @@ public class Program
                 logging.ClearProviders();
                 logging.AddSystemdConsole();
             })
-            .ConfigureWebHostDefaults(webBuilder => webBuilder.UseStartup<Startup>());
+            .ConfigureWebHostDefaults(webBuilder =>
+            {
+                // Pin every Kestrel endpoint to HTTP/1.1. The realtime /api/v1/stream WebSocket
+                // upgrade FAILS over HTTP/2: a TLS browser negotiates h2 via ALPN, then opens the
+                // WS with RFC-8441 Extended CONNECT, which does NOT match the [HttpGet] stream
+                // endpoint and falls through to the SPA fallback → 404 (verified: h1.1 → 101,
+                // h2 → 404). HTTP/2's multiplexing isn't needed for a single-host control panel, so
+                // h1.1 across the board is the simple, reliable choice. ConfigureEndpointDefaults
+                // runs for every endpoint, including the URL-bound ones from KGSM_API_URLS.
+                webBuilder.ConfigureKestrel(o =>
+                    o.ConfigureEndpointDefaults(e => e.Protocols = HttpProtocols.Http1));
+                webBuilder.UseStartup<Startup>();
+            });
 }
