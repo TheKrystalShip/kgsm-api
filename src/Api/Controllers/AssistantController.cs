@@ -67,20 +67,25 @@ public sealed class AssistantController(
         if (identity is null)
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no verified identity");
 
-        // Resolve whether THIS turn may perform actions, the AUTHORITY decision the API owns: the
-        // user's per-turn toggle (intent) AND their verified tier being operator+ (only operators run
-        // commands — same gate as the M3 command path). We forward a single trusted boolean to the
-        // assistant (X-Relay-Can-Act); a viewer who sets actions:true is zeroed here, and even a
-        // proposed command can only execute through the operator-gated M3 path (fork (a)).
-        bool canAct = (body.Actions ?? false)
-            && ci is not null && SessionClaims.ReadTier(ci) >= AuthTier.Operator;
+        // Resolve this turn's two action AUTHORITIES — the decision the API owns and the assistant
+        // trusts (it never does its own Discord lookup on the relay path). Both are derived from the
+        // caller's VERIFIED tier, never from the request body alone:
+        //   • canAct  = may the assistant PROPOSE a command? operator+ (toggle-independent — proposing
+        //               is a tier capability; the user still confirms each via the M3 command path).
+        //   • autoAct = may it AUTO-RUN lifecycle commands with no confirmation? admin ONLY, AND the
+        //               user turned the toggle on. This is the real gate: an operator (or a tampered
+        //               SPA forcing actions:true) is zeroed here — autoAct requires admin tier.
+        // body.Actions is the toggle INTENT; it can only ever narrow autoAct, never widen authority.
+        AuthTier tier = ci is not null ? SessionClaims.ReadTier(ci) : AuthTier.None;
+        bool canAct = tier >= AuthTier.Operator;
+        bool autoAct = (body.Actions ?? false) && tier >= AuthTier.Admin;
 
         var turnBody = new { prompt = body!.Prompt, think = body.Think, tools = body.Tools };
 
         HttpResponseMessage? upstream;
         try
         {
-            upstream = await assistant.OpenTurnStreamAsync(turnBody, identity.UserId, identity.Display, canAct, ct);
+            upstream = await assistant.OpenTurnStreamAsync(turnBody, identity.UserId, identity.Display, canAct, autoAct, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

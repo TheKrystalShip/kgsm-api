@@ -54,7 +54,9 @@ public sealed class AssistantClient : HttpClient
     /// posts <paramref name="turnBody"/> with <c>Accept: text/event-stream</c> and the trusted-relay
     /// headers — the shared <c>X-Relay-Secret</c>, the forwarded Discord identity (<c>X-Relay-User</c>
     /// / <c>X-Relay-User-Name</c>), and the API's per-turn action-authority decision
-    /// (<c>X-Relay-Can-Act</c>, from <paramref name="canAct"/>) — and returns the upstream response
+    /// (<c>X-Relay-Can-Act</c>, from <paramref name="canAct"/>, the authority to PROPOSE; and
+    /// <c>X-Relay-Auto-Act</c>, from <paramref name="autoAct"/>, the admin-only authority to AUTO-RUN
+    /// lifecycle commands without confirmation) — and returns the upstream response
     /// with <em>headers read only</em>, so
     /// the caller can relay the body frames verbatim. The caller <strong>owns disposal</strong>: disposing
     /// the response aborts the upstream request, which makes the assistant abort generation. Returns
@@ -67,7 +69,7 @@ public sealed class AssistantClient : HttpClient
     /// <paramref name="ct"/> and tears the whole chain down.
     /// </remarks>
     public async Task<HttpResponseMessage?> OpenTurnStreamAsync(
-        object turnBody, string relayUserId, string relayDisplayName, bool canAct, CancellationToken ct)
+        object turnBody, string relayUserId, string relayDisplayName, bool canAct, bool autoAct, CancellationToken ct)
     {
         if (!IsProvisioned)
             return null;
@@ -79,9 +81,13 @@ public sealed class AssistantClient : HttpClient
         request.Headers.Accept.ParseAdd("text/event-stream");
         if (!string.IsNullOrEmpty(_relaySecret))
             request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
-        // The API's action-authority decision for this turn (the user's toggle ∧ operator+ tier). The
-        // assistant trusts it ONLY because X-Relay-Secret matched; "false" (or absent) never grants.
+        // The API's PROPOSE authority for this turn (operator+ tier). The assistant trusts it ONLY
+        // because X-Relay-Secret matched; "false" (or absent) never grants.
         request.Headers.TryAddWithoutValidation("X-Relay-Can-Act", canAct ? "true" : "false");
+        // The API's AUTO-ACCEPT authority (admin tier ∧ the user's toggle): when "true" the assistant
+        // runs lifecycle commands immediately instead of staging them. Strictly stronger than can-act;
+        // same trust basis and same fail-closed default.
+        request.Headers.TryAddWithoutValidation("X-Relay-Auto-Act", autoAct ? "true" : "false");
         // The user id is a Discord snowflake the API set at login (not free text); the display name is a
         // user-controlled Discord value crossing a trust boundary, so strip control chars (CR/LF) — defense
         // in depth against header injection, and it also avoids a weird display name throwing on send.
