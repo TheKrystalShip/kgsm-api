@@ -151,7 +151,7 @@ public sealed class AssistantController(
     /// </summary>
     [HttpGet("conversations")]
     public Task<IActionResult> Conversations(CancellationToken ct) =>
-        RelayJsonAsync((id, ct2) => assistant.GetConversationsAsync(id.UserId, id.Display, ct2), ct);
+        RelayAsync((id, ct2) => assistant.GetConversationsAsync(id.UserId, id.Display, ct2), RelayedJson, ct);
 
     /// <summary>
     /// <c>GET /api/v1/assistant/conversations/{id}</c> — one of the caller's chats, full transcript,
@@ -160,14 +160,27 @@ public sealed class AssistantController(
     /// </summary>
     [HttpGet("conversations/{id}")]
     public Task<IActionResult> Conversation(string id, CancellationToken ct) =>
-        RelayJsonAsync((ident, ct2) => assistant.GetConversationAsync(ident.UserId, ident.Display, id, ct2), ct);
+        RelayAsync((ident, ct2) => assistant.GetConversationAsync(ident.UserId, ident.Display, id, ct2), RelayedJson, ct);
 
-    // Shared read-relay: the same capability + identity gates as the turn, then forwards the JSON body
-    // verbatim (the assistant owns the schema; the API shapes nothing — same posture as the turn relay).
+    /// <summary>
+    /// <c>DELETE /api/v1/assistant/conversations/{id}</c> — soft-deletes one of the caller's chats,
+    /// <b>viewer</b>-gated (deleting your OWN chat history is a personal read-surface action, not a
+    /// privileged host action). The assistant scopes <c>{id}</c> under the forwarded user id (own-conversation
+    /// only) and appends a tombstone — the transcript is retained, only the listing hides it. Returns <c>204</c>.
+    /// </summary>
+    [HttpDelete("conversations/{id}")]
+    public Task<IActionResult> DeleteConversation(string id, CancellationToken ct) =>
+        RelayAsync((ident, ct2) => assistant.DeleteConversationAsync(ident.UserId, ident.Display, id, ct2),
+            _ => Task.FromResult<IActionResult>(NoContent()), ct);
+
+    // Shared relay core: the same capability + identity gates as the turn, then the caller-supplied
+    // projection of a SUCCESSFUL upstream response (verbatim JSON for the reads, 204 for the delete).
     // Unlike the SSE turn, nothing is committed before we know the upstream status, so a real status code
     // is returned on every branch.
-    private async Task<IActionResult> RelayJsonAsync(
-        Func<DiscordIdentity, CancellationToken, Task<HttpResponseMessage?>> call, CancellationToken ct)
+    private async Task<IActionResult> RelayAsync(
+        Func<DiscordIdentity, CancellationToken, Task<HttpResponseMessage?>> call,
+        Func<HttpResponseMessage, Task<IActionResult>> onSuccess,
+        CancellationToken ct)
     {
         Capability cap = health.Current.Assistant;
         if (!cap.Provisioned)
@@ -206,9 +219,16 @@ public sealed class AssistantController(
                 return Error(StatusCodes.Status502BadGateway, "bad_gateway", "the assistant rejected the relay");
             }
 
-            string json = await upstream.Content.ReadAsStringAsync(ct);
-            return Content(json, "application/json; charset=utf-8");
+            return await onSuccess(upstream);
         }
+    }
+
+    // Project a successful upstream response by relaying its JSON body verbatim (the assistant owns the
+    // schema; the API shapes nothing — same posture as the turn relay).
+    private async Task<IActionResult> RelayedJson(HttpResponseMessage upstream)
+    {
+        string json = await upstream.Content.ReadAsStringAsync(HttpContext.RequestAborted);
+        return Content(json, "application/json; charset=utf-8");
     }
 
     // The frozen { error: { code, message } } envelope (architecture.html §6) — only ever returned

@@ -1046,6 +1046,10 @@ sys.exit(0 if ('path' in m and 'sizeBytes' in m and str(m.get('sha256','')).star
   [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" \
     && ok "GET assistant/conversations/{id}, assistant absent → 404 {error:{code:not_found}} (capability gate)" \
     || bad "reverse-path transcript-absent 404 (code=$CODE body=$BODY)"
+  req DELETE /api/v1/assistant/conversations/chatA
+  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" \
+    && ok "DELETE assistant/conversations/{id}, assistant absent → 404 {error:{code:not_found}} (capability gate)" \
+    || bad "reverse-path delete-absent 404 (code=$CODE body=$BODY)"
 
   echo "  (note: the FULL relay path — identity + secret forwarding + byte-faithful streaming — is proven by the"
   echo "   dedicated stub-assistant phase below; only a real-model (Ollama) end-to-end remains a live nicety)"
@@ -1223,6 +1227,15 @@ class H(BaseHTTPRequestHandler):
             return
         self.send_response(404); self.end_headers()
 
+    def do_DELETE(self):
+        # Soft-delete one chat. Gate on the relay secret exactly like the reads; 204 (no body) on success —
+        # the assistant hides it from the list but keeps the transcript (the corpus).
+        if self.path.startswith("/conversations/"):
+            if self.headers.get("X-Relay-Secret") != SECRET:
+                self.send_response(401); self.end_headers(); return
+            self.send_response(204); self.end_headers(); return
+        self.send_response(404); self.end_headers()
+
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0) or 0)
         if n: self.rfile.read(n)
@@ -1311,6 +1324,13 @@ if start_api_assistant "$ASSIST_URL" "$REL_SECRET"; then
     { [[ "$CODE" == 200 ]] && grep -q '"id":"chatA"' <<<"$BODY" && grep -q '"prompt":"hi from dev"' <<<"$BODY" && grep -q '"kind":"turn"' <<<"$BODY"; } \
       && ok "reverse path: GET /assistant/conversations/{id} → 200, transcript relayed verbatim (per-chat fetch scoped to verified caller)" \
       || bad "conversation transcript (code=$CODE body=$BODY)"
+
+    # Reverse path: soft-delete one chat. The API forwards X-Relay-Secret + X-Relay-User on a DELETE and
+    # returns 204 (the assistant hides it from the list but keeps the transcript — the corpus is retained).
+    req DELETE /api/v1/assistant/conversations/chatA
+    [[ "$CODE" == 204 ]] \
+      && ok "reverse path: DELETE /assistant/conversations/{id} → 204, soft-delete relayed (corpus retained, listing hides it)" \
+      || bad "conversation soft-delete (code=$CODE body=$BODY)"
   else
     bad "M7 stub relay: assistant capability never went operational (api log: $(tail -5 /tmp/kgsm-api-smoke-m7.log 2>/dev/null))"
   fi

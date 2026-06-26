@@ -119,7 +119,7 @@ public sealed class AssistantClient : HttpClient
     /// </summary>
     public Task<HttpResponseMessage?> GetConversationsAsync(
         string relayUserId, string relayDisplayName, CancellationToken ct) =>
-        RelayGetAsync("/conversations", relayUserId, relayDisplayName, ct);
+        RelaySendAsync(HttpMethod.Get, "/conversations", relayUserId, relayDisplayName, ct);
 
     /// <summary>
     /// Loads one of the verified end-user's conversations: <c>GET /conversations/{chatId}</c> on their
@@ -130,18 +130,30 @@ public sealed class AssistantClient : HttpClient
     /// </summary>
     public Task<HttpResponseMessage?> GetConversationAsync(
         string relayUserId, string relayDisplayName, string chatId, CancellationToken ct) =>
-        RelayGetAsync($"/conversations/{Uri.EscapeDataString(chatId)}", relayUserId, relayDisplayName, ct);
+        RelaySendAsync(HttpMethod.Get, $"/conversations/{Uri.EscapeDataString(chatId)}", relayUserId, relayDisplayName, ct);
 
-    // Shared GET-on-the-user's-behalf relay: forwards the secret + forwarded identity (the read endpoints
-    // need no can-act/auto-act decision), reads the small JSON body fully. Left to the default Timeout —
-    // these are short request/response calls, not the long SSE stream.
-    private async Task<HttpResponseMessage?> RelayGetAsync(
-        string path, string relayUserId, string relayDisplayName, CancellationToken ct)
+    /// <summary>
+    /// Soft-deletes one of the verified end-user's conversations: <c>DELETE /conversations/{chatId}</c> on
+    /// their behalf with the trusted-relay identity. The assistant composes the full key
+    /// (<c>web:{userId}:{chatId}</c>) server-side, so <paramref name="chatId"/> can only ever address the
+    /// caller's OWN conversation; it appends a tombstone — the transcript (the corpus) is retained, only the
+    /// listing hides it. The upstream answers <c>204</c>. Returns <see langword="null"/> when the assistant
+    /// isn't provisioned; the caller <strong>owns disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> DeleteConversationAsync(
+        string relayUserId, string relayDisplayName, string chatId, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Delete, $"/conversations/{Uri.EscapeDataString(chatId)}", relayUserId, relayDisplayName, ct);
+
+    // Shared relay-on-the-user's-behalf (GET read / DELETE soft-delete): forwards the secret + forwarded
+    // identity (these endpoints need no can-act/auto-act decision), reads the small body fully. Left to the
+    // default Timeout — these are short request/response calls, not the long SSE stream.
+    private async Task<HttpResponseMessage?> RelaySendAsync(
+        HttpMethod method, string path, string relayUserId, string relayDisplayName, CancellationToken ct)
     {
         if (!IsProvisioned)
             return null;
 
-        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        var request = new HttpRequestMessage(method, path);
         request.Headers.Accept.ParseAdd("application/json");
         if (!string.IsNullOrEmpty(_relaySecret))
             request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
