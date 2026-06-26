@@ -144,6 +144,19 @@ public sealed class AssistantClient : HttpClient
         string relayUserId, string relayDisplayName, string chatId, CancellationToken ct) =>
         RelaySendAsync(HttpMethod.Delete, $"/conversations/{Uri.EscapeDataString(chatId)}", relayUserId, relayDisplayName, ct);
 
+    /// <summary>
+    /// Compacts one of the verified end-user's conversations: <c>POST /conversations/{chatId}/compact</c> on
+    /// their behalf with the trusted-relay identity. The assistant composes the full key
+    /// (<c>web:{userId}:{chatId}</c>) server-side, so <paramref name="chatId"/> can only ever address the
+    /// caller's OWN conversation; it summarises the history in place (non-destructive — a checkpoint is
+    /// appended, the transcript is retained) and answers <c>200</c> with a CompactionOutcome JSON relayed
+    /// verbatim. Returns <see langword="null"/> when the assistant isn't provisioned; the caller
+    /// <strong>owns disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> CompactConversationAsync(
+        string relayUserId, string relayDisplayName, string chatId, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Post, $"/conversations/{Uri.EscapeDataString(chatId)}/compact", relayUserId, relayDisplayName, ct);
+
     // Shared relay-on-the-user's-behalf (GET read / DELETE soft-delete): forwards the secret + forwarded
     // identity (these endpoints need no can-act/auto-act decision), reads the small body fully. Left to the
     // default Timeout — these are short request/response calls, not the long SSE stream.

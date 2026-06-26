@@ -173,6 +173,18 @@ public sealed class AssistantController(
         RelayAsync((ident, ct2) => assistant.DeleteConversationAsync(ident.UserId, ident.Display, id, ct2),
             _ => Task.FromResult<IActionResult>(NoContent()), ct);
 
+    /// <summary>
+    /// <c>POST /api/v1/assistant/conversations/{id}/compact</c> — compacts one of the caller's chats,
+    /// <b>viewer</b>-gated (compacting your OWN conversation to free its context window is a personal action,
+    /// not a privileged host action — like reading or deleting it). The assistant scopes <c>{id}</c> under the
+    /// forwarded user id (own-conversation only) and summarises the history in place (non-destructive),
+    /// returning a <c>CompactionOutcome</c> JSON relayed verbatim. No audit row — it is neither an engine
+    /// action nor a host mutation.
+    /// </summary>
+    [HttpPost("conversations/{id}/compact")]
+    public Task<IActionResult> CompactConversation(string id, CancellationToken ct) =>
+        RelayAsync((ident, ct2) => assistant.CompactConversationAsync(ident.UserId, ident.Display, id, ct2), RelayedJson, ct);
+
     // Shared relay core: the same capability + identity gates as the turn, then the caller-supplied
     // projection of a SUCCESSFUL upstream response (verbatim JSON for the reads, 204 for the delete).
     // Unlike the SSE turn, nothing is committed before we know the upstream status, so a real status code

@@ -61,4 +61,34 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
+
+    // --- POST /conversations/{id}/compact — same relay gates as the reads/delete (viewer, degrade). ---
+
+    private static HttpRequestMessage Compact(string id) =>
+        new(HttpMethod.Post, $"/api/v1/assistant/conversations/{id}/compact");
+
+    [Fact]
+    public async Task Compact_NoToken_401()
+    {
+        HttpResponseMessage resp = await Client().SendAsync(Compact("chat1"));
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        Assert.Contains("\"code\":\"unauthorized\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Compact_NoneTier_403()
+    {
+        // Authenticated but below viewer → forbidden (same gate as the turn/reads).
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.None)).SendAsync(Compact("chat1"));
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Compact_Viewer_AssistantAbsent_404()
+    {
+        // Viewer clears authz; the unprovisioned assistant degrades to an honest 404, never a 500.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).SendAsync(Compact("chat1"));
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
 }
