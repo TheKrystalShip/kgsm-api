@@ -1037,6 +1037,16 @@ sys.exit(0 if ('path' in m and 'sizeBytes' in m and str(m.get('sha256','')).star
     && ok "POST assistant/turn blank prompt → 400 {error:{code:bad_request}}" \
     || bad "M7 blank-prompt 400 (code=$CODE body=$BODY)"
 
+  # The reverse-path read endpoints share the same capability gate: assistant absent → honest 404 envelope.
+  req GET /api/v1/assistant/conversations
+  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" \
+    && ok "GET assistant/conversations, assistant absent → 404 {error:{code:not_found}} (capability gate)" \
+    || bad "reverse-path conversations-absent 404 (code=$CODE body=$BODY)"
+  req GET /api/v1/assistant/conversations/chatA
+  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" \
+    && ok "GET assistant/conversations/{id}, assistant absent → 404 {error:{code:not_found}} (capability gate)" \
+    || bad "reverse-path transcript-absent 404 (code=$CODE body=$BODY)"
+
   echo "  (note: the FULL relay path — identity + secret forwarding + byte-faithful streaming — is proven by the"
   echo "   dedicated stub-assistant phase below; only a real-model (Ollama) end-to-end remains a live nicety)"
 
@@ -1194,8 +1204,24 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/health":
             self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
             self.wfile.write(b'{"status":"ok"}')
-        else:
-            self.send_response(404); self.end_headers()
+            return
+        # The reverse-path read endpoints (conversation history). Gate on the relay secret exactly like
+        # /turn — a wrong/absent secret is 401 — and echo the forwarded user so the smoke can assert the
+        # API forwards X-Relay-Secret + X-Relay-User on a READ, and relays the JSON body verbatim.
+        if self.path == "/conversations" or self.path.startswith("/conversations/"):
+            if self.headers.get("X-Relay-Secret") != SECRET:
+                self.send_response(401); self.end_headers(); return
+            user = self.headers.get("X-Relay-User", "")
+            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
+            if self.path == "/conversations":
+                # A canned summary list, tagged with the forwarded user so the smoke sees the scope.
+                self.wfile.write(('[{"id":"chatA","title":"%s asked about factorio","createdAt":"2026-06-26T10:00:00Z","lastActivityAt":"2026-06-26T10:05:00Z","turnCount":2}]' % user).encode())
+            else:
+                cid = self.path[len("/conversations/"):]
+                # A canned transcript echoing the requested chat id + forwarded user, §5·a-shaped turn.
+                self.wfile.write(('{"id":"%s","entries":[{"kind":"turn","createdAt":"2026-06-26T10:00:00Z","turn":{"prompt":"hi from %s","final":"hello","think":false,"thinking":null,"tools":[],"usage":null,"outcome":"ok"}}]}' % (cid, user)).encode())
+            return
+        self.send_response(404); self.end_headers()
 
     def do_POST(self):
         n = int(self.headers.get("Content-Length", 0) or 0)
@@ -1270,6 +1296,21 @@ if start_api_assistant "$ASSIST_URL" "$REL_SECRET"; then
     grep -q '"conv":""' <<<"$BODY" \
       && ok "relay conversation scope: omitted conversationId → no X-Relay-Conversation-Id (bare per-user key, back-compat)" \
       || bad "M7 conversationId omitted (expected empty conv; body=$BODY)"
+
+    # Reverse path: list the caller's own past chats. The API forwards X-Relay-Secret + X-Relay-User on a
+    # GET and relays the assistant's summary JSON verbatim (the stub echoes the forwarded user into the
+    # title → proves the identity reached the leaf).
+    req GET /api/v1/assistant/conversations
+    { [[ "$CODE" == 200 ]] && grep -q '"id":"chatA"' <<<"$BODY" && grep -q '"dev asked about factorio"' <<<"$BODY"; } \
+      && ok "reverse path: GET /assistant/conversations → 200, summary list relayed verbatim (X-Relay-User=dev forwarded on the read)" \
+      || bad "conversations list (code=$CODE body=$BODY)"
+
+    # Reverse path: load one chat's transcript. The {id} is forwarded in the path; the stub echoes it +
+    # the user back, proving the per-chat fetch reaches the leaf scoped to the verified caller.
+    req GET /api/v1/assistant/conversations/chatA
+    { [[ "$CODE" == 200 ]] && grep -q '"id":"chatA"' <<<"$BODY" && grep -q '"prompt":"hi from dev"' <<<"$BODY" && grep -q '"kind":"turn"' <<<"$BODY"; } \
+      && ok "reverse path: GET /assistant/conversations/{id} → 200, transcript relayed verbatim (per-chat fetch scoped to verified caller)" \
+      || bad "conversation transcript (code=$CODE body=$BODY)"
   else
     bad "M7 stub relay: assistant capability never went operational (api log: $(tail -5 /tmp/kgsm-api-smoke-m7.log 2>/dev/null))"
   fi

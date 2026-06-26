@@ -110,6 +110,49 @@ public sealed class AssistantClient : HttpClient
         return await SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Lists the verified end-user's own past conversations (the reverse path): <c>GET /conversations</c>
+    /// on their behalf, forwarding the trusted-relay identity (<c>X-Relay-Secret</c> + <c>X-Relay-User</c>
+    /// / <c>X-Relay-User-Name</c>) so the assistant scopes the listing to <c>web:{userId}</c>. The body is
+    /// the assistant's JSON verbatim (an array of conversation summaries) — the caller relays it. Returns
+    /// <see langword="null"/> when the assistant isn't provisioned; the caller <strong>owns disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> GetConversationsAsync(
+        string relayUserId, string relayDisplayName, CancellationToken ct) =>
+        RelayGetAsync("/conversations", relayUserId, relayDisplayName, ct);
+
+    /// <summary>
+    /// Loads one of the verified end-user's conversations: <c>GET /conversations/{chatId}</c> on their
+    /// behalf with the trusted-relay identity. The assistant composes the full key
+    /// (<c>web:{userId}:{chatId}</c>) server-side, so <paramref name="chatId"/> can only ever address the
+    /// caller's OWN conversation. The body is the assistant's transcript JSON verbatim. Returns
+    /// <see langword="null"/> when the assistant isn't provisioned; the caller <strong>owns disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> GetConversationAsync(
+        string relayUserId, string relayDisplayName, string chatId, CancellationToken ct) =>
+        RelayGetAsync($"/conversations/{Uri.EscapeDataString(chatId)}", relayUserId, relayDisplayName, ct);
+
+    // Shared GET-on-the-user's-behalf relay: forwards the secret + forwarded identity (the read endpoints
+    // need no can-act/auto-act decision), reads the small JSON body fully. Left to the default Timeout —
+    // these are short request/response calls, not the long SSE stream.
+    private async Task<HttpResponseMessage?> RelayGetAsync(
+        string path, string relayUserId, string relayDisplayName, CancellationToken ct)
+    {
+        if (!IsProvisioned)
+            return null;
+
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Accept.ParseAdd("application/json");
+        if (!string.IsNullOrEmpty(_relaySecret))
+            request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
+        request.Headers.TryAddWithoutValidation("X-Relay-User", HeaderSafe(relayUserId));
+        string displayName = HeaderSafe(relayDisplayName);
+        if (!string.IsNullOrEmpty(displayName))
+            request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
+
+        return await SendAsync(request, ct).ConfigureAwait(false);
+    }
+
     // Drop control chars (incl. CR/LF) so a user-controlled value can never split a header.
     private static string HeaderSafe(string value) =>
         string.IsNullOrEmpty(value) ? value : new string(value.Where(c => !char.IsControl(c)).ToArray());

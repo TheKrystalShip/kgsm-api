@@ -143,6 +143,74 @@ public sealed class AssistantController(
         return new EmptyResult();
     }
 
+    /// <summary>
+    /// <c>GET /api/v1/assistant/conversations</c> — the verified caller's own past chats (the reverse
+    /// path), <b>viewer</b>-gated. Relays the assistant's conversation-summary JSON verbatim so a fresh
+    /// browser/device can show history that lives server-side, not only in the client. Same degrade gate
+    /// as the turn (absent → 404, down → 503, upstream reject → 502).
+    /// </summary>
+    [HttpGet("conversations")]
+    public Task<IActionResult> Conversations(CancellationToken ct) =>
+        RelayJsonAsync((id, ct2) => assistant.GetConversationsAsync(id.UserId, id.Display, ct2), ct);
+
+    /// <summary>
+    /// <c>GET /api/v1/assistant/conversations/{id}</c> — one of the caller's chats, full transcript,
+    /// <b>viewer</b>-gated. The assistant scopes <c>{id}</c> under the forwarded user id, so it can only
+    /// ever address the caller's OWN conversation. Relays the transcript JSON verbatim.
+    /// </summary>
+    [HttpGet("conversations/{id}")]
+    public Task<IActionResult> Conversation(string id, CancellationToken ct) =>
+        RelayJsonAsync((ident, ct2) => assistant.GetConversationAsync(ident.UserId, ident.Display, id, ct2), ct);
+
+    // Shared read-relay: the same capability + identity gates as the turn, then forwards the JSON body
+    // verbatim (the assistant owns the schema; the API shapes nothing — same posture as the turn relay).
+    // Unlike the SSE turn, nothing is committed before we know the upstream status, so a real status code
+    // is returned on every branch.
+    private async Task<IActionResult> RelayJsonAsync(
+        Func<DiscordIdentity, CancellationToken, Task<HttpResponseMessage?>> call, CancellationToken ct)
+    {
+        Capability cap = health.Current.Assistant;
+        if (!cap.Provisioned)
+            return Error(StatusCodes.Status404NotFound, "not_found", "no assistant on this host");
+        if (cap.Status != CapabilityStatus.Operational)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable", "the assistant is currently unavailable");
+
+        ClaimsIdentity? ci = User.Identity as ClaimsIdentity;
+        DiscordIdentity? identity = ci is not null ? SessionClaims.ReadIdentity(ci) : null;
+        if (identity is null)
+            return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no verified identity");
+
+        HttpResponseMessage? upstream;
+        try
+        {
+            upstream = await call(identity, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return new EmptyResult(); // caller went away
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "assistant conversation relay: upstream call failed");
+            return Error(StatusCodes.Status502BadGateway, "bad_gateway", "the assistant could not be reached");
+        }
+
+        if (upstream is null)
+            return Error(StatusCodes.Status404NotFound, "not_found", "no assistant on this host");
+
+        using (upstream)
+        {
+            if (!upstream.IsSuccessStatusCode)
+            {
+                logger.LogWarning("assistant conversation relay: upstream returned {Status}", (int)upstream.StatusCode);
+                return Error(StatusCodes.Status502BadGateway, "bad_gateway", "the assistant rejected the relay");
+            }
+
+            string json = await upstream.Content.ReadAsStringAsync(ct);
+            return Content(json, "application/json; charset=utf-8");
+        }
+    }
+
     // The frozen { error: { code, message } } envelope (architecture.html §6) — only ever returned
     // before the SSE response is committed.
     private ObjectResult Error(int statusCode, string code, string message) =>
