@@ -56,13 +56,15 @@ public sealed class DiscordIdentityResolver(
         // 2. verify identity once, then discard the user token (we keep no Discord token).
         DiscordIdentity identity = await FetchIdentityAsync(userToken, ct);
 
-        // 3. resolve the guild role via the BOT token (the only path to roles). 404 = not in guild =
-        //    no role here = tier None (a real "verified but unauthorized" verdict, not an error).
-        IReadOnlyList<string> roleIds = await FetchGuildRolesAsync(identity.UserId, ct);
+        // 3. resolve the tier from guild membership via the BOT token (the only path to roles). 404 =
+        //    NOT a member ⇒ null ⇒ tier None (a real "verified but unauthorized" 403, not an error). A
+        //    verified member floors at Viewer; the Admin/Operator role ids elevate (AuthTiers.Resolve).
+        IReadOnlyList<string>? roleIds = await FetchGuildRolesAsync(identity.UserId, ct);
         AuthTier tier = AuthTiers.Resolve(roleIds, options);
 
-        logger.LogInformation("Discord auth resolved user {UserId} on guild {GuildId} -> tier {Tier} ({RoleCount} roles)",
-            identity.UserId, options.DiscordGuildId, AuthTiers.ToWire(tier), roleIds.Count);
+        logger.LogInformation("Discord auth resolved user {UserId} on guild {GuildId} -> tier {Tier} ({Membership})",
+            identity.UserId, options.DiscordGuildId, AuthTiers.ToWire(tier),
+            roleIds is null ? "not a member" : $"{roleIds.Count} roles");
         return new ResolvedPrincipal(identity, tier);
     }
 
@@ -120,7 +122,7 @@ public sealed class DiscordIdentityResolver(
         return new DiscordIdentity(userId, username, display, avatarUrl, ["identify", "guilds"]);
     }
 
-    private async Task<IReadOnlyList<string>> FetchGuildRolesAsync(string userId, CancellationToken ct)
+    private async Task<IReadOnlyList<string>?> FetchGuildRolesAsync(string userId, CancellationToken ct)
     {
         using var req = new HttpRequestMessage(HttpMethod.Get,
             $"{ApiBase}/guilds/{options.DiscordGuildId}/members/{userId}");
@@ -138,14 +140,16 @@ public sealed class DiscordIdentityResolver(
 
         using (resp)
         {
-            // Not a member of this guild -> no role here -> tier None (a real verdict, not an error).
+            // Not a member of this guild -> null -> tier None (a real verdict, not an error). This is
+            // DISTINCT from a member with an empty role array ([] -> Viewer floor): membership is the gate.
             if (resp.StatusCode is HttpStatusCode.NotFound)
-                return [];
+                return null;
             if (!resp.IsSuccessStatusCode)
                 throw new DiscordAuthException($"Discord guild-member lookup returned {(int)resp.StatusCode}.");
 
             string json = await resp.Content.ReadAsStringAsync(ct);
             using JsonDocument doc = SafeParse(json);
+            // A member, but no roles array (only @everyone) -> empty, NOT null -> Viewer floor.
             if (!doc.RootElement.TryGetProperty("roles", out JsonElement roles) || roles.ValueKind != JsonValueKind.Array)
                 return [];
             return roles.EnumerateArray()

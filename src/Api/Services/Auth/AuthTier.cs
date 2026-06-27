@@ -2,8 +2,9 @@ namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
 /// Per-host authorization tier (architecture.html §3·f). Ordered: a higher tier subsumes the
-/// lower ones (admin ⊇ operator ⊇ viewer). <c>None</c> is "identity verified, no role on this
-/// host" → a terminal <c>403</c> (never auto-re-authed — it would loop). The wire/claim form is
+/// lower ones (admin ⊇ operator ⊇ viewer). <c>None</c> is "identity verified, but NOT a member of
+/// this host's guild" → a terminal <c>403</c> (never auto-re-authed — it would loop). A verified
+/// guild member floors at <c>Viewer</c> (see <see cref="AuthTiers.Resolve"/>). The wire/claim form is
 /// the lower-case name; the ordinal drives the policy hierarchy (a viewer policy admits operator
 /// and admin too).
 /// </summary>
@@ -40,19 +41,23 @@ public static class AuthTiers
     };
 
     /// <summary>
-    /// The highest tier any of <paramref name="roleIds"/> grants under this host's role→tier map.
-    /// No match (or no roles) ⇒ <see cref="AuthTier.None"/>. A failed lookup is NEVER silently
-    /// downgraded to a softer tier — the caller maps None → 403 (the security analog of
-    /// never-fabricate-a-status: authorize on measured roles, or deny).
+    /// The tier a verified caller gets under this host's role→tier map. <paramref name="roleIds"/> is the
+    /// member's guild role ids, or <c>null</c> when they are <strong>not a member of the guild</strong> (the
+    /// 404 from the member lookup). <strong>Guild membership is the access gate:</strong> a non-member ⇒
+    /// <see cref="AuthTier.None"/> (terminal 403). A verified member <strong>floors at <see cref="AuthTier.Viewer"/></strong>
+    /// — the <c>RoleAdminIds</c> / <c>RoleOperatorIds</c> elevate from there. (<c>RoleViewerIds</c> is now moot —
+    /// every member is at least a viewer — but kept in config for back-compat.) A failed lookup is NEVER silently
+    /// downgraded — the caller maps None → 403 (the security analog of never-fabricate-a-status: authorize on
+    /// measured membership + roles, or deny).
     /// </summary>
-    public static AuthTier Resolve(IReadOnlyCollection<string> roleIds, ApiOptions options)
+    public static AuthTier Resolve(IReadOnlyCollection<string>? roleIds, ApiOptions options)
     {
-        if (roleIds.Count == 0) return AuthTier.None;
-        AuthTier best = AuthTier.None;
-        if (options.RoleAdminIds.Any(roleIds.Contains)) best = AuthTier.Admin;
-        else if (options.RoleOperatorIds.Any(roleIds.Contains)) best = AuthTier.Operator;
-        else if (options.RoleViewerIds.Any(roleIds.Contains)) best = AuthTier.Viewer;
-        return best;
+        // Not in the guild → no access on this host. Membership IS the gate.
+        if (roleIds is null) return AuthTier.None;
+        // A verified guild member floors at Viewer; the Admin/Operator role ids elevate.
+        if (options.RoleAdminIds.Any(roleIds.Contains)) return AuthTier.Admin;
+        if (options.RoleOperatorIds.Any(roleIds.Contains)) return AuthTier.Operator;
+        return AuthTier.Viewer;
     }
 }
 
