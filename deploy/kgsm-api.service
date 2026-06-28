@@ -45,6 +45,10 @@ StateDirectory=kgsm-api
 StateDirectoryMode=0750
 RuntimeDirectory=kgsm-api
 RuntimeDirectoryMode=0750
+# Keep /run/kgsm-api across restarts so systemd never removes it while the API runs. Belt to the
+# listener's suspenders: the kgsm-lib UnixSocketClient (1.28.0+) now self-heals if the event socket
+# file is unlinked, but preserving the dir prevents the systemd-driven removal class outright.
+RuntimeDirectoryPreserve=yes
 
 Restart=always
 RestartSec=2
