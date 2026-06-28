@@ -154,6 +154,13 @@ public sealed class ServersController(
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "unknown origin; expected one of: ui, assistant, discord, api");
 
+        // The optional Game Port override (now honored, §3·h additive→active): a TCP/UDP port is 1-65535.
+        // Reject an out-of-range value up front rather than letting kgsm fail the install mid-flight.
+        int? port = body?.Port;
+        if (port is < 1 or > 65535)
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "port must be between 1 and 65535");
+
         // Resolved per-request (transient, only registered when the engine is provisioned); degrade to a
         // 503 rather than throwing a missing-dependency when kgsm isn't configured on this host.
         if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
@@ -183,7 +190,7 @@ public sealed class ServersController(
                 $"an install is already in flight for '{assignedId}'");
 
         string? actor = AuditPrincipal.ActorString(User);
-        runner.StartInstall(job, blueprint, actor, origin);
+        runner.StartInstall(job, blueprint, port, actor, origin);
         return StatusCode(StatusCodes.Status202Accepted, new CommandAccepted(job));
     }
 

@@ -113,6 +113,31 @@ public sealed class InstallUninstallTests
         Assert.Empty(page.RootElement.GetProperty("data").EnumerateArray());
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(70000)]
+    [InlineData(-1)]
+    public async Task Install_PortOutOfRange_400(int port)
+    {
+        // The Game Port override is validated 1-65535 up front — an out-of-range value is a client-input
+        // 400, never passed to kgsm to fail mid-install.
+        HttpResponseMessage resp = await Post(_engine, AuthTier.Operator,
+            $"{{\"blueprint\":\"factorio\",\"port\":{port}}}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Install_ValidPort_202()
+    {
+        // An in-range Game Port is accepted (and forwarded to the engine — see RunInstall → Install(port:)).
+        HttpResponseMessage resp = await Post(_engine, AuthTier.Operator,
+            "{\"blueprint\":\"factorio\",\"port\":34250}");
+        Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
+        JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
+        Assert.Equal("install", job.GetProperty("verb").GetString());
+    }
+
     [Fact]
     public async Task Install_Viewer_403()
     {
@@ -241,8 +266,10 @@ public sealed class InstallUninstallTests
                 ? new KgsmResult(27, "", $"Blueprint '{blueprintName}' not found or invalid")
                 : new KgsmResult(0, customName ?? $"{blueprintName}-ab12");
 
+        // Accepts the Game Port override (the runner forwards it via Install(port:)); the gate tests assert
+        // the 202 synchronously, the out-of-range rejection is asserted on the controller before this runs.
         public KgsmResult Install(string blueprintName, string? installDir = null, string? version = null,
-            string? name = null, string? actor = null, string? origin = null) => new(0);
+            string? name = null, string? actor = null, string? origin = null, int? port = null) => new(0);
 
         public KgsmResult Uninstall(string instanceName, string? actor = null, string? origin = null) => new(0);
 

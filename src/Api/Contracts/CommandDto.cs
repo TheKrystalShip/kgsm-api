@@ -26,7 +26,10 @@ public sealed record CommandRequest(string? Verb, string? Origin = null);
 ///     <em>name</em> (not a free-text display label: kgsm validates it as an instance id and falls back
 ///     to an auto-generated <c>blueprint-suffix</c> if it isn't a usable unique name). <see cref="Origin"/>
 ///     (the driving surface, like <see cref="CommandRequest.Origin"/>) is stamped onto the engine call so
-///     the resulting <c>instance_installed</c> event — and its <c>server.install</c> audit row — records it.</description></item>
+///     the resulting <c>instance_installed</c> event — and its <c>server.install</c> audit row — records it.
+///     <see cref="Port"/> — the install form's Game Port; validated 1-65535 and passed to kgsm as
+///     <c>install --port</c>, overriding the blueprint's primary game port for the new instance (null keeps
+///     the blueprint default).</description></item>
 ///   <item><description><b>Reserved — accepted &amp; ignored (additive-only, §3·h):</b> everything else.
 ///     Sending them keeps the schema forward-compatible so the backend can grow into a field with no
 ///     client change and no version bump; until then they are <em>inert</em> (never silently half-applied).</description></item>

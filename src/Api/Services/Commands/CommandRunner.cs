@@ -59,11 +59,13 @@ public sealed class CommandRunner(
     /// Fire-and-forget an <c>install</c> job (M8·b — <c>POST /servers</c>). <paramref name="blueprint"/> is
     /// the source blueprint; <paramref name="job"/>'s <see cref="Job.ServerId"/> is the backend-assigned
     /// instance id (the controller resolved it via <c>GenerateId</c> and it is passed as the install
-    /// <c>--name</c>, which kgsm honors verbatim for an already-unique name). No audit row is written here —
-    /// kgsm's <c>instance_installed</c> echo carries the stamped provenance (the lifecycle case).
+    /// <c>--name</c>, which kgsm honors verbatim for an already-unique name). <paramref name="port"/> is the
+    /// optional Game Port override from the install form (validated 1-65535 by the controller; null keeps the
+    /// blueprint default). No audit row is written here — kgsm's <c>instance_installed</c> echo carries the
+    /// stamped provenance (the lifecycle case).
     /// </summary>
-    public void StartInstall(Job job, string blueprint, string? actor = null, string? origin = null) =>
-        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint, backupName: null));
+    public void StartInstall(Job job, string blueprint, int? port = null, string? actor = null, string? origin = null) =>
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint, backupName: null, installPort: port));
 
     /// <summary>
     /// Fire-and-forget an <c>uninstall</c> job (M8·b — <c>DELETE /servers/{id}</c>). Same echo-path
@@ -90,7 +92,7 @@ public sealed class CommandRunner(
     public void StartBackupRestore(Job job, string backupName, string? actor = null, string? origin = null) =>
         _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName));
 
-    private async Task ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName)
+    private async Task ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null)
     {
         bool ok = false;
         string? error = null;
@@ -106,7 +108,7 @@ public sealed class CommandRunner(
             (ok, error) = job.Verb switch
             {
                 CommandVerb.OpenPorts => await RunOpenPortsAsync(scope, job, actor, origin).ConfigureAwait(false),
-                CommandVerb.Install => RunInstall(scope, job, blueprint!, actor, origin),
+                CommandVerb.Install => RunInstall(scope, job, blueprint!, installPort, actor, origin),
                 CommandVerb.Uninstall => RunUninstall(scope, job, actor, origin),
                 // update / backup_* live on IInstanceService, NOT ILifecycleService — they get their own
                 // cases so they never fall through to RunLifecycle (whose inner switch would fail them as an
@@ -196,13 +198,16 @@ public sealed class CommandRunner(
     // KgsmAuditConsumer writes the server.install echo with the stamped provenance (the lifecycle case, NOT
     // the open_ports direct write).
     private (bool ok, string? error) RunInstall(
-        IServiceScope scope, Job job, string blueprint, string? actor, string? origin)
+        IServiceScope scope, Job job, string blueprint, int? port, string? actor, string? origin)
     {
         var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
         if (instances is null)
             return (false, "engine not provisioned");
 
-        KgsmResult result = instances.Install(blueprint, installDir: null, version: null, name: job.ServerId, actor, origin);
+        // port (the install form's Game Port) overrides the blueprint's primary port when supplied; null
+        // keeps the blueprint default. installDir/version stay null — kgsm uses its host-config default dir
+        // and the latest version (the SPA disables version selection; install dir is host-config, shown read-only).
+        KgsmResult result = instances.Install(blueprint, installDir: null, version: null, name: job.ServerId, actor: actor, origin: origin, port: port);
         return result.IsSuccess ? (true, null) : (false, Detail(result));
     }
 

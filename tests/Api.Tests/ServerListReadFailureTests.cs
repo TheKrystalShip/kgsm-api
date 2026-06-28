@@ -80,7 +80,7 @@ public sealed class ServerListReadFailureTests
 
         // --- untouched by GET /servers: honest NotImplemented (never silently fabricate) ---
         public KgsmResult GenerateId(string blueprintName, string? customName = null) => throw new NotImplementedException();
-        public KgsmResult Install(string blueprintName, string? installDir = null, string? version = null, string? name = null, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public KgsmResult Install(string blueprintName, string? installDir = null, string? version = null, string? name = null, string? actor = null, string? origin = null, int? port = null) => throw new NotImplementedException();
         public KgsmResult Uninstall(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public Instance? GetInstanceInfo(string instanceName) => throw new NotImplementedException();
         public InstanceRuntimeStatus? GetInstanceStatus(string instanceName) => throw new NotImplementedException();

@@ -42,6 +42,12 @@ public sealed record Host(
     // from the same shared const as the GET /api/v1 handshake so the two can't drift. NOT the host
     // OS / kernel version (those have no honest source today and stay client-side "—").
     string? PanelVersion = null,
+    // This host's KGSM default install directory (config_default_install_directory) — the base path under
+    // which new instances are created as <dir>/<blueprint>/<instance>. Read once from the engine's own
+    // config (per host: each host runs its own kgsm), so the install modal can show the real, host-specific
+    // base instead of a hardcoded path. Null when the engine isn't provisioned or the key is unset (honest
+    // unknown, never a fabricated default).
+    string? InstallDirectory = null,
     // M-diag depth (Monitor.Contracts 1.1.0). STATIC CPU identity — model/cores/threads/maxFreqGhz — is the
     // same every frame, so it lives on this Host view ONLY (like nothing on the tick) and is NOT re-pushed per
     // metrics WS tick. Null when there is no snapshot, and each inner field null when its /proc/sys source can't
