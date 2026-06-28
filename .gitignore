@@ -483,3 +483,9 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# local dev profile state (scripts/dev.sh)
+.dev/
+
+# Personal, host-local Claude notes (dev-token usage, etc.) — never committed
+CLAUDE.local.md
