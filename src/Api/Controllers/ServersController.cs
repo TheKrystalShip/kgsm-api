@@ -30,8 +30,18 @@ public sealed class ServersController(
     ILogger<ServersController> logger) : ControllerBase
 {
     [HttpGet]
-    public async Task<IReadOnlyList<Server>> GetAll(CancellationToken ct) =>
-        await aggregator.GetServersAsync(ct);
+    public async Task<ActionResult<IReadOnlyList<Server>>> GetAll(CancellationToken ct)
+    {
+        // Distinguish a FAILED engine read from a genuinely empty roster: serving a transient failure as
+        // 200 [] is what wiped the SPA's server list (it replaces its list from any 200). On a failed
+        // read return 503 — the client keeps its last-known list and shows a soft "couldn't refresh"
+        // rather than dropping every server. A successful read (even of zero servers) is a normal 200.
+        ServersRead read = await aggregator.GetServersReadAsync(ct);
+        if (!read.EngineRead)
+            return Error(StatusCodes.Status503ServiceUnavailable, "engine_unavailable",
+                "the game-server engine could not be read; last-known state is preserved");
+        return Ok(read.Servers);
+    }
 
     /// <summary>
     /// One server's detail record. From M6·b this is a <em>superset</em> of the list element: the same

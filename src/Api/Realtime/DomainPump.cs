@@ -46,9 +46,19 @@ public sealed class DomainPump(StreamHub hub, ServerAggregator servers, ApiOptio
                         continue;
                     }
 
-                    IReadOnlyList<Server> current = await servers.GetServersAsync(stoppingToken).ConfigureAwait(false);
+                    // Distinguish a FAILED engine read from a genuinely empty roster: on a failure the
+                    // lenient list is empty, and diffing [] against `last` would tombstone EVERY instance
+                    // (a mass server.removed) — making every server vanish on the client over the socket.
+                    // Skip the tick entirely on a failed read: keep `last` + `primed`, retry next interval.
+                    ServersRead read = await servers.GetServersReadAsync(stoppingToken).ConfigureAwait(false);
+                    if (!read.EngineRead)
+                    {
+                        logger.LogDebug("domain pump: engine read failed; skipping tick (keeping last-known roster)");
+                        continue;
+                    }
+
                     var byId = new Dictionary<string, Server>(StringComparer.Ordinal);
-                    foreach (Server s in current) byId[s.Id] = s;
+                    foreach (Server s in read.Servers) byId[s.Id] = s;
 
                     if (!primed)
                     {

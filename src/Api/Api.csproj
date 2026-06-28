@@ -107,8 +107,12 @@
          console.input, and the (actor, origin) provenance params on IInstanceService.SendInput so the
          console-input command path stamps who/through-what onto that echoed event (no direct write).
          1.25.0 fixes a pre-existing ProcessRunner bug where args with spaces (a multi-word console
-         command) were mangled by a space-joined Arguments string — now ArgumentList (verbatim argv). -->
-    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.25.0" />
+         command) were mangled by a space-joined Arguments string — now ArgumentList (verbatim argv).
+         1.26.0 adds IInstanceService.GetAllOrNull() — the roster read that returns null on a FAILED
+         engine read (vs an empty dict for a genuine zero roster), so GET /servers can 503-keep-stale
+         and the DomainPump can skip a tick instead of fabricating "zero servers" / tombstoning every
+         instance on a transient kgsm read hiccup (the vanishing-list fix). -->
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.26.0" />
 
     <!-- The shared GET /metrics wire contract (Snapshot graph + source-gen camelCase
          JSON), built in kgsm-monitor. We deserialize the monitor scrape into these exact

@@ -167,6 +167,7 @@ public sealed class ConsoleApiTests
                 : new KgsmResult(0, "", "");
 
         // --- unused by the console surface ---
+        public Dictionary<string, Instance>? GetAllOrNull() => throw new NotImplementedException();
         public Dictionary<string, Instance> GetAll() => throw new NotImplementedException();
         public Dictionary<string, Reading<InstanceRuntimeStatus>> GetAllStatuses(bool fast = false) => throw new NotImplementedException();
         public InstanceRuntimeStatus? GetInstanceStatus(string instanceName) => throw new NotImplementedException();

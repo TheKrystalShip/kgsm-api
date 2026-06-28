@@ -246,6 +246,7 @@ public sealed class InstallUninstallTests
 
         public KgsmResult Uninstall(string instanceName, string? actor = null, string? origin = null) => new(0);
 
+        public Dictionary<string, Instance>? GetAllOrNull() => GetAll();
         public Dictionary<string, Instance> GetAll() => new()
         {
             ["factorio-1"] = new Instance { Name = "factorio-1", BlueprintFile = "factorio.bp.yaml" },

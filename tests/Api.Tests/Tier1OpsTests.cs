@@ -385,6 +385,7 @@ public sealed class Tier1OpsTests
             ["stop_command_timeout_seconds"] = "30",
         };
 
+        public Dictionary<string, Instance>? GetAllOrNull() => GetAll();
         public Dictionary<string, Instance> GetAll() => new()
         {
             [Server] = new Instance { Name = Server, BlueprintFile = "factorio.bp.yaml" },

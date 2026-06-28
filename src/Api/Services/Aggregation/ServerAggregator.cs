@@ -50,16 +50,34 @@ public sealed class ServerAggregator
         _logger = logger;
     }
 
-    /// <summary>Build the full server list for this host (the <c>GET /servers</c> body).</summary>
-    public async Task<IReadOnlyList<Server>> GetServersAsync(CancellationToken ct)
+    /// <summary>
+    /// Build the full server list for this host AND report whether the engine was actually read. A
+    /// transient kgsm read failure surfaces as <see cref="ServersRead.EngineRead"/> == false with an
+    /// empty list — so a caller that must not mistake "couldn't read" for "zero servers" (the
+    /// <c>GET /servers</c> endpoint → 503-keep-stale; the <see cref="Realtime.DomainPump"/> → skip the
+    /// tick) can tell the two apart. A successful read of a genuinely empty roster is
+    /// <c>EngineRead == true</c> with an empty list (honestly zero servers).
+    /// </summary>
+    public async Task<ServersRead> GetServersReadAsync(CancellationToken ct)
     {
         // Domain read (blocking process spawns) and the metrics scrape run concurrently.
         Task<DomainReadout> domainTask = Task.Run(ReadDomain, ct);
         Task<Snap.Snapshot?> snapshotTask = _monitor.GetLatestAsync(ct);
         await Task.WhenAll(domainTask, snapshotTask).ConfigureAwait(false);
 
-        return Join(domainTask.Result, snapshotTask.Result);
+        DomainReadout domain = domainTask.Result;
+        return domain.EngineRead
+            ? new ServersRead(true, Join(domain, snapshotTask.Result))
+            : new ServersRead(false, []);
     }
+
+    /// <summary>
+    /// Build the full server list for this host (the lenient read used by existence checks and pumps):
+    /// a failed engine read collapses to an empty list, exactly as before. Surfaces that must
+    /// distinguish a failed read from a genuine empty roster use <see cref="GetServersReadAsync"/>.
+    /// </summary>
+    public async Task<IReadOnlyList<Server>> GetServersAsync(CancellationToken ct) =>
+        (await GetServersReadAsync(ct).ConfigureAwait(false)).Servers;
 
     /// <summary>
     /// Build one server's <strong>detail</strong> record (the <c>GET /servers/{id}</c> body) — the same
@@ -99,27 +117,41 @@ public sealed class ServerAggregator
             if (Interlocked.Exchange(ref _engineUnavailableLogged, 1) == 0)
                 _logger.LogWarning(
                     "kgsm engine is not configured (KGSM_API_KGSM_PATH is empty) — /servers will be empty.");
+            // A persistent misconfiguration, not a transient read failure: report an honest empty roster
+            // (EngineRead=true) so the surface shows "no servers" rather than perpetually keeping stale.
             return DomainReadout.Empty;
         }
 
         try
         {
-            Dictionary<string, Instance> roster = instances.GetAll();
+            // GetAllOrNull distinguishes a FAILED read (null) from a genuine empty roster (kgsm emits "{}",
+            // which deserializes to a non-null empty dict). A failed read must NOT be served as "zero
+            // servers" — that's what wiped the SPA's list (a 200 [] replacing it) and made the DomainPump
+            // tombstone every instance. Report it as unread so the caller keeps last-known state / 503s.
+            Dictionary<string, Instance>? roster = instances.GetAllOrNull();
+            if (roster is null)
+            {
+                _logger.LogWarning(
+                    "kgsm instance-roster read failed (the list command errored or returned unparseable "
+                    + "output) — preserving last-known state, NOT reporting zero servers.");
+                return DomainReadout.Unread;
+            }
+
             // fast: skip the per-instance network update-check (~20x faster). Version.Current is still
             // reported; only Latest/UpdatesAvailable go null — which this DTO does not emit anyway.
             Dictionary<string, Reading<InstanceRuntimeStatus>> statuses = instances.GetAllStatuses(fast: true);
 
             if (roster.Count == 0)
-                _logger.LogDebug("kgsm reported no instances (empty roster or a failed list command).");
+                _logger.LogDebug("kgsm reported an empty instance roster (genuinely zero instances).");
 
-            return new DomainReadout(roster, statuses);
+            return new DomainReadout(roster, statuses, EngineRead: true);
         }
         catch (Exception ex)
         {
-            // A list endpoint failing closed to empty is honest (it reports nothing, not a fabricated
-            // value); surface it so an operator can see the engine read broke.
-            _logger.LogWarning(ex, "kgsm domain read failed; serving an empty server list.");
-            return DomainReadout.Empty;
+            // A read that threw is a FAILED read, not "zero servers" — surface it as unread (the caller
+            // keeps last-known state) and log so an operator can see the engine read broke.
+            _logger.LogWarning(ex, "kgsm domain read threw; preserving last-known state, not reporting zero servers.");
+            return DomainReadout.Unread;
         }
     }
 
@@ -220,13 +252,34 @@ public sealed class ServerAggregator
 
     private static readonly string[] BlueprintSuffixes = [".bp.yaml", ".bp.yml"];
 
-    /// <summary>The kgsm-lib domain read result: the instance roster and the per-instance status readings.</summary>
+    /// <summary>
+    /// The kgsm-lib domain read result: the instance roster, the per-instance status readings, and
+    /// whether the engine was actually read. <see cref="EngineRead"/> is the honesty axis — false means
+    /// the roster read FAILED (transient), true means it succeeded (the roster may legitimately be empty).
+    /// </summary>
     private sealed record DomainReadout(
         IReadOnlyDictionary<string, Instance> Instances,
-        IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> Statuses)
+        IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> Statuses,
+        bool EngineRead)
     {
+        /// <summary>A successful read of an empty roster (or an unconfigured engine): honestly zero servers.</summary>
         public static readonly DomainReadout Empty = new(
             new Dictionary<string, Instance>(),
-            new Dictionary<string, Reading<InstanceRuntimeStatus>>());
+            new Dictionary<string, Reading<InstanceRuntimeStatus>>(),
+            EngineRead: true);
+
+        /// <summary>A FAILED read: the engine could not be read, so the caller must keep last-known state.</summary>
+        public static readonly DomainReadout Unread = new(
+            new Dictionary<string, Instance>(),
+            new Dictionary<string, Reading<InstanceRuntimeStatus>>(),
+            EngineRead: false);
     }
 }
+
+/// <summary>
+/// The result of reading this host's server list: whether the engine was actually read
+/// (<see cref="EngineRead"/> == false ⇒ a transient read failure, not "zero servers") and the servers
+/// from that read. Consumed by <c>GET /servers</c> (503 on a failed read) and the <c>DomainPump</c>
+/// (skip the tick on a failed read) so neither mistakes an unread roster for an empty one.
+/// </summary>
+public readonly record struct ServersRead(bool EngineRead, IReadOnlyList<Server> Servers);

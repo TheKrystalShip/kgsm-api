@@ -200,6 +200,7 @@ public sealed class ReadModelFieldsTests
         private static readonly string[] Ids =
             ["factorio-checked", "factorio-uptodate", "factorio-unchecked", "factorio-stopped", "factorio-naive", "factorio-broken"];
 
+        public Dictionary<string, Instance>? GetAllOrNull() => GetAll();
         public Dictionary<string, Instance> GetAll() =>
             Ids.ToDictionary(id => id, id => new Instance { Name = id, BlueprintFile = "factorio.bp.yaml" });
 

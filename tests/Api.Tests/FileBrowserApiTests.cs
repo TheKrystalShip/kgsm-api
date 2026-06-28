@@ -238,6 +238,7 @@ public sealed class FileBrowserApiTests
     /// honest NotImplemented (never silently fabricate).</summary>
     private sealed class FakeFilesInstanceService(string jail) : IInstanceService
     {
+        public Dictionary<string, Instance>? GetAllOrNull() => GetAll();
         public Dictionary<string, Instance> GetAll() => new()
         {
             [Server] = new Instance { Name = Server, BlueprintFile = "factorio.bp.yaml", WorkingDir = jail },
