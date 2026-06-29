@@ -279,6 +279,13 @@ of leaves present.
   `UseStatusCodePages` (404, and 401/403 once M4 lands). `/health` is **ours** (ops), not a
   frontend contract.
 - **Namespaces** are `TheKrystalShip.Api.*` (ecosystem-wide `TheKrystalShip.*`).
+- **Versioning (two axes — don't conflate):** the **route version** is the `/api/v1` path segment
+  (`ApiInfo.ApiVersion = "v1"`, surfaced as `version`/`panelVersion`) — additive-only, changes only on a
+  breaking generation. The **build version** is the assembly InformationalVersion = `<Version>` (in
+  `Api.csproj`, currently `0.1.0`) **+ the git SHA auto-stamped by the `SetSourceRevisionId` target**, e.g.
+  `0.1.0+<sha>` — surfaced as `build` on `GET /api/v1` and `identity.build` on the Host DTO (the honest
+  "which build is this host running"). Bump `<Version>` per release; the SHA degrades to absent (never
+  fabricated) outside a git checkout. **Full reference: `README.md` §Versioning.**
 - **Logging:** the ecosystem convention (`../logging-convention.md`) — the host does
   `ConfigureLogging(ClearProviders → AddSystemdConsole)`; levels come from the `appsettings.json`
   `Logging` section + env (`Logging__LogLevel__Default`). ⚠ The Discord/Slack webhook `HttpClient`s

@@ -58,6 +58,11 @@ public sealed record Host(
     // Sensor temperatures (hwmon) — DYNAMIC, so mirrored on HostMetricsDto too. Empty array when no hwmon chip
     // exposes a temperature (never an invented row); null only when there is no snapshot at all.
     IReadOnlyList<SensorSample>? Sensors = null,
+    // The host identity card — operator-declared region (+ the editable display label, already surfaced as
+    // Label) joined with the runtime-derived OS / .NET runtime / build version / API start time. Present on
+    // BOTH the list and detail (cheap, static, no leaf needed — like PanelVersion); each inner field is
+    // honest-null when its source can't be read, never fabricated. See HostIdentity.
+    HostIdentity? Identity = null,
     // The host-wide open-ports grid (M6·b) — populated ONLY on the GET /hosts/{id} detail view; omitted
     // on the GET /hosts list (this block stays detail-only; the metrics telemetry above rides both). Null
     // when the firewall can't answer (absent/unreachable/unknown); an empty OpenPorts means the firewall
@@ -113,6 +118,41 @@ public sealed record CpuInfoSample(string? Model, int? Cores, int? Threads, doub
 /// <see cref="ValueC"/> in °C. Passed through 1:1 from the snapshot — the sensors array is empty (never an
 /// invented row) when no chip exposes a temperature.</summary>
 public sealed record SensorSample(string Chip, string? Label, double ValueC);
+
+/// <summary>
+/// This host's identity card — the descriptive "who/where/what is this host" block that sits alongside the
+/// live <see cref="HostCapabilities"/> (the "what can it do" block) on the <see cref="Host"/> record. Two
+/// honesty classes, never conflated: <see cref="Region"/> is <strong>operator-declared</strong> (config or a
+/// <c>PATCH /hosts/{id}</c>, null when unset — never guessed); <see cref="Os"/>/<see cref="Runtime"/>/<see
+/// cref="Build"/>/<see cref="StartedAt"/> are <strong>runtime-derived</strong> (read from the OS / the
+/// assembly). The editable display label is surfaced as <see cref="Host.Label"/> (not duplicated here).
+/// </summary>
+public sealed record HostIdentity(
+    // Deployment region — an arbitrary free string (e.g. "eu-west", "homelab-basement"), NOT a restricted
+    // enum. Null when neither the override nor KGSM_API_REGION is set (honest unknown).
+    string? Region,
+    // The OS the API/host runs on (name/kernel/arch). Null only if even the runtime OS description is blank.
+    OsInfo? Os,
+    // The .NET runtime, e.g. ".NET 10.0.0".
+    string Runtime,
+    // This build's version (assembly informational version: <Version> + git SHA) — "which build is this host
+    // running". The route version stays "v1" (ApiInfo.ApiVersion / panelVersion); this is the build axis.
+    string Build,
+    // When the API process started (UTC) — distinct from host uptime; answers "did the API restart".
+    DateTimeOffset StartedAt);
+
+/// <summary>
+/// Sparse update body for <c>PATCH /hosts/{id}</c> (admin) — the editable half of the identity card. Only
+/// the present fields change: a <see langword="null"/> field is left unchanged; an explicit empty string
+/// <strong>clears</strong> the override (the value falls back to its <c>KGSM_API_*</c> config default). Both
+/// are free-form strings (length-bounded by the controller); region is NOT a restricted enum.
+/// </summary>
+public sealed record HostPatch(string? Label, string? Region);
+
+/// <summary>The OS the API/host runs on. <see cref="Name"/> is the distro pretty-name (e.g. "Arch Linux"),
+/// <see cref="Kernel"/> the kernel release (e.g. "7.0.12-arch1-1"); each null when unreadable. <see cref="Arch"/>
+/// (e.g. "x64") is always available from the runtime.</summary>
+public sealed record OsInfo(string? Name, string? Kernel, string Arch);
 
 /// <summary>
 /// The per-host capability block (architecture §4·b). Each optionally-exposed backend

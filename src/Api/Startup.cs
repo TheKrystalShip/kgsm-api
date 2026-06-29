@@ -85,6 +85,11 @@ public class Startup(IConfiguration configuration)
 
         services.AddSingleton<MonitorClient>();
         services.AddSingleton<AssistantClient>();
+        // Host identity: the static, runtime-derived card (OS/runtime/build/start-time), read once + cached;
+        // and the editable overrides store (region/label) — its own EnsureCreated + CREATE TABLE IF NOT EXISTS
+        // so the host_settings table appears on an existing DB without wiping the shared audit log.
+        services.AddSingleton<HostIdentityProvider>();
+        services.AddSingleton<HostSettingsStore>();
         services.AddSingleton<HostAggregator>();
         if (apiOptions.WatchdogProvisioned)
             services.AddKgsmWatchdogClient(apiOptions.WatchdogSocketPath);

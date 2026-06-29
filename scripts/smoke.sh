@@ -217,6 +217,20 @@ req GET /api/v1/ping
 [[ "$CODE" == 200 ]] && grep -q '"pong":true' <<<"$BODY" \
   && ok "/api/v1/ping 200 + {pong:true}" || bad "/api/v1/ping (code=$CODE body=$BODY)"
 
+# 3c. /api/v1 handshake doubles as the host's PUBLIC identity card (read pre-login): a real build version
+#     (NOT the route version "v1"), the display label, and region OMITTED when unset (honest unknown).
+req GET /api/v1
+if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+ok=(isinstance(d.get('build'),str) and d['build'] and d['build']!='v1'    # build != route version
+    and isinstance(d.get('label'),str) and d['label']
+    and 'region' not in d)                                                # unset => omitted, never guessed
+sys.exit(0 if ok else 1)
+" 2>/dev/null; then
+  ok "/api/v1 identity card {build,label}; region omitted when unset"
+else bad "/api/v1 identity card (code=$CODE body=$BODY)"; fi
+
 # 4. EF Core + SQLite round-trip (the data layer wiring, end-to-end). M5: a READ round-trip now (connect
 #    -> EnsureCreated the audit schema -> count) — the audit table is append-only, so the probe never
 #    writes a fake row. Fresh DB => auditRows:0; the point is the wiring builds + queries.
@@ -296,6 +310,63 @@ sys.exit(0 if (m=='operational' or not present) else 1)
   STATUS="$(python3 -c "import json;print(json.load(open('/tmp/kgsm-api-smoke.body'))['capabilities']['metrics']['status'])" 2>/dev/null)"
   ok "metrics '${STATUS}' ↔ capacity coupling (present⇒operational; honest, never fabricated)"
 else bad "capacity/metrics coupling violated (body=$BODY)"; fi
+
+# 12b. The host identity card (runtime-derived): a real build version, the .NET runtime, an os block with
+#      a non-empty arch (name/kernel string-or-null), a parseable UTC startedAt, and region honest-null when
+#      unset. Present on the detail view (rides the list too).
+req GET "/api/v1/hosts/${HOST_ID}"
+if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+from datetime import datetime
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+i=d.get('identity') or {}
+os_=i.get('os') or {}
+ok=(isinstance(i.get('build'),str) and i['build'] and i['build']!='v1'
+    and isinstance(i.get('runtime'),str) and i['runtime']
+    and isinstance(os_.get('arch'),str) and os_['arch']
+    and ('name' in os_) and ('kernel' in os_)
+    and isinstance(i.get('startedAt'),str) and i['startedAt'].endswith('Z')
+    and i.get('region') is None)                                          # unset => present-as-null
+datetime.fromisoformat(i['startedAt'].replace('Z','+00:00'))              # must parse, or this throws
+sys.exit(0 if ok else 1)
+" 2>/dev/null; then
+  ok "/hosts/{id} identity card {os,runtime,build,startedAt}; region honest-null"
+else bad "/hosts/{id} identity card (code=$CODE body=$BODY)"; fi
+
+# 12c. PATCH /hosts/{id} (admin — auth disabled here = synthetic admin) edits the identity overrides: set
+#      region+label, prove they surface on the host card AND the open handshake, then clear back to defaults
+#      (empty string => fall back to config; region => null). The runtime-mutable half of the card.
+req PATCH "/api/v1/hosts/${HOST_ID}" -H 'Content-Type: application/json' -d '{"region":"smoke-region","label":"Smoke Box"}'
+if [[ "$CODE" == 200 ]] \
+   && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if (d['label']=='Smoke Box' and (d.get('identity') or {}).get('region')=='smoke-region') else 1)
+" 2>/dev/null; then
+  # The handshake reflects the override too (no longer omitted).
+  req GET /api/v1
+  if python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if (d.get('region')=='smoke-region' and d.get('label')=='Smoke Box') else 1)
+" 2>/dev/null; then
+    # Clear: empty string => label back to host id (config default), region back to null.
+    req PATCH "/api/v1/hosts/${HOST_ID}" -H 'Content-Type: application/json' -d '{"region":"","label":""}'
+    if [[ "$CODE" == 200 ]] && EXP="$HOST_ID" python3 -c "
+import json,os,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if (d['label']==os.environ['EXP'] and (d.get('identity') or {}).get('region') is None) else 1)
+" 2>/dev/null; then
+      ok "PATCH /hosts/{id} identity set→reflected (host+handshake)→cleared"
+    else bad "PATCH /hosts/{id} clear (code=$CODE body=$BODY)"; fi
+  else bad "PATCH /hosts/{id} region not on handshake (body=$BODY)"; fi
+else bad "PATCH /hosts/{id} set (code=$CODE body=$BODY)"; fi
+
+# 12d. PATCH over-length is a 400 with the frozen envelope (length-bounded, never a silent truncation).
+req PATCH "/api/v1/hosts/${HOST_ID}" -H 'Content-Type: application/json' \
+  -d "{\"region\":\"$(python3 -c 'print("x"*101)')\"}"
+[[ "$CODE" == 400 ]] && grep -q '"code":"bad_request"' <<<"$BODY" \
+  && ok "PATCH /hosts/{id} over-length → 400 {error:bad_request}" || bad "PATCH over-length 400 (code=$CODE body=$BODY)"
 
 # --- M1·b: servers (kgsm-lib domain+run-state ⋈ monitor metrics) -----------
 echo "==> M1·b server checks — Phase A degrade (no monitor; kgsm=${KGSM_PATH})"
@@ -863,8 +934,10 @@ sys.exit(0 if d.get('kind')=='host' and d.get('tier') in ('raw','rollup') and ha
     ok "host history 200 + NON-EMPTY series (sampler → metrics.db durable write proven)"
   else bad "M9 host history durability (code=$CODE body=$(cat /tmp/kgsm-api-smoke.body 2>/dev/null | head -c 300))"; fi
 
-  # Server history: the sampler should have persisted per-server metrics for 'factorio'
-  req GET "/api/v1/servers/factorio/metrics/history?range=1h"
+  # Server history: the sampler should have persisted per-server metrics for the joined instance. Key it to
+  # $FIRST_ID (the roster's first instance, which the stub monitor + sampler are keyed to) — NOT a hardcoded
+  # 'factorio', which 404s on any host whose first instance isn't literally named "factorio".
+  req GET "/api/v1/servers/${FIRST_ID}/metrics/history?range=1h"
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
@@ -1363,13 +1436,15 @@ req POST /api/v1/servers -H 'Content-Type: application/json' -d '{"blueprint":"f
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST /servers install -> $CODE $BODY)"; }
 req DELETE /api/v1/servers/x
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (DELETE /servers/{id} -> $CODE $BODY)"; }
+req PATCH "/api/v1/hosts/${HOST_ID}" -H 'Content-Type: application/json' -d '{"region":"x"}'
+[[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (PATCH /hosts/{id} -> $CODE $BODY)"; }
 req PUT "/api/v1/servers/x/files/content?path=y" -H 'Content-Type: application/json' -d '{"content":"x"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (PUT files/content -> $CODE $BODY)"; }
 req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
 req POST /api/v1/library/refresh
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST library/refresh -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/servers/{id}/files(+content),/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,PUT files/content,POST assistant/turn,POST library/refresh,metrics/history (no open back door)" \
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/servers/{id}/files(+content),/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,PATCH /hosts/{id},PUT files/content,POST assistant/turn,POST library/refresh,metrics/history (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 31b. The library cover/hero image endpoints are [AllowAnonymous] (a CSS background:url / <img> never sends

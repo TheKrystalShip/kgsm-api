@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace TheKrystalShip.Api.Data;
 
@@ -28,6 +29,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// one-time wipe when it lands.</summary>
     public DbSet<RawgEntry> RawgEntries => Set<RawgEntry>();
 
+    /// <summary>This host's operator-editable identity overrides (region/label) — one row, keyed by host id.
+    /// Mapped here so EF reads/writes it; on an EXISTING DB it is instead created by
+    /// <see cref="Services.Aggregation.HostSettingsStore"/>'s idempotent <c>CREATE TABLE IF NOT EXISTS</c>
+    /// (EnsureCreated no-ops there, and we must not wipe the shared audit log).</summary>
+    public DbSet<HostSettingsEntity> HostSettings => Set<HostSettingsEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<IntegrationEntity>(e =>
@@ -46,6 +53,19 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(r => r.FetchedAt).HasConversion(
                 v => v.UtcTicks,
                 v => new DateTimeOffset(v, TimeSpan.Zero));
+        });
+
+        modelBuilder.Entity<HostSettingsEntity>(e =>
+        {
+            e.ToTable("host_settings");
+            e.HasKey(h => h.Id);
+            // Store UpdatedAt as UTC ticks (long) — the same posture as AuditEntry.Ts / RawgEntry.FetchedAt
+            // (SQLite has no date type). A ValueConverter on the non-nullable underlying type; EF composes
+            // it with the property's nullability (NULL stays NULL). Round-trips to a UTC DateTimeOffset.
+            e.Property(h => h.UpdatedAt).HasConversion(
+                new ValueConverter<DateTimeOffset, long>(
+                    v => v.UtcTicks,
+                    v => new DateTimeOffset(v, TimeSpan.Zero)));
         });
 
         modelBuilder.Entity<AuditEntry>(e =>

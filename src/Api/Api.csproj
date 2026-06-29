@@ -8,6 +8,14 @@
     <RootNamespace>TheKrystalShip.Api</RootNamespace>
     <AssemblyName>kgsm-api</AssemblyName>
 
+    <!-- The build version — the honest "which build is this host running?" value the identity card reports
+         (Host.identity.build / GET /api/v1 build). A real <Version> here REPLACES the old fabricated-semver
+         concern (ApiInfo used to hardcode "v1" precisely because there was none). The git SHA is appended
+         automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
+         e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
+         this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
+    <Version>0.1.0</Version>
+
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
          See docs/m0-aot-spike-findings.md and PLAN.md §8 for the decision record. -->
@@ -120,5 +128,23 @@
          cannot drift between the monitor (producer) and this api (consumer). -->
     <PackageReference Include="TheKrystalShip.KGSM.Monitor.Contracts" Version="1.3.0" />
   </ItemGroup>
+
+  <!-- Stamp the short git SHA onto the build so the assembly InformationalVersion becomes "<Version>+<sha>"
+       (the SDK appends SourceRevisionId to the informational version by default). HONEST + automatic: any
+       build inside the kgsm-api git repo gets the real commit; outside a repo / no git, the Exec fails,
+       ContinueOnError swallows it, and the version is just <Version> with no SHA — never a fabricated one.
+       Runs before the assembly-info generation so the attribute picks it up. Skipped if a SHA was already
+       passed in (e.g. deploy.sh -p:SourceRevisionId=...). -->
+  <Target Name="SetSourceRevisionId" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo;CoreCompile"
+          Condition="'$(SourceRevisionId)' == ''">
+    <Exec Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse --short=12 HEAD"
+          ConsoleToMSBuild="true" ContinueOnError="true" StandardErrorImportance="low" StandardOutputImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitShortSha" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
+    </Exec>
+    <PropertyGroup Condition="'$(_GitExitCode)' == '0' and '$(_GitShortSha)' != ''">
+      <SourceRevisionId>$(_GitShortSha)</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
 
 </Project>

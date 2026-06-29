@@ -24,7 +24,7 @@ namespace TheKrystalShip.Api.Services.Aggregation;
 /// </remarks>
 public sealed class HostAggregator(
     ApiOptions options, MonitorClient monitor, NetworkAggregator network, LeafHealthMonitor health,
-    IServiceScopeFactory scopeFactory)
+    HostSettingsStore settings, HostIdentityProvider identity, IServiceScopeFactory scopeFactory)
 {
     // The host's KGSM default install directory is effectively static config, so read it once (lazily,
     // thread-safe) and cache it for the process lifetime rather than spawning `kgsm config get` on every
@@ -67,9 +67,13 @@ public sealed class HostAggregator(
         Snap.Snapshot? snapshot = await monitor.GetLatestAsync(ct).ConfigureAwait(false);
         HostMetricsDto? capacity = snapshot is null ? null : MetricsMapping.ToHostMetrics(snapshot);
 
+        // Editable identity overrides (region/label) — the stored value wins, else config (cached; no DB hit
+        // on the hot path). Effective label is what the SPA renders as the host name.
+        HostSettingsRecord overrides = await settings.GetAsync(ct).ConfigureAwait(false);
+
         return new Host(
             Id: options.HostId,
-            Label: options.HostLabel,
+            Label: settings.EffectiveLabel(overrides),
             // The api answers on the host it runs on, so reaching this response means the host is up.
             Status: "online",
             CpuPct: capacity?.CpuPct,
@@ -94,7 +98,15 @@ public sealed class HostAggregator(
             // null when there is no snapshot; DYNAMIC sensors ride the shared capacity DTO (so the Host view
             // and a metrics tick carry the same hwmon list). Honest-null/empty when not measurable.
             Cpu: snapshot is null ? null : MetricsMapping.ToCpuInfo(snapshot.Cpu.Info),
-            Sensors: capacity?.Sensors);
+            Sensors: capacity?.Sensors,
+            // The identity card: operator-declared region joined with the runtime-derived OS/runtime/build/
+            // start-time (each honest-null when unsourceable). Cheap + static, so present on both list and detail.
+            Identity: new HostIdentity(
+                Region: settings.EffectiveRegion(overrides),
+                Os: identity.Os,
+                Runtime: identity.Runtime,
+                Build: identity.Build,
+                StartedAt: identity.StartedAt));
     }
 
     /// <summary>

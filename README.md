@@ -1,164 +1,99 @@
-# KGSM API - .NET 9.0 Web API
+# kgsm-api — KGSM Control Panel API
 
-A modern .NET 9.0 Web API for managing game server instances through the Krystal Game Server Manager (KGSM).
+The per-host **Control Panel aggregator API** for the KGSM ecosystem. One deployable unit =
+**one host** = `kgsm` + its leaves + this API. It aggregates **only its own host's** leaves
+(metrics, assistant, watchdog, firewall) and serves the React SPA (`kgsm-web`) and other surfaces
+over a path-versioned REST + WebSocket surface at `/api/v1`. Cross-host "fleet" rollup is done
+client-side by the SPA — there is no `/fleet` endpoint.
 
-## Project Structure
+It is a **leaf-aggregator, not part of the engine**: it reaches the engine only through `kgsm-lib`
+(the single C#↔engine chokepoint), scrapes the monitor's socket, and **never fabricates a metric,
+status, or alert** — measured, or explicitly `null`/`unknown`, never invented.
+
+> This is a from-scratch rewrite. An earlier .NET 9 attempt (which fabricated metrics) was scrapped;
+> if you find references to SignalR hubs, `/api/kgsm/...` routes, or `BlueprintsController`, they
+> describe that dead attempt, not this project.
+
+## Stack
+
+- **.NET 10 (JIT)** — controllers + **EF Core (SQLite)**. **Deliberately NOT Native AOT** (the rest
+  of the ecosystem is AOT; this is the one component where JIT is the right call — controllers and EF
+  are AOT-incompatible, and the API is the broadest, highest-churn surface). See `CLAUDE.md` and
+  `docs/m0-aot-spike-findings.md` for the decision record.
+- Classic `Program` + `Startup` structure; namespaces are `TheKrystalShip.Api.*`.
+- Persistence is **only the API's own operational metadata** (audit log, integrations, RAWG cache,
+  host-identity overrides, metrics history) — the domain itself is live-scraped, never stored.
+
+## Layout
 
 ```
-src/
-├── Controllers/               # API Controllers
-│   ├── BlueprintsController.cs   # Blueprint management endpoints
-│   ├── InstancesController.cs    # Instance management endpoints
-│   └── SystemController.cs       # System metrics endpoints
-├── Services/                  # Business Logic Services
-│   ├── ISystemMetricsService.cs  # System metrics interface
-│   ├── SystemMetricsService.cs   # System metrics implementation
-│   ├── ILogStreamingService.cs   # Log streaming interface
-│   └── LogStreamingService.cs    # Log streaming implementation
-├── Models/                    # Data Models (One class per file)
-│   ├── SystemMetrics.cs          # Main system metrics container
-│   ├── CpuMetrics.cs             # CPU usage metrics
-│   ├── CpuCoreInfo.cs            # CPU core information
-│   ├── CpuHistoryPoint.cs        # CPU history data point
-│   ├── MemoryMetrics.cs          # Memory usage metrics
-│   ├── DiskMetrics.cs            # Disk usage metrics
-│   ├── NetworkMetrics.cs         # Network usage metrics
-│   ├── NetworkDataPoint.cs       # Network data point
-│   ├── NetworkTotal.cs           # Network totals
-│   ├── SystemInfo.cs             # System information
-│   ├── LogStreamStatus.cs        # Log stream status
-│   └── Dtos/                     # Data Transfer Objects (One class per file)
-│       ├── InstanceInstallDto.cs # Instance installation request
-│       ├── InstanceCommandDto.cs # Instance command request
-│       ├── LogDisconnectDto.cs   # Log disconnect request
-│       ├── ApiResponse.cs        # Generic API response
-│       └── ApiErrorResponse.cs   # API error response
-├── Configuration/             # Configuration Classes
-│   └── KgsmApiOptions.cs         # KGSM API configuration options
-├── Hubs/                     # SignalR Hubs
-│   └── LogStreamingHub.cs        # Real-time log streaming
-├── Program.cs                # Application entry point
-├── appsettings.json          # Configuration file
-└── api.csproj               # Project file
+src/Api/
+├── Program.cs · Startup.cs        # composition root (DI + pipeline)
+├── Controllers/                   # thin HTTP controllers (/api/v1/*)
+├── Contracts/                     # the wire DTOs (frozen per PLAN.md §6)
+├── Services/                      # leaf clients + join/aggregation/auth/audit/commands
+├── Realtime/                      # the GET /api/v1/stream WebSocket hub + pumps
+├── Data/                          # EF Core (AppDbContext, entities)
+├── Json/ · Infrastructure/        # JSON conventions + error envelope
+tests/Api.Tests/                   # xUnit + WebApplicationFactory (faked seams)
+scripts/smoke.sh                   # the HTTP/WS contract suite (the "mock frontend")
+deploy/deploy.sh                   # build + (re)deploy the systemd service
 ```
 
-## Features
+## Commands
 
-### ✅ Implemented (Scaffolding Complete)
-
-- **Project Structure**: Clean architecture with separation of concerns
-- **Dependency Injection**: Proper DI container setup
-- **CORS Configuration**: Development-friendly CORS policy
-- **KGSM Library Integration**: Uses TheKrystalShip.KGSM.Lib
-- **SignalR Support**: Real-time WebSocket communication
-- **Health Checks**: Basic health monitoring
-- **OpenAPI/Swagger**: API documentation
-- **Logging**: Structured logging with different levels
-
-### 🚧 Placeholder Implementations (Ready for Development)
-
-- **System Metrics Collection**: CPU, Memory, Disk, Network monitoring
-- **Log Streaming**: Real-time log streaming with buffering
-- **KGSM Operations**: All CRUD operations for blueprints and instances
-
-## API Endpoints
-
-### Blueprints
-- `GET /api/kgsm/blueprints` - Get all available blueprints
-
-### Instances
-- `GET /api/kgsm/instances` - Get all instances
-- `POST /api/kgsm/instances` - Install new instance
-- `DELETE /api/kgsm/instances/{name}` - Uninstall instance
-- `POST /api/kgsm/instances/{name}/start` - Start instance
-- `POST /api/kgsm/instances/{name}/stop` - Stop instance
-- `POST /api/kgsm/instances/{name}/restart` - Restart instance
-- `GET /api/kgsm/instances/{name}/logs` - Get instance logs
-
-### System
-- `GET /api/system/metrics` - Get system metrics
-
-### SignalR Hubs
-- `/hubs/logs` - Real-time log streaming hub
-
-### Health & Monitoring
-- `/health` - Health check endpoint
-- `/openapi/v1.json` - OpenAPI specification
-- `/swagger` - Swagger UI (Development only)
-
-## Configuration
-
-### appsettings.json
-```json
-{
-  "KgsmApi": {
-    "KgsmPath": "kgsm",
-    "SocketPath": "/tmp/kgsm.sock",
-    "Port": 5167,
-    "AllowedOrigins": [
-      "http://localhost:3000",
-      "http://127.0.0.1:3000"
-    ],
-    "MaxLogBufferLines": 1000,
-    "LogCleanupIntervalSeconds": 30
-  }
-}
+```bash
+dotnet build kgsm-api.slnx                  # build (Debug)
+dotnet run --project src/Api/Api.csproj     # run locally (binds KGSM_API_URLS, default :8080)
+dotnet test kgsm-api.slnx                    # xUnit suite (401/403/tier matrix, contracts, behavior)
+scripts/smoke.sh                             # build Release + run the HTTP/WS contract checks
+./deploy/deploy.sh                           # build + (re)deploy the live systemd service (needs sudo)
 ```
 
-## Dependencies
+Runtime config lives in `src/Api/appsettings.json` (the documented schema + defaults for every
+`KGSM_API_*` key); each key is overridable by an **environment variable of the same name** (env wins —
+how the systemd unit and the smoke configure a host). A blank leaf endpoint reports its capability
+`absent`; **auth is ON by default** (`KGSM_API_AUTH_DISABLED=1` is the loudly-logged dev escape hatch).
 
-- **.NET 9.0**: Latest .NET framework
-- **TheKrystalShip.KGSM.Lib**: KGSM interop library
-- **Microsoft.AspNetCore.SignalR**: Real-time communication
-- **Microsoft.Extensions.Diagnostics.HealthChecks**: Health monitoring
-- **Swashbuckle.AspNetCore**: API documentation
+## Versioning
 
-## Design Principles
+The API reports **two distinct version axes** — don't conflate them:
 
-- **SOLID Principles**: Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion
-- **Clean Architecture**: Separation of concerns with clear boundaries
-- **Single Class Per File**: Each class, interface, and record gets its own file for better maintainability
-- **Dependency Injection**: Constructor injection for all dependencies
-- **Async/Await**: Asynchronous programming throughout
-- **Structured Logging**: Consistent logging with proper log levels
-- **Configuration Pattern**: Strongly-typed configuration options
+| Axis | Value | Where it's surfaced | What it means |
+|---|---|---|---|
+| **Route version** | `v1` (`ApiInfo.ApiVersion`) | `GET /api/v1` → `version`; Host DTO `panelVersion` | The `/api/v1` path segment. **Additive-only, path-versioned** — grow into reserved fields, never break. Changes only on a breaking API generation. |
+| **Build version** | `<Version>` + git SHA, e.g. `0.1.0+2e8e593692c3` | `GET /api/v1` → `build`; Host DTO `identity.build` | The assembly **InformationalVersion** — the honest "which build is this host running?". Bumps every release. |
 
-## Getting Started
+**How the build version is produced** (`src/Api/Api.csproj`):
 
-1. **Prerequisites**:
-   - .NET 9.0 SDK
-   - KGSM installed and available in PATH
+- `<Version>` is the human-set semver (currently **`0.1.0`** — pre-1.0; `v1.0` is the `PLAN.md`
+  milestone target, not yet reached). **Bump it here** as real releases happen.
+- The **git short SHA is appended automatically** by the `SetSourceRevisionId` MSBuild target
+  (`git rev-parse --short=12 HEAD` → `SourceRevisionId`), so the SDK stamps the InformationalVersion
+  as `<Version>+<sha>`. Any build inside the git checkout gets the real commit.
+- **Honest degradation:** outside a git checkout (or with no `git`), the target no-ops and the version
+  is just `<Version>` with no SHA — never a fabricated commit. A deploy can pin it explicitly with
+  `dotnet build -p:SourceRevisionId=<sha>`.
 
-2. **Build**:
-   ```bash
-   dotnet build
-   ```
+**Reading it at runtime:**
 
-3. **Run**:
-   ```bash
-   dotnet run
-   ```
+```bash
+curl -s http://127.0.0.1:8080/api/v1            # → { ..., "version": "v1", "build": "0.1.0+<sha>" }
+curl -s http://127.0.0.1:8080/api/v1/hosts/<id> # → { ..., "identity": { "build": "0.1.0+<sha>", ... } }
+```
 
-4. **Development**:
-   - API available at: `https://localhost:7110` or `http://localhost:5167`
-   - Swagger UI: `https://localhost:7110/swagger` (Development only)
-   - Health Check: `https://localhost:7110/health`
+`GET /api/v1` is open (pre-auth) — the connect screen reads `build`/`label`/`region` before login; the
+fuller `identity` block (incl. OS/kernel) is auth-gated on `GET /hosts/{id}`. See the **Host identity
+card** row in `PLAN.md §6`.
 
-## Next Steps
+## Authoritative docs
 
-This scaffolding provides a solid foundation. To complete the implementation:
+This README is an overview; the authorities are:
 
-1. **System Metrics**: Replace placeholder implementations with actual system monitoring
-2. **Log Streaming**: Implement real process spawning for KGSM log tailing
-3. **Error Handling**: Add comprehensive error handling and validation
-4. **Authentication**: Add authentication/authorization if needed
-5. **Testing**: Add unit and integration tests
-6. **Deployment**: Configure for production deployment
-
-## Architecture Decisions
-
-- **SignalR over Socket.IO**: Native .NET real-time communication
-- **Minimal APIs**: Used traditional controllers for better OpenAPI support
-- **Service Lifetime**: Scoped services for request-bound operations
-- **Configuration**: Options pattern with strongly-typed configuration
-- **Logging**: Built-in .NET logging with structured output
+- **`PLAN.md`** — the milestone roadmap, principles, and the **§6 cross-team contract registry** (every
+  frozen wire shape). The authority for this backend.
+- **`../architecture.html`** — the frontend team's external-surface spec (REST/WS/SSE, auth Model A,
+  the §6 conventions). The authority for the wire contracts.
+- **`../system-architecture.md`** — the ecosystem keystone (topology, invariants, open decisions).
+- **`CLAUDE.md`** — working guidance, the locked stack decision, and the invariants ("never fabricate",
+  "metric-presence ≠ status", additive-only, single-writer audit).

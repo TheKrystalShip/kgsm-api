@@ -30,8 +30,17 @@ public sealed class ApiOptions
     /// </summary>
     public required string HostId { get; init; }
 
-    /// <summary>Human-friendly host label (default: the host id).</summary>
+    /// <summary>Human-friendly host label (default: the host id). The deploy-time default; an admin
+    /// <c>PATCH /hosts/{id}</c> override (stored in <c>host_settings</c>) wins at runtime.</summary>
     public required string HostLabel { get; init; }
+
+    /// <summary>
+    /// Deployment region (<c>KGSM_API_REGION</c>) — an <strong>arbitrary free string</strong> (e.g.
+    /// <c>eu-west</c>, <c>us-east</c>, <c>homelab</c>), NOT a restricted enum. The deploy-time default for the
+    /// host identity card; an admin <c>PATCH /hosts/{id}</c> override (stored in <c>host_settings</c>) wins at
+    /// runtime. <see langword="null"/> when unset — surfaced as honest unknown, never a fabricated region.
+    /// </summary>
+    public string? Region { get; init; }
 
     /// <summary>kgsm-monitor metrics socket. Empty ⇒ metrics capability not provisioned (absent).</summary>
     public required string MonitorSocketPath { get; init; }
@@ -307,6 +316,8 @@ public sealed class ApiOptions
         {
             HostId = hostId,
             HostLabel = Clean(configuration["KGSM_API_HOST_LABEL"]) ?? hostId,
+            // Region: an arbitrary free string. Null when unset (honest unknown) — Clean() collapses blank to null.
+            Region = Clean(configuration["KGSM_API_REGION"]),
             // For socket/url defaults we distinguish "unset" (use the default) from
             // "set to empty" (deliberately mark the capability absent): a present-but-empty
             // value stays empty, an absent key falls back to the standard path.
