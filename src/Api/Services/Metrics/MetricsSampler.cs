@@ -94,6 +94,12 @@ public sealed class MetricsSampler : BackgroundService
         rows.Add(new MetricSample { EntityKind = "server", EntityId = sm.Id, Metric = "pids", Ts = ts, Value = sm.Pids });
         if (sm.DiskBytes is { } disk)
             rows.Add(new MetricSample { EntityKind = "server", EntityId = sm.Id, Metric = "diskBytes", Ts = ts, Value = disk });
+        // Network rx/tx — same honest-null semantics as io: persisted only when the meter
+        // sourced them (native eBPF), absent (never 0) for an unmetered server.
+        if (sm.RxBps is { } rx)
+            rows.Add(new MetricSample { EntityKind = "server", EntityId = sm.Id, Metric = "rxBps", Ts = ts, Value = rx });
+        if (sm.TxBps is { } tx)
+            rows.Add(new MetricSample { EntityKind = "server", EntityId = sm.Id, Metric = "txBps", Ts = ts, Value = tx });
     }
 
     internal static void MapHostMetrics(List<MetricSample> rows, string hostId, Snap.Snapshot s, long ts)

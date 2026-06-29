@@ -16,18 +16,18 @@ public sealed class MetricsHistoryTests
     // --- Frame → rows mapping (unit, no DB) ----------------------------------------------------------
 
     [Fact]
-    public void MapServerMetrics_AllPresent_SixRows()
+    public void MapServerMetrics_AllPresent_EightRows()
     {
-        // RxBps/TxBps (Monitor.Contracts 1.3.0) are present here but the history sampler does NOT yet
-        // persist per-server network rows — they ride the live wire DTO/WS tick only — so the row count
-        // stays 6 even with both populated.
+        // All eight measured series present → eight rows. RxBps/TxBps (Monitor.Contracts 1.3.0) are now
+        // persisted to history (same honest-null semantics as io), so the live Network card has a
+        // historical counterpart instead of vanishing from the 1h/24h/7d/30d grid.
         var sm = new Snap.ServerMetrics("test-server", "Test", "native",
             CpuPctCore: 142.3, MemBytes: 512_000_000, IoReadBps: 1000, IoWriteBps: 2000,
             Pids: 5, DiskBytes: 10_000_000_000, RxBps: 3000, TxBps: 4000);
         var rows = new List<MetricSample>();
         MetricsSampler.MapServerMetrics(rows, sm, 1000);
 
-        Assert.Equal(6, rows.Count);
+        Assert.Equal(8, rows.Count);
         Assert.All(rows, r => Assert.Equal("server", r.EntityKind));
         Assert.All(rows, r => Assert.Equal("test-server", r.EntityId));
         Assert.All(rows, r => Assert.Equal(1000, r.Ts));
@@ -37,6 +37,8 @@ public sealed class MetricsHistoryTests
         Assert.Contains(rows, r => r.Metric == "ioWriteBps" && r.Value == 2000);
         Assert.Contains(rows, r => r.Metric == "pids" && r.Value == 5);
         Assert.Contains(rows, r => r.Metric == "diskBytes" && r.Value == 10_000_000_000);
+        Assert.Contains(rows, r => r.Metric == "rxBps" && r.Value == 3000);
+        Assert.Contains(rows, r => r.Metric == "txBps" && r.Value == 4000);
     }
 
     [Fact]
@@ -55,6 +57,9 @@ public sealed class MetricsHistoryTests
         Assert.DoesNotContain(rows, r => r.Metric == "ioReadBps");
         Assert.DoesNotContain(rows, r => r.Metric == "ioWriteBps");
         Assert.DoesNotContain(rows, r => r.Metric == "diskBytes");
+        // Network is honest-null too: an unmetered server persists no rx/tx rows (never a fabricated 0).
+        Assert.DoesNotContain(rows, r => r.Metric == "rxBps");
+        Assert.DoesNotContain(rows, r => r.Metric == "txBps");
     }
 
     [Fact]
