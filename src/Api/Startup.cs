@@ -237,6 +237,13 @@ public class Startup(IConfiguration configuration)
         // introspection, like the file browser): it shells journalctl directly and is pure/stateless → singleton.
         services.AddSingleton<TheKrystalShip.Api.Services.Logs.JournalReader>();
 
+        // Services board — the GET /hosts/{id}/services leaf control center. Same host-OS-introspection
+        // category as the host logs: SystemdReader shells `systemctl show` (the unit manager's own state),
+        // and ServicesAggregator joins that liveness with the LeafHealthMonitor deep-health cache (resolved
+        // as the singleton above). Pure/stateless readers → singletons.
+        services.AddSingleton<SystemdReader>();
+        services.AddSingleton<ServicesAggregator>();
+
         // M6·a — alerts (the condition-mirror). The engine is ALWAYS-ON (like LeafHealthMonitor, not gated
         // on WS subscribers): GET /alerts must serve fresh truth regardless of who is listening. It polls
         // the watchdog's supervision state (via kgsm-lib IWatchdogClient — the crash source) every ~5s,

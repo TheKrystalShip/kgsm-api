@@ -144,6 +144,46 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
 
+    // --- Services board (GET /hosts/{id}/services): OPERATOR-gated, same host-internals sensitivity as the
+    // host logs (unit names / pids / memory / enablement). The reader shells real systemctl; content is
+    // irrelevant to the gate — a 200 (real rows or honest 'unknown'/'not-installed') means authz passed.
+    private static string ServicesPath => $"/api/v1/hosts/{AuthTestFactory.HostId}/services";
+
+    [Fact]
+    public async Task NoToken_Services_401()
+    {
+        HttpResponseMessage resp = await Client().GetAsync(ServicesPath);
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Viewer_Services_403()
+    {
+        // Mirrors the host-log gate: a viewer cannot read host service internals — operator and up only.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).GetAsync(ServicesPath);
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+        Assert.Contains("\"code\":\"forbidden\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData(AuthTier.Operator)]
+    [InlineData(AuthTier.Admin)]
+    public async Task OperatorAndAdmin_Services_200(AuthTier tier)
+    {
+        HttpResponseMessage resp = await Client(factory.AccessToken(tier)).GetAsync(ServicesPath);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode); // authorization passed -> the board (real or honest-unknown)
+        // The catalog always yields a row per leaf, even on a host where none are installed (state:"not-installed").
+        Assert.Contains("\"data\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Operator_Services_UnknownHost_404()
+    {
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator))
+            .GetAsync("/api/v1/hosts/not-this-host/services");
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
     // --- Hardening: none-tier, refresh-as-access, wrong signature, garbage -------------------------
     [Fact]
     public async Task NoneTier_Reads_403()

@@ -253,6 +253,12 @@ public sealed class ApiOptions
     /// default <c>journalctl</c> — resolved via PATH). The reader degrades to an empty page if it's missing.</summary>
     public required string JournalctlPath { get; init; }
 
+    /// <summary>The <c>systemctl</c> binary the Services board (<c>GET /hosts/{id}/services</c>) shells to read
+    /// each leaf unit's live state (<c>KGSM_API_SYSTEMCTL_PATH</c>, default <c>systemctl</c> — resolved via
+    /// PATH). Reading unit state is unprivileged; the reader degrades each unit to <c>unknown</c> if it's
+    /// missing. Same host-OS-introspection category as <see cref="JournalctlPath"/> — NOT a §4·b capability.</summary>
+    public required string SystemctlPath { get; init; }
+
     /// <summary>Hard wall-clock budget (ms) for a single host-log read (<c>KGSM_API_LOG_READ_TIMEOUT_MS</c>,
     /// default 5000, floor 500). On timeout the reader returns the lines it gathered (honest partial), never a
     /// fabricated tail.</summary>
@@ -403,6 +409,7 @@ public sealed class ApiOptions
             // KGSM_API_LOG_SOURCES on a host whose units are named differently. journalctl resolves via PATH.
             LogSources = ParseLogSources(configuration["KGSM_API_LOG_SOURCES"]),
             JournalctlPath = BlankFallback(configuration["KGSM_API_JOURNALCTL_PATH"], "journalctl"),
+            SystemctlPath = BlankFallback(configuration["KGSM_API_SYSTEMCTL_PATH"], "systemctl"),
             LogReadTimeoutMs = Math.Max(500, IntOr(configuration["KGSM_API_LOG_READ_TIMEOUT_MS"], 5000)),
 
             // Auth (M4·a). On by default; the dev escape hatch is the only way to the old open window.
@@ -462,17 +469,12 @@ public sealed class ApiOptions
     private static IReadOnlyList<string> Csv(string? value) =>
         (value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-    // The default host-log source map: the host's leaf services (assistant, monitor, watchdog, firewall) plus
-    // the api and bot — the journald units they deploy as. Order = the frontend's source-dropdown order.
-    private static readonly LogSourceMap[] DefaultLogSources =
-    [
-        new("watchdog", "kgsm-watchdog.service"),
-        new("monitor", "kgsm-monitor.service"),
-        new("assistant", "kgsm-assistant-service.service"),
-        new("firewall", "kgsm-firewall.service"),
-        new("api", "kgsm-api.service"),
-        new("bot", "kgsm-bot.service"),
-    ];
+    // The default host-log source map is DERIVED from the canonical leaf catalog (LeafCatalog) — the single
+    // source of truth for "which units make up a host" — so the host-log sources and the Services board can
+    // never drift on the unit set. KGSM_API_LOG_SOURCES still overrides this map for a host whose units are
+    // named differently (logs only; the Services board reads the catalog directly). Order = catalog order.
+    private static readonly IReadOnlyList<LogSourceMap> DefaultLogSources =
+        Services.Leaves.LeafCatalog.Default.Select(l => new LogSourceMap(l.Id, l.Unit)).ToArray();
 
     // Parse `source:unit,source:unit,…` -> the ordered map; blank/unset -> the default leaf set. A malformed
     // entry (no ':' or a blank half) is skipped; if nothing parses we fall back to the default (never an empty

@@ -316,7 +316,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
         HostId = "test", HostLabel = "test",
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
         FirewallSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmSocketPath = "",
-        LogSources = [], JournalctlPath = "journalctl", LogReadTimeoutMs = 5000,
+        LogSources = [], JournalctlPath = "journalctl", SystemctlPath = "systemctl", LogReadTimeoutMs = 5000,
         RawgApiKey = "test-key", RawgCacheDir = cacheDir, PublicBaseUrl = "",
         SteamCdnBaseUrl = "https://steamcdn.test/apps", // inert here: the worker uses the injected ISteamCoverClient fake
         LibraryRefreshIntervalDays = 7, LibraryRefreshHour = 6,
