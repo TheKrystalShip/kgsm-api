@@ -193,6 +193,8 @@ public sealed class LibraryAggregator
 
     // Build the absolute serving URL for an image slot: {base}/api/v1/library/{id}/{slot}. The base is already
     // trailing-slash-trimmed; the id is path-segment-escaped so a stray char can't break the URL.
-    private static string ImageUrl(string baseUrl, string id, string slot) =>
+    // internal so ServerAggregator can reuse the SAME URL shape when it joins a server's blueprint art
+    // (one image-URL authority — the detail server art and the catalog point at the same endpoints).
+    internal static string ImageUrl(string baseUrl, string id, string slot) =>
         $"{baseUrl}/api/v1/library/{Uri.EscapeDataString(id)}/{slot}";
 }

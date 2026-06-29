@@ -78,6 +78,16 @@ public sealed record Server(
     // uptime from a start timestamp); the upstream parse gap is flagged for a kgsm-lib/kgsm fix (emit ISO,
     // and/or a start_time converter), out of scope for this read slice. Never a guessed timezone.
     DateTimeOffset? StartedAt = null,
+    // RAWG.io cover-art + hero banner for this server's blueprint, joined from this host's cached library
+    // metadata (RawgStore, keyed on the blueprint id == this server's Blueprint) — populated ONLY on the
+    // GET /servers/{id} detail view, like Network; omitted on the list + the `servers` stream so those stay
+    // byte-identical to the frozen M1·b shape. Absolute, directly-renderable URLs to this api's own
+    // self-hosted /library/{blueprint}/{cover|hero} image endpoints (the SAME bytes the catalog serves), or
+    // null when no image is cached / no source. Cover is the 2:3 portrait capsule; Hero is the landscape
+    // background_image_additional banner the detail page renders behind the title. Never a CDN hotlink,
+    // never fabricated.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Cover = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Hero = null,
     // The firewall/ports cross-reference (M6·b) — populated ONLY on the GET /servers/{id} detail view
     // (and the servers/{id}/network WS patch); omitted entirely on the list + the `servers` stream, so
     // those stay byte-identical to the frozen M1·b shape (detail ≠ list, the first such split). See

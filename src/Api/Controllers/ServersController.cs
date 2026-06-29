@@ -27,6 +27,7 @@ public sealed class ServersController(
     ServerAggregator aggregator,
     JobRegistry jobs,
     CommandRunner runner,
+    ApiOptions options,
     ILogger<ServersController> logger) : ControllerBase
 {
     [HttpGet]
@@ -52,7 +53,8 @@ public sealed class ServersController(
     [HttpGet("{id}")]
     public async Task<ActionResult<Server>> GetById(string id, CancellationToken ct)
     {
-        Server? server = await aggregator.GetServerDetailAsync(id, ct);
+        // BaseUrl() lets the detail join build absolute, self-hosted cover/hero URLs for the SPA's hero.
+        Server? server = await aggregator.GetServerDetailAsync(id, BaseUrl(), ct);
 
         // Unknown id -> 404 with no body; UseStatusCodePages renders the not_found envelope.
         if (server is null)
@@ -253,4 +255,11 @@ public sealed class ServersController(
     // formatters (camelCase) — same shape UseStatusCodePages emits for the message-less 404 above.
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
+
+    // The absolute origin the self-hosted cover/hero serving URLs are built from — the configured public
+    // base (reverse-proxy deployments) or the live request's scheme+host. Mirrors LibraryController.BaseUrl().
+    private string BaseUrl() =>
+        !string.IsNullOrWhiteSpace(options.PublicBaseUrl)
+            ? options.PublicBaseUrl
+            : $"{Request.Scheme}://{Request.Host}";
 }

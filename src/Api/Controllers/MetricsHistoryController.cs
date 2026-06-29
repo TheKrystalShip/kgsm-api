@@ -29,7 +29,8 @@ public sealed class MetricsHistoryController(
         if (!options.MetricsHistoryEnabled)
             return Ok(EmptyResponse(id, "server", range ?? MetricsRange.OneHour));
 
-        Server? server = await serverAggregator.GetServerDetailAsync(id, ct);
+        // null baseUrl: existence check only — skip the cover/hero art join (decorative, not needed here).
+        Server? server = await serverAggregator.GetServerDetailAsync(id, null, ct);
         if (server is null)
             return NotFound();
 

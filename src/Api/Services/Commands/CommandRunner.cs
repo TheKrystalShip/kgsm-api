@@ -355,7 +355,8 @@ public sealed class CommandRunner(
     // Reuses the detail build so the patch is byte-identical to a subsequent GET /servers/{id} network field.
     private async Task PublishNetworkPatchAsync(string serverId)
     {
-        Server? server = await aggregator.GetServerDetailAsync(serverId, CancellationToken.None).ConfigureAwait(false);
+        // null baseUrl: this verify only publishes the Network block — skip the cover/hero art join.
+        Server? server = await aggregator.GetServerDetailAsync(serverId, null, CancellationToken.None).ConfigureAwait(false);
         if (server?.Network is not null)
             hub.Publish(StreamProtocol.ServerNetworkTopic(serverId), StreamProtocol.ServerNetworkEntityKey(serverId),
                 new StreamMessage(StreamProtocol.ServerNetworkTopic(serverId), StreamProtocol.NetworkPatch, server.Network));

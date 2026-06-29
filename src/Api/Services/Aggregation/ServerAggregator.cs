@@ -1,5 +1,7 @@
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Leaves;
+using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
@@ -30,6 +32,7 @@ public sealed class ServerAggregator
     private readonly ApiOptions _options;
     private readonly MonitorClient _monitor;
     private readonly NetworkAggregator _network;
+    private readonly RawgStore _rawg;
     private readonly IServiceProvider _services;
     private readonly ILogger<ServerAggregator> _logger;
 
@@ -40,12 +43,14 @@ public sealed class ServerAggregator
         ApiOptions options,
         MonitorClient monitor,
         NetworkAggregator network,
+        RawgStore rawg,
         IServiceProvider services,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
         _monitor = monitor;
         _network = network;
+        _rawg = rawg;
         _services = services;
         _logger = logger;
     }
@@ -82,11 +87,19 @@ public sealed class ServerAggregator
     /// <summary>
     /// Build one server's <strong>detail</strong> record (the <c>GET /servers/{id}</c> body) — the same
     /// join as the list element <em>plus</em> the M6·b <see cref="ServerNetwork"/> block (a firewall probe
-    /// cross-referenced against the instance's required ports). Returns <see langword="null"/> for an
-    /// unknown id (the controller maps that to <c>404</c>). This is the first place the detail view diverges
-    /// from the list element — the list/stream deliberately omit <c>network</c> (no per-poll firewall probe).
+    /// cross-referenced against the instance's required ports) and the blueprint's cached RAWG
+    /// <see cref="Server.Cover"/>/<see cref="Server.Hero"/> art. Returns <see langword="null"/> for an
+    /// unknown id (the controller maps that to <c>404</c>). This is the place the detail view diverges
+    /// from the list element — the list/stream deliberately omit <c>network</c>/<c>cover</c>/<c>hero</c>.
+    /// <para>
+    /// <paramref name="baseUrl"/> is the absolute origin the self-hosted cover/hero URLs are built from
+    /// (<c>{scheme}://{host}</c> or the configured public base, passed by the controller). Pass
+    /// <see langword="null"/>/blank to skip the art join entirely — what the off-request callers (the
+    /// command-runner verify payload, the metrics-history existence check) do, so the <c>servers</c>
+    /// stream patch stays byte-identical to the frozen M1·b shape.
+    /// </para>
     /// </summary>
-    public async Task<Server?> GetServerDetailAsync(string id, CancellationToken ct)
+    public async Task<Server?> GetServerDetailAsync(string id, string? baseUrl, CancellationToken ct)
     {
         Task<DomainReadout> domainTask = Task.Run(ReadDomain, ct);
         Task<Snap.Snapshot?> snapshotTask = _monitor.GetLatestAsync(ct);
@@ -103,7 +116,43 @@ public sealed class ServerAggregator
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
         ServerNetwork network = await _network
             .BuildServerNetworkAsync(id, instance.Ports, ct).ConfigureAwait(false);
-        return server with { Network = network };
+
+        (string? cover, string? hero) = await ResolveArtAsync(server.Blueprint, baseUrl, ct).ConfigureAwait(false);
+        return server with { Cover = cover, Hero = hero, Network = network };
+    }
+
+    /// <summary>
+    /// Resolve the blueprint's cached cover (2:3 portrait) + hero (landscape banner) as absolute self-hosted
+    /// URLs — the SAME <c>/library/{blueprint}/{slot}</c> endpoints the catalog serves, reusing
+    /// <see cref="LibraryAggregator.ImageUrl"/> as the single URL-shape authority. A URL is built only when
+    /// the cache row actually recorded a landed image file (else honest null — no source / unresolved).
+    /// Degrades independently of everything else: no <paramref name="baseUrl"/>, a cache miss, or a read
+    /// failure all leave both null without failing the detail (art is decorative, never load-bearing).
+    /// </summary>
+    private async Task<(string? Cover, string? Hero)> ResolveArtAsync(string blueprint, string? baseUrl, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl) || string.IsNullOrWhiteSpace(blueprint))
+            return (null, null);
+
+        try
+        {
+            RawgEntry? row = await _rawg.GetAsync(blueprint, ct).ConfigureAwait(false);
+            if (row is null)
+                return (null, null);
+
+            string? cover = string.IsNullOrWhiteSpace(row.CoverFile)
+                ? null
+                : LibraryAggregator.ImageUrl(baseUrl, blueprint, RawgCache.CoverSlot);
+            string? hero = string.IsNullOrWhiteSpace(row.HeroFile)
+                ? null
+                : LibraryAggregator.ImageUrl(baseUrl, blueprint, RawgCache.HeroSlot);
+            return (cover, hero);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "RAWG cover/hero lookup for blueprint {Blueprint} failed; serving detail without art.", blueprint);
+            return (null, null);
+        }
     }
 
     /// <summary>The kgsm-lib domain read: the instance roster + each instance's status reading.</summary>
