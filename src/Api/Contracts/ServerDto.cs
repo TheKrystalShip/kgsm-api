@@ -99,15 +99,22 @@ public sealed record Server(
 /// <param name="Pids">Live process/thread count.</param>
 /// <param name="DiskBytes">On-disk footprint of the instance's files (bytes) — the monitor's
 /// slow-cadence working-dir walk. <c>null</c> when not yet measured / unreadable (passed through,
-/// never coerced to 0). A filesystem figure, not a cgroup counter; per-server <em>network</em> has
-/// no honest source for native servers and is deliberately not emitted (see the monitor contract).</param>
+/// never coerced to 0). A filesystem figure, not a cgroup counter.</param>
+/// <param name="RxBps">Per-server network receive rate (bytes/sec). Sourced from the monitor's
+/// passive eBPF <c>cgroup/skb</c> byte meter on the instance cgroup (Monitor.Contracts 1.3.0).
+/// <c>null</c> when not measurable — meter not set up, the cap absent, or a container instance not
+/// under <c>kgsm.slice</c> (passed through, never coerced to 0).</param>
+/// <param name="TxBps">Per-server network transmit rate (bytes/sec); same source + honest-null
+/// semantics as <paramref name="RxBps"/>.</param>
 public sealed record ServerMetricsDto(
     double CpuPctCore,
     long MemBytes,
     long? IoReadBps,
     long? IoWriteBps,
     int Pids,
-    long? DiskBytes);
+    long? DiskBytes,
+    long? RxBps,
+    long? TxBps);
 
 /// <summary>
 /// The honest run-state vocabulary (M1·b). Derived from kgsm-lib's

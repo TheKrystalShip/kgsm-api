@@ -18,9 +18,12 @@ public sealed class MetricsHistoryTests
     [Fact]
     public void MapServerMetrics_AllPresent_SixRows()
     {
+        // RxBps/TxBps (Monitor.Contracts 1.3.0) are present here but the history sampler does NOT yet
+        // persist per-server network rows — they ride the live wire DTO/WS tick only — so the row count
+        // stays 6 even with both populated.
         var sm = new Snap.ServerMetrics("test-server", "Test", "native",
             CpuPctCore: 142.3, MemBytes: 512_000_000, IoReadBps: 1000, IoWriteBps: 2000,
-            Pids: 5, DiskBytes: 10_000_000_000);
+            Pids: 5, DiskBytes: 10_000_000_000, RxBps: 3000, TxBps: 4000);
         var rows = new List<MetricSample>();
         MetricsSampler.MapServerMetrics(rows, sm, 1000);
 
@@ -41,7 +44,7 @@ public sealed class MetricsHistoryTests
     {
         var sm = new Snap.ServerMetrics("test-server", "Test", "native",
             CpuPctCore: 10.0, MemBytes: 100, IoReadBps: null, IoWriteBps: null,
-            Pids: 1, DiskBytes: null);
+            Pids: 1, DiskBytes: null, RxBps: null, TxBps: null);
         var rows = new List<MetricSample>();
         MetricsSampler.MapServerMetrics(rows, sm, 2000);
 

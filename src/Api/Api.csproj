@@ -118,7 +118,7 @@
          JSON), built in kgsm-monitor. We deserialize the monitor scrape into these exact
          types with the same JSON context, so the contract is solid at build time and
          cannot drift between the monitor (producer) and this api (consumer). -->
-    <PackageReference Include="TheKrystalShip.KGSM.Monitor.Contracts" Version="1.2.0" />
+    <PackageReference Include="TheKrystalShip.KGSM.Monitor.Contracts" Version="1.3.0" />
   </ItemGroup>
 
 </Project>
