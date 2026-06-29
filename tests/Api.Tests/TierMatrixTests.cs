@@ -96,6 +96,54 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     public async Task Admin_Reads_200() =>
         Assert.Equal(HttpStatusCode.OK, (await Client(factory.AccessToken(AuthTier.Admin)).GetAsync("/api/v1/hosts")).StatusCode);
 
+    // --- Host logs (GET /hosts/{id}/logs): OPERATOR-gated, stricter than the viewer-gated audit feed -----
+    // (raw journald can carry secrets). The reader shells real journalctl; content is irrelevant to the gate
+    // — a 200 (lines or honest-empty) means authorization passed, a 403 means it didn't.
+    private static string LogsPath => $"/api/v1/hosts/{AuthTestFactory.HostId}/logs?limit=1";
+
+    [Fact]
+    public async Task NoToken_Logs_401()
+    {
+        HttpResponseMessage resp = await Client().GetAsync(LogsPath);
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Viewer_Logs_403()
+    {
+        // A viewer can read the audit log but NOT raw host logs — the deliberate one-tier-up gate.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).GetAsync(LogsPath);
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+        Assert.Contains("\"code\":\"forbidden\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData(AuthTier.Operator)]
+    [InlineData(AuthTier.Admin)]
+    public async Task OperatorAndAdmin_Logs_200(AuthTier tier)
+    {
+        HttpResponseMessage resp = await Client(factory.AccessToken(tier)).GetAsync(LogsPath);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode); // authorization passed -> the page (lines or empty)
+    }
+
+    [Fact]
+    public async Task Operator_Logs_UnknownHost_404()
+    {
+        // Past authz (operator) but a foreign host id -> 404, consistent with the rest of the hosts surface.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator))
+            .GetAsync("/api/v1/hosts/not-this-host/logs?limit=1");
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Operator_Logs_UnknownSource_400()
+    {
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator))
+            .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/logs?source=bogus");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
     // --- Hardening: none-tier, refresh-as-access, wrong signature, garbage -------------------------
     [Fact]
     public async Task NoneTier_Reads_403()

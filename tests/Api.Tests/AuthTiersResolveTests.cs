@@ -20,6 +20,7 @@ public sealed class AuthTiersResolveTests
         HostId = "test", HostLabel = "test",
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
         FirewallSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmSocketPath = "",
+        LogSources = [], JournalctlPath = "journalctl", LogReadTimeoutMs = 5000,
         RawgApiKey = "", RawgCacheDir = "covers", PublicBaseUrl = "",
         SteamCdnBaseUrl = "https://steamcdn.test/apps",
         LibraryRefreshIntervalDays = 7, LibraryRefreshHour = 6,

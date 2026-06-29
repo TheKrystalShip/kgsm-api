@@ -195,6 +195,12 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<ConsoleBridgeManager>();
         services.AddHostedService(sp => sp.GetRequiredService<ConsoleBridgeManager>());
 
+        // Host-log live tail — the resident piece behind the follow-only, operator-gated hosts/{id}/logs WS
+        // topic. While that topic has subscribers it runs ONE shared `journalctl -f` across the configured leaf
+        // units and fans each new line out as a log.line (the REST GET /hosts/{id}/logs hydrates history; this
+        // streams the live tail). Idle when nobody is watching; degrades to silent if journalctl is unavailable.
+        services.AddHostedService<JournalFollowBridge>();
+
         // M3 — commands (the first write path). The registry holds in-memory job state + the
         // one-in-flight-per-server guard; the runner executes admitted verbs off-request (its own DI
         // scope per job, since ILifecycleService is transient/process-based) and streams job.patch +
@@ -226,6 +232,10 @@ public class Startup(IConfiguration configuration)
         // capability axis (engine-base, like config/backups): the jail root comes from kgsm-lib
         // (Instance.WorkingDir) and the read/write is host filesystem. Pure/stateless → singleton.
         services.AddSingleton<IInstanceFileService, InstanceFileService>();
+
+        // Host logs — the GET /hosts/{id}/logs journald aggregator. No leaf, no capability axis (host-OS
+        // introspection, like the file browser): it shells journalctl directly and is pure/stateless → singleton.
+        services.AddSingleton<TheKrystalShip.Api.Services.Logs.JournalReader>();
 
         // M6·a — alerts (the condition-mirror). The engine is ALWAYS-ON (like LeafHealthMonitor, not gated
         // on WS subscribers): GET /alerts must serve fresh truth regardless of who is listening. It polls

@@ -19,6 +19,7 @@ namespace TheKrystalShip.Api.Controllers;
 [Authorize(Policy = AuthPolicy.Viewer)] // a read surface — viewer and up; the WS bearer rides ?access_token= (M4·a)
 public sealed class StreamController(
     StreamHub hub,
+    IAuthorizationService authorization,
     IHostApplicationLifetime lifetime,
     ILogger<StreamController> logger) : ControllerBase
 {
@@ -33,8 +34,13 @@ public sealed class StreamController(
             return;
         }
 
+        // The handshake itself is viewer-gated; resolve operator ONCE here so the connection can refuse
+        // operator-only topic subscriptions (the host-logs tail). Authorize before upgrading the socket.
+        bool canOperatorTopics =
+            (await authorization.AuthorizeAsync(HttpContext.User, policyName: AuthPolicy.Operator)).Succeeded;
+
         using WebSocket socket = await HttpContext.WebSockets.AcceptWebSocketAsync();
-        var connection = new StreamConnection(socket, hub.Json, logger);
+        var connection = new StreamConnection(socket, hub.Json, logger, canOperatorTopics);
         hub.Add(connection);
         try
         {

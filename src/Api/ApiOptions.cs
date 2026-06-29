@@ -237,6 +237,27 @@ public sealed class ApiOptions
     /// </summary>
     public required long FilesMaxEditBytes { get; init; }
 
+    // --- Host logs (the GET /hosts/{id}/logs journald aggregation surface) ------------------------
+
+    /// <summary>
+    /// The ordered source-id → systemd-unit map the host-log aggregator reads
+    /// (<c>KGSM_API_LOG_SOURCES</c>, e.g. <c>watchdog:kgsm-watchdog.service,monitor:kgsm-monitor.service</c>).
+    /// Blank/unset ⇒ the default leaf set (assistant, monitor, watchdog, firewall, api, bot). Order is the
+    /// order the frontend presents the sources. Reading the journal needs the api's user to have journal read
+    /// access (the <c>systemd-journal</c>/<c>wheel</c> ACL); a host whose units are named differently overrides
+    /// this map. NOT a §4·b capability — journald is always present locally; a read failure degrades to empty.
+    /// </summary>
+    public required IReadOnlyList<LogSourceMap> LogSources { get; init; }
+
+    /// <summary>The <c>journalctl</c> binary the host-log reader shells (<c>KGSM_API_JOURNALCTL_PATH</c>,
+    /// default <c>journalctl</c> — resolved via PATH). The reader degrades to an empty page if it's missing.</summary>
+    public required string JournalctlPath { get; init; }
+
+    /// <summary>Hard wall-clock budget (ms) for a single host-log read (<c>KGSM_API_LOG_READ_TIMEOUT_MS</c>,
+    /// default 5000, floor 500). On timeout the reader returns the lines it gathered (honest partial), never a
+    /// fabricated tail.</summary>
+    public required int LogReadTimeoutMs { get; init; }
+
     // --- Auth (M4·a) — Discord per-host, Model A (architecture.html §3·f, keystone O5) -----------
     // Identity is a global Discord SSO anchor; authorization is a short-lived host-scoped bearer
     // this host mints after verifying identity once and resolving the role via the host's bot.
@@ -378,6 +399,12 @@ public sealed class ApiOptions
             FilesMaxEntries = Math.Max(1, IntOr(configuration["KGSM_API_FILES_MAX_ENTRIES"], 200)),
             FilesMaxEditBytes = Math.Max(1024, LongOr(configuration["KGSM_API_FILES_MAX_EDIT_BYTES"], 2 * 1024 * 1024)),
 
+            // Host logs (GET /hosts/{id}/logs). The unit map defaults to the host's leaf services; override
+            // KGSM_API_LOG_SOURCES on a host whose units are named differently. journalctl resolves via PATH.
+            LogSources = ParseLogSources(configuration["KGSM_API_LOG_SOURCES"]),
+            JournalctlPath = BlankFallback(configuration["KGSM_API_JOURNALCTL_PATH"], "journalctl"),
+            LogReadTimeoutMs = Math.Max(500, IntOr(configuration["KGSM_API_LOG_READ_TIMEOUT_MS"], 5000)),
+
             // Auth (M4·a). On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = Flag(configuration["KGSM_API_AUTH_DISABLED"]),
             SigningKey = Defaulted(configuration["KGSM_API_AUTH_SIGNING_KEY"], ""),
@@ -434,4 +461,38 @@ public sealed class ApiOptions
     // Comma-separated list (role ids), trimmed and de-blanked. Empty/unset -> empty list.
     private static IReadOnlyList<string> Csv(string? value) =>
         (value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    // The default host-log source map: the host's leaf services (assistant, monitor, watchdog, firewall) plus
+    // the api and bot — the journald units they deploy as. Order = the frontend's source-dropdown order.
+    private static readonly LogSourceMap[] DefaultLogSources =
+    [
+        new("watchdog", "kgsm-watchdog.service"),
+        new("monitor", "kgsm-monitor.service"),
+        new("assistant", "kgsm-assistant-service.service"),
+        new("firewall", "kgsm-firewall.service"),
+        new("api", "kgsm-api.service"),
+        new("bot", "kgsm-bot.service"),
+    ];
+
+    // Parse `source:unit,source:unit,…` -> the ordered map; blank/unset -> the default leaf set. A malformed
+    // entry (no ':' or a blank half) is skipped; if nothing parses we fall back to the default (never an empty
+    // map, which would silently disable the whole surface).
+    private static IReadOnlyList<LogSourceMap> ParseLogSources(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return DefaultLogSources;
+        var list = new List<LogSourceMap>();
+        foreach (string pair in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            int i = pair.IndexOf(':');
+            if (i <= 0 || i >= pair.Length - 1) continue;
+            string src = pair[..i].Trim();
+            string unit = pair[(i + 1)..].Trim();
+            if (src.Length > 0 && unit.Length > 0) list.Add(new LogSourceMap(src, unit));
+        }
+        return list.Count > 0 ? list : DefaultLogSources;
+    }
 }
+
+/// <summary>A configured mapping of a friendly log source id (<c>watchdog</c>) to the systemd unit whose
+/// journal carries it (<c>kgsm-watchdog.service</c>). Ordered as the frontend should present the sources.</summary>
+public sealed record LogSourceMap(string Source, string Unit);

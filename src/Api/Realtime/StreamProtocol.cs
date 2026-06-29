@@ -52,6 +52,24 @@ public static class StreamProtocol
     /// <summary>This host's capability status flips: <c>hosts/{hostId}/capabilities</c>.</summary>
     public static string HostCapabilitiesTopic(string hostId) => $"hosts/{hostId}/capabilities";
 
+    /// <summary>This host's live aggregated leaf logs: <c>hosts/{hostId}/logs</c> (the live-tail companion to
+    /// the REST <c>GET /hosts/{id}/logs</c>). A <strong>follow-only</strong>, <strong>operator-gated</strong>
+    /// topic — the client hydrates history via REST and applies live lines from here on (patch-only, §3·j).
+    /// One shared <c>journalctl -f</c> per host (<see cref="JournalFollowBridge"/>) feeds it while it has
+    /// subscribers; raw journald can carry secrets, so <see cref="RequiresOperator"/> refuses a viewer's
+    /// subscribe at the socket (defense-in-depth on top of the operator-gated REST endpoint).</summary>
+    public static string HostLogsTopic(string hostId) => $"hosts/{hostId}/logs";
+
+    /// <summary>Does <paramref name="topic"/> name some <c>hosts/{id}/logs</c> topic? (the bridge's idle-gate +
+    /// the operator predicate).</summary>
+    public static bool IsHostLogsTopic(string topic) =>
+        topic.StartsWith("hosts/", StringComparison.Ordinal) && topic.EndsWith("/logs", StringComparison.Ordinal);
+
+    /// <summary>Topics that require <c>operator</c> to subscribe, refused for a viewer at the socket even though
+    /// the <c>/stream</c> handshake is only viewer-gated. Today: the host-logs tail (raw journald can leak
+    /// secrets — stricter than the viewer-gated audit feed, matching the REST endpoint's gate).</summary>
+    public static bool RequiresOperator(string topic) => IsHostLogsTopic(topic);
+
     // --- server -> client message types (the `type` field of the { topic, type, data } envelope) ---
     /// <summary>A full honest <c>Server</c> element to merge by id (doc-given). Fired on status/roster change.</summary>
     public const string ServerPatch = "server.patch";
@@ -88,6 +106,20 @@ public static class StreamProtocol
     /// lines each occupy their own outbound slot and never collapse into the latest. A slow client drops some
     /// lines under backpressure but never silently fuses two into one.</summary>
     public static string ConsoleEntityKey(string id, long seq) => $"console:{id}:{seq}";
+
+    // --- host logs (the live-tail companion to GET /hosts/{id}/logs) ---
+    /// <summary>One live log line on a <see cref="HostLogsTopic"/>: <c>data</c> is the same
+    /// <see cref="Contracts.LogLine"/> shape the REST endpoint returns (one shared wire shape, so the client
+    /// adapts WS and REST lines identically). Best-effort tail (the console/audit precedent): under
+    /// backpressure a slow client drops <em>some</em> lines but they never fuse — the coalesce key is the
+    /// line's unique journald cursor (<see cref="HostLogEntityKey"/>). The durable record is the journal; the
+    /// client re-hydrates via REST on reconnect.</summary>
+    public const string LogLine = "log.line";
+
+    /// <summary>The per-connection coalesce key for a live log line: the entry's unique journald cursor
+    /// (<c>logs:{cursor}</c>) — UNIQUE per line (the audit/console precedent, NOT supersede-by-latest), so
+    /// distinct lines each occupy their own outbound slot and never collapse into the latest.</summary>
+    public static string HostLogEntityKey(string cursor) => $"logs:{cursor}";
 
     // --- jobs (M3 — the command write path) ---
     /// <summary>Command/job progress + completion (host-wide): <c>jobs</c> (architecture.html §5·d).</summary>

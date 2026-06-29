@@ -30,6 +30,11 @@ public sealed class StreamConnection
     private readonly JsonSerializerOptions _json;
     private readonly ILogger _logger;
 
+    // Whether this connection may subscribe to operator-gated topics (e.g. the host-logs tail). The /stream
+    // handshake is only viewer-gated, so a viewer's socket is live but must NOT receive operator-only lines —
+    // resolved once at connect from the principal's tier (StreamController) and enforced on every subscribe.
+    private readonly bool _canOperatorTopics;
+
     private readonly HashSet<string> _subscriptions = new(StringComparer.Ordinal);
     private readonly object _subLock = new();
 
@@ -40,11 +45,12 @@ public sealed class StreamConnection
     private readonly Channel<byte> _wake = Channel.CreateBounded<byte>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true, SingleWriter = false });
 
-    public StreamConnection(WebSocket socket, JsonSerializerOptions json, ILogger logger)
+    public StreamConnection(WebSocket socket, JsonSerializerOptions json, ILogger logger, bool canOperatorTopics = false)
     {
         _socket = socket;
         _json = json;
         _logger = logger;
+        _canOperatorTopics = canOperatorTopics;
     }
 
     // --- subscription state (read by the hub on every publish; mutated by the reader loop) ---
@@ -125,7 +131,14 @@ public sealed class StreamConnection
             case StreamProtocol.Subscribe:
                 lock (_subLock)
                     foreach (string t in topics)
-                        if (!string.IsNullOrWhiteSpace(t)) _subscriptions.Add(t);
+                    {
+                        if (string.IsNullOrWhiteSpace(t)) continue;
+                        // Refuse an operator-gated topic for a non-operator socket (raw logs can leak secrets):
+                        // silently not-subscribed — the client never receives those lines (it has no client-error
+                        // channel yet, and a viewer's REST request already 403s, so this is socket-side defense).
+                        if (!_canOperatorTopics && StreamProtocol.RequiresOperator(t)) continue;
+                        _subscriptions.Add(t);
+                    }
                 break;
             case StreamProtocol.Unsubscribe:
                 lock (_subLock)
