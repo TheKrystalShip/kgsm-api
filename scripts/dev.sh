@@ -32,6 +32,9 @@ export KGSM_API_CORS_ORIGINS="${KGSM_API_CORS_ORIGINS:-http://localhost:5173,htt
 export KGSM_API_ASSISTANT_URL="${KGSM_API_ASSISTANT_URL:-http://127.0.0.1:5180}"
 export KGSM_API_ASSISTANT_RELAY_SECRET="$SECRET"
 export KGSM_API_KGSM_PATH="$KGSM"
+# Dedicated dev event socket — isolated from the production /run/kgsm-api/kgsm-events.sock.
+# kgsm delivers to both in parallel (config_event_socket_filenames lists this path).
+export KGSM_API_KGSM_SOCKET="${KGSM_API_KGSM_SOCKET:-$DEVDIR/kgsm-events.sock}"
 export KGSM_API_HOST_LABEL="${KGSM_API_HOST_LABEL:-dev}"
 export KGSM_API_DB="${KGSM_API_DB:-$DEVDIR/kgsm-api.db}"
 
@@ -41,6 +44,7 @@ echo "── kgsm-api DEV ──────────────────
 echo "  bind        : $KGSM_API_URLS   (auth DISABLED → synthetic admin)"
 echo "  cors        : $KGSM_API_CORS_ORIGINS"
 echo "  kgsm engine : $KGSM"
+echo "  kgsm socket : $KGSM_API_KGSM_SOCKET"
 echo "  assistant   : $asst"
 echo "  db          : $KGSM_API_DB"
 echo "──────────────────────────────────────────────────────────"
