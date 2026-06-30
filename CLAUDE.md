@@ -307,6 +307,13 @@ of leaves present.
   mock → real. Caution on the wiring; this is the first time frontend + backend + leaves
   merge.
 
+## Version tracking
+
+- **Version source:** `<Version>` in `src/Api/Api.csproj`; the build automatically appends the short git SHA to `AssemblyInformationalVersion`
+- Bump the version whenever you make a user-facing change (new feature, bug fix, behaviour change). Patch for fixes, minor for new features, major for breaking changes.
+- Update `CHANGELOG.md` under `## [Unreleased]` with a brief entry for every meaningful change.
+- A git tag matching the new version should be created on release: `git tag v<version>`.
+
 ## Gotchas
 
 - **`legacy/`** is the scrapped .NET 9 API — harvest patterns (e.g. log-streaming) but
