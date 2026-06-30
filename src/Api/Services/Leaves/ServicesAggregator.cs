@@ -16,7 +16,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// interesting case the at-a-glance Overview dot can't show). Read-only in this slice — start/stop/restart
 /// controls are a later increment (polkit grant + admin gate + audit).
 /// </summary>
-public sealed class ServicesAggregator(SystemdReader systemd, LeafHealthMonitor health)
+public sealed class ServicesAggregator(SystemdReader systemd, LeafHealthMonitor health, LeafRegistry registry)
 {
     private static readonly IReadOnlyList<LeafDescriptor> Catalog = LeafCatalog.Default;
 
@@ -37,6 +37,9 @@ public sealed class ServicesAggregator(SystemdReader systemd, LeafHealthMonitor 
                 Unit: leaf.Unit,
                 State: st.State,
                 OnDemand: leaf.OnDemand,
+                // Runtime provisioning from the registry for the four provisionable leaves; null (omitted)
+                // for api/bot where it isn't applicable.
+                Provisioned: ProvisionableLeaf.IsProvisionable(leaf.Id) ? registry.IsProvisioned(leaf.Id) : null,
                 SubState: st.SubState,
                 Enabled: st.Enabled,
                 Since: st.Since,

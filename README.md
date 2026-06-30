@@ -86,6 +86,27 @@ curl -s http://127.0.0.1:8080/api/v1/hosts/<id> # → { ..., "identity": { "buil
 fuller `identity` block (incl. OS/kernel) is auth-gated on `GET /hosts/{id}`. See the **Host identity
 card** row in `PLAN.md §6`.
 
+## Runtime leaf configuration — one-time setup
+
+The Services panel lets an admin edit a leaf's configuration at runtime; the API delivers it as an
+**override** (never editing the leaf's own deployed config) and applies it by restarting the leaf. That
+needs a tiny bit of one-time privileged wiring — and **`./deploy/deploy.sh` does it for you**, by
+calling `deploy/setup-leaf-config.sh` on every deploy. So a fresh checkout reaches a fully-working state
+from the single `./deploy/deploy.sh` command; the wiring step is idempotent (a re-run is a no-op).
+
+What that wiring is:
+
+- A **systemd drop-in** per config-target leaf (`monitor`, `watchdog`, `assistant`, `firewall`) that
+  layers an API-owned override env file (`/var/lib/kgsm-api/leaf-overrides/<leaf>.env`) on **last**, so
+  the API's overrides win — the leaf never references the API.
+- A **scoped polkit rule** letting the service user `systemctl restart` **only** those four units
+  (restart-family verbs only). This is the **only** ongoing privileged operation; the API renders the
+  override files **unprivileged** in its own state dir. `NoNewPrivileges=true` on the API unit does not
+  block it — `systemctl restart` is a polkit-authorized D-Bus call to PID 1, not an in-process escalation.
+
+To run the wiring on its own, verify it, or undo it, see **`deploy/leaf-config/README.md`**. The
+config-target units are kept in lockstep with `src/Api/Services/Leaves/LeafCatalog.cs`.
+
 ## Authoritative docs
 
 This README is an overview; the authorities are:

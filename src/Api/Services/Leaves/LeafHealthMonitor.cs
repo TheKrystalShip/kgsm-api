@@ -34,27 +34,31 @@ public sealed class LeafHealthMonitor : BackgroundService
     private static readonly TimeSpan Interval = TimeSpan.FromSeconds(2);   // "query frequently"
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
 
-    private readonly ApiOptions _options;
     private readonly MonitorClient _monitor;
     private readonly AssistantClient _assistant;
+    private readonly LeafRegistry _registry;
     private readonly IServiceProvider _services;
     private readonly StreamHub _hub;
     private readonly ILogger<LeafHealthMonitor> _logger;
 
     private readonly string _topic;
-    private volatile HostCapabilities _current; // single-writer (the poll loop); volatile for reader threads
+    // Serializes the poll body so the always-on 2s loop and an out-of-band PollNowAsync (a connect/disconnect
+    // forcing an immediate publish) never race two writers onto _current.
+    private readonly SemaphoreSlim _pollGate = new(1, 1);
+    private volatile HostCapabilities _current; // written only under _pollGate; volatile for reader threads
 
     public LeafHealthMonitor(
         ApiOptions options,
         MonitorClient monitor,
         AssistantClient assistant,
+        LeafRegistry registry,
         IServiceProvider services,
         StreamHub hub,
         ILogger<LeafHealthMonitor> logger)
     {
-        _options = options;
         _monitor = monitor;
         _assistant = assistant;
+        _registry = registry;
         _services = services;
         _hub = hub;
         _logger = logger;
@@ -64,6 +68,13 @@ public sealed class LeafHealthMonitor : BackgroundService
 
     /// <summary>The latest capability block (thread-safe read). Never null; cold-start reads as <c>unknown</c>.</summary>
     public HostCapabilities Current => _current;
+
+    /// <summary>
+    /// Force an immediate, out-of-band poll + publish (used by the connect/disconnect endpoints so a runtime
+    /// provisioning flip lights up / tears down the SPA's capability-gated UI without waiting for the next 2s
+    /// tick). Serialized with the background loop; emits a <c>capabilities.patch</c> only if the block changed.
+    /// </summary>
+    public Task PollNowAsync(CancellationToken ct = default) => PollAndPublishAsync(ct);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -86,37 +97,47 @@ public sealed class LeafHealthMonitor : BackgroundService
 
     private async Task PollAndPublishAsync(CancellationToken ct)
     {
-        // Probe all leaves concurrently; each call self-bounds (HttpClient timeout / linked CTS) so one
-        // hung leaf can never stall the cycle. The leaf clients own their transport (the chokepoint
-        // invariant): monitor + assistant speak HTTP /health, the watchdog goes through kgsm-lib.
-        Task<bool> metricsTask = _monitor.CheckHealthAsync(ct);
-        Task<bool> assistantTask = _assistant.CheckHealthAsync(ct);
-        Task<bool> watchdogTask = ProbeWatchdogAsync(ct);
-        await Task.WhenAll(metricsTask, assistantTask, watchdogTask).ConfigureAwait(false);
+        // Serialize the body: the 2s loop and an out-of-band PollNowAsync must not both write _current.
+        await _pollGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            // Provisioning comes from the runtime registry (NOT the immutable ApiOptions), so a connect/
+            // disconnect flips the capability set live. A non-provisioned leaf is never probed (Absent).
+            bool metricsProvisioned = _registry.IsProvisioned(ProvisionableLeaf.Monitor);
+            bool assistantProvisioned = _registry.IsProvisioned(ProvisionableLeaf.Assistant);
+            bool watchdogProvisioned = _registry.IsProvisioned(ProvisionableLeaf.Watchdog);
 
-        // info.intervalMs stays honestly sourced from the metrics snapshot (cached), only when up.
-        Snap.Snapshot? snap = metricsTask.Result ? await _monitor.GetLatestAsync(ct).ConfigureAwait(false) : null;
+            // Probe all provisioned leaves concurrently; each call self-bounds (HttpClient timeout / linked
+            // CTS) so one hung leaf can never stall the cycle. The leaf clients own their transport (the
+            // chokepoint invariant) and gate themselves on the same registry, so an unprovisioned leaf
+            // returns false/null without a wire call.
+            Task<bool> metricsTask = metricsProvisioned ? _monitor.CheckHealthAsync(ct) : Task.FromResult(false);
+            Task<bool> assistantTask = assistantProvisioned ? _assistant.CheckHealthAsync(ct) : Task.FromResult(false);
+            Task<bool> watchdogTask = watchdogProvisioned ? ProbeWatchdogAsync(ct) : Task.FromResult(false);
+            await Task.WhenAll(metricsTask, assistantTask, watchdogTask).ConfigureAwait(false);
 
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        HostCapabilities prev = _current;
-        var next = new HostCapabilities(
-            Metrics: BuildMetrics(prev.Metrics, metricsTask.Result, snap, now),
-            Assistant: BuildLeaf(prev.Assistant, _options.AssistantProvisioned, assistantTask.Result, now, "Assistant health check failed."),
-            Watchdog: BuildLeaf(prev.Watchdog, _options.WatchdogProvisioned, watchdogTask.Result, now, "Watchdog is not ready."));
+            // info.intervalMs stays honestly sourced from the metrics snapshot (cached), only when up.
+            Snap.Snapshot? snap = metricsTask.Result ? await _monitor.GetLatestAsync(ct).ConfigureAwait(false) : null;
 
-        if (next.Equals(prev))
-            return; // no flip -> no emit (and provisioned/since are stable, so the block is value-equal)
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            HostCapabilities prev = _current;
+            var next = new HostCapabilities(
+                Metrics: BuildMetrics(prev.Metrics, metricsProvisioned, metricsTask.Result, snap, now),
+                Assistant: BuildLeaf(prev.Assistant, assistantProvisioned, assistantTask.Result, now, "Assistant health check failed."),
+                Watchdog: BuildLeaf(prev.Watchdog, watchdogProvisioned, watchdogTask.Result, now, "Watchdog is not ready."));
 
-        _current = next;
-        _hub.Publish(_topic, _topic, new StreamMessage(_topic, StreamProtocol.CapabilitiesPatch, next));
+            if (next.Equals(prev))
+                return; // no flip -> no emit (and provisioned/since are stable, so the block is value-equal)
+
+            _current = next;
+            _hub.Publish(_topic, _topic, new StreamMessage(_topic, StreamProtocol.CapabilitiesPatch, next));
+        }
+        finally { _pollGate.Release(); }
     }
 
     private async Task<bool> ProbeWatchdogAsync(CancellationToken ct)
     {
-        if (!_options.WatchdogProvisioned)
-            return false;
-
-        // Registered only when provisioned (see Startup); resolve optionally to stay safe.
+        // Caller already gated on the registry; resolve the (now always-registered, lazy) client optionally.
         var watchdog = _services.GetService(typeof(IWatchdogClient)) as IWatchdogClient;
         if (watchdog is null)
             return false;
@@ -141,10 +162,10 @@ public sealed class LeafHealthMonitor : BackgroundService
         }
     }
 
-    private Capability BuildMetrics(Capability prev, bool healthy, Snap.Snapshot? snap, DateTimeOffset now)
+    private static Capability BuildMetrics(Capability prev, bool provisioned, bool healthy, Snap.Snapshot? snap, DateTimeOffset now)
     {
-        if (!_options.MetricsProvisioned)
-            return Capability.Absent; // never declared -> client renders 'absent'; never flips
+        if (!provisioned)
+            return Capability.Absent; // not connected -> client renders 'absent'
 
         string status = healthy ? CapabilityStatus.Operational : CapabilityStatus.Down;
         object? info = healthy && snap is not null ? new MetricsCapabilityInfo(snap.IntervalMs) : null;
@@ -180,8 +201,8 @@ public sealed class LeafHealthMonitor : BackgroundService
             ? new Capability(Provisioned: true, Status: CapabilityStatus.Unknown) // declared, not yet probed
             : Capability.Absent;
         return new HostCapabilities(
-            Metrics: Cold(_options.MetricsProvisioned),
-            Assistant: Cold(_options.AssistantProvisioned),
-            Watchdog: Cold(_options.WatchdogProvisioned));
+            Metrics: Cold(_registry.IsProvisioned(ProvisionableLeaf.Monitor)),
+            Assistant: Cold(_registry.IsProvisioned(ProvisionableLeaf.Assistant)),
+            Watchdog: Cold(_registry.IsProvisioned(ProvisionableLeaf.Watchdog)));
     }
 }

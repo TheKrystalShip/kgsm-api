@@ -208,3 +208,19 @@ else
     $SUDO journalctl -u "$SERVICE" -n 30 --no-pager || true
     exit 1
 fi
+
+# ── 5. Runtime leaf-config wiring (idempotent; the only privileged feature setup) ──────────────
+# Re-assert the systemd drop-ins + the scoped polkit rule that let the API APPLY per-leaf config at
+# runtime (the Services panel feature — see deploy/leaf-config/README.md). Composed here, never
+# duplicated, so a SINGLE `./deploy/deploy.sh` on a fresh checkout reaches a fully-working state.
+# Idempotent: a steady-state re-run is a no-op (cmp-guarded installs, conditional daemon-reload). It
+# runs AFTER the API is up so /var/lib/kgsm-api (the StateDirectory) already exists for the override dir.
+# SUDO is forwarded so a non-interactive (askpass) deploy stays non-interactive through this step too.
+SETUP_LEAF_CONFIG="$REPO_DIR/deploy/setup-leaf-config.sh"
+if [[ -x "$SETUP_LEAF_CONFIG" ]]; then
+    log "asserting runtime leaf-config wiring (drop-ins + scoped polkit restart grant) ..."
+    SUDO="$SUDO" KGSM_API_USER="$SVC_USER" "$SETUP_LEAF_CONFIG"
+else
+    err "deploy/setup-leaf-config.sh not found / not executable — skipping the leaf-config wiring."
+    err "runtime leaf configuration (the Services panel) stays inert until it runs; see deploy/leaf-config/README.md."
+fi

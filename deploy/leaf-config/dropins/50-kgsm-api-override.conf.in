@@ -1,0 +1,19 @@
+# Installed by kgsm-api setup (runtime leaf-config feature) — deploy/setup-leaf-config.sh renders
+# this template per leaf into /etc/systemd/system/<unit>.d/50-kgsm-api-override.conf (@LEAF@ = the
+# leaf id: monitor | watchdog | assistant | firewall).
+#
+# The API fans configuration OUT to this leaf via an override env file in the API's OWN state dir;
+# the leaf never references the API (keystone §4: "no leaf depends on the API"). This drop-in is pure
+# plumbing — static, installed once + daemon-reload; the override file's CONTENTS change at runtime
+# (the API rewrites them unprivileged), which needs no reload, only a restart to apply.
+#
+# Layering, last wins:  this override env  >  the leaf's own EnvironmentFile / appsettings.json.
+# Two reasons it wins: (1) a drop-in is parsed AFTER the unit's own [Service] directives, so this
+# EnvironmentFile is the last one loaded and its KEY=value beat any earlier Environment=/EnvironmentFile=;
+# (2) for the .NET leaves an environment variable already overrides appsettings.json. So a key set here
+# overrides the hand-deployed floor WITHOUT the API ever editing that floor.
+#
+# The leading '-' makes a missing file non-fatal: the override file does not exist until the API first
+# writes one, and "reset to default" deletes it again — the leaf must start cleanly either way.
+[Service]
+EnvironmentFile=-/var/lib/kgsm-api/leaf-overrides/@LEAF@.env

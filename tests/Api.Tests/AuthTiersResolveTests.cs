@@ -25,6 +25,7 @@ public sealed class AuthTiersResolveTests
         SteamCdnBaseUrl = "https://steamcdn.test/apps",
         LibraryRefreshIntervalDays = 7, LibraryRefreshHour = 6,
         FilesMaxEntries = 200, FilesMaxEditBytes = 2 * 1024 * 1024,
+        LeafOverridesDir = "/tmp/kgsm-api-test-overrides", LeafApplyCanaryMs = 15000,
         DomainPollMs = 5000, MetricsPollMs = 1000,
         MetricsHistoryDb = "metrics.db", MetricsPersistMs = 15000, MetricsRawRetentionHours = 24,
         MetricsRollupStepMin = 5, MetricsRollupRetentionDays = 30, MetricsMaintenanceMs = 60000,

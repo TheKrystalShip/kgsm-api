@@ -40,6 +40,7 @@ public sealed class CommandRunner(
     JobRegistry registry,
     AuditService audit,
     ApiOptions options,
+    Leaves.LeafRegistry leafRegistry,
     ILogger<CommandRunner> logger)
 {
     // The open_ports firewall mutation can be slower than a detail-view probe (ufw serialized behind a
@@ -278,6 +279,11 @@ public sealed class CommandRunner(
     private async Task<(bool ok, string? error)> RunOpenPortsAsync(
         IServiceScope scope, Job job, string? actor, string? origin)
     {
+        // The firewall client is now always registered (lazy); runtime provisioning is the registry's flag.
+        // Degrade honestly when the firewall isn't connected on this host (the prior `firewall is null` case).
+        if (!leafRegistry.IsProvisioned(Leaves.ProvisionableLeaf.Firewall))
+            return (false, "firewall authority not provisioned");
+
         var firewall = scope.ServiceProvider.GetService(typeof(IFirewallService)) as IFirewallService;
         if (firewall is null)
             return (false, "firewall authority not provisioned");

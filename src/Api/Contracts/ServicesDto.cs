@@ -16,6 +16,11 @@ namespace TheKrystalShip.Api.Contracts;
 /// not-installed|unknown</c> — systemd's view (or honest unknown when unreadable).</param>
 /// <param name="OnDemand">Socket-activated / idle-exiting (the firewall): <c>inactive</c> is its normal
 /// resting state, so the UI renders it neutrally rather than as a fault.</param>
+/// <param name="Provisioned">Runtime provisioning (connected-on-this-host) — <c>true</c>/<c>false</c> for the
+/// four runtime-provisionable leaves (monitor/watchdog/assistant/firewall), <strong>null</strong> (omitted)
+/// for <c>api</c>/<c>bot</c> where provisioning is not applicable. The UI shows a connect/disconnect toggle
+/// only when this is present. Distinct from systemd <see cref="State"/> (a leaf can be connected yet its
+/// unit inactive, or disconnected yet its unit running — provisioning is the SPA-facing capability flag).</param>
 /// <param name="SubState">systemd's finer sub-state (<c>running|dead|exited|…</c>).</param>
 /// <param name="Enabled">Starts on boot (null when N/A — static/masked — or unknown).</param>
 /// <param name="Since">When the unit last became active (uptime is derived from it).</param>
@@ -30,6 +35,7 @@ public sealed record LeafService(
     string Unit,
     string State,
     bool OnDemand,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Provisioned,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SubState,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Enabled,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? Since,

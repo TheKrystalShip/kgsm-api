@@ -25,7 +25,7 @@ namespace TheKrystalShip.Api.Services.Aggregation;
 /// (best-effort: an absent engine or an unmapped instance leaves <c>app</c> null, never guessed).
 /// </remarks>
 public sealed class NetworkAggregator(
-    ApiOptions options,
+    Leaves.LeafRegistry registry,
     IServiceProvider services,
     ILogger<NetworkAggregator> logger)
 {
@@ -44,7 +44,9 @@ public sealed class NetworkAggregator(
     {
         IReadOnlyList<(int Port, string Proto)> required = ExpandDistinct(requiredPorts);
 
-        if (!options.FirewallProvisioned)
+        // Runtime provisioning from the registry (seeded from config → unchanged default behaviour); a runtime
+        // firewall connect arms this surface, a disconnect degrades it to absent.
+        if (!registry.IsProvisioned(Leaves.ProvisionableLeaf.Firewall))
             return new ServerNetwork(FirewallAvailability.Absent, Unknownify(required), Reachable: null);
 
         var firewall = services.GetService(typeof(IFirewallService)) as IFirewallService;
@@ -100,7 +102,7 @@ public sealed class NetworkAggregator(
     /// </summary>
     public async Task<HostNetwork?> BuildHostNetworkAsync(CancellationToken ct)
     {
-        if (!options.FirewallProvisioned)
+        if (!registry.IsProvisioned(Leaves.ProvisionableLeaf.Firewall))
             return null;
 
         var firewall = services.GetService(typeof(IFirewallService)) as IFirewallService;

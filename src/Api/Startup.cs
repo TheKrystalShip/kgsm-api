@@ -77,6 +77,15 @@ public class Startup(IConfiguration configuration)
         ApiOptions apiOptions = ApiOptions.FromConfiguration(configuration);
         services.AddSingleton(apiOptions);
 
+        // Leaf runtime-provisioning registry (the leaf-runtime-provisioning feature): the DB-backed,
+        // runtime-mutable source of truth for which leaves are connected, replacing the immutable
+        // ApiOptions.*Provisioned flags. Registered as a hosted service EARLY (before the other hosted
+        // services below) so it reconciles the persisted provisioning with the config seed before the
+        // LeafHealthMonitor's first poll; also a singleton (the synchronous cache the leaf clients,
+        // LeafHealthMonitor, ServicesAggregator and NetworkAggregator gate on).
+        services.AddSingleton<LeafRegistry>();
+        services.AddHostedService(sp => sp.GetRequiredService<LeafRegistry>());
+
         // M9 — metrics history (a SEPARATE metrics.db, D4). The MetricsDbContext is registered
         // alongside AppDbContext; its own EnsureCreated creates the sample+rollup tables. WAL +
         // auto_vacuum configured at creation time by MetricsHistoryStore.
@@ -91,8 +100,14 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<HostIdentityProvider>();
         services.AddSingleton<HostSettingsStore>();
         services.AddSingleton<HostAggregator>();
-        if (apiOptions.WatchdogProvisioned)
-            services.AddKgsmWatchdogClient(apiOptions.WatchdogSocketPath);
+        // Always register the watchdog client (lazy, configured-or-default socket) so a runtime "connect
+        // watchdog" arms it without a restart — provisioning is now the registry's flag, not the client's
+        // presence. A blank configured socket falls back to the standard path; consumers (LeafHealthMonitor,
+        // AlertEngine, ConsoleBridgeManager) gate on provisioning before using it, so a down socket is inert.
+        services.AddKgsmWatchdogClient(o =>
+            o.SocketPath = string.IsNullOrWhiteSpace(apiOptions.WatchdogSocketPath)
+                ? "/run/kgsm-watchdog/control.sock"
+                : apiOptions.WatchdogSocketPath);
 
         // M1·b — the servers join. kgsm-lib is the engine chokepoint (base, not a leaf): registered
         // when the engine is provisioned (it is, by default, at the packaged path). IInstanceService
@@ -109,9 +124,18 @@ public class Startup(IConfiguration configuration)
         // idle-exits, so a periodic probe would defeat that; NetworkAggregator probes it ON-DEMAND (detail
         // views + the open_ports verify), bounding each call, and reports liveness as the block-level
         // `firewall` status. A longer request timeout covers ufw mutation serialized behind the global lock.
-        if (apiOptions.FirewallProvisioned)
-            services.AddKgsmFirewallClient(o => { o.SocketPath = apiOptions.FirewallSocketPath; o.RequestTimeout = TimeSpan.FromSeconds(30); });
-        // Always registered: it degrades to firewall:"absent"/null when the client isn't present, so the
+        // Always register the firewall client too (lazy, configured-or-default socket): the runtime registry
+        // flag — NOT the client's presence — decides the firewall surface now (NetworkAggregator + the
+        // open_ports command gate on LeafRegistry.IsProvisioned("firewall"), seeded from config so the
+        // default is unchanged). A runtime "connect firewall" arms the ports surface without a restart.
+        services.AddKgsmFirewallClient(o =>
+        {
+            o.SocketPath = string.IsNullOrWhiteSpace(apiOptions.FirewallSocketPath)
+                ? "/run/kgsm-firewall/firewall.sock"
+                : apiOptions.FirewallSocketPath;
+            o.RequestTimeout = TimeSpan.FromSeconds(30);
+        });
+        // Always registered: it degrades to firewall:"absent"/null when not provisioned, so the
         // server/host aggregators can depend on it unconditionally.
         services.AddSingleton<NetworkAggregator>();
         services.AddSingleton<ServerAggregator>();
@@ -243,6 +267,18 @@ public class Startup(IConfiguration configuration)
         // as the singleton above). Pure/stateless readers → singletons.
         services.AddSingleton<SystemdReader>();
         services.AddSingleton<ServicesAggregator>();
+
+        // Leaf runtime config (Phase 2 — the privileged broker). The override store persists the per-leaf
+        // KEY=value overrides (the leaf_override table, idempotent CREATE TABLE IF NOT EXISTS like the
+        // registry); the renderer materializes them into the API-owned <LeafOverridesDir>/<leaf>.env file a
+        // systemd drop-in feeds the leaf; the apply broker (LeafConfigService) writes → renders → restarts via
+        // IUnitController → polls ILeafProbe (health canary) → auto-rolls-back on failure. IUnitController +
+        // ILeafProbe are seams (real impls shell systemctl / read systemd liveness; faked in tests).
+        services.AddSingleton<LeafOverrideStore>();
+        services.AddSingleton<LeafOverrideRenderer>();
+        services.AddSingleton<IUnitController, SystemctlUnitController>();
+        services.AddSingleton<ILeafProbe, LeafProbe>();
+        services.AddSingleton<LeafConfigService>();
 
         // M6·a — alerts (the condition-mirror). The engine is ALWAYS-ON (like LeafHealthMonitor, not gated
         // on WS subscribers): GET /alerts must serve fresh truth regardless of who is listening. It polls

@@ -480,6 +480,73 @@ req POST /api/v1/library/refresh
   && ok "POST /library/refresh → 202 (admin on-demand refresh accepted, runs off the request thread)" \
   || bad "/library/refresh (code=$CODE body=$BODY)"
 
+# --- Leaf runtime provisioning + config (the Services panel — admin-gated; auth disabled = synthetic admin) ---
+echo "==> Leaf runtime provisioning + config checks"
+
+# LP1. GET /hosts/{id}/services carries the runtime `provisioned` flag for the four provisionable leaves
+#      (monitor true here — its socket is set; watchdog/assistant/firewall false) and OMITS it for api/bot.
+req GET "/api/v1/hosts/${HOST_ID}/services"
+if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+rows={r['id']:r for r in d['data']}
+ok=('provisioned' in rows['monitor'] and rows['monitor']['provisioned'] is True
+    and 'provisioned' in rows['firewall'] and rows['firewall']['provisioned'] is False
+    and 'provisioned' not in rows['api'] and 'provisioned' not in rows['bot'])
+sys.exit(0 if ok else 1)
+" 2>/dev/null; then
+  ok "/services carries provisioned for the 4 leaves; omitted for api/bot (honest, not-applicable)"
+else bad "/services provisioned flag (code=$CODE body=$BODY)"; fi
+
+# LP2. Connect the assistant at runtime → 200 + provisioned:true; the §4·b capability set lights up live
+#      (assistant provisioned:true on GET /hosts/{id}); disconnect reverses it. No restart, no reconnect.
+req POST "/api/v1/hosts/${HOST_ID}/services/assistant/connect"
+conn_ok=false
+if [[ "$CODE" == 200 ]] && python3 -c "import json,sys;sys.exit(0 if json.load(open('/tmp/kgsm-api-smoke.body'))['provisioned'] is True else 1)" 2>/dev/null; then
+  req GET "/api/v1/hosts/${HOST_ID}"
+  if python3 -c "import json,sys;sys.exit(0 if json.load(open('/tmp/kgsm-api-smoke.body'))['capabilities']['assistant']['provisioned'] is True else 1)" 2>/dev/null; then
+    req POST "/api/v1/hosts/${HOST_ID}/services/assistant/disconnect"
+    [[ "$CODE" == 200 ]] && req GET "/api/v1/hosts/${HOST_ID}" \
+      && python3 -c "import json,sys;sys.exit(0 if json.load(open('/tmp/kgsm-api-smoke.body'))['capabilities']['assistant']['provisioned'] is False else 1)" 2>/dev/null \
+      && conn_ok=true
+  fi
+fi
+$conn_ok && ok "connect/disconnect assistant flips the live capability set (provisioned true→false), no restart" \
+  || bad "connect/disconnect round-trip (code=$CODE body=$BODY)"
+
+# LP3. A non-provisionable leaf (bot) and an unknown leaf both 404 on connect (only the 4 leaves flip).
+req POST "/api/v1/hosts/${HOST_ID}/services/bot/connect"
+c1="$CODE"
+req POST "/api/v1/hosts/${HOST_ID}/services/nope/connect"
+[[ "$c1" == 404 && "$CODE" == 404 ]] \
+  && ok "connect bot/nope → 404 (only monitor/watchdog/assistant/firewall are provisionable)" \
+  || bad "connect non-provisionable 404 (bot=$c1 nope=$CODE)"
+
+# LP4. GET /services/{leaf}/config returns the manifest (real env names); a non-config-target leaf 404s.
+req GET "/api/v1/hosts/${HOST_ID}/services/monitor/config"
+if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+keys={f['key'] for f in d['fields']}
+envs={f['envName'] for f in d['fields']}
+ok=(d['leaf']=='monitor' and 'logLevel' in keys and 'intervalMs' in keys
+    and 'Logging__LogLevel__Default' in envs and 'KGSM_MONITOR_INTERVAL_MS' in envs)
+sys.exit(0 if ok else 1)
+" 2>/dev/null; then
+  req GET "/api/v1/hosts/${HOST_ID}/services/bot/config"
+  [[ "$CODE" == 404 ]] && ok "/services/{leaf}/config manifest (real env names); non-target leaf → 404" \
+    || bad "/services/bot/config not 404 (code=$CODE)"
+else bad "/services/monitor/config manifest (code=$CODE body=$BODY)"; fi
+
+# LP5. PUT config VALIDATION (no mutation, no restart): an unknown key and a bad enum value each 400 with the
+#      frozen envelope — rejected BEFORE any render/restart, so the smoke never shells systemctl.
+req PUT "/api/v1/hosts/${HOST_ID}/services/monitor/config" -H 'Content-Type: application/json' -d '{"values":{"nope":"x"}}'
+c1="$CODE"; b1="$BODY"
+req PUT "/api/v1/hosts/${HOST_ID}/services/monitor/config" -H 'Content-Type: application/json' -d '{"values":{"logLevel":"Loud"}}'
+if [[ "$c1" == 400 ]] && grep -q '"code":"bad_request"' <<<"$b1" && [[ "$CODE" == 400 ]]; then
+  ok "PUT config rejects unknown key + bad enum → 400 {error:bad_request} (no mutation)"
+else bad "PUT config validation (unknownKey=$c1 badEnum=$CODE)"; fi
+
 stop_api
 
 # --- Phase B: embedded stub monitor → host happy path + the servers JOIN present-branch ----
@@ -1444,6 +1511,11 @@ req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
 req POST /api/v1/library/refresh
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST library/refresh -> $CODE $BODY)"; }
+# Leaf runtime provisioning + config (admin-gated): connect + PUT config 401 with no bearer.
+req POST "/api/v1/hosts/${HOST_ID}/services/monitor/connect"
+[[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST services/{leaf}/connect -> $CODE $BODY)"; }
+req PUT "/api/v1/hosts/${HOST_ID}/services/monitor/config" -H 'Content-Type: application/json' -d '{"values":{"logLevel":"Debug"}}'
+[[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (PUT services/{leaf}/config -> $CODE $BODY)"; }
 $auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/servers/{id}/files(+content),/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,PATCH /hosts/{id},PUT files/content,POST assistant/turn,POST library/refresh,metrics/history (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 

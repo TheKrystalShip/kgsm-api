@@ -1,0 +1,44 @@
+// 49-kgsm-api-leaf-restart.rules — scoped polkit grant for the kgsm-api runtime leaf-config feature.
+//
+// Installed by deploy/setup-leaf-config.sh into /etc/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules
+// (@SVC_USER@ is substituted with the kgsm-api service user at install time).
+//
+// What it grants: the kgsm-api service user may `systemctl restart` EXACTLY the four configurable KGSM
+// leaf units below — nothing else, and only the restart verb family (never start/stop/enable/mask/...).
+// This is the ONLY ongoing privileged operation the feature needs: the API renders each leaf's override
+// env file UNPRIVILEGED in its own state dir, and only needs help to APPLY it = restart the unit.
+//
+// Returning polkit.Result.YES means NO interactive auth agent is consulted, so it works for a headless,
+// session-less service (no password prompt, no logged-in seat). The grant is intentionally narrow — the
+// same flavor of one-time, tightly-scoped privilege as the watchdog's cgroup delegation and the firewall
+// authority.
+//
+// NoNewPrivileges note: the kgsm-api unit sets NoNewPrivileges=true. That does NOT block this — a
+// `systemctl restart` is a D-Bus call to PID 1 (systemd) authorized by polkit, not an in-process
+// privilege escalation, so it works fine under NNP. Do NOT remove NoNewPrivileges to "make restart work";
+// it already works. (NNP only stops the API's own process from gaining privileges via exec.)
+//
+// ⚠ The four unit names MUST stay in lockstep with src/Api/Services/Leaves/LeafCatalog.cs (the config
+// targets) and with the leaf→unit map in deploy/setup-leaf-config.sh. The setup script asserts this
+// template names every unit it installs a drop-in for, so drift fails loudly at setup time.
+polkit.addRule(function(action, subject) {
+    if (action.id !== "org.freedesktop.systemd1.manage-units") {
+        return;
+    }
+    if (subject.user !== "@SVC_USER@") {
+        return;
+    }
+    var units = {
+        "kgsm-monitor.service": true,
+        "kgsm-watchdog.service": true,
+        "kgsm-assistant-service.service": true,
+        "kgsm-firewall.service": true
+    };
+    if (units[action.lookup("unit")] !== true) {
+        return;
+    }
+    var verb = action.lookup("verb");
+    if (verb === "restart" || verb === "try-restart" || verb === "reload-or-restart") {
+        return polkit.Result.YES;
+    }
+});

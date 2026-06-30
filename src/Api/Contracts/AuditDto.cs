@@ -123,6 +123,14 @@ public static class AuditAction
     // auth.* — API-internal (no kgsm event → written directly, no double-write risk).
     public const string AuthLogin = "auth.login";
     public const string AuthLogout = "auth.logout";
+
+    // service.* — API-internal admin actions on a leaf service (the leaf-runtime-provisioning/config
+    // feature). kgsm runs nothing and emits no event, so these are DIRECT writes (the auth.* case — no echo,
+    // no double-write). connect/disconnect flip a leaf's runtime provisioning; config applies a config
+    // override (its meta lists the changed keys + outcome — NEVER a secret value).
+    public const string ServiceConnect = "service.connect";
+    public const string ServiceDisconnect = "service.disconnect";
+    public const string ServiceConfig = "service.config";
 }
 
 /// <summary>Display weight for an audit record (architecture.html §3·d <c>severity</c>).</summary>
@@ -155,6 +163,10 @@ public static class AuditTargetKind
 {
     public const string Server = "server";
     public const string Host = "host";
+    // A KGSM leaf service (monitor/watchdog/assistant/firewall) — the target of the service.* admin actions
+    // (the leaf-runtime-provisioning/config feature). Beyond the doc's server/host set; the frontend accepts
+    // unknown target kinds forward-compat.
+    public const string Leaf = "leaf";
 }
 
 /// <summary>

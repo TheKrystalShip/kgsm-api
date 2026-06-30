@@ -30,24 +30,32 @@ public sealed class AssistantClient : HttpClient
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
 
     private readonly ILogger<AssistantClient> _logger;
+    private readonly LeafRegistry _registry;
     private readonly string _relaySecret;
+    private readonly bool _hasBaseUrl;
 
-    public AssistantClient(ApiOptions options, ILogger<AssistantClient> logger)
+    public AssistantClient(ApiOptions options, LeafRegistry registry, ILogger<AssistantClient> logger)
         : base(NewHandler(), disposeHandler: true)
     {
         _logger = logger;
+        _registry = registry;
         _relaySecret = options.AssistantRelaySecret;
 
-        if (options.AssistantProvisioned
-            && Uri.TryCreate(options.AssistantBaseUrl, UriKind.Absolute, out Uri? baseUri))
+        // Set the base address from the configured URL whenever one is present (independent of the runtime
+        // provisioning flag) so a connect/disconnect arms/disarms the client live without a restart. Without
+        // a configured URL there is no endpoint to flip to (no universal default), so the runtime flip can
+        // only ever report the capability down — the honest limit, noted in the feature plan.
+        if (Uri.TryCreate(options.AssistantBaseUrl, UriKind.Absolute, out Uri? baseUri))
         {
             BaseAddress = baseUri;
-            IsProvisioned = true;
+            _hasBaseUrl = true;
         }
     }
 
-    /// <summary>True when an assistant base URL is configured on this host (capability is declared).</summary>
-    public bool IsProvisioned { get; }
+    /// <summary>True when the assistant is provisioned (connected) on this host at runtime AND a base URL is
+    /// configured to reach it. The capability/relay calls all gate on this, so disconnecting the assistant
+    /// disarms them live.</summary>
+    public bool IsProvisioned => _hasBaseUrl && _registry.IsProvisioned(ProvisionableLeaf.Assistant);
 
     /// <summary>
     /// Opens the assistant's <c>POST /turn</c> as an SSE stream on a verified end-user's behalf (M7):

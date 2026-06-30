@@ -27,22 +27,29 @@ public sealed class MonitorClient : IDisposable
     // stall a /hosts request.
     private static readonly TimeSpan ScrapeTimeout = TimeSpan.FromSeconds(2);
 
+    // Where the monitor's metrics socket lives on a standard install — used to build the transport when no
+    // explicit path is configured, so a runtime "connect monitor" works against the standard socket.
+    private const string DefaultSocketPath = "/run/kgsm-monitor/metrics.sock";
+
     private readonly ILogger<MonitorClient> _logger;
-    private readonly HttpClient? _http;
+    private readonly LeafRegistry _registry;
+    private readonly HttpClient _http;
     private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
     private Snapshot? _cached;
     private long _lastFetchTicks;
     private bool _hasFetched;
 
-    public MonitorClient(ApiOptions options, ILogger<MonitorClient> logger)
+    public MonitorClient(ApiOptions options, LeafRegistry registry, ILogger<MonitorClient> logger)
     {
         _logger = logger;
+        _registry = registry;
 
-        if (!options.MetricsProvisioned)
-            return; // unprovisioned: GetLatestAsync short-circuits to null, capability is absent.
-
-        string socketPath = options.MonitorSocketPath;
+        // ALWAYS build the transport (from the configured-or-default socket) so flipping the registry arms
+        // probing/scraping live without a restart; the CALL-time registry gate decides whether to use it.
+        string socketPath = string.IsNullOrWhiteSpace(options.MonitorSocketPath)
+            ? DefaultSocketPath
+            : options.MonitorSocketPath;
         var handler = new SocketsHttpHandler
         {
             // Every connection is dialed over the unix-domain socket; the request URI host is
@@ -77,8 +84,8 @@ public sealed class MonitorClient : IDisposable
     /// </summary>
     public async Task<Snapshot?> GetLatestAsync(CancellationToken ct)
     {
-        if (_http is null)
-            return null;
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Monitor))
+            return null; // disconnected at runtime: honest absent, no scrape.
 
         if (IsFresh())
             return _cached;
@@ -113,8 +120,8 @@ public sealed class MonitorClient : IDisposable
     /// </remarks>
     public async Task<bool> CheckHealthAsync(CancellationToken ct)
     {
-        if (_http is null)
-            return false; // unprovisioned: capability is absent, not down.
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Monitor))
+            return false; // disconnected at runtime: capability is absent, not down.
 
         try
         {
@@ -140,7 +147,7 @@ public sealed class MonitorClient : IDisposable
     {
         try
         {
-            using HttpResponseMessage resp = await _http!.GetAsync("/metrics", ct).ConfigureAwait(false);
+            using HttpResponseMessage resp = await _http.GetAsync("/metrics", ct).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
                 // 503 until the first tick lands; any non-2xx is "no data right now".
@@ -166,7 +173,7 @@ public sealed class MonitorClient : IDisposable
 
     public void Dispose()
     {
-        _http?.Dispose();
+        _http.Dispose();
         _refreshLock.Dispose();
     }
 }

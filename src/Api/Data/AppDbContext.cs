@@ -35,6 +35,16 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// (EnsureCreated no-ops there, and we must not wipe the shared audit log).</summary>
     public DbSet<HostSettingsEntity> HostSettings => Set<HostSettingsEntity>();
 
+    /// <summary>Each provisionable leaf's runtime provisioning flag (the leaf-runtime-provisioning feature) —
+    /// one row per leaf, keyed by leaf id. Like <see cref="HostSettings"/> it is also created by
+    /// <see cref="Services.Leaves.LeafRegistry"/>'s idempotent <c>CREATE TABLE IF NOT EXISTS</c> on an existing DB.</summary>
+    public DbSet<LeafRegistryEntity> LeafRegistryEntries => Set<LeafRegistryEntity>();
+
+    /// <summary>Per-leaf config overrides (the leaf-runtime-config feature) — composite-keyed by (leaf,key).
+    /// Created by <see cref="Services.Leaves.LeafOverrideStore"/>'s idempotent <c>CREATE TABLE IF NOT EXISTS</c>
+    /// on an existing DB (EnsureCreated no-ops there).</summary>
+    public DbSet<LeafOverrideEntity> LeafOverrides => Set<LeafOverrideEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<IntegrationEntity>(e =>
@@ -66,6 +76,25 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 new ValueConverter<DateTimeOffset, long>(
                     v => v.UtcTicks,
                     v => new DateTimeOffset(v, TimeSpan.Zero)));
+        });
+
+        modelBuilder.Entity<LeafRegistryEntity>(e =>
+        {
+            e.ToTable("leaf_registry");
+            e.HasKey(l => l.LeafId);
+            // UpdatedAt as UTC ticks (long) — the host_settings/audit posture (SQLite has no date type).
+            e.Property(l => l.UpdatedAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+        });
+
+        modelBuilder.Entity<LeafOverrideEntity>(e =>
+        {
+            e.ToTable("leaf_override");
+            e.HasKey(o => new { o.LeafId, o.Key }); // one row per (leaf, manifest key)
+            e.Property(o => o.UpdatedAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
         });
 
         modelBuilder.Entity<AuditEntry>(e =>

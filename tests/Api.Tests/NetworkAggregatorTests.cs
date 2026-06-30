@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using TheKrystalShip.Api;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Exceptions;
@@ -222,7 +223,13 @@ public sealed class NetworkAggregatorTests
     // --- helpers -----------------------------------------------------------------------------------
 
     private static NetworkAggregator Aggregator(bool provisioned, IFirewallService? firewall) =>
-        new(Options(provisioned), new StubProvider { Firewall = firewall }, NullLogger<NetworkAggregator>.Instance);
+        new(Registry(provisioned), new StubProvider { Firewall = firewall }, NullLogger<NetworkAggregator>.Instance);
+
+    // NetworkAggregator now gates on the runtime LeafRegistry (seeded from config). The registry's in-memory
+    // seed is set in its constructor (synchronous, no DB), so IsProvisioned("firewall") is correct without a
+    // scope factory — the unused factory is never touched on this path.
+    private static LeafRegistry Registry(bool provisioned) =>
+        new(null!, Options(provisioned), NullLogger<LeafRegistry>.Instance);
 
     private static ApiOptions Options(bool firewallProvisioned)
     {

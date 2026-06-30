@@ -128,6 +128,16 @@ invoking (service-owning) user, then `sudo`s **only** the systemd steps — stop
 success on the launch exit code alone). Idempotent; the env file (`/etc/kgsm-api/kgsm-api.env`)
 and DB (`/var/lib/kgsm-api`) live outside `/opt` and are never touched.
 
+**It also wires the runtime leaf-config feature** (the Services panel) as a final idempotent step:
+`deploy.sh` calls `deploy/setup-leaf-config.sh`, which installs a per-leaf systemd drop-in (layering an
+API-owned override env file in `/var/lib/kgsm-api/leaf-overrides/`) and a **scoped polkit rule** letting
+the service user `systemctl restart` **only** the four config-target leaves (monitor/watchdog/assistant/
+firewall — kept in lockstep with `src/Api/Services/Leaves/LeafCatalog.cs`). Restart is the *only*
+privileged op; the API renders override files unprivileged. It works under `NoNewPrivileges=true`
+(restart is a polkit-authorized D-Bus call to PID 1, not an in-process escalation). Full reference +
+verify/undo: `deploy/leaf-config/README.md`. So a single `./deploy/deploy.sh` on a fresh checkout does
+**all** setup — no manual polkit side-quest.
+
 **It needs `sudo` for the systemd steps, and the prompt is non-interactive under Claude
 Code — so ASK THE USER for their sudo/root password before running it** (e.g. run it with
 `SUDO='sudo -A'` + a `SUDO_ASKPASS` helper, or have the user run the script themselves).
@@ -227,8 +237,10 @@ exactly one correct access path:
 (monitor + assistant `GET /health`; watchdog `IsReadyAsync` via kgsm-lib — never a direct socket).
 It is the **single source** feeding both the REST `GET /hosts` capability block (`HostAggregator`
 reads its cached `Current`) and the M2 `hosts/{id}/capabilities` stream (it publishes flips). Two
-axes, never conflated: **`provisioned`** (the capability *set*) is fixed at startup from config and
-**never flips at runtime** — it is what the frontend negotiates at connect; **`status`** is the live
+axes, never conflated: **`provisioned`** (the capability *set*) is **runtime-flippable** — seeded at
+startup from config, then an admin can connect/disconnect a leaf live from the Services panel (a
+DB-backed `LeafRegistry` the `LeafHealthMonitor` reads each tick; the `hosts/{id}/capabilities` patch
+carries the changed *set*, not just each capability's `status`); **`status`** is the live
 availability. A leaf failing flips only `status` (operational→down→operational) with
 `provisioned:true` — "temporarily unavailable, still there", **never** "lost"; never invent a softer
 status nor suppress the down flip. `since` = when *this api* observed the flip.

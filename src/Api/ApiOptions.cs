@@ -264,6 +264,26 @@ public sealed class ApiOptions
     /// fabricated tail.</summary>
     public required int LogReadTimeoutMs { get; init; }
 
+    // --- Leaf runtime config (the leaf-runtime-config feature, Phase 2) ----------------------------
+
+    /// <summary>
+    /// Directory the per-leaf override files (<c>&lt;leaf&gt;.env</c>) are rendered to
+    /// (<c>KGSM_API_LEAF_OVERRIDES_DIR</c>, default <c>/var/lib/kgsm-api/leaf-overrides</c> — the API's own
+    /// state dir, so the API writes it <strong>unprivileged</strong>; a systemd drop-in the leaf is unaware of
+    /// feeds it via <c>EnvironmentFile=-</c>). The renderer mkdirs it <c>0700</c> and writes each file
+    /// <c>0600</c> (the overrides can hold secrets). The override file is a deterministic render of the
+    /// <c>leaf_override</c> DB rows — never hand-edited.
+    /// </summary>
+    public required string LeafOverridesDir { get; init; }
+
+    /// <summary>
+    /// How long (ms) the apply broker watches a leaf's health after a config restart before declaring the
+    /// change good (<c>KGSM_API_LEAF_APPLY_CANARY_MS</c>, default 15000, floor 2000). If the leaf is not
+    /// healthy within this window the override is restored and the leaf restarted again (auto-rollback) — so a
+    /// bad value is a caught, reverted failure, not a downed leaf.
+    /// </summary>
+    public required int LeafApplyCanaryMs { get; init; }
+
     // --- Auth (M4·a) — Discord per-host, Model A (architecture.html §3·f, keystone O5) -----------
     // Identity is a global Discord SSO anchor; authorization is a short-lived host-scoped bearer
     // this host mints after verifying identity once and resolving the role via the host's bot.
@@ -411,6 +431,12 @@ public sealed class ApiOptions
             JournalctlPath = BlankFallback(configuration["KGSM_API_JOURNALCTL_PATH"], "journalctl"),
             SystemctlPath = BlankFallback(configuration["KGSM_API_SYSTEMCTL_PATH"], "systemctl"),
             LogReadTimeoutMs = Math.Max(500, IntOr(configuration["KGSM_API_LOG_READ_TIMEOUT_MS"], 5000)),
+
+            // Leaf runtime config (Phase 2). The override dir lives in the API's StateDirectory by default
+            // (unprivileged write); the canary window is floored at 2s so a bad value can't be declared good
+            // before the leaf has even restarted.
+            LeafOverridesDir = BlankFallback(configuration["KGSM_API_LEAF_OVERRIDES_DIR"], "/var/lib/kgsm-api/leaf-overrides"),
+            LeafApplyCanaryMs = Math.Max(2000, IntOr(configuration["KGSM_API_LEAF_APPLY_CANARY_MS"], 15000)),
 
             // Auth (M4·a). On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = Flag(configuration["KGSM_API_AUTH_DISABLED"]),
