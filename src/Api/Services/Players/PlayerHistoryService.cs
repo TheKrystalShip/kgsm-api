@@ -204,21 +204,26 @@ public sealed class PlayerHistoryService(
     /// the watchdog is unavailable. Rebuilds the in-memory cache from DB.</summary>
     private async Task MarkUnknownFallbackAsync(CancellationToken ct)
     {
-        int count = await db_playerHistory()
-            .Where(p => p.Status == PlayerStatus.online)
-            .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, PlayerStatus.unknown), ct)
-            .ConfigureAwait(false);
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using IServiceScope scope = scopeFactory.CreateScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        if (count > 0)
-            logger.LogInformation("Player history: marked {Count} online players as unknown on startup", count);
+            int count = await db.PlayerHistory
+                .Where(p => p.Status == PlayerStatus.online)
+                .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, PlayerStatus.unknown), ct)
+                .ConfigureAwait(false);
+
+            if (count > 0)
+                logger.LogInformation("Player history: marked {Count} online players as unknown on startup", count);
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
 
         await RebuildCacheAsync(ct).ConfigureAwait(false);
-    }
-
-    private IQueryable<PlayerRecord> db_playerHistory()
-    {
-        using IServiceScope scope = scopeFactory.CreateScope();
-        return scope.ServiceProvider.GetRequiredService<AppDbContext>().PlayerHistory;
     }
 
     /// <summary>Upsert a player on <c>player.join</c>. Sets status to <c>online</c>, updates
