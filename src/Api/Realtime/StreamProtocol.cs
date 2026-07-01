@@ -156,6 +156,38 @@ public static class StreamProtocol
     /// </summary>
     public static string AuditEntityKey(string id) => $"audit:{id}";
 
+    // --- players (the live roster feed, player-presence-contract.md §5) ---
+    /// <summary>Live roster join/leave transitions, host-wide (like <see cref="AuditTopic"/> — one topic,
+    /// every server's presence events; the payload's <c>serverId</c> tells them apart, exactly like
+    /// <see cref="Contracts.AuditRecord.ServerId"/>). No pump publishes this: <see cref="Services.Players.PlayerRosterService"/>
+    /// pushes directly from the same join/leave event handlers that write the <c>player.join</c>/<c>player.leave</c>
+    /// audit rows.</summary>
+    public const string PlayersTopic = "players";
+    /// <summary>A session joined a server's roster: <c>data = { serverId, player }</c> (player = the
+    /// <see cref="Contracts.RosterPlayer"/> shape <c>GET /servers/{id}/players</c> returns).</summary>
+    public const string PlayersJoin = "players.join";
+    /// <summary>A session left a server's roster: <c>data = { serverId, player }</c> — same shape as
+    /// <see cref="PlayersJoin"/> (the player's LAST known state at leave), so the client can render a
+    /// "just left" line without a second lookup.</summary>
+    public const string PlayersLeave = "players.leave";
+    /// <summary>A server's WHOLE roster was cleared (instance stop/start/restart — a fresh server
+    /// session invalidates every prior one): <c>data = { serverId }</c>, no per-session payload. The
+    /// client drops every entry it holds for that server rather than waiting for N individual
+    /// <see cref="PlayersLeave"/> frames that will never arrive (the underlying sessions vanish without
+    /// emitting their own leave lines — player-presence-contract.md §5).</summary>
+    public const string PlayersReset = "players.reset";
+
+    /// <summary>The per-connection coalesce key for a roster transition on <see cref="PlayersTopic"/>: a
+    /// join and a later leave for the SAME <c>(serverId, sessionKey)</c> share a slot, so a leave correctly
+    /// supersedes a still-queued join for that session (the <see cref="ServerEntityKey"/>/<see cref="ServerRemoved"/>
+    /// precedent) — a slow client never double-renders a session that already left.</summary>
+    public static string PlayerEntityKey(string serverId, string sessionKey) => $"players:{serverId}:{sessionKey}";
+
+    /// <summary>The per-connection coalesce key for a <see cref="PlayersReset"/> frame: keyed on the
+    /// server alone (no session), so a repeat reset for the same server collapses to the latest — a
+    /// stacked-up reset carries no additional information over the newest one.</summary>
+    public static string PlayerResetEntityKey(string serverId) => $"players-reset:{serverId}";
+
     // --- alerts (M6·a — the condition-mirror feed) ---
     /// <summary>Live problem conditions, host-wide: <c>alerts</c> (architecture.html §3·c).</summary>
     public const string AlertsTopic = "alerts";

@@ -405,6 +405,74 @@ public sealed class AuditMappingTests
         Assert.Null(w.Meta);
     }
 
+    // --- player-presence-contract.md §5 additions: addr / sessionKey / reason in meta ----------------
+    [Fact]
+    public void FromPlayerJoinedEvent_WithAddrAndSessionKey_BothLandInMeta()
+    {
+        // romestead-shaped: no stable account id, a real ip:port address, and the addr doubling as the
+        // session token (contract §"networking predicts the token type").
+        var data = new InstancePlayerJoinedData
+        {
+            InstanceName = "romestead-1",
+            Actor = "system",
+            Origin = "system",
+            PlayerId = null,
+            PlayerName = "Aelia",
+            PlayerAddr = "86.191.216.57:58845",
+            SessionKey = "86.191.216.57:58845",
+        };
+
+        AuditWrite w = AuditMapping.FromPlayerJoinedEvent(data, hostId: "primary");
+
+        Assert.Equal("86.191.216.57:58845", w.Meta!["playerAddr"]);
+        Assert.Equal("86.191.216.57:58845", w.Meta["sessionKey"]);
+        Assert.False(w.Meta.ContainsKey("reason")); // join never carries a reason
+    }
+
+    [Fact]
+    public void FromPlayerLeftEvent_WithReasonAndSessionKey_BothLandInMeta()
+    {
+        // Core Keeper-shaped: an opaque userid session token + a disconnect reason on leave.
+        var data = new InstancePlayerLeftData
+        {
+            InstanceName = "corekeeper-1",
+            Actor = "system",
+            Origin = "system",
+            PlayerId = null,
+            PlayerName = "Woltah",
+            PlayerAddr = null,
+            SessionKey = "3801603394",
+            Reason = "App_Min",
+        };
+
+        AuditWrite w = AuditMapping.FromPlayerLeftEvent(data, hostId: "primary");
+
+        Assert.Equal("3801603394", w.Meta!["sessionKey"]);
+        Assert.Equal("App_Min", w.Meta["reason"]);
+        Assert.False(w.Meta.ContainsKey("playerAddr")); // honestly absent, never ""
+    }
+
+    [Fact]
+    public void FromPlayerLeftEvent_NoAddrSessionKeyOrReason_MetaOmitsAllThree()
+    {
+        // Pre-1.29.0-shaped payload (or a source that never populates them) — omitted, never fabricated
+        // empty strings; the pre-existing playerId/playerName-only meta contract is unchanged.
+        var data = new InstancePlayerLeftData
+        {
+            InstanceName = "factorio-01",
+            Actor = "system",
+            Origin = "system",
+            PlayerId = "76561198000000000",
+            PlayerName = "haru",
+        };
+
+        AuditWrite w = AuditMapping.FromPlayerLeftEvent(data, hostId: "primary");
+
+        Assert.False(w.Meta!.ContainsKey("playerAddr"));
+        Assert.False(w.Meta.ContainsKey("sessionKey"));
+        Assert.False(w.Meta.ContainsKey("reason"));
+    }
+
     [Theory]
     [InlineData(2456, 2456, "udp", "2456/udp")]          // single port → no dash
     [InlineData(2456, 2458, "udp", "2456-2458/udp")]     // range → dashed

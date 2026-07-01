@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Alerts;
+using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Events;
 
@@ -28,6 +29,7 @@ public sealed class KgsmAuditConsumer(
     IServiceProvider services,
     AuditService audit,
     AlertEngine alerts,
+    PlayerRosterService roster,
     ApiOptions options,
     ILogger<KgsmAuditConsumer> logger) : IHostedService
 {
@@ -82,12 +84,31 @@ public sealed class KgsmAuditConsumer(
         // server.start row but NOT bridged (a boot bring-up is not a crash recovery — IsRecoveryAction
         // excludes the system-origin start). A stop-cleared crash links null. Honest, never fabricated.
         // See Services/Alerts/CLAUDE.md.
+        // Player-presence roster reset (player-presence-contract.md §5): "Reset a server's roster on
+        // instance stop/start/restart" — a fresh start invalidates every prior session (new log = new
+        // EventChannelTail inode on the watchdog side), a stop obviously ends them all, and a restart is
+        // its OWN distinct event (not a stop+start pair) whose underlying process dies without emitting
+        // per-player "left" lines — without this reset those sessions would linger as phantom "connected"
+        // entries until each one happened to reconnect under a fresh key. Composed INTO these same
+        // handlers rather than a second RegisterHandler<...> call — kgsm-lib's EventService keeps one
+        // handler per event type (a plain dictionary indexer), so a second consumer registering here
+        // would silently replace this audit write, not add to it (see
+        // Services/Players/PlayerRosterService.cs remarks).
         events.RegisterHandler<InstanceStartedData>(d =>
-            WriteServerAndBridge(d, AuditAction.ServerStart, "started"));
+        {
+            roster.Reset(d.InstanceName);
+            return WriteServerAndBridge(d, AuditAction.ServerStart, "started");
+        });
         events.RegisterHandler<InstanceStoppedData>(d =>
-            WriteServer(d, AuditAction.ServerStop, AuditSeverity.Info, "stopped"));
+        {
+            roster.Reset(d.InstanceName);
+            return WriteServer(d, AuditAction.ServerStop, AuditSeverity.Info, "stopped");
+        });
         events.RegisterHandler<InstanceRestartedData>(d =>
-            WriteServerAndBridge(d, AuditAction.ServerRestart, "restarted"));
+        {
+            roster.Reset(d.InstanceName);
+            return WriteServerAndBridge(d, AuditAction.ServerRestart, "restarted");
+        });
         events.RegisterHandler<InstanceUninstalledData>(d =>
             WriteServer(d, AuditAction.ServerUninstall, AuditSeverity.Warn, "uninstalled"));
 
@@ -138,14 +159,26 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceUpnpClosedData>(d =>
             audit.AppendAsync(AuditMapping.FromUpnpClosedEvent(d, options.HostId)));
 
-        // player.join / player.leave — presence echoes (kgsm-lib 1.19.0). For our container images the
-        // watchdog forwards these from the in-image detection shim (system/system); native detection is a
-        // later increment. The player id/name (either nullable, at-least-one guaranteed by the shim) rides
-        // in meta. Pure mapper (AuditMapping.FromPlayer*Event), socket-free. Engine-owned → no double-write.
+        // player.join / player.leave — presence echoes (kgsm-lib 1.19.0, extended 1.29.0 with
+        // addr/sessionKey/reason). For our container images the watchdog forwards these from the in-image
+        // detection shim; native log-scraping detection emits the identical shape. The player id/name/addr
+        // (nullable, at-least-one guaranteed by the emitting side) plus sessionKey/reason ride in the audit
+        // meta (AuditMapping.FromPlayer*Event, pure/socket-free). Engine-owned → no double-write. ALSO
+        // drives the live roster projection (PlayerRosterService) — composed here rather than a second
+        // RegisterHandler<InstancePlayerJoinedData/-LeftData> call for the same single-handler-per-type
+        // reason as the start/stop reset above.
         events.RegisterHandler<InstancePlayerJoinedData>(d =>
-            audit.AppendAsync(AuditMapping.FromPlayerJoinedEvent(d, options.HostId)));
+        {
+            roster.Join(d.InstanceName, d.SessionKey, d.PlayerId, d.PlayerName, d.PlayerAddr,
+                d.Timestamp ?? DateTimeOffset.UtcNow);
+            return audit.AppendAsync(AuditMapping.FromPlayerJoinedEvent(d, options.HostId));
+        });
         events.RegisterHandler<InstancePlayerLeftData>(d =>
-            audit.AppendAsync(AuditMapping.FromPlayerLeftEvent(d, options.HostId)));
+        {
+            roster.Leave(d.InstanceName, d.SessionKey, d.PlayerId, d.PlayerName, d.PlayerAddr,
+                d.Timestamp ?? DateTimeOffset.UtcNow);
+            return audit.AppendAsync(AuditMapping.FromPlayerLeftEvent(d, options.HostId));
+        });
 
         // config.set — instance config edits (kgsm-lib 1.22.0). The PATCH /servers/{id}/config path stamps
         // actor+origin onto SetInstanceConfigValue, so this echo carries provenance; engine-owned → no

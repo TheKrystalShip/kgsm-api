@@ -18,6 +18,7 @@ using TheKrystalShip.Api.Services.Integrations;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.Api.Services.Metrics;
+using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Extensions;
 
 namespace TheKrystalShip.Api;
@@ -250,6 +251,12 @@ public class Startup(IConfiguration configuration)
         // engine. Reads go straight to AppDbContext on the request scope (AuditController). No EF
         // migrations — the schema is EnsureCreated (greenfield/dev authority; PLAN M5).
         services.AddSingleton<AuditService>();
+
+        // Player-presence live roster (player-presence-contract.md §5) — an in-memory projection driven
+        // FROM KgsmAuditConsumer's own player.join/player.leave (+ start/stop reset) handlers, never via a
+        // second IEventService registration for the same event types (kgsm-lib keeps one handler per type;
+        // see PlayerRosterService's remarks). GET /servers/{id}/players reads it directly.
+        services.AddSingleton<PlayerRosterService>();
         services.AddHostedService<KgsmAuditConsumer>();
 
         // File browser (Tier 3 #12) — the jailed content I/O for GET/PUT /servers/{id}/files. No leaf, no

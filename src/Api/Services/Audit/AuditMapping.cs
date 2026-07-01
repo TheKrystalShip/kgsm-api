@@ -215,20 +215,25 @@ public static class AuditMapping
     /// <summary>
     /// Map a kgsm <c>instance_player_joined</c> event to a <c>player.join</c> row at
     /// <see cref="AuditSeverity.Info"/>. For our container images this is forwarded by the watchdog from
-    /// the in-image detection shim (provenance <c>system</c>/<c>system</c> off the envelope, handled
-    /// unchanged by <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/>). The player identity
-    /// (<c>playerId</c>/<c>playerName</c>, either nullable) rides in <c>meta</c>; the row is scoped to the
-    /// server (no player target kind), mirroring the crash mapper. Never fabricates the missing half.
+    /// the in-image detection shim; native detection (log-scraping) is the same shape (provenance
+    /// <c>system</c>/<c>system</c> off the envelope, handled unchanged by <see cref="ParseActor"/>/
+    /// <see cref="NormalizeOrigin"/>). The player identity (<c>playerId</c>/<c>playerName</c>/
+    /// <c>playerAddr</c>, all nullable) and the <c>sessionKey</c> ride in <c>meta</c>; the row is scoped to
+    /// the server (no player target kind), mirroring the crash mapper. Never fabricates a missing field.
     /// </summary>
     public static AuditWrite FromPlayerJoinedEvent(InstancePlayerJoinedData d, string hostId) =>
-        PlayerWrite(d, hostId, AuditAction.PlayerJoin, "joined", d.PlayerId, d.PlayerName);
+        PlayerWrite(d, hostId, AuditAction.PlayerJoin, "joined",
+            d.PlayerId, d.PlayerName, d.PlayerAddr, d.SessionKey, reason: null);
 
     /// <summary>
     /// Map a kgsm <c>instance_player_left</c> event to a <c>player.leave</c> row — the leave counterpart of
-    /// <see cref="FromPlayerJoinedEvent"/>, identical provenance/identity rules.
+    /// <see cref="FromPlayerJoinedEvent"/>, identical provenance/identity rules, plus the disconnect
+    /// <c>reason</c> when the game's log carried one (never fabricated; kick/ban classification of this
+    /// vocabulary is deferred to a future version — player-presence-contract.md §6).
     /// </summary>
     public static AuditWrite FromPlayerLeftEvent(InstancePlayerLeftData d, string hostId) =>
-        PlayerWrite(d, hostId, AuditAction.PlayerLeave, "left", d.PlayerId, d.PlayerName);
+        PlayerWrite(d, hostId, AuditAction.PlayerLeave, "left",
+            d.PlayerId, d.PlayerName, d.PlayerAddr, d.SessionKey, d.Reason);
 
     /// <summary>
     /// Map a kgsm <c>instance_config_changed</c> event (kgsm-lib 1.22.0) to a <c>config.set</c> row at
@@ -293,9 +298,10 @@ public static class AuditMapping
 
     // Join/left differ only in action + summary verb — build the row once. The summary names the player
     // by display name, falling back to the stable id, then a generic label (never fabricates an identity;
-    // at-least-one-non-null is the emitting shim's guarantee, this is defensive).
+    // at-least-one-non-null is the emitting side's guarantee, this is defensive).
     private static AuditWrite PlayerWrite(
-        EventDataBase d, string hostId, string action, string verb, string? playerId, string? playerName)
+        EventDataBase d, string hostId, string action, string verb,
+        string? playerId, string? playerName, string? playerAddr, string? sessionKey, string? reason)
     {
         string instance = Instance(d);
         string who = !string.IsNullOrEmpty(playerName) ? playerName!
@@ -311,16 +317,21 @@ public static class AuditMapping
             ServerId: instance,
             HostId: hostId,
             Summary: $"{who} {verb} {Display(instance)}",
-            Meta: PlayerMeta(playerId, playerName));
+            Meta: PlayerMeta(playerId, playerName, playerAddr, sessionKey, reason));
     }
 
-    // Meta off a player event (id/name, either nullable); empties dropped, null when neither is present —
-    // never store "". The honest identity, never fabricated.
-    private static IReadOnlyDictionary<string, string>? PlayerMeta(string? id, string? name)
+    // Meta off a player event (id/name/addr/reason, all nullable, plus sessionKey); empties dropped, null
+    // when nothing is present — never store "". The honest identity, never fabricated. Rides the existing
+    // Meta JSON column — no schema change (player-presence-contract.md §5).
+    private static IReadOnlyDictionary<string, string>? PlayerMeta(
+        string? id, string? name, string? addr, string? sessionKey, string? reason)
     {
         Dictionary<string, string>? meta = null;
         if (!string.IsNullOrEmpty(id)) (meta ??= [])["playerId"] = id!;
         if (!string.IsNullOrEmpty(name)) (meta ??= [])["playerName"] = name!;
+        if (!string.IsNullOrEmpty(addr)) (meta ??= [])["playerAddr"] = addr!;
+        if (!string.IsNullOrEmpty(sessionKey)) (meta ??= [])["sessionKey"] = sessionKey!;
+        if (!string.IsNullOrEmpty(reason)) (meta ??= [])["reason"] = reason!;
         return meta;
     }
 

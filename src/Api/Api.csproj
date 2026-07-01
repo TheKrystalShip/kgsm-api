@@ -119,8 +119,14 @@
          1.26.0 adds IInstanceService.GetAllOrNull() — the roster read that returns null on a FAILED
          engine read (vs an empty dict for a genuine zero roster), so GET /servers can 503-keep-stale
          and the DomainPump can skip a tick instead of fabricating "zero servers" / tombstoning every
-         instance on a transient kgsm read hiccup (the vanishing-list fix). -->
-    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.28.0" />
+         instance on a transient kgsm read hiccup (the vanishing-list fix). 1.29.0 (player-presence
+         generalization, see player-presence-contract.md) extends InstancePlayerJoinedData with
+         PlayerAddr + SessionKey, and InstancePlayerLeftData with the same two plus Reason — the
+         consumer vocabulary for the watchdog's generalized native log-scraping session map (real
+         ip:port / opaque session correlation token / disconnect reason). Consumed here by the new
+         roster projection (Services/Players/PlayerRosterService.cs) + the audit meta extension
+         (AuditMapping.PlayerMeta). -->
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="1.29.0" />
 
     <!-- The shared GET /metrics wire contract (Snapshot graph + source-gen camelCase
          JSON), built in kgsm-monitor. We deserialize the monitor scrape into these exact
