@@ -212,11 +212,6 @@ req GET /api/v1
 [[ "$CODE" == 200 ]] && grep -q '"name":"kgsm-api"' <<<"$BODY" && grep -q '"version":"v1"' <<<"$BODY" \
   && ok "/api/v1 200 + {name,version}" || bad "/api/v1 handshake (code=$CODE body=$BODY)"
 
-# 3b. /api/v1/ping — the SPA's latency target: 200 + minimal {pong:true} body, no auth
-req GET /api/v1/ping
-[[ "$CODE" == 200 ]] && grep -q '"pong":true' <<<"$BODY" \
-  && ok "/api/v1/ping 200 + {pong:true}" || bad "/api/v1/ping (code=$CODE body=$BODY)"
-
 # 3c. /api/v1 handshake doubles as the host's PUBLIC identity card (read pre-login): a real build version
 #     (NOT the route version "v1"), the display label, and region OMITTED when unset (honest unknown).
 req GET /api/v1
@@ -1531,13 +1526,11 @@ done
 $anon_ok && ok "library cover/hero [AllowAnonymous]: no-bearer -> 404 (not 401) — game art renders without a token" \
   || bad "library cover/hero anonymous override (see above)"
 
-# 32. The reachability/latency probes stay OPEN under auth (the SPA checks 'backend reachable' and
-#     measures ping before login, and pings with a bare GET / no bearer to avoid a CORS preflight).
+# 32. The reachability probes stay OPEN under auth (the SPA checks 'backend reachable' before login).
 req GET /health;       H=$CODE
 req GET /api/v1;       V=$CODE
-req GET /api/v1/ping;  P=$CODE
-[[ "$H" == 200 && "$V" == 200 && "$P" == 200 ]] && ok "/health + /api/v1 + /api/v1/ping stay open under auth (200/200/200)" \
-  || bad "open endpoints under auth (health=$H meta=$V ping=$P)"
+[[ "$H" == 200 && "$V" == 200 ]] && ok "/health + /api/v1 stay open under auth (200/200)" \
+  || bad "open endpoints under auth (health=$H meta=$V)"
 
 # 33. The login endpoint 503s until Discord is configured (the M4·b live half) — honest "unconfigured",
 #     not a 404/500. JWT validation + tier gating (above) are enforced regardless.

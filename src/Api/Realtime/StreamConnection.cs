@@ -44,6 +44,8 @@ public sealed class StreamConnection
     private readonly object _queueLock = new();
     private readonly Channel<byte> _wake = Channel.CreateBounded<byte>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true, SingleWriter = false });
+    private readonly Channel<byte[]> _pongs = Channel.CreateUnbounded<byte[]>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
     public StreamConnection(WebSocket socket, JsonSerializerOptions json, ILogger logger, bool canOperatorTopics = false)
     {
@@ -87,6 +89,7 @@ public sealed class StreamConnection
         await Task.WhenAny(reader, writer).ConfigureAwait(false);
         cts.Cancel();              // one loop ended (close/error/cancel) -> tear down the other
         _wake.Writer.TryComplete();
+        _pongs.Writer.TryComplete();
         try { await Task.WhenAll(reader, writer).ConfigureAwait(false); }
         catch { /* teardown: cancellation / socket-aborted noise is expected here */ }
 
@@ -124,28 +127,41 @@ public sealed class StreamConnection
         try { cmd = JsonSerializer.Deserialize<ClientCommand>(utf8, _json); }
         catch (JsonException) { return; } // malformed frame: ignore (no client-error protocol until later)
 
-        if (cmd?.Topics is not { Length: > 0 } topics) return;
+        if (string.IsNullOrEmpty(cmd?.Type)) return;
 
         switch (cmd.Type)
         {
+            case StreamProtocol.Ping:
+                HandlePing(utf8);
+                break;
             case StreamProtocol.Subscribe:
-                lock (_subLock)
-                    foreach (string t in topics)
-                    {
-                        if (string.IsNullOrWhiteSpace(t)) continue;
-                        // Refuse an operator-gated topic for a non-operator socket (raw logs can leak secrets):
-                        // silently not-subscribed — the client never receives those lines (it has no client-error
-                        // channel yet, and a viewer's REST request already 403s, so this is socket-side defense).
-                        if (!_canOperatorTopics && StreamProtocol.RequiresOperator(t)) continue;
-                        _subscriptions.Add(t);
-                    }
+                if (cmd.Topics is { Length: > 0 })
+                    lock (_subLock)
+                        foreach (string t in cmd.Topics)
+                        {
+                            if (string.IsNullOrWhiteSpace(t)) continue;
+                            if (!_canOperatorTopics && StreamProtocol.RequiresOperator(t)) continue;
+                            _subscriptions.Add(t);
+                        }
                 break;
             case StreamProtocol.Unsubscribe:
-                lock (_subLock)
-                    foreach (string t in topics) _subscriptions.Remove(t);
+                if (cmd.Topics is { Length: > 0 })
+                    lock (_subLock)
+                        foreach (string t in cmd.Topics) _subscriptions.Remove(t);
                 break;
             default:
                 break; // unknown command type: ignore (forward-compatible)
+        }
+    }
+
+    private void HandlePing(byte[] utf8)
+    {
+        using var doc = JsonDocument.Parse(utf8);
+        if (doc.RootElement.TryGetProperty("ts", out JsonElement ts))
+        {
+            var pong = new StreamMessage("pong", StreamProtocol.Pong, new { ts = ts.GetDouble() });
+            byte[] frame = JsonSerializer.SerializeToUtf8Bytes(pong, _json);
+            _pongs.Writer.TryWrite(frame);
         }
     }
 
@@ -171,6 +187,15 @@ public sealed class StreamConnection
                     using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     sendCts.CancelAfter(SendTimeout); // a stalled client gets torn down, not allowed to back up
                     await _socket.SendAsync(frame, WebSocketMessageType.Text, endOfMessage: true, sendCts.Token)
+                        .ConfigureAwait(false);
+                }
+
+                // Drain non-coalesced pong responses (one per client ping, never collapsed).
+                while (_pongs.Reader.TryRead(out byte[]? pongFrame))
+                {
+                    using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    sendCts.CancelAfter(SendTimeout);
+                    await _socket.SendAsync(pongFrame, WebSocketMessageType.Text, endOfMessage: true, sendCts.Token)
                         .ConfigureAwait(false);
                 }
             }

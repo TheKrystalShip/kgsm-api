@@ -49,20 +49,10 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     [Theory]
     [InlineData("/health")]
     [InlineData("/api/v1")]
-    [InlineData("/api/v1/ping")]
     public async Task OpenEndpoints_NoToken_200(string path)
     {
         HttpResponseMessage resp = await Client().GetAsync(path);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-    }
-
-    // The SPA's latency target: open + minimal {pong:true} body (it's a timing target, not a data feed).
-    [Fact]
-    public async Task Ping_NoToken_PongBody()
-    {
-        HttpResponseMessage resp = await Client().GetAsync("/api/v1/ping");
-        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        Assert.Contains("\"pong\":true", await resp.Content.ReadAsStringAsync());
     }
 
     // --- Viewer: reads pass, the mutation is forbidden (403, not 401 — it IS authenticated) --------
