@@ -257,6 +257,14 @@ public class Startup(IConfiguration configuration)
         // second IEventService registration for the same event types (kgsm-lib keeps one handler per type;
         // see PlayerRosterService's remarks). GET /servers/{id}/players reads it directly.
         services.AddSingleton<PlayerRosterService>();
+
+        // Player-presence permanent roster (player-presence-contract.md §5) — the DB-backed authority for
+        // GET /servers/{id}/players and all roster WS frames. Maintains an in-memory cache for fast reads,
+        // persists to SQLite for durability, publishes WS frames on every status change. Called FROM
+        // KgsmAuditConsumer alongside PlayerRosterService (session-level dedup). On startup, marks stale
+        // online entries as unknown (honest — we missed events during downtime).
+        services.AddSingleton<PlayerHistoryService>();
+
         services.AddHostedService<KgsmAuditConsumer>();
 
         // File browser (Tier 3 #12) — the jailed content I/O for GET/PUT /servers/{id}/files. No leaf, no

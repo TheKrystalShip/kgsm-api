@@ -45,6 +45,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// on an existing DB (EnsureCreated no-ops there).</summary>
     public DbSet<LeafOverrideEntity> LeafOverrides => Set<LeafOverrideEntity>();
 
+    /// <summary>The permanent player roster — one row per unique player per server (player-presence-contract.md §5).
+    /// Once a player connects they are never removed; status toggles between online/offline/banned/unknown.
+    /// Created by the same <c>EnsureCreated</c>; the deployed DB needs a one-time wipe when it lands.</summary>
+    public DbSet<PlayerRecord> PlayerHistory => Set<PlayerRecord>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<IntegrationEntity>(e =>
@@ -93,6 +98,28 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.ToTable("leaf_override");
             e.HasKey(o => new { o.LeafId, o.Key }); // one row per (leaf, manifest key)
             e.Property(o => o.UpdatedAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+        });
+
+        modelBuilder.Entity<PlayerRecord>(e =>
+        {
+            e.ToTable("player_history");
+            e.HasKey(p => p.RowId);
+            e.Property(p => p.RowId).ValueGeneratedOnAdd();
+
+            // One row per (server, player identity) — the composite unique dedup key.
+            e.HasIndex(p => new { p.ServerId, p.PlayerIdentity }).IsUnique();
+
+            // Fast filter: "all online on this server", "all banned across servers", etc.
+            e.HasIndex(p => new { p.ServerId, p.Status });
+
+            // FirstSeen/LastSeen stored as UTC ticks (long) — same pattern as AuditEntry.Ts
+            // (SQLite has no date type; ticks make >= comparisons translatable).
+            e.Property(p => p.FirstSeen).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            e.Property(p => p.LastSeen).HasConversion(
                 v => v.UtcTicks,
                 v => new DateTimeOffset(v, TimeSpan.Zero));
         });

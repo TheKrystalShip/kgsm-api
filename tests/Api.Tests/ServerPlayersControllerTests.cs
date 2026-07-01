@@ -19,7 +19,7 @@ namespace TheKrystalShip.Api.Tests;
 /// see <c>Tier1OpsTests</c>). Load-bearing: **operator**-gated (the contract's explicit call, unlike the
 /// viewer-gated read on other server sub-resources); the honest <c>unknown</c>-vs-<c>configured</c>-empty
 /// distinction (§5's central rule — a game with no detection must NEVER read as "0 players online");
-/// and that the live roster (<see cref="PlayerRosterService"/>, pre-seeded here the same way the audit
+/// and that the live roster (<see cref="PlayerHistoryService"/>, pre-seeded here the same way the audit
 /// consumer would drive it) actually surfaces through the endpoint when detection IS configured.
 /// </summary>
 public sealed class ServerPlayersControllerTests
@@ -79,9 +79,7 @@ public sealed class ServerPlayersControllerTests
     public async Task NoDetectionConfigured_Unknown_PlayersForcedEmpty()
     {
         // The central honesty rule (§5): NEITHER regex set → detection:"unknown" and players MUST be []
-        // regardless of whatever the roster projection happens to hold for this id (it never will here,
-        // since nothing drives it for an undetected game, but the controller enforces this at the gate,
-        // not by trusting the projection to be empty).
+        // regardless of whatever the history projection happens to hold for this id.
         HttpResponseMessage resp = await Client(_engine, AuthTier.Operator).GetAsync($"/api/v1/servers/{NoDetection}/players");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -105,11 +103,11 @@ public sealed class ServerPlayersControllerTests
     [Fact]
     public async Task Configured_LiveRoster_Surfaces()
     {
-        // Pre-seed the roster exactly the way KgsmAuditConsumer's join handler would (via the same
+        // Pre-seed the history exactly the way KgsmAuditConsumer's join handler would (via the same
         // singleton the controller reads) — proves the read path end-to-end, not just the gate.
-        var roster = _engine.Services.GetRequiredService<PlayerRosterService>();
+        var history = _engine.Services.GetRequiredService<PlayerHistoryService>();
         var since = DateTimeOffset.UtcNow.AddMinutes(-2);
-        roster.Join(Detected, sessionKey: "76561198000000000", id: "76561198000000000",
+        history.Join(Detected, sessionKey: "76561198000000000", id: "76561198000000000",
             name: "Heisen", addr: null, since);
 
         HttpResponseMessage resp = await Client(_engine, AuthTier.Operator).GetAsync($"/api/v1/servers/{Detected}/players");
@@ -119,12 +117,13 @@ public sealed class ServerPlayersControllerTests
         Assert.Equal("configured", doc.RootElement.GetProperty("detection").GetString());
         JsonElement.ArrayEnumerator players = doc.RootElement.GetProperty("players").EnumerateArray();
         JsonElement p = Assert.Single(players);
-        Assert.Equal("76561198000000000", p.GetProperty("sessionKey").GetString());
-        Assert.Equal("Heisen", p.GetProperty("name").GetString());
-        Assert.Equal("76561198000000000", p.GetProperty("id").GetString());
-        Assert.True(p.GetProperty("addr").ValueKind is JsonValueKind.Null);
+        Assert.Equal("76561198000000000", p.GetProperty("playerIdentity").GetString());
+        Assert.Equal("Heisen", p.GetProperty("playerName").GetString());
+        Assert.Equal("76561198000000000", p.GetProperty("playerId").GetString());
+        Assert.True(p.GetProperty("playerAddr").ValueKind is JsonValueKind.Null);
+        Assert.Equal("online", p.GetProperty("status").GetString());
 
-        roster.Reset(Detected); // don't leak state into other tests sharing this factory's singleton
+        history.Reset(Detected); // don't leak state into other tests sharing this factory's singleton
     }
 
     /// <summary><see cref="AuthTestFactory"/> with a fake <see cref="IInstanceService"/> whose roster

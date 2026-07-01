@@ -1,23 +1,18 @@
-using Microsoft.AspNetCore.Http.Json;
-using Microsoft.Extensions.Options;
 using TheKrystalShip.Api.Contracts;
-using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Players;
 
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// Pure projection coverage (no I/O, no socket) for the live roster (player-presence-contract.md §5) —
-/// join upsert, leave remove, the map-miss no-op, the session-key fallback precedence, and the
-/// stop/start reset. A real <see cref="StreamHub"/> is used with zero connections registered, so
-/// <c>Publish</c> is exercised (no exception) but does no actual send — the WS wire shape itself is
-/// proven once elsewhere (<c>ConsoleBridgeTests</c>'s precedent), this file is about the projection's
-/// STATE.
+/// Pure projection coverage (no I/O, no socket) for the in-memory session-level roster
+/// (PlayerRosterService) — join upsert, leave evict, session-key fallback precedence, and the
+/// stop/start reset. The history service (PlayerHistoryService) is the authority; this service
+/// is the fast session-level dedup cache.
 /// </summary>
 public sealed class PlayerRosterServiceTests
 {
-    private static PlayerRosterService NewService() => new(new StreamHub(
-        Options.Create(new JsonOptions())));
+    private static PlayerRosterService NewService() => new();
 
     [Fact]
     public void Join_UpsertsSession_ReadableFromGetRoster()
@@ -25,23 +20,23 @@ public sealed class PlayerRosterServiceTests
         var roster = NewService();
         var since = DateTimeOffset.UtcNow;
 
-        roster.Join("factorio-1", sessionKey: "76561198000000000", id: "76561198000000000",
+        string? identity = roster.Join("factorio-1", sessionKey: "76561198000000000", id: "76561198000000000",
             name: "Heisen", addr: null, since);
 
+        Assert.Equal("76561198000000000", identity);
+
         RosterPlayer p = Assert.Single(roster.GetRoster("factorio-1"));
-        Assert.Equal("76561198000000000", p.SessionKey);
-        Assert.Equal("Heisen", p.Name);
-        Assert.Equal("76561198000000000", p.Id);
-        Assert.Null(p.Addr);
-        Assert.Equal(since, p.Since);
+        Assert.Equal("76561198000000000", p.PlayerIdentity);
+        Assert.Equal("Heisen", p.PlayerName);
+        Assert.Equal("76561198000000000", p.PlayerId);
+        Assert.Null(p.PlayerAddr);
+        Assert.Equal(PlayerStatus.online, p.Status);
+        Assert.Equal(since, p.FirstSeen);
     }
 
     [Fact]
     public void Join_SameSessionKeyTwice_UpsertsInPlace_NotADuplicate()
     {
-        // Mirrors the watchdog's own insert-if-absent semantics being harmless if a doubled join line
-        // ever reached here (the map already dedups upstream; this is a defensive re-assertion, not a
-        // second entry).
         var roster = NewService();
         roster.Join("valheim-1", "651023867:1", null, "Test", null, DateTimeOffset.UtcNow);
         roster.Join("valheim-1", "651023867:1", null, "Test", null, DateTimeOffset.UtcNow.AddSeconds(1));
@@ -50,21 +45,20 @@ public sealed class PlayerRosterServiceTests
     }
 
     [Theory]
-    [InlineData(null, "1.2.3.4:9999", "id-1", "name-1", "1.2.3.4:9999")]     // sessionKey missing -> addr
-    [InlineData(null, null, "id-1", "name-1", "id-1")]                       // sessionKey+addr missing -> id
-    [InlineData(null, null, null, "name-1", "name-1")]                      // only name -> name
-    [InlineData("key-1", "1.2.3.4:9999", "id-1", "name-1", "key-1")]         // sessionKey present -> wins
-    public void Join_SessionKeyFallback_MatchesContractPrecedence(
-        string? sessionKey, string? addr, string? id, string? name, string expectedKey)
+    [InlineData(null, "1.2.3.4:9999", "id-1", "name-1", "id-1")]       // sessionKey missing -> identity from id
+    [InlineData(null, null, "id-1", "name-1", "id-1")]                  // sessionKey+addr missing -> id
+    [InlineData(null, null, null, "name-1", "name-1")]                  // only name -> name
+    [InlineData("key-1", "1.2.3.4:9999", "id-1", "name-1", "id-1")]    // sessionKey present -> identity from id (player-level)
+    public void Join_PlayerIdentity_UsesStableId(
+        string? sessionKey, string? addr, string? id, string? name, string expectedIdentity)
     {
-        // The contract's derived session_key = key ?? addr ?? id ?? name. SessionKey is nullable only to
-        // mirror the kgsm-lib DTO style (contract §3) — the real wire always sends one; this fallback is
-        // defensive.
+        // PlayerIdentity resolves as: id ?? addr ?? name ?? sessionKey — deliberately different
+        // from the session-level sessionKey (key ?? addr ?? id ?? name).
         var roster = NewService();
         roster.Join("core-keeper-1", sessionKey, id, name, addr, DateTimeOffset.UtcNow);
 
         RosterPlayer p = Assert.Single(roster.GetRoster("core-keeper-1"));
-        Assert.Equal(expectedKey, p.SessionKey);
+        Assert.Equal(expectedIdentity, p.PlayerIdentity);
     }
 
     [Fact]
@@ -91,8 +85,6 @@ public sealed class PlayerRosterServiceTests
     [Fact]
     public void Leave_MapMiss_NoThrow_RemainsEmpty()
     {
-        // The honest fallback (player-presence-contract.md §5/plan §"honesty boundaries"): a watchdog- or
-        // api-restart-mid-session leave that never had a matching join is a silent no-op, not an error.
         var roster = NewService();
         roster.Leave("factorio-1", "never-joined", "id-9", "Ghost", null, DateTimeOffset.UtcNow);
 
@@ -109,7 +101,7 @@ public sealed class PlayerRosterServiceTests
         roster.Leave("factorio-1", "sess-1", "id-1", "A", null, DateTimeOffset.UtcNow);
 
         RosterPlayer remaining = Assert.Single(roster.GetRoster("factorio-1"));
-        Assert.Equal("sess-2", remaining.SessionKey);
+        Assert.Equal("id-2", remaining.PlayerIdentity);
     }
 
     [Fact]
@@ -123,26 +115,21 @@ public sealed class PlayerRosterServiceTests
         roster.Reset("factorio-1");
 
         Assert.Empty(roster.GetRoster("factorio-1"));
-        Assert.Single(roster.GetRoster("valheim-1")); // untouched — reset is per-server
+        Assert.Single(roster.GetRoster("valheim-1"));
     }
 
     [Fact]
     public void Reset_OnRestart_ClearsPhantomSessions_ScopedPerServer()
     {
-        // A restart is its own distinct kgsm event (InstanceRestartedData), never a stop+start pair, and
-        // the underlying process dies without emitting per-player "left" lines — so KgsmAuditConsumer
-        // resets this server's roster from THAT handler too (player-presence-contract.md §5, amended to
-        // "stop/start/restart"). Modeled here at the service level exactly as the consumer drives it: a
-        // bare Reset call, no accompanying Leave events.
         var roster = NewService();
         roster.Join("factorio-1", "sess-1", "id-1", "A", null, DateTimeOffset.UtcNow);
         roster.Join("factorio-1", "sess-2", "id-2", "B", null, DateTimeOffset.UtcNow);
         roster.Join("valheim-1", "sess-3", "id-3", "C", null, DateTimeOffset.UtcNow);
 
-        roster.Reset("factorio-1"); // the restart handler's call — no matching Leave events precede it
+        roster.Reset("factorio-1");
 
-        Assert.Empty(roster.GetRoster("factorio-1")); // no phantom "connected" sessions survive the restart
-        Assert.Single(roster.GetRoster("valheim-1"));  // an unrelated server's roster is untouched
+        Assert.Empty(roster.GetRoster("factorio-1"));
+        Assert.Single(roster.GetRoster("valheim-1"));
     }
 
     [Fact]
@@ -163,7 +150,7 @@ public sealed class PlayerRosterServiceTests
 
         RosterPlayer[] all = roster.GetRoster("factorio-1").ToArray();
         Assert.Equal(2, all.Length);
-        Assert.Equal("sess-1", all[0].SessionKey);
-        Assert.Equal("sess-2", all[1].SessionKey);
+        Assert.Equal("First", all[0].PlayerIdentity);
+        Assert.Equal("Second", all[1].PlayerIdentity);
     }
 }

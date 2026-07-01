@@ -30,6 +30,7 @@ public sealed class KgsmAuditConsumer(
     AuditService audit,
     AlertEngine alerts,
     PlayerRosterService roster,
+    PlayerHistoryService history,
     ApiOptions options,
     ILogger<KgsmAuditConsumer> logger) : IHostedService
 {
@@ -37,6 +38,9 @@ public sealed class KgsmAuditConsumer(
     {
         // Always ensure the audit table exists — even with no engine, GET /audit and auth writes need it.
         await audit.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+
+        // Ensure the player_history table exists and mark stale online entries as unknown.
+        await history.MarkUnknownOnStartupAsync(cancellationToken).ConfigureAwait(false);
 
         if (!options.KgsmProvisioned)
         {
@@ -97,16 +101,19 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceStartedData>(d =>
         {
             roster.Reset(d.InstanceName);
+            history.Reset(d.InstanceName);
             return WriteServerAndBridge(d, AuditAction.ServerStart, "started");
         });
         events.RegisterHandler<InstanceStoppedData>(d =>
         {
             roster.Reset(d.InstanceName);
+            history.Reset(d.InstanceName);
             return WriteServer(d, AuditAction.ServerStop, AuditSeverity.Info, "stopped");
         });
         events.RegisterHandler<InstanceRestartedData>(d =>
         {
             roster.Reset(d.InstanceName);
+            history.Reset(d.InstanceName);
             return WriteServerAndBridge(d, AuditAction.ServerRestart, "restarted");
         });
         events.RegisterHandler<InstanceUninstalledData>(d =>
@@ -171,11 +178,15 @@ public sealed class KgsmAuditConsumer(
         {
             roster.Join(d.InstanceName, d.SessionKey, d.PlayerId, d.PlayerName, d.PlayerAddr,
                 d.Timestamp ?? DateTimeOffset.UtcNow);
+            history.Join(d.InstanceName, d.SessionKey, d.PlayerId, d.PlayerName, d.PlayerAddr,
+                d.Timestamp ?? DateTimeOffset.UtcNow);
             return audit.AppendAsync(AuditMapping.FromPlayerJoinedEvent(d, options.HostId));
         });
         events.RegisterHandler<InstancePlayerLeftData>(d =>
         {
             roster.Leave(d.InstanceName, d.SessionKey, d.PlayerId, d.PlayerName, d.PlayerAddr,
+                d.Timestamp ?? DateTimeOffset.UtcNow);
+            history.Leave(d.InstanceName, d.SessionKey, d.PlayerId, d.PlayerName, d.PlayerAddr,
                 d.Timestamp ?? DateTimeOffset.UtcNow);
             return audit.AppendAsync(AuditMapping.FromPlayerLeftEvent(d, options.HostId));
         });
