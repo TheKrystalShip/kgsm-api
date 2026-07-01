@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
+using Snap = TheKrystalShip.KGSM.Monitor.Contracts;
 
 namespace TheKrystalShip.Api.Services.Alerts;
 
@@ -51,9 +53,21 @@ namespace TheKrystalShip.Api.Services.Alerts;
 /// belt-and-braces now, since episode-scoping would reject its pre-crash timestamp regardless). <b>Limit:</b>
 /// a crash cleared by a STOP, or whose own recovery event dropped, resolves with <c>actionId</c>
 /// <see langword="null"/> — never a fabricated link.</para>
-/// <para><b>Threading.</b> The alert state (<see cref="_firing"/>/<see cref="_resolved"/>/<see cref="_clearSince"/>)
-/// is mutated ONLY by <see cref="Tick"/> on the single poll-loop thread; the controller reads the volatile
-/// immutable <see cref="_snapshot"/>; <see cref="_lastStartAction"/> is concurrent. No locks.</para>
+/// <para><b>The metrics-threshold source (increment 1, <c>metrics-threshold-alerts-plan.md</c>).</b> A second,
+/// independent producer folded into this same engine: <see cref="TickMetrics"/> reconciles the monitor
+/// <see cref="Snap.Snapshot"/> against <see cref="ApiOptions.Policy"/>'s <see cref="ThresholdRule"/>s, raising
+/// <c>metric:&lt;ruleKey&gt;[:&lt;ref-or-serverId&gt;]</c> alerts on a sustained host/per-server breach. Unlike
+/// crash, a metric value can spike — so this pass needs its OWN fire-dwell (<see cref="_breachSince"/>,
+/// <see cref="ThresholdRule.FireForSec"/>) on top of the shared clear-dwell (<see cref="_clearSince"/>,
+/// <see cref="ThresholdRule.ClearForSec"/>) plus a hysteresis deadband (<see cref="ThresholdRule.ClearMargin"/>)
+/// so a value hovering at the threshold can't flap the feed. <c>snap == null</c> (monitor down) holds every
+/// metric alert unchanged — the same honest-unknown posture as a failed watchdog poll. A metric alert's
+/// <c>resolution.actionId</c> is always <see langword="null"/> (the bridge is crash-specific) and
+/// <c>Escalated</c> is always <see langword="false"/> (a metric in the danger band still auto-resolves).</para>
+/// <para><b>Threading.</b> The alert state (<see cref="_firing"/>/<see cref="_resolved"/>/<see cref="_clearSince"/>/
+/// <see cref="_breachSince"/>) is mutated ONLY by <see cref="Tick"/> and <see cref="TickMetrics"/>, both on the
+/// single poll-loop thread (sequentially, never concurrently); the controller reads the volatile immutable
+/// <see cref="_snapshot"/>; <see cref="_lastStartAction"/> is concurrent. No locks.</para>
 /// </remarks>
 public sealed class AlertEngine : BackgroundService
 {
@@ -77,13 +91,20 @@ public sealed class AlertEngine : BackgroundService
 
     private readonly ApiOptions _options;
     private readonly IServiceProvider _services;
+    private readonly MonitorClient _monitor;
     private readonly StreamHub _hub;
     private readonly ILogger<AlertEngine> _logger;
 
-    // Mutated only by Tick (single loop thread).
+    // Mutated only by Tick / TickMetrics (single loop thread).
     private readonly Dictionary<string, Alert> _firing = new();          // id -> live firing record
     private readonly List<Alert> _resolved = new();                      // resolved, within retention
     private readonly Dictionary<string, DateTimeOffset> _clearSince = new(); // id -> when first read clear
+
+    /// <summary>Metric fire-dwell: id -> when the value was FIRST observed breaching (warn or danger). Crash
+    /// never needed this — its poll interval is its own debounce; a metric can spike, so a rule must hold a
+    /// breach for <see cref="ThresholdRule.FireForSec"/> before it raises. Namespaced by id (<c>metric:…</c>),
+    /// so it can never collide with a crash id (<c>crash:…</c>).</summary>
+    private readonly Dictionary<string, DateTimeOffset> _breachSince = new();
 
     // Written by the event thread (NoteRecoveryAction), read by the poll thread (Tick). Lock-free.
     // Episode-scoped at read time by timestamp (see BuildResolution) — a stale action never bridges.
@@ -91,10 +112,11 @@ public sealed class AlertEngine : BackgroundService
 
     private volatile Snapshot _snapshot = Snapshot.Empty;
 
-    public AlertEngine(ApiOptions options, IServiceProvider services, StreamHub hub, ILogger<AlertEngine> logger)
+    public AlertEngine(ApiOptions options, IServiceProvider services, MonitorClient monitor, StreamHub hub, ILogger<AlertEngine> logger)
     {
         _options = options;
         _services = services;
+        _monitor = monitor;
         _hub = hub;
         _logger = logger;
     }
@@ -124,11 +146,12 @@ public sealed class AlertEngine : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!_options.WatchdogProvisioned)
+        if (!_options.WatchdogProvisioned && !_options.MetricsThresholdProvisioned)
         {
-            // No crash source on this host — GET /alerts serves an empty feed, the WS topic stays silent.
+            // Neither a crash source nor a metrics-threshold source on this host — GET /alerts serves an
+            // empty feed, the WS topic stays silent.
             _logger.LogInformation(
-                "Alerts: watchdog not provisioned — crash alerts are off (GET /alerts serves an empty feed).");
+                "Alerts: no crash or metrics-threshold source provisioned — empty feed.");
             return;
         }
 
@@ -150,29 +173,49 @@ public sealed class AlertEngine : BackgroundService
 
     private async Task PollAsync(CancellationToken ct)
     {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        // Gather whatever is provisioned, then reconcile each pass — independently, so a metrics-only host
+        // never touches the watchdog and a watchdog-only host never scrapes the monitor.
+        if (_options.WatchdogProvisioned)
+        {
+            IReadOnlyList<WatchdogInstanceState>? states = await PollWatchdogStatesAsync(ct).ConfigureAwait(false);
+            if (states is not null) Tick(states, now); // null = blind cycle (timeout/unreachable) — skip, never fabricate
+        }
+
+        if (_options.MetricsThresholdProvisioned)
+        {
+            Snap.Snapshot? snapshot = await _monitor.GetLatestAsync(ct).ConfigureAwait(false); // null when monitor down
+            TickMetrics(snapshot, now);
+        }
+    }
+
+    // The watchdog crash-source scrape, split out of PollAsync so it can be skipped entirely when the
+    // watchdog isn't provisioned (a metrics-only host must never call the watchdog client). Behavior
+    // unchanged from the original PollAsync body: a timeout/unreachable watchdog returns null (skip the
+    // tick — honest-unknown, never resolve/retract on a blind cycle).
+    private async Task<IReadOnlyList<WatchdogInstanceState>?> PollWatchdogStatesAsync(CancellationToken ct)
+    {
         // Registered only when provisioned (see Startup); resolve optionally to stay safe.
         var watchdog = _services.GetService(typeof(IWatchdogClient)) as IWatchdogClient;
-        if (watchdog is null) return;
+        if (watchdog is null) return null;
 
         using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timed.CancelAfter(ProbeTimeout);
-        IReadOnlyList<WatchdogInstanceState> states;
         try
         {
-            states = await watchdog.ListAsync(timed.Token).ConfigureAwait(false);
+            return await watchdog.ListAsync(timed.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             _logger.LogDebug("watchdog list timed out after {Timeout} — skipping alert tick", ProbeTimeout);
-            return; // honest-unknown: skip the tick, never resolve/retract on a blind cycle
+            return null;
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "watchdog list failed — skipping alert tick");
-            return;
+            return null;
         }
-
-        Tick(states, DateTimeOffset.UtcNow);
     }
 
     /// <summary>
@@ -220,9 +263,14 @@ public sealed class AlertEngine : BackgroundService
             }
         }
 
-        // 2) resolve (probation-gated) the cleared, retract the vanished.
+        // 2) resolve (probation-gated) the cleared, retract the vanished. ONLY crash: ids — _firing now also
+        // holds metric: alerts (the threshold source shares this dict), and those are TickMetrics's to
+        // reconcile, never this watchdog pass's. Without this guard a crash poll would see a metric alert's
+        // serverId absent from its watchdog `present`/`firingNow` sets and wrongly retract/resolve a live
+        // metric condition.
         foreach (string id in _firing.Keys.ToList())
         {
+            if (!id.StartsWith(CrashIdPrefix, StringComparison.Ordinal)) continue;
             Alert record = _firing[id];
             string serverId = record.ServerId!;
             if (firingNow.ContainsKey(serverId)) continue; // still firing
@@ -252,13 +300,152 @@ public sealed class AlertEngine : BackgroundService
             Publish(StreamProtocol.AlertResolve, id, new AlertResolved(id, resolution));
         }
 
-        // 3) age off the rear-view.
-        _resolved.RemoveAll(a => a.ResolvedAt is { } r && now - r > ResolvedRetention);
+        RebuildSnapshot(now);
+    }
 
-        // 4) republish the immutable snapshot the REST read serves.
-        _snapshot = new Snapshot(
-            _firing.Values.OrderBy(a => a.RaisedAt).ToList(),
-            _resolved.OrderByDescending(a => a.ResolvedAt).ToList());
+    /// <summary>
+    /// One reconcile of the metric-threshold rules (<see cref="ApiOptions.Policy"/>) against the monitor's
+    /// latest <paramref name="snap"/> — the new producer for the <c>host-monitor</c>/<c>metrics</c> sources
+    /// (<c>metrics-threshold-alerts-plan.md</c> §E). Pure over the engine's in-memory state (no I/O beyond the
+    /// hub publish) and single-threaded — the unit-test seam, mirroring <see cref="Tick"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Honest-unknown.</b> <paramref name="snap"/> <see langword="null"/> (the monitor is down) holds
+    /// every metric alert unchanged — never resolves/retracts on the absence of an answer, exactly like a
+    /// failed watchdog poll. A field that isn't evaluable this tick (a null nullable, no swap, no cpu-info, no
+    /// sensors) is already filtered out by <see cref="ThresholdMetrics.Observe"/> — never reached here.</para>
+    /// <para><b>Two dwells, not one.</b> A breach must hold <see cref="ThresholdRule.FireForSec"/> before it
+    /// raises (<see cref="_breachSince"/> — kills a spike); a clear must hold <see cref="ThresholdRule.ClearForSec"/>
+    /// AND have dropped <see cref="ThresholdRule.ClearMargin"/> below <see cref="ThresholdRule.Warn"/> before it
+    /// resolves (reuses <see cref="_clearSince"/>, namespaced by id so it never collides with a crash entry). A
+    /// value sitting in the deadband between the two neither advances nor flaps — it just stays firing.</para>
+    /// <para><b>Vanished server row.</b> A firing <c>metric:&lt;ruleKey&gt;:&lt;serverId&gt;</c> whose server no
+    /// longer appears in a <em>non-null</em> <paramref name="snap"/> is treated as cleared and resolves after the
+    /// same <see cref="ThresholdRule.ClearForSec"/> dwell — distinct from a monitor blackout, which (per the
+    /// honest-unknown rule above) never resolves anything.</para>
+    /// </remarks>
+    internal void TickMetrics(Snap.Snapshot? snap, DateTimeOffset now)
+    {
+        if (snap is null) return; // honest-unknown: change nothing, hold every metric alert (no rebuild either)
+
+        foreach (ThresholdRule rule in _options.Policy.Rules)
+        {
+            if (!rule.Enabled) continue;
+
+            bool hostScope = ThresholdMetrics.IsHostScope(rule.Metric);
+            // Only server-scope rules need vanished-row tracking — a host-scope rule's targets (a singleton,
+            // or the mount/sensor fan-out) don't correspond to a Snapshot.Servers row.
+            HashSet<string>? observedIds = hostScope ? null : new HashSet<string>();
+
+            foreach (MetricObservation obs in ThresholdMetrics.Observe(rule, snap))
+            {
+                observedIds?.Add(obs.Id);
+                ReconcileMetricObservation(rule, obs, now);
+            }
+
+            if (observedIds is not null)
+                ResolveVanishedServerAlerts(rule, observedIds, now);
+        }
+
+        RebuildSnapshot(now);
+    }
+
+    // One id's reconcile against its rule for this tick's observation — the fire-dwell / hysteresis-clear /
+    // deadband state machine from metrics-threshold-alerts-plan.md §E, applied per <see cref="MetricObservation"/>.
+    private void ReconcileMetricObservation(ThresholdRule rule, MetricObservation obs, DateTimeOffset now)
+    {
+        string id = obs.Id;
+        string? band = rule.Danger is { } danger && obs.Value >= danger ? AlertSeverity.Danger
+            : obs.Value >= rule.Warn ? AlertSeverity.Warn
+            : null;
+
+        if (band is not null)
+        {
+            // Breaching (warn or danger) — not clearing, so cancel any pending resolve and arm/hold the
+            // fire-dwell clock.
+            _clearSince.Remove(id);
+            if (!_breachSince.ContainsKey(id)) _breachSince[id] = now;
+
+            if (now - _breachSince[id] < TimeSpan.FromSeconds(rule.FireForSec))
+                return; // dwell not met yet — pending, no raise (kills a one-tick spike)
+
+            if (_firing.TryGetValue(id, out Alert? existing))
+            {
+                if (existing.Severity != band)
+                {
+                    Alert updated = BuildMetricFiring(rule, obs, band, existing.RaisedAt);
+                    _firing[id] = updated;
+                    Publish(StreamProtocol.AlertRaise, id, updated); // re-push the full record (severity change)
+                }
+            }
+            else
+            {
+                Alert raised = BuildMetricFiring(rule, obs, band, now);
+                _firing[id] = raised;
+                Publish(StreamProtocol.AlertRaise, id, raised);
+            }
+            return;
+        }
+
+        if (obs.Value <= rule.Warn - rule.ClearMargin)
+        {
+            // Truly cleared — past the hysteresis deadband. Start/observe the clear dwell.
+            _breachSince.Remove(id);
+            if (!_firing.TryGetValue(id, out Alert? firingRecord)) return; // not firing — nothing to clear
+
+            if (!_clearSince.TryGetValue(id, out DateTimeOffset since))
+            {
+                _clearSince[id] = now;
+                return; // the arming tick itself never resolves
+            }
+            if (now - since < TimeSpan.FromSeconds(rule.ClearForSec)) return; // not yet stable — hold
+
+            _firing.Remove(id);
+            _clearSince.Remove(id);
+            AlertResolution resolution = BuildMetricResolution(rule, obs);
+            Alert resolved = firingRecord with { Status = AlertStatus.Resolved, ResolvedAt = now, Resolution = resolution };
+            _resolved.Add(resolved);
+            Publish(StreamProtocol.AlertResolve, id, new AlertResolved(id, resolution));
+            return;
+        }
+
+        // Deadband: elevated but neither at the fire threshold nor past the clear margin. Honest middle
+        // ground — never starts the clear dwell, so a value hovering right at Warn can't flap the feed.
+        // (If it WAS firing it stays firing; if it wasn't, it still isn't.)
+        _breachSince.Remove(id);
+    }
+
+    // A firing metric:<ruleKey>:<serverId> whose server vanished from a NON-NULL snapshot this tick (the
+    // monitor is up, the row is just gone — a real stop/uninstall, not a blackout). Runs the same clear-dwell
+    // as a true value-clear, then resolves with an honest "no longer reporting" reason.
+    private void ResolveVanishedServerAlerts(ThresholdRule rule, HashSet<string> observedIds, DateTimeOffset now)
+    {
+        string prefix = ThresholdMetrics.AlertId(rule.Key, null) + ":"; // "metric:<ruleKey>:"
+        foreach (string id in _firing.Keys.ToList())
+        {
+            if (!id.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            if (observedIds.Contains(id)) continue; // still reporting — handled by the observation pass above
+
+            Alert record = _firing[id];
+            if (!_clearSince.TryGetValue(id, out DateTimeOffset since))
+            {
+                _clearSince[id] = now;
+                continue; // the arming tick itself never resolves
+            }
+            if (now - since < TimeSpan.FromSeconds(rule.ClearForSec)) continue; // not yet stable — hold
+
+            _firing.Remove(id);
+            _clearSince.Remove(id);
+            _breachSince.Remove(id);
+            var resolution = new AlertResolution(
+                AlertResolvedBy.System,
+                ThresholdMetrics.IsHostScope(rule.Metric) ? AlertSource.HostMonitor : AlertSource.Metrics,
+                "Recovered — no longer reporting metrics.",
+                ActionId: null);
+            Alert resolved = record with { Status = AlertStatus.Resolved, ResolvedAt = now, Resolution = resolution };
+            _resolved.Add(resolved);
+            Publish(StreamProtocol.AlertResolve, id, new AlertResolved(id, resolution));
+        }
     }
 
     private Alert BuildFiring(string serverId, Observed obs, DateTimeOffset raisedAt)
@@ -326,11 +513,85 @@ public sealed class AlertEngine : BackgroundService
         return new AlertResolution(AlertResolvedBy.System, AlertSource.Watchdog, reason, actionId);
     }
 
+    /// <summary>The firing record for a metric-threshold breach (<c>host-monitor</c>/<c>metrics</c> source).
+    /// <see cref="Alert.Escalated"/> is ALWAYS <see langword="false"/> — a metric in the danger band still
+    /// auto-resolves once it recedes, so severity alone (never <c>escalated</c>) carries how bad it is.</summary>
+    private Alert BuildMetricFiring(ThresholdRule rule, MetricObservation obs, string severity, DateTimeOffset raisedAt)
+    {
+        bool hostScope = ThresholdMetrics.IsHostScope(rule.Metric);
+        string noun = MetricNoun(rule.Metric);
+        // Subject: a host rule names its target (mount/sensor ref, else the host itself); a server rule names
+        // the instance (carried as serverId). The measured value rides in obs.Display (already unit-formatted).
+        string subject = hostScope
+            ? (obs.RefKey is { Length: > 0 } refKey ? refKey : _options.HostId)
+            : (obs.ServerId ?? "server");
+        string sev = severity == AlertSeverity.Danger ? "critical" : "high";
+
+        // Deep-link hints to the tab where the operator would act: a host-scope alert points at the host's
+        // resources view (host CPU/mem/disk); a server-scope alert at that server's performance tab.
+        AlertAnchor anchor = hostScope
+            ? new AlertAnchor(AlertSurface.Host, _options.HostId, Tab: "resources", Ref: obs.RefKey)
+            : new AlertAnchor(AlertSurface.Server, _options.HostId, Tab: "performance", Ref: obs.ServerId);
+
+        return new Alert(
+            Id: obs.Id,
+            Severity: severity,
+            Source: hostScope ? AlertSource.HostMonitor : AlertSource.Metrics,
+            Title: $"{subject} {noun} at {obs.Display}",
+            Detail: $"Sustained {sev} {noun} — held for at least {FormatDwell(rule.FireForSec)}.",
+            ServerId: obs.ServerId,
+            HostId: _options.HostId,
+            Anchor: anchor,
+            Status: AlertStatus.Firing,
+            RaisedAt: raisedAt,
+            Escalated: false,
+            Attempts: 0);
+    }
+
+    /// <summary>The resolution for a cleared metric-threshold breach. <see cref="AlertResolution.ActionId"/>
+    /// is ALWAYS <see langword="null"/> — a threshold clears because the measured value receded, never via an
+    /// operator/system action; the actionId↔audit bridge is crash-specific. <see cref="AlertResolution.By"/>
+    /// stays <c>system</c> (the server observed the clear).</summary>
+    private AlertResolution BuildMetricResolution(ThresholdRule rule, MetricObservation obs)
+    {
+        string source = ThresholdMetrics.IsHostScope(rule.Metric) ? AlertSource.HostMonitor : AlertSource.Metrics;
+        return new AlertResolution(
+            AlertResolvedBy.System, source, $"Recovered — {MetricNoun(rule.Metric)} back to {obs.Display}.", ActionId: null);
+    }
+
+    private static string MetricNoun(ThresholdMetric metric) => metric switch
+    {
+        ThresholdMetric.HostMemUsedPct => "memory",
+        ThresholdMetric.HostSwapUsedPct => "swap",
+        ThresholdMetric.HostDiskUsedPct => "disk",
+        ThresholdMetric.HostLoadPerCore => "load",
+        ThresholdMetric.HostTempC => "temperature",
+        ThresholdMetric.ServerMemBytes => "memory",
+        ThresholdMetric.ServerCpuPctCore => "CPU",
+        ThresholdMetric.ServerPids => "processes",
+        _ => "metric",
+    };
+
+    private static string FormatDwell(int seconds) =>
+        seconds > 0 && seconds % 60 == 0 ? $"{seconds / 60}m" : $"{seconds}s";
+
+    /// <summary>Age off the rear-view, then republish the immutable snapshot the REST read serves. Called by
+    /// BOTH <see cref="Tick"/> (crash) and <see cref="TickMetrics"/> (threshold) so <see cref="_snapshot"/>
+    /// always projects the FULL firing/resolved set — both sources together, order-independent.</summary>
+    private void RebuildSnapshot(DateTimeOffset now)
+    {
+        _resolved.RemoveAll(a => a.ResolvedAt is { } r && now - r > ResolvedRetention);
+        _snapshot = new Snapshot(
+            _firing.Values.OrderBy(a => a.RaisedAt).ToList(),
+            _resolved.OrderByDescending(a => a.ResolvedAt).ToList());
+    }
+
     private void Publish(string type, string id, object data) =>
         _hub.Publish(StreamProtocol.AlertsTopic, StreamProtocol.AlertEntityKey(id),
             new StreamMessage(StreamProtocol.AlertsTopic, type, data));
 
-    private static string AlertId(string serverId) => $"crash:{serverId}";
+    private const string CrashIdPrefix = "crash:";
+    private static string AlertId(string serverId) => $"{CrashIdPrefix}{serverId}";
 
     // The watchdog-observed crash condition for one instance (the inputs that shape the firing record).
     private readonly record struct Observed(bool Escalated, int Attempts, string Reason);

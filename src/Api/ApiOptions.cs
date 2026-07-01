@@ -1,3 +1,5 @@
+using TheKrystalShip.Api.Services.Alerts;
+
 namespace TheKrystalShip.Api;
 
 /// <summary>
@@ -220,6 +222,33 @@ public sealed class ApiOptions
     /// (<c>KGSM_API_METRICS_MAINT_MS</c>, default 60000).</summary>
     public required int MetricsMaintenanceMs { get; init; }
 
+    // --- Metric-threshold alerts (the alerts `metrics`/`host-monitor` source, increment 1 of 2 — see
+    //     metrics-threshold-alerts-plan.md). Policy storage is appsettings/env ONLY this increment: a
+    //     baked-in Default, optionally wholesale-overridden by the MetricsThresholds:Rules config section.
+    //     DB-backed/panel-editable policy is increment 2, out of scope. ----------------------------------
+
+    /// <summary>
+    /// The active metric-threshold policy. Defaults to <see cref="MetricsThresholdPolicy.Default"/>; a
+    /// present, non-empty <c>MetricsThresholds:Rules</c> config section overrides it WHOLESALE (not
+    /// merged field-by-field). Tuning a threshold or enabling a per-server rule means editing
+    /// <c>appsettings.json</c>/the env file and restarting the API — the expected increment-1 UX.
+    /// </summary>
+    public MetricsThresholdPolicy Policy { get; init; } = MetricsThresholdPolicy.Default;
+
+    /// <summary>Kill-switch for the whole metric-threshold alert pass
+    /// (<c>KGSM_API_METRICS_THRESHOLDS_DISABLED</c>), independent of each rule's own <c>enabled</c> flag —
+    /// flips the entire source off without touching the rule config.</summary>
+    public bool MetricsThresholdsDisabled { get; init; }
+
+    /// <summary>
+    /// Whether the metric-threshold alert source is active: the monitor capability is provisioned (metrics
+    /// are actually reachable to threshold), the kill-switch is off, and at least one rule is enabled. The
+    /// <c>AlertEngine</c> guards its metrics reconcile pass on this, mirroring
+    /// <see cref="WatchdogProvisioned"/> for the existing crash pass.
+    /// </summary>
+    public bool MetricsThresholdProvisioned =>
+        MetricsProvisioned && !MetricsThresholdsDisabled && Policy.AnyEnabled;
+
     // --- File browser (Tier 3 #12) — the GET/PUT /servers/{id}/files surface ----------------------
 
     /// <summary>
@@ -420,6 +449,12 @@ public sealed class ApiOptions
             MetricsRollupRetentionDays = Math.Max(1, IntOr(configuration["KGSM_API_METRICS_ROLLUP_RETENTION_DAYS"], 30)),
             MetricsMaintenanceMs = Math.Max(10000, IntOr(configuration["KGSM_API_METRICS_MAINT_MS"], 60000)),
 
+            // Metric-threshold alerts (increment 1 — appsettings/env only). The kill-switch is independent
+            // of each rule's own enabled flag; the policy itself wholesale-overrides the baked-in Default
+            // only when MetricsThresholds:Rules is present and non-empty (see LoadThresholdPolicy).
+            MetricsThresholdsDisabled = Flag(configuration["KGSM_API_METRICS_THRESHOLDS_DISABLED"]),
+            Policy = LoadThresholdPolicy(configuration),
+
             // File browser (Tier 3 #12). Entry cap is a frontend-render bound; edit ceiling guards the
             // editor against megabyte blobs. Clamped sane: at least 1 entry, at least 1 KiB.
             FilesMaxEntries = Math.Max(1, IntOr(configuration["KGSM_API_FILES_MAX_ENTRIES"], 200)),
@@ -467,6 +502,24 @@ public sealed class ApiOptions
     {
         string? dir = string.IsNullOrWhiteSpace(dbPath) ? null : Path.GetDirectoryName(dbPath.Trim());
         return string.IsNullOrEmpty(dir) ? "covers" : Path.Combine(dir, "covers");
+    }
+
+    // MetricsThresholds:Rules binds via reflection-based config binding (JIT runtime — fine here); a
+    // present, non-empty section wins WHOLESALE over the baked-in Default (no field-by-field merge), per
+    // the locked decision in metrics-threshold-alerts-plan.md. Null/empty/absent -> Default.
+    // NB: bind to the mutable ThresholdRuleBinding, NOT the positional ThresholdRule — the binder cannot
+    // construct a record whose `double? Danger` ctor param has no value, and silently returns an empty list,
+    // so a single warn-only rule would drop the whole custom policy back to Default. A rule missing its Key
+    // is skipped (malformed), never materialized with a null id.
+    private static MetricsThresholdPolicy LoadThresholdPolicy(IConfiguration configuration)
+    {
+        List<ThresholdRuleBinding>? bound =
+            configuration.GetSection("MetricsThresholds:Rules").Get<List<ThresholdRuleBinding>>();
+        List<ThresholdRule>? rules = bound?
+            .Where(b => !string.IsNullOrWhiteSpace(b.Key))
+            .Select(b => b.ToRule())
+            .ToList();
+        return rules is { Count: > 0 } ? new MetricsThresholdPolicy(rules) : MetricsThresholdPolicy.Default;
     }
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

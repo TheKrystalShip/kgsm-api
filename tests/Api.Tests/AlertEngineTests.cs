@@ -1,11 +1,13 @@
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TheKrystalShip.Api;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Alerts;
+using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Models;
 
 namespace TheKrystalShip.Api.Tests;
@@ -292,8 +294,22 @@ public sealed class AlertEngineTests
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static AlertEngine Engine() =>
-        new(BuildOptions(), new StubProvider(), Hub(), NullLogger<AlertEngine>.Instance);
+    private static AlertEngine Engine()
+    {
+        ApiOptions options = BuildOptions();
+        return new(options, new StubProvider(), Monitor(options), Hub(), NullLogger<AlertEngine>.Instance);
+    }
+
+    // A real MonitorClient, never invoked by the crash tests (Tick takes watchdog states as an argument and
+    // never scrapes) — it exists only to satisfy the ctor. Both it and its LeafRegistry construct lazily: the
+    // unix-socket transport is dialed only on a GetLatestAsync these tests never call.
+    private static MonitorClient Monitor(ApiOptions options)
+    {
+        IServiceScopeFactory scopeFactory =
+            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
+        var registry = new LeafRegistry(scopeFactory, options, NullLogger<LeafRegistry>.Instance);
+        return new MonitorClient(options, registry, NullLogger<MonitorClient>.Instance);
+    }
 
     private static ApiOptions BuildOptions() =>
         ApiOptions.FromConfiguration(new ConfigurationBuilder()

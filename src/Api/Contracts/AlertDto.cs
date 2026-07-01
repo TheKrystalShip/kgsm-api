@@ -112,4 +112,8 @@ public static class AlertResolvedBy
 public static class AlertSurface
 {
     public const string Server = "server";
+
+    /// <summary>A host-scope condition (e.g. a metric threshold over a host-wide field like disk/mem/load)
+    /// deep-links to the host view instead of a server.</summary>
+    public const string Host = "host";
 }
