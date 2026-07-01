@@ -24,7 +24,7 @@ public sealed class PlayerHistoryServiceTests
         var scopeFactory = services.GetRequiredService<IServiceScopeFactory>();
         var hub = new StreamHub(Options.Create(new JsonOptions()));
         var logger = new LoggerFactory().CreateLogger<PlayerHistoryService>();
-        return new PlayerHistoryService(scopeFactory, hub, logger);
+        return new PlayerHistoryService(scopeFactory, services, hub, logger);
     }
 
     [Fact]

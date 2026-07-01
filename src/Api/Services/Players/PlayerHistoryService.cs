@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.KGSM.Core.Interfaces;
+using TheKrystalShip.KGSM.Core.Models;
 
 namespace TheKrystalShip.Api.Services.Players;
 
@@ -16,15 +18,17 @@ namespace TheKrystalShip.Api.Services.Players;
 /// <para><b>Composed, not independent.</b> Like <see cref="PlayerRosterService"/>, this service
 /// does NOT register its own <c>IEventService</c> handler — it is called FROM
 /// <see cref="Audit.KgsmAuditConsumer"/>'s existing handlers for the single-handler-per-type reason.</para>
-/// <para><b>Unknown on startup.</b> On API startup, all <c>online</c> entries are set to
-/// <c>unknown</c> — we missed events during downtime. They resolve to <c>online</c> or
-/// <c>offline</c> only on the next definitive event — no probing, no timeouts. Honest.</para>
+/// <para><b>Reconcile on startup.</b> On API startup, the watchdog's live session map is queried
+/// to determine who is currently online. Players in the snapshot are marked online; everyone
+/// else is marked offline. This replaces the old "mark unknown" behavior — the watchdog snapshot
+/// IS the ground truth. If the watchdog is absent/down, falls back to marking unknown (honest).</para>
 /// <para><b>Write pattern.</b> Follows the <see cref="Audit.AuditService"/> pattern: singleton,
 /// own DI scope per write, serialized writes via <see cref="SemaphoreSlim"/> (SQLite single-writer),
 /// <c>EnsureCreated</c> with double-checked locking.</para>
 /// </remarks>
 public sealed class PlayerHistoryService(
     IServiceScopeFactory scopeFactory,
+    IServiceProvider serviceProvider,
     StreamHub hub,
     ILogger<PlayerHistoryService> logger)
 {
@@ -35,17 +39,172 @@ public sealed class PlayerHistoryService(
     private readonly SemaphoreSlim _ensureGate = new(1, 1);
     private bool _ensured;
 
-    /// <summary>Mark all <c>online</c> players as <c>unknown</c> on API startup. We missed events
-    /// during downtime — honest until resolved by a definitive join/leave event. Call once from
-    /// <see cref="Audit.KgsmAuditConsumer.StartAsync"/> before registering event handlers.</summary>
-    public async Task MarkUnknownOnStartupAsync(CancellationToken ct = default)
+    /// <summary>Reconcile player statuses from the watchdog's live session map on API startup.
+    /// Queries the watchdog for currently connected players, marks them online, and marks
+    /// everyone else offline. If the watchdog is absent/down, falls back to marking unknown.</summary>
+    public async Task ReconcileFromWatchdogAsync(CancellationToken ct = default)
     {
         await EnsureCreatedAsync(ct).ConfigureAwait(false);
 
+        // Try to get the watchdog's live session map.
+        IWatchdogClient? watchdog = serviceProvider.GetService(typeof(IWatchdogClient)) as IWatchdogClient;
+        if (watchdog is null)
+        {
+            logger.LogInformation("Player history: watchdog not provisioned — falling back to unknown on startup");
+            await MarkUnknownFallbackAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>? watchdogSessions;
+        try
+        {
+            using var probe = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, probe.Token);
+            watchdogSessions = await watchdog.GetAllPlayersAsync(linked.Token).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Player history: watchdog session query failed — falling back to unknown");
+            await MarkUnknownFallbackAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        if (watchdogSessions is null)
+        {
+            logger.LogInformation("Player history: watchdog returned null — falling back to unknown on startup");
+            await MarkUnknownFallbackAsync(ct).ConfigureAwait(false);
+            return;
+        }
+
+        // Build the set of currently-online player identities from the watchdog snapshot.
+        // Indexed by instance name → set of all identity fields for cross-matching.
+        var onlineByInstance = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var kvp in watchdogSessions)
+        {
+            var online = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var session in kvp.Value)
+            {
+                if (session.SessionKey is not null) online.Add(session.SessionKey);
+                if (session.Id is not null) online.Add(session.Id);
+                if (session.Name is not null) online.Add(session.Name);
+                if (session.Addr is not null) online.Add(session.Addr);
+            }
+            onlineByInstance[kvp.Key] = online;
+        }
+
+        // Load full roster from DB.
         using IServiceScope scope = scopeFactory.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        PlayerRecord[] all = await db.PlayerHistory.ToArrayAsync(ct).ConfigureAwait(false);
 
-        int count = await db.PlayerHistory
+        int markedOnline = 0;
+        int markedOffline = 0;
+        int newlyDiscovered = 0;
+
+        // Phase 1: reconcile existing DB records.
+        foreach (PlayerRecord record in all)
+        {
+            // Never override banned — that's an intentional, manual status.
+            if (record.Status == PlayerStatus.banned)
+                continue;
+
+            if (onlineByInstance.TryGetValue(record.ServerId, out var online))
+            {
+                bool isOnline = online.Contains(record.PlayerIdentity)
+                    || (record.PlayerId is not null && online.Contains(record.PlayerId))
+                    || (record.PlayerName is not null && online.Contains(record.PlayerName))
+                    || (record.PlayerAddr is not null && online.Contains(record.PlayerAddr));
+
+                if (isOnline && record.Status != PlayerStatus.online)
+                {
+                    record.Status = PlayerStatus.online;
+                    record.LastSeen = DateTimeOffset.UtcNow;
+                    markedOnline++;
+                }
+                else if (!isOnline && record.Status == PlayerStatus.online)
+                {
+                    record.Status = PlayerStatus.offline;
+                    markedOffline++;
+                }
+            }
+            else if (record.Status == PlayerStatus.online)
+            {
+                // Instance not in watchdog snapshot — mark offline.
+                record.Status = PlayerStatus.offline;
+                markedOffline++;
+            }
+        }
+
+        // Phase 2: discover new players from watchdog that aren't in the DB yet.
+        foreach (var kvp in watchdogSessions)
+        {
+            string serverId = kvp.Key;
+            foreach (var session in kvp.Value)
+            {
+                if (session.SessionKey is null) continue;
+
+                bool exists = all.Any(r => r.ServerId == serverId
+                    && (r.PlayerIdentity == session.SessionKey
+                        || (session.Id is not null && r.PlayerId == session.Id)
+                        || (session.Name is not null && r.PlayerName == session.Name)
+                        || (session.Addr is not null && r.PlayerAddr == session.Addr)));
+
+                if (!exists)
+                {
+                    string playerIdentity = session.Id ?? session.Addr ?? session.Name ?? session.SessionKey;
+                    DateTimeOffset now = DateTimeOffset.UtcNow;
+                    db.PlayerHistory.Add(new PlayerRecord
+                    {
+                        ServerId = serverId,
+                        PlayerIdentity = playerIdentity,
+                        PlayerId = session.Id,
+                        PlayerName = session.Name,
+                        PlayerAddr = session.Addr,
+                        Status = PlayerStatus.online,
+                        FirstSeen = now,
+                        LastSeen = now,
+                        BanReason = null
+                    });
+                    newlyDiscovered++;
+                }
+            }
+        }
+
+        if (markedOnline > 0 || markedOffline > 0 || newlyDiscovered > 0)
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            logger.LogInformation(
+                "Player history: reconciled from watchdog — {Online} marked online, {Offline} marked offline, {New} newly discovered",
+                markedOnline, markedOffline, newlyDiscovered);
+        }
+
+        // Rebuild the in-memory cache from DB.
+        await RebuildCacheAsync(ct).ConfigureAwait(false);
+
+        // Publish WS frames for newly discovered online players so open tabs update.
+        foreach (var kvp in watchdogSessions)
+        {
+            string serverId = kvp.Key;
+            foreach (var session in kvp.Value)
+            {
+                if (session.SessionKey is null) continue;
+                string playerIdentity = session.Id ?? session.Addr ?? session.Name ?? session.SessionKey;
+
+                if (_cache.TryGetValue(serverId, out var roster) && roster.TryGetValue(playerIdentity, out var player) && player.Status == PlayerStatus.online)
+                {
+                    hub.Publish(StreamProtocol.PlayersTopic, StreamProtocol.PlayerEntityKey(serverId, playerIdentity),
+                        new StreamMessage(StreamProtocol.PlayersTopic, StreamProtocol.PlayersJoin,
+                            new PlayerTransition(serverId, player)));
+                }
+            }
+        }
+    }
+
+    /// <summary>Mark all <c>online</c> players as <c>unknown</c> on API startup. Fallback when
+    /// the watchdog is unavailable. Rebuilds the in-memory cache from DB.</summary>
+    private async Task MarkUnknownFallbackAsync(CancellationToken ct)
+    {
+        int count = await db_playerHistory()
             .Where(p => p.Status == PlayerStatus.online)
             .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, PlayerStatus.unknown), ct)
             .ConfigureAwait(false);
@@ -53,8 +212,13 @@ public sealed class PlayerHistoryService(
         if (count > 0)
             logger.LogInformation("Player history: marked {Count} online players as unknown on startup", count);
 
-        // Rebuild the in-memory cache from DB after marking unknown.
         await RebuildCacheAsync(ct).ConfigureAwait(false);
+    }
+
+    private IQueryable<PlayerRecord> db_playerHistory()
+    {
+        using IServiceScope scope = scopeFactory.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<AppDbContext>().PlayerHistory;
     }
 
     /// <summary>Upsert a player on <c>player.join</c>. Sets status to <c>online</c>, updates

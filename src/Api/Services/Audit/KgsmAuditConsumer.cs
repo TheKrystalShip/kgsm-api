@@ -39,8 +39,8 @@ public sealed class KgsmAuditConsumer(
         // Always ensure the audit table exists — even with no engine, GET /audit and auth writes need it.
         await audit.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
 
-        // Ensure the player_history table exists and mark stale online entries as unknown.
-        await history.MarkUnknownOnStartupAsync(cancellationToken).ConfigureAwait(false);
+        // Reconcile player roster from the watchdog's live session map (or mark unknown if unavailable).
+        await history.ReconcileFromWatchdogAsync(cancellationToken).ConfigureAwait(false);
 
         if (!options.KgsmProvisioned)
         {

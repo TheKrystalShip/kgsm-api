@@ -297,6 +297,7 @@ public sealed class ConsoleBridgeTests
         public Task<WatchdogActionResult> StartAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WatchdogActionResult> StopAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WatchdogInstanceState?> GetStatusAsync(string instanceName, CancellationToken cancellationToken = default) => Task.FromResult<WatchdogInstanceState?>(null);
+        public Task<IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>?> GetAllPlayersAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>?>(null);
 
         public void Dispose() { }
     }

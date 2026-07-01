@@ -127,6 +127,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
         public Task<WatchdogActionResult> StopAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WatchdogInstanceState?> GetStatusAsync(string instanceName, CancellationToken cancellationToken = default) => Task.FromResult<WatchdogInstanceState?>(null);
         public Task<IReadOnlyList<WatchdogInstanceState>> ListAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WatchdogInstanceState>>(Array.Empty<WatchdogInstanceState>());
+        public Task<IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>?> GetAllPlayersAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>?>(null);
         public void Dispose() { }
     }
 }
