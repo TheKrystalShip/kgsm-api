@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Permanent player roster history: `PlayerHistory` entity + `PlayerHistoryService` (DB-backed
+  authority for who has ever connected to a server). Each player has a `PlayerStatus` (online,
+  offline, banned, unknown) that is deterministic — status resolves only on the next event,
+  never probed. `MarkUnknownOnStartupAsync` marks all online players unknown on API restart.
+  `players.ban` support with `banReason`. 14 new `PlayerHistoryServiceTests`.
+
 ## [0.2.0] - 2026-07-01
 
 ### Added
