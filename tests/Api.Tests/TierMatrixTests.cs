@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Net.WebSockets;
-using Microsoft.AspNetCore.TestHost;
+using System.Text.Json;
 using TheKrystalShip.Api.Services.Auth;
 
 namespace TheKrystalShip.Api.Tests;
@@ -206,32 +205,50 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
-    // --- /stream: viewer admits the endpoint (then the WS-required check 400s a plain GET) ---------
+    // --- /stream: fetch-based SSE — bearer rides a header, not a WS handshake. A plain viewer GET (no
+    // topics) is a valid 200 SSE connection (no more "not a WS upgrade" 400 — that check is gone from
+    // StreamController), so this also covers what used to be Viewer_PlainGetStream_400_NotAuthError. ---
     [Fact]
-    public async Task Viewer_PlainGetStream_400_NotAuthError()
-    {
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).GetAsync("/api/v1/stream");
-        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode); // authz passed; not a WS upgrade
-        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
-    }
-
-    // --- /stream WS: the browser bearer rides ?access_token= (can't set an Authorization header) ---
-    [Fact]
-    public async Task Stream_WebSocket_WithQueryToken_Connects()
+    public async Task Stream_Sse_WithBearerHeader_Connects()
     {
         string token = factory.AccessToken(AuthTier.Viewer);
-        WebSocketClient ws = factory.Server.CreateWebSocketClient();
-        var uri = new Uri(factory.Server.BaseAddress, $"api/v1/stream?access_token={token}");
-        WebSocket socket = await ws.ConnectAsync(uri, CancellationToken.None);
-        Assert.Equal(WebSocketState.Open, socket.State);
-        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
+        using HttpResponseMessage resp = await SseTestHelpers.OpenStream(Client(), "/api/v1/stream", token);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.StartsWith("text/event-stream", resp.Content.Headers.ContentType?.ToString());
     }
 
     [Fact]
-    public async Task Stream_WebSocket_NoToken_HandshakeFails()
+    public async Task Stream_Sse_NoToken_Returns401()
     {
-        WebSocketClient ws = factory.Server.CreateWebSocketClient();
-        var uri = new Uri(factory.Server.BaseAddress, "api/v1/stream");
-        await Assert.ThrowsAnyAsync<Exception>(() => ws.ConnectAsync(uri, CancellationToken.None));
+        HttpResponseMessage resp = await SseTestHelpers.OpenStream(Client(), "/api/v1/stream");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    // --- the single most important regression test in this file: the old ?access_token= hack is GONE ---
+    // (a query token with no Authorization header must never authenticate — SSE sends the bearer only as
+    // a header through the normal JwtBearer pipeline; see sse-migration-plan.md §1).
+    [Fact]
+    public async Task Stream_Sse_QueryTokenIgnored()
+    {
+        string token = factory.AccessToken(AuthTier.Viewer);
+        HttpResponseMessage resp = await SseTestHelpers.OpenStream(Client(), $"/api/v1/stream?access_token={token}");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    // --- operator-only topics are silently dropped for a non-operator; never a 403 on the whole stream ---
+    [Fact]
+    public async Task Stream_Sse_OperatorTopic_SilentlyDroppedForViewer()
+    {
+        string token = factory.AccessToken(AuthTier.Viewer);
+        using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
+            Client(), $"/api/v1/stream?topics=hosts/{AuthTestFactory.HostId}/logs", token);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode); // connects — the drop is silent, not a 403
+
+        using SseFrameReader frames = await SseTestHelpers.Frames(resp);
+        // The logs topic was filtered out server-side (non-operator caller) — nothing arrives on this
+        // connection within a short bounded wait, proving silence rather than merely an untriggered
+        // event (same pattern as PlayerRosterWsTests.Reset_AlreadyEmptyRoster_PublishesNothing).
+        JsonElement? frame = await frames.WaitForFrame(_ => true, TimeSpan.FromSeconds(1));
+        Assert.Null(frame);
     }
 }

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-02
+
+### Changed
+- **Realtime transport migrated from WebSocket to Server-Sent Events (SSE).** `GET /api/v1/stream`
+  is now a `text/event-stream` GET: topics are chosen via `?topics=` (resource-scoped topics
+  contain `/`), the bearer arrives in the `Authorization` header, and an auth failure returns a
+  plain, readable `401` (no more opaque WebSocket `1006` close). Server pushes `data:` frames with
+  a `: connected` preamble and a 20s `: keepalive` heartbeat; `X-Accel-Buffering: no` +
+  `DisableBuffering()` keep frames unbuffered through reverse proxies. The per-connection
+  coalesce-to-latest queue and subscriber-gated publishers are unchanged — only the wire transport
+  and framing changed. Removed the client→server command channel (`Subscribe`/`Unsubscribe`/`Ping`/
+  `Pong`) since topics are now fixed at connect time by the query string.
+- **HTTP protocol bumped to `Http1AndHttp2`** (prod TLS negotiates h2; dev plain-text stays h1.1).
+  The prior h1.1 lock existed solely because WebSocket-over-h2 has no path in Kestrel; with WS gone
+  that constraint is lifted. `UseWebSockets()` and the `?access_token=` query-string auth shim are
+  removed from the pipeline.
+
 ## [0.3.1] - 2026-07-01
 
 ### Changed

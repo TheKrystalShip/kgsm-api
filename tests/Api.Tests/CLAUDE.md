@@ -18,8 +18,15 @@ Api's `TreatWarningsAsErrors`.
 - **Mint tokens via the server's OWN token service** — `factory.AccessToken(tier)` /
   `RefreshToken(tier)` resolve `ISessionTokenService` from `factory.Services`, so the key + host audience
   match the running pipeline. For a deliberately-wrong-signature token, `TestTokens.MintAccessWithKey`.
-- **WS auth** is exercised with `factory.Server.CreateWebSocketClient()` + `?access_token=` (connects
-  with a viewer token; the handshake fails without one).
+- **`/api/v1/stream` (fetch-based SSE since the 2026-07-02 migration, `sse-migration-plan.md`)** is
+  exercised with `SseTestHelpers.OpenStream(client, path, token)` — a `GET` with
+  `HttpCompletionOption.ResponseHeadersRead` and an `Authorization: Bearer` header (never a query-string
+  token; that hack is gone server-side and a dedicated regression test, `Stream_Sse_QueryTokenIgnored`,
+  locks it). For tests that need to read frames off an open connection, wrap the response in
+  `SseTestHelpers.Frames(resp)` → an `SseFrameReader` whose `WaitForFrame(predicate, timeout)` polls
+  `data:` blocks (skipping `:`-comment-only ones like `connected`/`keepalive`) until one matches or the
+  timeout elapses — the SSE-era analogue of the old WS `Send`/`Receive` pair, minus `Send` (topics are
+  baked into the connect URL now, immutable per connection).
 
 ## What lives here vs. smoke
 
@@ -27,8 +34,9 @@ Api's `TreatWarningsAsErrors`.
   **401/403/tier matrix**, the callback verdict (ok/denied/invalid/upstream-error), refresh rotation,
   the session snapshot. `401` (no/invalid bearer) vs `403` (authenticated, tier too low) is the
   load-bearing split — assert both.
-- **`scripts/smoke.sh`:** the HTTP **contract surface** end-to-end (envelopes, DTO shapes, the WS
-  protocol, the no-token sweep) against a real running process. The two are complementary, not redundant.
+- **`scripts/smoke.sh`:** the HTTP **contract surface** end-to-end (envelopes, DTO shapes, the SSE
+  stream protocol, the no-token sweep) against a real running process. The two are complementary, not
+  redundant.
 
 ## Convention for future milestones
 

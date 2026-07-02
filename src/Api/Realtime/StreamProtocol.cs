@@ -14,15 +14,7 @@ namespace TheKrystalShip.Api.Realtime;
 /// </summary>
 public static class StreamProtocol
 {
-    // --- client -> server command types (the inbound { type, topics[] } envelope) ---
-    public const string Subscribe = "subscribe";
-    public const string Unsubscribe = "unsubscribe";
-    public const string Ping = "ping";
-
-    // --- server -> client message types (latency probe) ---
-    public const string Pong = "pong";
-
-    // --- topics (the M2-scoped, M1-backable set) ---
+    // --- topics (the scoped, backable set) ---
     /// <summary>All servers' status/roster changes (NOT the 1s metric firehose — see <see cref="ServerMetricsTopic"/>).</summary>
     public const string ServersTopic = "servers";
 

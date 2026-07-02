@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Options;
@@ -6,7 +7,7 @@ using Microsoft.Extensions.Options;
 namespace TheKrystalShip.Api.Realtime;
 
 /// <summary>
-/// The per-host connection registry and fan-out point (M2). The <c>StreamController</c> registers/
+/// The per-host connection registry and fan-out point. The <c>StreamController</c> registers/
 /// unregisters each live <see cref="StreamConnection"/>; the pumps publish topic messages, which the
 /// hub routes only to the connections subscribed to that topic. A message is serialized <em>once</em>
 /// per publish and the same bytes are enqueued to every subscriber (no per-connection re-serialization),
@@ -23,7 +24,7 @@ public sealed class StreamHub
         _json = httpJsonOptions.Value.SerializerOptions;
     }
 
-    /// <summary>The shared JSON options (camelCase + ISO-8601 'Z'); also used by a connection to parse client commands.</summary>
+    /// <summary>The shared JSON options (camelCase + ISO-8601 'Z').</summary>
     public JsonSerializerOptions Json => _json;
 
     public void Add(StreamConnection connection) => _connections.TryAdd(connection, 0);
@@ -46,6 +47,16 @@ public sealed class StreamHub
     }
 
     /// <summary>
+    /// Build an SSE frame: <c>data: &lt;json&gt;\n\n</c> as UTF-8 bytes. Called once per publish
+    /// (all connections are SSE now); the same bytes are enqueued to every subscriber.
+    /// </summary>
+    private byte[] BuildSseFrame(StreamMessage message)
+    {
+        string json = JsonSerializer.Serialize(message, _json);
+        return Encoding.UTF8.GetBytes("data: " + json + "\n\n");
+    }
+
+    /// <summary>
     /// Route <paramref name="message"/> to every connection subscribed to <paramref name="topic"/>,
     /// coalescing per <paramref name="coalesceKey"/> within each connection's outbound queue. Serializes
     /// at most once, and only when there is at least one subscriber.
@@ -56,7 +67,7 @@ public sealed class StreamHub
         foreach (StreamConnection c in _connections.Keys)
         {
             if (!c.IsSubscribed(topic)) continue;
-            frame ??= JsonSerializer.SerializeToUtf8Bytes(message, _json);
+            frame ??= BuildSseFrame(message);
             c.Enqueue(coalesceKey, frame.Value);
         }
     }

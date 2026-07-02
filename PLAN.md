@@ -29,7 +29,7 @@ engine echo carries provenance (no double-write), `GET /audit` (keyset) + the `a
 the first leaf wiring — `GET /hosts` + `/hosts/{id}` scraped from kgsm-monitor with the §4·b
 capability block — **the join `GET /servers` + `/servers/{id}`** (kgsm-lib domain +
 run-state ⋈ monitor per-instance metrics, the honest `Server` DTO frozen in §6), and now **the
-realtime `GET /api/v1/stream` WebSocket** (per-host topics pushed by gated pumps + an always-on
+realtime `GET /api/v1/stream` fetch-based SSE stream** (per-host topics pushed by gated pumps + an always-on
 leaf health monitor; the capability set fixed at connect, status flipping on `/health` polls), and now
 **the first write path `POST /servers/{id}/commands`** (gate → `202` + `job` → `jobs` WS → verify; verbs
 `start`/`stop`/`restart`, `update` deferred) are
@@ -57,7 +57,7 @@ leaves + this API (keystone §4). The API aggregates **only its own host's** lea
 the **SPA** fans out to N hosts and does all cross-host rollup **client-side**
 (`architecture.html §4·a` — no `/fleet/summary` endpoint exists or is needed at
 homelab scale). This is settled (confirmed 2026-06-14) and follows from four
-independent v0.3 signals: per-host WebSocket (§3·b), per-host auth/bot (§3·f),
+independent v0.3 signals: per-host SSE stream (§3·b), per-host auth/bot (§3·f),
 per-host capabilities (§4·b), client-side aggregation (§4·a).
 
 **Runtime:** .NET 10, `Microsoft.NET.Sdk.Web`, **Native AOT** (`PublishAot`,
@@ -243,21 +243,25 @@ wiring* lands first.
   fields and **freeze the real `Server` DTO here.** The single most important contract
   conversation in the project.
 
-### M2 — Realtime: WebSocket per host  ·  `partial` (backend built & self-validated 2026-06-15; frontend gate pending)
-- **Goal:** push the M1 data instead of polling (resolves keystone O2 → WebSocket).
+### M2 — Realtime: SSE per host  ·  `partial` (backend built & self-validated 2026-06-15; transport
+migrated WebSocket→SSE 2026-07-02, `sse-migration-plan.md`; frontend gate pending)
+- **Goal:** push the M1 data instead of polling (resolves keystone O2 → SSE).
 - **Wires:** monitor tick → push; kgsm-lib status-change → push. *Reality:* neither source
   pushes, so the API **polls internally / pushes externally** — two gated background pumps
   (`MetricsPump` ~1s, `DomainPump` ~3s) plus the always-on `LeafHealthMonitor` (~2s) fan out
   through a per-host hub.
-- **Scope:** `/api/v1/stream` (WebSocket, **unauthenticated until M4** — a pre-auth read surface);
-  `{ topic, type, data }` envelope; subscribe/unsubscribe; topics `servers`,
+- **Scope:** `/api/v1/stream` (fetch-based `text/event-stream`, **unauthenticated until M4** — a
+  pre-auth read surface); `{ topic, type, data }` envelope; topics chosen at connect via
+  `?topics=a,b,c` (**immutable per connection** — no client→server channel, no
+  subscribe/unsubscribe; changing topics means opening another stream); topics `servers`,
   `servers/{id}/metrics`, `hosts/{id}/metrics`, `hosts/{id}/capabilities`; the §3·j resilience
   handshake (per-host reconnect/backoff, poll-fallback, re-hydrate on return).
-- **Built:** the full M2 contract is frozen in §6. Raw ASP.NET Core WebSockets (not SignalR — the
-  hand-rolled `{topic,type,data}` envelope is the contract); central `Realtime/StreamProtocol.cs`
+- **Built:** the full M2 contract is frozen in §6. Hand-rolled SSE (not SignalR — the
+  hand-rolled `{topic,type,data}` envelope is the contract; fetch-based, not native `EventSource`,
+  so the bearer can ride a header); central `Realtime/StreamProtocol.cs`
   (no inline topic/type strings); coalesce-to-latest per-key backpressure (a slow client gets the
   latest, never an unbounded backlog; a stalled send is torn down → §3·j reconnect). Patch-only,
-  no snapshot-on-subscribe (the client hydrates via REST). One shared `MetricsMapping` makes a WS
+  no snapshot-on-subscribe (the client hydrates via REST). One shared `MetricsMapping` makes an SSE
   tick byte-identical to the REST element it patches.
 - **Capability model (refined here):** availability is driven by an **always-on `LeafHealthMonitor`**
   that polls each provisioned leaf's `/health` every ~2s (monitor/assistant HTTP `/health`; watchdog
@@ -269,15 +273,15 @@ wiring* lands first.
   from `/metrics` frame-presence (a warming monitor is `operational` with null capacity).
 - **Honesty:** monitor-down → metric topics go **silent** (never a replayed stale frame); the
   `hosts/{id}/capabilities` `down` flip explains the silence.
-- **Self-validated:** `scripts/smoke.sh` → **25/25** (8 M0 + 4 M1·a + 6 M1·b + **7 M2**), incl. a
-  stdlib RFC6455 client that subscribes, reads honest ticks, proves the `servers` topic stays quiet
+- **Self-validated:** `scripts/smoke.sh` → **25/25** (8 M0 + 4 M1·a + 6 M1·b + **7 M2**), incl. an
+  SSE reader that subscribes, reads honest ticks, proves the `servers` topic stays quiet
   under the metric firehose, and (kill **then restart** the stub monitor mid-stream) proves the full
   **degrade→recover** capability lifecycle: down flip + tick silence, then operational flip + ticks
   resume, `provisioned:true` throughout. **Boundary:** `server.patch`/`server.removed` emission is
   code-path-only (roster static in smoke; see §8).
 - **Depends:** M1 (same DTOs, now streamed).
-- **Risk:** WebSocket lifecycle/backpressure and the message-envelope contract (the
-  ASP.NET Core WebSocket middleware is bog-standard under JIT).
+- **Risk:** SSE lifecycle/backpressure and the message-envelope contract (the response-body write
+  loop is bog-standard under JIT).
 - **Frontend gate:** `realtimeStore` connects, applies patches, falls back to polling
   on drop and snaps back on reconnect.
 
@@ -809,7 +813,7 @@ for the external surface and this doc for the backend's honest realization of it
 | `Host` DTO + capacity (`cpuPct`/`mem`/`disks`) | M1·a | `architecture.html §4·a` — **frozen 2026-06-14.** `{ id, label, status:"online", cpuPct, mem{used,total} GiB, disks[]{mount,used,total} GiB, capabilities }`. **Divergence (record for the gate):** capacity (`cpuPct`/`mem`/`disks`) is **nullable** — `null` when metrics ≠ operational (the §4·a example always shows numbers). `/hosts/{id}` currently == the list shape; §244's sensors/network/processes are deferred. |
 | Capability record `{ provisioned, status, since?, message?, info? }` | M1·a · **refined M2** | `architecture.html §4·b` — **frozen 2026-06-14, refined 2026-06-15.** **Two independent axes, never conflated:** `provisioned` (bool) is the **fixed** "what leaves this host has" — resolved once from config, the one-time set the frontend negotiates at connect; it **never flips at runtime**. `status` ∈ `operational\|degraded\|down\|unknown` is the **live availability**, driven by frequently polling each leaf's health (M2 `LeafHealthMonitor`, ~2s) — monitor/assistant `GET /health`, watchdog `IsReadyAsync` via kgsm-lib. A leaf failing flips `status` (operational→down→operational), **never** `provisioned`: the capability is "temporarily unavailable, still there", never "lost" — `provisioned:true, status:down` IS the down notification (we never invent a softer status nor suppress the flip). `provisioned:false` → client-derived `absent`. `since` **now emitted** (M2): the timestamp this api *observed* the flip (not an authoritative leaf-change time). `degraded` reserved (a restarting leaf is `down`); cold (pre-first-poll) reads as `unknown`. **Divergences:** `info.intervalMs` (camelCase, ms) replaces the example's `info.interval_s`; `transport` **omitted** (REST + WS, not `"sse"`). |
 | Monitor `/metrics` wire shape (`Snapshot` graph) | M1·a | **shared package** `TheKrystalShip.KGSM.Monitor.Contracts` — the DTO graph + source-gen camelCase JSON, built in kgsm-monitor and consumed here so the contract is solid at build time. **Drift rule:** any contract change MUST bump the package `Version` and the api's `<PackageReference>` (a same-version repack is silently served stale from the NuGet cache). |
-| WS stream envelope + topic/type vocabulary | **M2** | `architecture.html §3·b/§3·j` — **frozen 2026-06-15.** Endpoint `GET /api/v1/stream` (WebSocket; **unauthenticated until M4** — a pre-auth *read* surface, less severe than M3's mutation but flagged). **Inbound:** `{ type: "subscribe"\|"unsubscribe", topics: [...] }`; unknown command type ignored; unknown/future topics accepted silently (forward-compat for `jobs` M3 / `audit` M5 / `alerts` / `console`); **no ack or error-frame protocol yet.** **Outbound:** `{ topic, type, data }`, patch-only (the client `hydrate(REST) + applyPatch(WS)`; **no snapshot on subscribe** — §3·j re-hydrates via REST on (re)connect). **Topics (M1-backable subset):** `servers` · `servers/{id}/metrics` · `hosts/{id}/metrics` · `hosts/{id}/capabilities`. **Message types** (only `server.patch` is doc-given; the rest are ours, negotiated like the M1·b DTO — all centralized in `Realtime/StreamProtocol.cs`, never inline strings): `server.patch` (data = the **frozen M1·b `Server`**, NOT the §3·b example's `{status:"online", players}`; carries the full element incl. a **point-in-time `metrics` block that may lag** the dedicated `servers/{id}/metrics` tick — merge by id), `server.removed` (`{ id }` tombstone), `metrics.tick` (`ServerMetricsDto`), `host.metrics` (`HostMetricsDto` = the capacity portion of the `Host` view; `net`/`temp` omitted, never fabricated), `capabilities.patch` (`HostCapabilities`). **`servers` carries status/roster only — NOT the 1s metric firehose** (resource ticks live on `servers/{id}/metrics`; a deliberate divergence from §3·b's "resource deltas" wording, smoke-proven the `servers` topic stays quiet under ticking metrics). **Honesty:** monitor-down → metric topics go **silent** (never a replayed stale frame) and `hosts/{id}/capabilities` flips metrics `down` — that flip is what explains the silence. **Capability availability is driven by the always-on `LeafHealthMonitor`** (frequent `/health` polls, the single source feeding both this stream and the REST `GET /hosts`), which stamps `since` on each flip — see the Capability-record row. The `capabilities.patch` keeps `provisioned:true` through a down→up cycle: degrade **and** recover gracefully, capability never "lost". |
+| SSE stream envelope + topic/type vocabulary | **M2** | `architecture.html §3·b/§3·j` — **frozen 2026-06-15; transport migrated WebSocket→SSE 2026-07-02 (`sse-migration-plan.md`).** Endpoint `GET /api/v1/stream` (fetch-based SSE, `text/event-stream`; **unauthenticated until M4** — a pre-auth *read* surface, less severe than M3's mutation but flagged). **Topics chosen at connect** via `?topics=a,b,c` (comma-separated; **immutable per connection** — no client→server channel, changing topics means opening another stream); unknown/future topics accepted silently (forward-compat for `jobs` M3 / `audit` M5 / `alerts` / `console`); **no ack or error-frame protocol.** **Outbound:** `data: <json>\n\n` where `<json>` is `{ topic, type, data }`, patch-only (the client `hydrate(REST) + applyPatch(stream)`; **no snapshot on subscribe** — §3·j re-hydrates via REST on (re)connect). **Topics (M1-backable subset):** `servers` · `servers/{id}/metrics` · `hosts/{id}/metrics` · `hosts/{id}/capabilities`. **Message types** (only `server.patch` is doc-given; the rest are ours, negotiated like the M1·b DTO — all centralized in `Realtime/StreamProtocol.cs`, never inline strings): `server.patch` (data = the **frozen M1·b `Server`**, NOT the §3·b example's `{status:"online", players}`; carries the full element incl. a **point-in-time `metrics` block that may lag** the dedicated `servers/{id}/metrics` tick — merge by id), `server.removed` (`{ id }` tombstone), `metrics.tick` (`ServerMetricsDto`), `host.metrics` (`HostMetricsDto` = the capacity portion of the `Host` view; `net`/`temp` omitted, never fabricated), `capabilities.patch` (`HostCapabilities`). **`servers` carries status/roster only — NOT the 1s metric firehose** (resource ticks live on `servers/{id}/metrics`; a deliberate divergence from §3·b's "resource deltas" wording, smoke-proven the `servers` topic stays quiet under ticking metrics). **Honesty:** monitor-down → metric topics go **silent** (never a replayed stale frame) and `hosts/{id}/capabilities` flips metrics `down` — that flip is what explains the silence. **Capability availability is driven by the always-on `LeafHealthMonitor`** (frequent `/health` polls, the single source feeding both this stream and the REST `GET /hosts`), which stamps `since` on each flip — see the Capability-record row. The `capabilities.patch` keeps `provisioned:true` through a down→up cycle: degrade **and** recover gracefully, capability never "lost". |
 | Command verbs + `job` shape + `command.verified` | **M3** | `architecture.html §5·d` — **frozen 2026-06-15.** **Endpoint** `POST /servers/{id}/commands` body `{ verb }` → `202` + `{ job }`; closed, server-defined verb set **`start`·`stop`·`restart`** (**`update` deferred** from the first cut — long-running + version-changing, settles on a version re-check not a run-state one). **Errors:** unknown/missing verb → `400 bad_request`; unknown server → `404 not_found`; an obvious no-op against the real status (start-when-running / stop-when-stopped) or a command already in flight for that server → `409 conflict`. **`job`** = `{ id, serverId, verb, state, createdAt, settledAt?, error? }` (opaque `job_…` id; ISO-8601 UTC `Z` times; `error` set only on `failed`, the engine's real detail — never a fabricated success). **Divergence (honest-vs-aspirational, the same negotiated call as the M1·b DTO):** `job.state` is the **job's own** lifecycle `queued→running→succeeded\|failed`, NOT the §5·d example's server-shaped `state:"running"` — the affected server's authoritative/optimistic status rides the `servers` topic via `server.patch`, and the client derives the optimistic display from the verb (the same topic-separation discipline as the metric topics). **WS:** the `jobs` topic carries a single **`job.patch`** (the full `job` on every transition, coalesced by job id — patch-only, exactly like `server.patch`). **Gate (state guards):** minimal/honest — only the obvious no-ops; the engine (kgsm→watchdog/Docker) owns everything subtler, surfacing an impossible transition as the job's `failed` + its error (the API never fabricates admissibility kgsm does not enforce; `unknown` status never blocks). **Verify** (the §5·d `command.verified` for the direct write path): on settle, a fresh run-state read → an explicit `server.patch`. **Permissions** gate at M4; jobs are **in-memory** (SQLite + audit at M5). The propose/confirm half of §5·d (`command.proposed` over SSE) is the assistant flow (M7), not M3. |
 | Auth session + tiers + 401/403/login_required | **M4·a** | `architecture.html §3·f` — **frozen 2026-06-15 (M4·a).** **Bearer = stateless JWT** (HMAC; access ~15 min + refresh 8h cap; no session table). Endpoints `/auth/discord/start` (302→authorize), `/auth/discord/callback` (`{ verdict:"ok"\|"denied", tier, token, refresh?, userId }`), `/auth/session/refresh` (refresh bearer → `{ token }`), `/auth/session` (`{ user:{ id, username, display, avatarUrl? }, scopes }` or `401`), `/auth/logout` (`204`). Tiers `admin·operator·viewer·none` resolved from the guild role via the **bot token** (`GET /guilds/{guild}/members/{user}` — the only path to roles; the `identify guilds` user scopes don't carry them). `401` (no/invalid/expired bearer) recoverable; `403` (`none`/insufficient tier) terminal. **Divergences (the negotiated honest-vs-aspirational call, like the M1·b DTO / M3 job.state):** (1) camelCase `userId` (not the §3·f example's snake_case `user_id`) — one casing across the surface; (2) `GET /auth/session` returns the **login-time profile snapshot** embedded in the token, NOT a fresh live Discord fetch — the §3·f "fetched live" can't hold once the Discord token is discarded (which §3·f also requires), so snapshot is the honest realization; (3) role re-check happens only at a full bounce (≤ the 8h cap), not on refresh (refresh skips Discord); (4) `/auth/session/refresh` takes the refresh token in the `Authorization: Bearer` header (the `{host}` body is accepted but not required) — a per-host-API simplification of the §3·f `{host}`-body shape. **WS:** the `/stream` bearer rides `?access_token=` (a handshake can't set a header). **Tier gating:** viewer = reads + stream, operator = + the command `POST`, admin = diagnostics (`_throw`/`_dbcheck`) + reserved (settings/install/audit-config, M5/M8). **Secure-by-default:** an authorization `FallbackPolicy` requires an authenticated caller on any endpoint without explicit `[Authorize]`/`[AllowAnonymous]`; only `/health` + `/api/v1` opt out (the SPA's pre-login reachability probes). **CSRF (added M4·b):** `/auth/discord/start` sets a one-time HttpOnly `state` cookie (stateless double-submit; `SameSite=Lax`, `Secure` only under https); `/auth/discord/callback` returns `400 invalid_state` on a missing/mismatched state before any Discord exchange. **M4·b — LIVE-VALIDATED 2026-06-15:** the real Discord exchange + bot-token role lookup resolved an admin login end-to-end (§8); login endpoints `503` only until the Discord app/bot-token/guild/role-map are configured. |
 | Audit record + closed `action` vocabulary + SQLite schema | **M5** | `architecture.html §3·d` — **frozen 2026-06-15.** **Endpoint** `GET /api/v1/audit?cursor=&limit=50&severity=&serverId=&actor=` → `{ data, nextCursor }`, **newest first**, keyset on the opaque `rowid` cursor (`RowId < cursor` ordered `DESC`; `nextCursor` = the last row's rowid, or null when the page is short). Filters map 1:1 to indexed columns; `limit` clamped (default 50, max 200). **Record** = `{ id (evt_…), ts (Z), origin, actor:{ kind:user\|system\|token, name, provider:discord\|system\|api? }, action, severity:info\|success\|warn\|danger, target:{ kind,id,name }?, serverId?, hostId?, summary, meta? }`. **WS:** the `audit` topic carries **`audit.append`** (one full record; the client **prepends** — events are immutable). Unlike the metric/status patches it is **NOT supersede-by-latest**: the coalesce key is the unique event id, so distinct appends never collapse. **Action vocab wired in M5** (the honestly-sourceable subset): `server.start\|stop\|restart\|update\|install\|uninstall`, `backup.create\|restore` (from kgsm events), `auth.login\|logout` (API-internal). **Extended in M6·0** (producers now landed): `server.crash` (kgsm-watchdog — `instance_crashed`→warn, `instance_failed`→danger, both `system`-stamped, kgsm-lib 1.9.0) and `network.ports.open`/`network.ports.close` (the CLI-path firewall echoes `instance_ports_opened`/`_closed`, kgsm-lib 1.12.0; ports recorded in `meta`). **Divergence (a server-side additive extension, like origin-nullable):** the §3·d `network` set lists only `ports.open`, but the server also records `network.ports.close` — a real, now-sourceable action — so opens and closes form a symmetric trail (a standalone `files firewall disable` closes ports outside any uninstall and would otherwise go unrecorded); the frontend already accepts unknown actions forward-compat (M2). The api-issued `open_ports` command writes `network.ports.open` **directly** at M6·b (kgsm runs nothing → no echo, the `auth.*` case); there is no api close command (§3·g is open-only), so `ports.close` is cleanly CLI-echo-only — no double-write. **Still deferred (no source yet):** `config.change`/`player.*`/`host.*`/`discord.*`/`settings.change`. **Source model (the no-double-write decision):** kgsm **owns** `server.*`/`backup.*`, so the API records the engine's **event echo** — it never writes an audit row when it issues a command; instead the command path **stamps** `actor`(bearer identity)+`origin`(declared surface) which ride the event and are read back off it. `auth.*` has no kgsm event → written directly (no double-write). **Divergences (the negotiated honest-vs-aspirational call, like the M1·b DTO):** (1) **`origin` is nullable** (the §3·d DDL says `NOT NULL`) — a direct-CLI engine action has no product surface, so the engine emits `null` and we persist that, never fabricate a surface; (2) the example's **`meta.jobId` is not populatable** — no correlation id round-trips the stateless engine, so `meta` holds action-specific detail (e.g. `{oldVersion,newVersion}`, `{blueprint}`, `{source,version}`, the login `{tier}`) instead; (3) the command path's `origin` is **caller-declared** (`ui\|assistant\|discord\|api`, default `api` — literally true; `system` reserved for autonomous engine actions and rejected), **never derived from the actor** (the two axes stay independent). **Honest boundary:** events emitted while the API isn't listening are **never audited** (stateless engine, no backfill) — inherent to a downstream-consumer design. **Storage:** the §3·d SQLite schema, created via **`EnsureCreated`, NOT an EF migration** (greenfield/dev authority — wipe the DB on a schema change). Gated at **viewer** (a core read surface). |
@@ -841,7 +845,7 @@ kgsm-api/
     appsettings.json          # [M0] logging defaults (env vars override via IConfiguration)
     Program.cs                # [M0] entry: Host.CreateDefaultBuilder + ConfigureWebHostDefaults().UseStartup<Startup>() (classic structure, no top-level statements)
     Startup.cs                # [M0] ConfigureServices (controllers+JSON, EF, CORS, exception handler) + Configure (pipeline)
-    Controllers/              # [M0] Health, Meta, Diagnostics · [M1·a] Hosts → [M1·b] Servers · [M2] Stream (WebSocket) → [M3] Commands → [M4·a] Auth → [M5] Audit → …
+    Controllers/              # [M0] Health, Meta, Diagnostics · [M1·a] Hosts → [M1·b] Servers · [M2] Stream (SSE) → [M3] Commands → [M4·a] Auth → [M5] Audit → …
     Contracts/                # [M0] ErrorEnvelope, HealthStatus, ApiInfo · [M1·a] HostDto · [M1·b] ServerDto (Server/ServerMetricsDto/ServerStatus) · [M2] StreamDto (HostMetricsDto/ServerRemoved) · [M3] CommandDto · [M4·a] AuthDto (CallbackResult/RefreshResponse/SessionResponse)
     Realtime/                 # [M2] BUILT — StreamProtocol (central topic/type vocabulary), StreamMessage (envelope), StreamHub (registry+fan-out), StreamConnection (coalescing duplex loops), MetricsPump + DomainPump (gated push pumps)
     Infrastructure/           # [M0] ApiExceptionHandler (IExceptionHandler→500 envelope), ApiErrors (envelope writer)
@@ -1014,22 +1018,30 @@ read `blueprint` instead of a curated `game` name, and handle `status:"unknown"`
 as first-class. Agree these renderings before the store swap.
 
 ### M2 — 2026-06-15 · realtime WebSocket + the capability/health model self-validated; frontend gate PENDING
+**⚠ Transport migrated WebSocket→SSE 2026-07-02** (`sse-migration-plan.md`) — this entry is the
+2026-06-15 build log and describes the WebSocket transport as it was validated **at that time**; the
+contract (topics, envelope, coalescing, capability model) carried over unchanged, only the wire
+transport + auth (header bearer, not `?access_token=`) changed. See §6 for the current (SSE) contract.
+
 **Status:** the per-host realtime stream is built and verified end-to-end against a deterministic stub
 monitor, including the full degrade→recover capability lifecycle. The collaborative gate (frontend
 `realtimeStore` connects, applies patches, falls back to polling on drop, re-hydrates on reconnect) is
 deferred with the M0/M1 gates. Not marked "frontend validated."
 
-**The stream (frozen in §6).** Raw ASP.NET Core WebSockets at `GET /api/v1/stream` (not SignalR — the
-hand-rolled `{topic,type,data}` envelope IS the contract). Inbound `{type:subscribe|unsubscribe,topics[]}`;
-unknown command types and unknown/future topics accepted silently (forward-compat for `jobs`/`audit`/…).
-Patch-only, no snapshot-on-subscribe (the client hydrates via REST per §3·j). All topic/type strings are
-centralized in `Realtime/StreamProtocol.cs` — none inline. Three gated pumps fan out through a per-host
+**The stream (as built 2026-06-15; frozen contract now in §6).** Raw ASP.NET Core WebSockets at
+`GET /api/v1/stream` (not SignalR — the hand-rolled `{topic,type,data}` envelope IS the contract).
+Inbound `{type:subscribe|unsubscribe,topics[]}`; unknown command types and unknown/future topics
+accepted silently (forward-compat for `jobs`/`audit`/…). Patch-only, no snapshot-on-subscribe (the
+client hydrates via REST per §3·j). All topic/type strings are centralized in
+`Realtime/StreamProtocol.cs` — none inline. Three gated pumps fan out through a per-host
 `StreamHub`: `MetricsPump` (~1s monitor scrape → `servers/{id}/metrics` + `hosts/{id}/metrics`),
 `DomainPump` (~3s join diff → `servers`, status/roster only — change-detection ignores the metrics block
 so it never double-streams the 1s firehose), and the always-on `LeafHealthMonitor` (→ `hosts/{id}/capabilities`).
 Backpressure is **coalesce-to-latest per key**: a slow client gets the newest frame, never an unbounded
 backlog; a stalled send is torn down → §3·j reconnect. One shared `MetricsMapping` makes a WS tick
-byte-identical to the REST element it patches.
+byte-identical to the REST element it patches. **(2026-07-02: the inbound subscribe/unsubscribe channel
+is gone — SSE has no client→server channel, so topics are chosen once via `?topics=` at connect,
+immutable per connection; everything else in this paragraph carried over unchanged.)**
 
 **The capability/health model (the conversation that shaped this milestone).** Two axes, never conflated:
 `provisioned` is the **fixed** capability *set* (resolved once from config, negotiated at connect, never
@@ -1084,12 +1096,13 @@ monitor now serves `/health` too (unified 2026-06-15), so a live exercise no lon
 (4) The §3·j client-side resilience (poll-fallback, backoff, re-hydrate) is the frontend's half — the
 backend provides the silence/flip signals it keys off, not the reconnect logic.
 
-**Owed to the frontend at the gate:** subscribe to the topics the active page needs (unsubscribe on
-navigation); treat `server.patch` data as the full honest `Server` element (merge by id), `server.removed`
-as a drop; render a `capabilities.patch` `down` (with `provisioned:true`) as "temporarily unavailable",
-not "gone", and snap back on the `operational` flip; on socket drop, fall back to REST polling and
-re-hydrate on reconnect (§3·j). The stream is **unauthenticated until M4** — same trusted-network window
-as M3.
+**Owed to the frontend at the gate:** connect a stream carrying the topics the active page needs
+(close it on navigation away — post-2026-07-02, topics are chosen once via `?topics=` at connect, so
+"unsubscribing" means closing that stream, not sending a command); treat `server.patch` data as the
+full honest `Server` element (merge by id), `server.removed` as a drop; render a `capabilities.patch`
+`down` (with `provisioned:true`) as "temporarily unavailable", not "gone", and snap back on the
+`operational` flip; on stream drop, fall back to REST polling and re-hydrate on reconnect (§3·j). The
+stream is **unauthenticated until M4** — same trusted-network window as M3.
 
 ### M3 — 2026-06-15 · commands (the first write path: gate → job → verify) self-validated; frontend gate PENDING
 

@@ -1,15 +1,15 @@
-using System.Net.WebSockets;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 
 namespace TheKrystalShip.Api.Realtime;
 
 /// <summary>
-/// One live <c>/api/v1/stream</c> WebSocket. Owns the socket's full-duplex loops: a reader that
-/// applies <c>subscribe</c>/<c>unsubscribe</c> commands, and a writer that drains a
-/// <strong>coalesce-to-latest</strong> outbound queue. The pumps never touch the socket — they
-/// <see cref="Enqueue"/> through the <c>StreamHub</c>; this class is the only thing that reads/writes
-/// the wire (a WebSocket permits one concurrent send + one concurrent receive, which the two loops honor).
+/// One live <c>/api/v1/stream</c> SSE connection. Owns the response body's write loop: drains a
+/// <strong>coalesce-to-latest</strong> outbound queue as <c>data: &lt;json&gt;\n\n</c> frames,
+/// with a keepalive comment every 20s. The pumps never touch the body — they
+/// <see cref="Enqueue"/> through the <c>StreamHub</c>; this class is the only thing that writes
+/// the wire.
 /// </summary>
 /// <remarks>
 /// <para><b>Backpressure (the §3·j-aligned resilience contract).</b> The outbound queue holds at most
@@ -19,21 +19,17 @@ namespace TheKrystalShip.Api.Realtime;
 /// dropped intermediate metric tick is irrelevant, and a status flip never gets dropped behind metric
 /// ticks because they carry different keys. If a send still stalls past <see cref="SendTimeout"/> the
 /// connection is torn down, and §3·j's client falls back to polling, reconnects, and re-hydrates.</para>
-/// <para><b>No initial snapshot.</b> The client hydrates via REST on (re)connect (§3·j) and the socket
+/// <para><b>No initial snapshot.</b> The client hydrates via REST on (re)connect (§3·j) and the stream
 /// only pushes patches from the next tick on — so subscribing never replays state here.</para>
 /// </remarks>
 public sealed class StreamConnection
 {
     private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(20);
 
-    private readonly WebSocket _socket;
+    private readonly Stream _body;
     private readonly JsonSerializerOptions _json;
     private readonly ILogger _logger;
-
-    // Whether this connection may subscribe to operator-gated topics (e.g. the host-logs tail). The /stream
-    // handshake is only viewer-gated, so a viewer's socket is live but must NOT receive operator-only lines —
-    // resolved once at connect from the principal's tier (StreamController) and enforced on every subscribe.
-    private readonly bool _canOperatorTopics;
 
     private readonly HashSet<string> _subscriptions = new(StringComparer.Ordinal);
     private readonly object _subLock = new();
@@ -44,18 +40,17 @@ public sealed class StreamConnection
     private readonly object _queueLock = new();
     private readonly Channel<byte> _wake = Channel.CreateBounded<byte>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true, SingleWriter = false });
-    private readonly Channel<byte[]> _pongs = Channel.CreateUnbounded<byte[]>(
-        new UnboundedChannelOptions { SingleReader = true, SingleWriter = false });
 
-    public StreamConnection(WebSocket socket, JsonSerializerOptions json, ILogger logger, bool canOperatorTopics = false)
+    public StreamConnection(Stream body, IEnumerable<string> topics, JsonSerializerOptions json, ILogger logger)
     {
-        _socket = socket;
+        _body = body;
         _json = json;
         _logger = logger;
-        _canOperatorTopics = canOperatorTopics;
+        foreach (string t in topics)
+            _subscriptions.Add(t);
     }
 
-    // --- subscription state (read by the hub on every publish; mutated by the reader loop) ---
+    // --- subscription state (read by the hub on every publish) ---
 
     public bool IsSubscribed(string topic)
     {
@@ -79,143 +74,90 @@ public sealed class StreamConnection
         _wake.Writer.TryWrite(0); // wake the writer; dropped if a wake is already pending (it drains all anyway)
     }
 
-    /// <summary>Run both loops until the socket closes, the client disconnects, or <paramref name="ct"/> fires.</summary>
+    /// <summary>Run the write loop until cancel/disconnect/failed-write.</summary>
     public async Task RunAsync(CancellationToken ct)
     {
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        Task reader = ReadLoopAsync(cts.Token);
-        Task writer = WriteLoopAsync(cts.Token);
-
-        await Task.WhenAny(reader, writer).ConfigureAwait(false);
-        cts.Cancel();              // one loop ended (close/error/cancel) -> tear down the other
-        _wake.Writer.TryComplete();
-        _pongs.Writer.TryComplete();
-        try { await Task.WhenAll(reader, writer).ConfigureAwait(false); }
-        catch { /* teardown: cancellation / socket-aborted noise is expected here */ }
-
-        await CloseQuietlyAsync().ConfigureAwait(false);
-    }
-
-    private async Task ReadLoopAsync(CancellationToken ct)
-    {
-        var buffer = new byte[8192];
-        var message = new List<byte>(); // accumulates a fragmented message; commands are tiny
-        while (!ct.IsCancellationRequested && _socket.State == WebSocketState.Open)
+        // Write the initial connected comment so the client's fetch resolves promptly (drives mode→live).
+        try
         {
-            WebSocketReceiveResult result;
-            try
-            {
-                result = await _socket.ReceiveAsync(buffer, ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { break; }
-            catch (WebSocketException) { break; }
-
-            if (result.MessageType == WebSocketMessageType.Close) break;
-
-            message.AddRange(buffer.AsSpan(0, result.Count));
-            if (!result.EndOfMessage) continue;
-
-            if (result.MessageType == WebSocketMessageType.Text)
-                HandleCommand(message.ToArray());
-            message.Clear();
+            byte[] connected = Encoding.UTF8.GetBytes(": connected\n\n");
+            await _body.WriteAsync(connected, ct).ConfigureAwait(false);
+            await _body.FlushAsync(ct).ConfigureAwait(false);
         }
-    }
-
-    private void HandleCommand(byte[] utf8)
-    {
-        ClientCommand? cmd;
-        try { cmd = JsonSerializer.Deserialize<ClientCommand>(utf8, _json); }
-        catch (JsonException) { return; } // malformed frame: ignore (no client-error protocol until later)
-
-        if (string.IsNullOrEmpty(cmd?.Type)) return;
-
-        switch (cmd.Type)
+        catch (Exception ex)
         {
-            case StreamProtocol.Ping:
-                HandlePing(utf8);
-                break;
-            case StreamProtocol.Subscribe:
-                if (cmd.Topics is { Length: > 0 })
-                    lock (_subLock)
-                        foreach (string t in cmd.Topics)
-                        {
-                            if (string.IsNullOrWhiteSpace(t)) continue;
-                            if (!_canOperatorTopics && StreamProtocol.RequiresOperator(t)) continue;
-                            _subscriptions.Add(t);
-                        }
-                break;
-            case StreamProtocol.Unsubscribe:
-                if (cmd.Topics is { Length: > 0 })
-                    lock (_subLock)
-                        foreach (string t in cmd.Topics) _subscriptions.Remove(t);
-                break;
-            default:
-                break; // unknown command type: ignore (forward-compatible)
+            _logger.LogDebug(ex, "SSE stream: failed to write connected comment");
+            return;
         }
-    }
 
-    private void HandlePing(byte[] utf8)
-    {
-        using var doc = JsonDocument.Parse(utf8);
-        if (doc.RootElement.TryGetProperty("ts", out JsonElement ts))
+        try
         {
-            var pong = new StreamMessage("pong", StreamProtocol.Pong, new { ts = ts.GetDouble() });
-            byte[] frame = JsonSerializer.SerializeToUtf8Bytes(pong, _json);
-            _pongs.Writer.TryWrite(frame);
+            await WriteLoopAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "SSE stream: write loop ended");
         }
     }
 
     private async Task WriteLoopAsync(CancellationToken ct)
     {
-        try
+        while (true)
         {
-            while (await _wake.Reader.WaitToReadAsync(ct).ConfigureAwait(false))
+            // Wait for either a pending frame or the heartbeat interval.
+            var wakeTask = _wake.Reader.WaitToReadAsync(ct).AsTask();
+            var delayTask = Task.Delay(HeartbeatInterval, ct);
+
+            Task finished = await Task.WhenAny(wakeTask, delayTask).ConfigureAwait(false);
+
+            if (finished == delayTask)
             {
-                while (_wake.Reader.TryRead(out _)) { } // collapse coalesced wakes
-
-                ReadOnlyMemory<byte>[] frames;
-                lock (_queueLock)
+                // Heartbeat: write a keepalive comment.
+                try
                 {
-                    if (_pending.Count == 0) continue;
-                    frames = new ReadOnlyMemory<byte>[_pending.Count];
-                    _pending.Values.CopyTo(frames, 0);
-                    _pending.Clear();
-                }
-
-                foreach (ReadOnlyMemory<byte> frame in frames)
-                {
+                    byte[] keepalive = Encoding.UTF8.GetBytes(": keepalive\n\n");
                     using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                    sendCts.CancelAfter(SendTimeout); // a stalled client gets torn down, not allowed to back up
-                    await _socket.SendAsync(frame, WebSocketMessageType.Text, endOfMessage: true, sendCts.Token)
-                        .ConfigureAwait(false);
+                    sendCts.CancelAfter(SendTimeout);
+                    await _body.WriteAsync(keepalive, sendCts.Token).ConfigureAwait(false);
+                    await _body.FlushAsync(sendCts.Token).ConfigureAwait(false);
                 }
+                catch (Exception)
+                {
+                    break; // stalled client or cancelled — tear down
+                }
+                continue;
+            }
 
-                // Drain non-coalesced pong responses (one per client ping, never collapsed).
-                while (_pongs.Reader.TryRead(out byte[]? pongFrame))
+            // Wake branch: drain all pending frames.
+            while (_wake.Reader.TryRead(out _)) { } // collapse coalesced wakes
+
+            ReadOnlyMemory<byte>[] frames;
+            lock (_queueLock)
+            {
+                if (_pending.Count == 0) continue;
+                frames = new ReadOnlyMemory<byte>[_pending.Count];
+                _pending.Values.CopyTo(frames, 0);
+                _pending.Clear();
+            }
+
+            bool writeFailed = false;
+            foreach (ReadOnlyMemory<byte> frame in frames)
+            {
+                try
                 {
                     using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     sendCts.CancelAfter(SendTimeout);
-                    await _socket.SendAsync(pongFrame, WebSocketMessageType.Text, endOfMessage: true, sendCts.Token)
-                        .ConfigureAwait(false);
+                    await _body.WriteAsync(frame, sendCts.Token).ConfigureAwait(false);
+                    await _body.FlushAsync(sendCts.Token).ConfigureAwait(false);
+                }
+                catch (Exception)
+                {
+                    writeFailed = true;
+                    break;
                 }
             }
+            if (writeFailed) break;
         }
-        catch (OperationCanceledException) { }
-        catch (WebSocketException) { }
-        catch (ChannelClosedException) { }
     }
-
-    private async Task CloseQuietlyAsync()
-    {
-        try
-        {
-            if (_socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
-                await _socket.CloseAsync(WebSocketCloseStatus.NormalClosure, statusDescription: null, CancellationToken.None)
-                    .ConfigureAwait(false);
-        }
-        catch { /* best-effort close; the socket may already be aborted */ }
-    }
-
-    /// <summary>The inbound client command: <c>{ "type": "subscribe"|"unsubscribe", "topics": [...] }</c>.</summary>
-    private sealed record ClientCommand(string? Type, string[]? Topics);
 }

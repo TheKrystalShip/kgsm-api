@@ -1,9 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
-using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Audit;
@@ -16,7 +13,7 @@ namespace TheKrystalShip.Api.Tests;
 /// event-sourced path is exercised by seeding through <see cref="AuditService"/> directly; the live
 /// kgsm-socket path is the trusted-host validation, like M3's happy path). Covers the keyset query
 /// (order, pagination, filters), the viewer gate, the API-internal auth.login write end-to-end, and
-/// the <c>audit</c> WS append. Each test scopes its rows by a unique serverId/actor so the shared
+/// the <c>audit</c> SSE append. Each test scopes its rows by a unique serverId/actor so the shared
 /// per-class DB never cross-contaminates assertions.
 /// </summary>
 public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>
@@ -207,27 +204,26 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         Assert.Equal(JsonValueKind.Null, loginRow.GetProperty("target").ValueKind); // panel-wide, no target
     }
 
-    // --- The audit WS topic: an append is pushed as audit.append -----------------------------------
+    // --- The audit topic: an append is pushed as audit.append ---------------------------------------
     [Fact]
     public async Task AuditTopic_DeliversAppend()
     {
-        string token = factory.AccessToken(AuthTier.Viewer);
-        WebSocketClient ws = factory.Server.CreateWebSocketClient();
-        var uri = new Uri(factory.Server.BaseAddress, $"api/v1/stream?access_token={token}");
-        using WebSocket socket = await ws.ConnectAsync(uri, CancellationToken.None);
-
-        await Send(socket, """{"type":"subscribe","topics":["audit"]}""");
+        using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
+            factory.CreateClient(), "/api/v1/stream?topics=audit", factory.AccessToken(AuthTier.Viewer));
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
         // Append repeatedly across the read window so the subscription is certainly live before the
         // append we observe (no ack protocol; this avoids a subscribe/append race without sleeps).
-        string sid = $"ws-{Guid.NewGuid():N}";
+        string sid = $"sse-{Guid.NewGuid():N}";
         DateTime deadline = DateTime.UtcNow.AddSeconds(10);
-        string? frame = null;
+        JsonElement? frame = null;
         while (DateTime.UtcNow < deadline)
         {
             await Audit.AppendAsync(ServerWrite(AuditAction.ServerStart, sid));
-            string? got = await Receive(socket, TimeSpan.FromMilliseconds(400));
-            if (got is not null && got.Contains("\"type\":\"audit.append\""))
+            JsonElement? got = await frames.WaitForFrame(
+                f => f.GetProperty("type").GetString() == "audit.append", TimeSpan.FromMilliseconds(400));
+            if (got is not null)
             {
                 frame = got;
                 break;
@@ -235,33 +231,9 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         }
 
         Assert.NotNull(frame);
-        JsonElement env = JsonDocument.Parse(frame!).RootElement;
+        JsonElement env = frame!.Value;
         Assert.Equal("audit", env.GetProperty("topic").GetString());
         Assert.Equal("audit.append", env.GetProperty("type").GetString());
         Assert.Equal(AuditAction.ServerStart, env.GetProperty("data").GetProperty("action").GetString());
-
-        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
-    }
-
-    private static Task Send(WebSocket socket, string text) =>
-        socket.SendAsync(Encoding.UTF8.GetBytes(text), WebSocketMessageType.Text, true, CancellationToken.None);
-
-    private static async Task<string?> Receive(WebSocket socket, TimeSpan timeout)
-    {
-        using var cts = new CancellationTokenSource(timeout);
-        var buf = new byte[16384];
-        var sb = new StringBuilder();
-        try
-        {
-            WebSocketReceiveResult r;
-            do
-            {
-                r = await socket.ReceiveAsync(buf, cts.Token);
-                if (r.MessageType == WebSocketMessageType.Close) return null;
-                sb.Append(Encoding.UTF8.GetString(buf, 0, r.Count));
-            } while (!r.EndOfMessage);
-            return sb.ToString();
-        }
-        catch (OperationCanceledException) { return null; }
     }
 }

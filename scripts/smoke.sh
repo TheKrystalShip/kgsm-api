@@ -10,11 +10,12 @@
 #   iff capacity is present, 'down' iff capacity is null (never a fabricated number).
 #   M1·b (§3): GET /servers + /servers/{id} (kgsm-lib domain+run-state ⋈ monitor metrics) —
 #   the honest Server DTO, the 404 envelope, and the per-server metrics<->presence coupling.
-#   M2 (§3·b/§3·j): GET /api/v1/stream WebSocket — the { topic, type, data } envelope, subscribe,
-#   per-server + host metric ticks carried through honestly, the servers topic staying quiet under
-#   the metric firehose, and the capability lifecycle: kill the monitor -> metric ticks fall silent +
-#   a capabilities patch reports metrics 'down' (provisioned:true — never "lost"); restart it ->
-#   metrics flips back 'operational' + ticks resume. Degrade AND recover gracefully, capability set fixed.
+#   M2 (§3·b/§3·j): GET /api/v1/stream fetch-based SSE (migrated off WebSocket 2026-07-02,
+#   sse-migration-plan.md) — the { topic, type, data } envelope, topics chosen at connect via
+#   ?topics=a,b,c, per-server + host metric ticks carried through honestly, the servers topic staying
+#   quiet under the metric firehose, and the capability lifecycle: kill the monitor -> metric ticks
+#   fall silent + a capabilities patch reports metrics 'down' (provisioned:true — never "lost"); restart
+#   it -> metrics flips back 'operational' + ticks resume. Degrade AND recover gracefully, capability set fixed.
 #   M4·a (§3·f): auth is ON by default. The M0–M3 checks above run under KGSM_API_AUTH_DISABLED=1 (the
 #   dev escape hatch — synthetic admin), then a dedicated AUTH-ENABLED instance proves the no-token
 #   sweep: every protected endpoint 401s with the frozen envelope, /health + /api/v1 stay open, and the
@@ -30,12 +31,13 @@
 # down + capacity null; every server metrics:null). Phase B starts an EMBEDDED stub monitor
 # (a unix socket serving a canned Snapshot with a per-server row keyed to a real instance) and
 # restarts the API at it — proving the happy path: host capacity present + the servers JOIN's
-# present-branch (metrics carried through, keyed by id). It then opens a WebSocket and, mid-stream,
+# present-branch (metrics carried through, keyed by id). It then opens an SSE stream and, mid-stream,
 # KILLS then RESTARTS the stub to prove the monitor-down/up capability lifecycle. The stub makes all of this deterministic
 # with no external monitor; SMOKE_MONITOR_SOCKET still overrides Phase A's monitor if you want a live one.
 # What this CANNOT prove is a real browser preflight (CORS is browser-enforced) or an actual SPA
-# fetch — those wait on frontend access. The WebSocket client is a ~70-line stdlib Python RFC6455
-# client (no websocat/wscat/websockets dependency, none of which are guaranteed on a host).
+# fetch — those wait on frontend access. The SSE client is a small stdlib Python reader (http.client,
+# de-chunks the streaming body for free) — no websocat/wscat/curl-streaming dependency, none of which
+# are guaranteed on a host.
 #
 # Usage:  scripts/smoke.sh                 # build + run all checks (both phases)
 #         SMOKE_PORT=9001 scripts/smoke.sh
@@ -78,9 +80,9 @@ STUB_SOCK="/tmp/kgsm-api-smoke-stub-monitor.sock"; rm -f "$STUB_SOCK"
 # Canned per-server metric values the stub serves; the join must carry these through verbatim.
 STUB_CPU=142.5; STUB_MEM=3422552064; STUB_IO_READ=4096; STUB_PIDS=12  # ioWrite is null (nullable passthrough)
 STUB_DISK=293172125  # diskBytes (Contracts 1.2.0): per-server on-disk footprint, passed through verbatim
-# M2 realtime: the stdlib WebSocket client + where it logs the frames it receives.
-WS_PY="/tmp/kgsm-api-smoke-ws.py"
-WS_LOG="/tmp/kgsm-api-smoke-ws.log"
+# M2 realtime: the stdlib SSE client + where it logs the frames it receives.
+SSE_PY="/tmp/kgsm-api-smoke-sse.py"
+SSE_LOG="/tmp/kgsm-api-smoke-sse.log"
 # M7 assistant relay: a TCP HTTP stub serving /health + a canned §5·a /turn SSE that GATES on the relay
 # secret and echoes the forwarded user — the deterministic stub analogue of the M2 stub monitor, proving
 # the API forwards X-Relay-Secret + X-Relay-User and streams the body verbatim (the relay machinery the
@@ -659,88 +661,82 @@ sys.exit(0 if (s is not None and s['metrics'] is not None) else 1)
     ok "/servers metrics present ↔ monitor operational (server-side coupling)"
   else bad "/servers list join coupling (body=$BODY)"; fi
 
-  # --- M2 realtime: the /api/v1/stream WebSocket -----------------------------
-  echo "==> M2 realtime checks — WebSocket /api/v1/stream (stub up, then killed mid-stream)"
+  # --- M2 realtime: the /api/v1/stream fetch-based SSE stream -----------------
+  echo "==> M2 realtime checks — SSE /api/v1/stream (stub up, then killed mid-stream)"
 
-  # 19. A plain (non-upgrade) GET on the stream endpoint is a client error -> OUR 400 envelope.
-  req GET /api/v1/stream
-  [[ "$CODE" == 400 ]] && grep -q '"code":"bad_request"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
-    && ok "/stream non-WS GET 400 → {error:{code:bad_request}}" || bad "/stream non-WS 400 envelope (code=$CODE body=$BODY)"
+  # 19. A plain GET (no ?topics=) is a VALID 200 SSE connection — the removed "not a WS upgrade" 400
+  #     case (that whole check is gone from StreamController; an empty/missing topic set is just a
+  #     stream with no subscriptions beyond heartbeats). Bounded via --max-time since this endpoint
+  #     never closes on its own; curl still flushes headers + whatever body arrived before the cutoff.
+  curl -s -D /tmp/kgsm-api-smoke-stream19.hdr -o /tmp/kgsm-api-smoke-stream19.body --max-time 2 \
+    -H 'Accept: text/event-stream' "${BASE}/api/v1/stream" >/dev/null 2>&1
+  if grep -qE '^HTTP/[0-9.]+ 200' /tmp/kgsm-api-smoke-stream19.hdr 2>/dev/null \
+     && grep -qi '^content-type: text/event-stream' /tmp/kgsm-api-smoke-stream19.hdr 2>/dev/null \
+     && grep -q ': connected' /tmp/kgsm-api-smoke-stream19.body 2>/dev/null; then
+    ok "/stream plain GET (no topics) → 200 text/event-stream + ': connected' comment"
+  else
+    bad "/stream plain GET 200 SSE (hdr=$(cat /tmp/kgsm-api-smoke-stream19.hdr 2>/dev/null) body=$(cat /tmp/kgsm-api-smoke-stream19.body 2>/dev/null))"
+  fi
 
-  # A stdlib RFC6455 client: handshake, send one subscribe, log every received text frame as a
-  # {"t":<rel-sec>,"msg":{topic,type,data}} line. Masks client frames; ignores pings; runs DURATION secs.
-  cat > "$WS_PY" <<'PYEOF'
-import socket, os, sys, json, base64, struct, time
+  # A stdlib SSE client: GET ?topics=… (topics are fixed at connect now, no subscribe message), read the
+  # streaming body via http.client (which de-chunks Transfer-Encoding: chunked for free), and log every
+  # data: frame as a {"t":<rel-sec>,"msg":{topic,type,data}} line — same log shape the checks below already
+  # parse, so only the transport underneath changed. ':'-comment blocks (connected/keepalive) are skipped.
+  # Reads ONE byte at a time: HTTPResponse.read(n) is backed by a BufferedReader that blocks accumulating
+  # up to n bytes across MULTIPLE underlying socket reads rather than returning on the first short read —
+  # with n=4096 that silently batches many seconds of frames into one late delivery, corrupting the
+  # relative timestamps checks 23-25 rely on. n=1 needs only one available byte per call, so frames land
+  # with real arrival times (a few thousand single-byte reads over a 20s window is irrelevant overhead here).
+  cat > "$SSE_PY" <<'PYEOF'
+import http.client, sys, json, time, urllib.parse
 host, port, dur = "127.0.0.1", int(sys.argv[1]), float(sys.argv[2])
 topics = json.loads(sys.argv[3])
-key = base64.b64encode(os.urandom(16)).decode()
-req = (f"GET /api/v1/stream HTTP/1.1\r\nHost: {host}:{port}\r\n"
-       "Upgrade: websocket\r\nConnection: Upgrade\r\n"
-       f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n")
-s = socket.create_connection((host, port), timeout=5)
-s.sendall(req.encode())
-resp = b""
-while b"\r\n\r\n" not in resp:
-    chunk = s.recv(4096)
-    if not chunk:
-        print(json.dumps({"err": "handshake-eof"})); sys.exit(3)
-    resp += chunk
-head, _, rest = resp.partition(b"\r\n\r\n")
-if b" 101 " not in head.split(b"\r\n", 1)[0]:
-    print(json.dumps({"err": "no-101", "head": head[:80].decode("latin1")})); sys.exit(3)
-buf = bytearray(rest)
+path = "/api/v1/stream?topics=" + urllib.parse.quote(",".join(topics), safe="")
 
-def send_text(txt):
-    data = txt.encode(); mask = os.urandom(4); n = len(data); hdr = bytearray([0x81])
-    if n < 126: hdr.append(0x80 | n)
-    elif n < 65536: hdr.append(0x80 | 126); hdr += struct.pack(">H", n)
-    else: hdr.append(0x80 | 127); hdr += struct.pack(">Q", n)
-    hdr += mask
-    s.sendall(bytes(hdr) + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
+conn = http.client.HTTPConnection(host, port, timeout=dur + 15)
+conn.request("GET", path, headers={"Accept": "text/event-stream"})
+resp = conn.getresponse()
+if resp.status != 200:
+    print(json.dumps({"err": "bad-status", "status": resp.status})); sys.exit(3)
 
-send_text(json.dumps({"type": "subscribe", "topics": topics}))
-s.settimeout(0.5)
-deadline = time.monotonic() + dur
+start = time.monotonic()
+deadline = start + dur
+buf = b""
 
-def read_exact(n):
-    while len(buf) < n:
-        try: chunk = s.recv(4096)
-        except socket.timeout:
-            if time.monotonic() > deadline: return None
-            continue
-        if not chunk: return None
-        buf.extend(chunk)
-    out = bytes(buf[:n]); del buf[:n]; return out
+def emit(block):
+    # One SSE block = one or more lines; only a `data:` line carries a frame. A comment-only block
+    # (": connected" / ": keepalive") has none and is silently skipped, like a real client's parser.
+    for raw_line in block.split(b"\n"):
+        if raw_line.startswith(b"data:"):
+            try:
+                msg = json.loads(raw_line[len(b"data:"):].strip().decode("utf-8"))
+            except Exception:
+                return
+            print(json.dumps({"t": round(time.monotonic() - start, 3), "msg": msg}), flush=True)
+            return
 
-while time.monotonic() < deadline:
-    h = read_exact(2)
-    if h is None: break
-    op = h[0] & 0x0f; ln = h[1] & 0x7f
-    if ln == 126:
-        e = read_exact(2)
-        if e is None: break
-        ln = struct.unpack(">H", e)[0]
-    elif ln == 127:
-        e = read_exact(8)
-        if e is None: break
-        ln = struct.unpack(">Q", e)[0]
-    payload = read_exact(ln) if ln else b""
-    if payload is None: break
-    if op == 0x8: break        # close
-    if op == 0x9: continue     # ping (no pong needed in this short window)
-    if op == 0x1:
-        try: msg = json.loads(payload.decode())
-        except Exception: continue
-        print(json.dumps({"t": round(time.monotonic(), 3), "msg": msg}), flush=True)
-try: s.close()
-except OSError: pass
+try:
+    while time.monotonic() < deadline:
+        try:
+            b1 = resp.read(1)
+        except (TimeoutError, OSError):
+            break
+        if not b1:
+            break  # server closed the stream
+        buf += b1
+        while b"\n\n" in buf:
+            block, buf = buf.split(b"\n\n", 1)
+            emit(block)
+finally:
+    try: conn.close()
+    except Exception: pass
 PYEOF
 
-  WS_TOPICS="$(I="$FIRST_ID" H="$HOST_ID" python3 -c "import json,os;print(json.dumps(['servers/'+os.environ['I']+'/metrics','hosts/'+os.environ['H']+'/metrics','hosts/'+os.environ['H']+'/capabilities','servers']))")"
-  : > "$WS_LOG"
-  echo "  opening WebSocket (subscribing: servers, servers/${FIRST_ID}/metrics, hosts/${HOST_ID}/metrics, hosts/${HOST_ID}/capabilities)"
-  python3 "$WS_PY" "$PORT" 20 "$WS_TOPICS" >"$WS_LOG" 2>/tmp/kgsm-api-smoke-ws.err &
-  WS_CLIENT_PID=$!; PIDS+=("$WS_CLIENT_PID")
+  SSE_TOPICS="$(I="$FIRST_ID" H="$HOST_ID" python3 -c "import json,os;print(json.dumps(['servers/'+os.environ['I']+'/metrics','hosts/'+os.environ['H']+'/metrics','hosts/'+os.environ['H']+'/capabilities','servers']))")"
+  : > "$SSE_LOG"
+  echo "  opening SSE stream (subscribing: servers, servers/${FIRST_ID}/metrics, hosts/${HOST_ID}/metrics, hosts/${HOST_ID}/capabilities)"
+  python3 "$SSE_PY" "$PORT" 20 "$SSE_TOPICS" >"$SSE_LOG" 2>/tmp/kgsm-api-smoke-sse.err &
+  SSE_CLIENT_PID=$!; PIDS+=("$SSE_CLIENT_PID")
   sleep 5                                              # metric ticks flow + capability state is operational
   echo "  killing stub monitor mid-stream (degrade: down flip + tick silence)"
   kill "$STUB_PID" 2>/dev/null; wait "$STUB_PID" 2>/dev/null
@@ -749,10 +745,10 @@ PYEOF
   SNAP_ID="$FIRST_ID" SNAP_CPU="$STUB_CPU" SNAP_MEM="$STUB_MEM" SNAP_IOREAD="$STUB_IO_READ" SNAP_PIDS="$STUB_PIDS" SNAP_DISK="$STUB_DISK" \
     python3 "$STUB_PY" "$STUB_SOCK" >>/tmp/kgsm-api-smoke-stub.log 2>&1 &
   STUB_PID=$!; PIDS+=("$STUB_PID")
-  wait "$WS_CLIENT_PID" 2>/dev/null                    # client runs out its window through the recovery
+  wait "$SSE_CLIENT_PID" 2>/dev/null                   # client runs out its window through the recovery
 
   # 20. Per-server metric ticks arrive on servers/{id}/metrics carrying the stub values VERBATIM.
-  if I="$FIRST_ID" CPU="$STUB_CPU" MEM="$STUB_MEM" LOG="$WS_LOG" python3 -c "
+  if I="$FIRST_ID" CPU="$STUB_CPU" MEM="$STUB_MEM" LOG="$SSE_LOG" python3 -c "
 import json,os,sys
 topic='servers/'+os.environ['I']+'/metrics'
 ticks=[r['msg'] for r in (json.loads(l) for l in open(os.environ['LOG']) if l.strip()) if 'msg' in r
@@ -764,28 +760,28 @@ for m in ticks:
             and d.get('memBytes')==int(os.environ['MEM']) and d.get('ioWriteBps') is None): sys.exit(2)
 sys.exit(0)
 " 2>/dev/null; then
-    ok "WS metrics.tick on servers/{id}/metrics (cpuPctCore>100 + null ioWrite carried verbatim, ≥2 ticks)"
-  else bad "WS per-server metric ticks (see $WS_LOG)"; fi
+    ok "SSE metrics.tick on servers/{id}/metrics (cpuPctCore>100 + null ioWrite carried verbatim, ≥2 ticks)"
+  else bad "SSE per-server metric ticks (see $SSE_LOG)"; fi
 
   # 21. Host capacity ticks arrive on hosts/{id}/metrics with real (non-null) capacity.
-  if H="$HOST_ID" LOG="$WS_LOG" python3 -c "
+  if H="$HOST_ID" LOG="$SSE_LOG" python3 -c "
 import json,os,sys
 topic='hosts/'+os.environ['H']+'/metrics'
 ticks=[r['msg'] for r in (json.loads(l) for l in open(os.environ['LOG']) if l.strip()) if 'msg' in r
        and r['msg'].get('topic')==topic and r['msg'].get('type')=='host.metrics']
 if not ticks: sys.exit(1)
 d=ticks[0].get('data') or {}
-# The enriched HostMetricsDto rides the WS tick too (the shared MetricsMapping → byte-identical to REST):
+# The enriched HostMetricsDto rides the SSE tick too (the shared MetricsMapping → byte-identical to REST):
 sys.exit(0 if (d.get('cpuPct') is not None and d.get('mem') and d.get('disks')
                and d.get('perCore')==[10.0,15.0] and d.get('hostname')=='smoke-stub'
                and d.get('sampleTs')==1718400000000 and isinstance(d.get('interfaces'),list)) else 2)
 " 2>/dev/null; then
-    ok "WS host.metrics on hosts/{id}/metrics (capacity + M-diag telemetry present)"
-  else bad "WS host metric ticks (see $WS_LOG)"; fi
+    ok "SSE host.metrics on hosts/{id}/metrics (capacity + M-diag telemetry present)"
+  else bad "SSE host metric ticks (see $SSE_LOG)"; fi
 
   # 22. The servers topic carries STATUS/ROSTER only — NOT the 1s metric firehose. With status stable,
   #     ZERO server.patch must arrive even though many metric ticks did (the frozen §6 topic split).
-  if LOG="$WS_LOG" python3 -c "
+  if LOG="$SSE_LOG" python3 -c "
 import json,os,sys
 rows=[json.loads(l) for l in open(os.environ['LOG']) if l.strip()]
 patches=[r for r in rows if 'msg' in r and r['msg'].get('topic')=='servers'
@@ -793,12 +789,12 @@ patches=[r for r in rows if 'msg' in r and r['msg'].get('topic')=='servers'
 ticks=[r for r in rows if 'msg' in r and r['msg'].get('type')=='metrics.tick']
 sys.exit(0 if (len(ticks)>=2 and len(patches)==0) else 1)
 " 2>/dev/null; then
-    ok "WS servers topic quiet under the metric firehose (status/roster only, no metric double-stream)"
-  else bad "WS servers topic emitted unexpectedly (see $WS_LOG)"; fi
+    ok "SSE servers topic quiet under the metric firehose (status/roster only, no metric double-stream)"
+  else bad "SSE servers topic emitted unexpectedly (see $SSE_LOG)"; fi
 
   # 23. DEGRADE flip: after the monitor dies, a capabilities.patch reports metrics 'down' — and keeps
   #     provisioned:true. The capability is "temporarily unavailable, still there", never "lost".
-  if H="$HOST_ID" LOG="$WS_LOG" python3 -c "
+  if H="$HOST_ID" LOG="$SSE_LOG" python3 -c "
 import json,os,sys
 topic='hosts/'+os.environ['H']+'/capabilities'
 downs=[((r['msg'].get('data') or {}).get('metrics') or {}) for r in
@@ -807,13 +803,13 @@ downs=[((r['msg'].get('data') or {}).get('metrics') or {}) for r in
        and ((r['msg'].get('data') or {}).get('metrics') or {}).get('status')=='down']
 sys.exit(0 if (downs and all(m.get('provisioned') is True for m in downs)) else 1)
 " 2>/dev/null; then
-    ok "WS capabilities.patch metrics 'down' + provisioned:true (degrade — capability never 'lost')"
-  else bad "WS degrade flip not observed / provisioned flipped (see $WS_LOG)"; fi
+    ok "SSE capabilities.patch metrics 'down' + provisioned:true (degrade — capability never 'lost')"
+  else bad "SSE degrade flip not observed / provisioned flipped (see $SSE_LOG)"; fi
 
   # 24. ...and the metric ticks CEASE during the outage — silence, never a replayed stale frame. The
   #     window starts past the monitor's ~1s cache grace and ends before the restart, so it is fully
   #     within the dead period.
-  if H="$HOST_ID" LOG="$WS_LOG" python3 -c "
+  if H="$HOST_ID" LOG="$SSE_LOG" python3 -c "
 import json,os,sys
 rows=[json.loads(l) for l in open(os.environ['LOG']) if l.strip()]
 topic='hosts/'+os.environ['H']+'/capabilities'
@@ -824,12 +820,12 @@ if not down_t: sys.exit(1)
 d=min(down_t); lo,hi=d+1.5,d+3.5
 sys.exit(0 if not any(lo<=t<=hi for t in tick_t) else 2)
 " 2>/dev/null; then
-    ok "WS metric ticks fall silent during the outage (no stale replay)"
-  else bad "WS metric ticks continued during outage (see $WS_LOG)"; fi
+    ok "SSE metric ticks fall silent during the outage (no stale replay)"
+  else bad "SSE metric ticks continued during outage (see $SSE_LOG)"; fi
 
   # 25. RECOVER flip: after the monitor returns, a capabilities.patch flips metrics back to operational
   #     (provisioned:true on EVERY patch throughout), and the metric ticks resume past the recovery.
-  if I="$FIRST_ID" H="$HOST_ID" LOG="$WS_LOG" python3 -c "
+  if I="$FIRST_ID" H="$HOST_ID" LOG="$SSE_LOG" python3 -c "
 import json,os,sys
 rows=[json.loads(l) for l in open(os.environ['LOG']) if l.strip()]
 ctopic='hosts/'+os.environ['H']+'/capabilities'
@@ -845,10 +841,10 @@ mt='servers/'+os.environ['I']+'/metrics'
 tick_t=[r['t'] for r in rows if 'msg' in r and r['msg'].get('topic')==mt and r['msg'].get('type')=='metrics.tick']
 sys.exit(0 if any(t>u for t in tick_t) else 4)                         # ticks resume past the recovery
 " 2>/dev/null; then
-    ok "WS recovery: metrics flips back operational (provisioned:true throughout) + ticks resume"
-  else bad "WS recovery flip / resume not observed (see $WS_LOG)"; fi
+    ok "SSE recovery: metrics flips back operational (provisioned:true throughout) + ticks resume"
+  else bad "SSE recovery flip / resume not observed (see $SSE_LOG)"; fi
 
-  # --- M3 commands: the write path (gate → 202 + job → jobs WS → verify) ------
+  # --- M3 commands: the write path (gate → 202 + job → jobs stream → verify) ------
   echo "==> M3 command checks — POST /servers/{id}/commands (the gate/rejection contract, no mutation)"
 
   # 26. Unknown server id -> OUR 404 envelope (the write path resolves the server like the read path).
@@ -881,11 +877,11 @@ sys.exit(0 if any(t>u for t in tick_t) else 4)                         # ticks r
     echo "  (skipping no-op gate check: server status '${ST:-unknown}' — the gate correctly does not block unknown)"
   fi
 
-  # Coverage note (honest, mirroring M2's server.patch boundary): the 202 + job + WS job.patch + verify
+  # Coverage note (honest, mirroring M2's server.patch boundary): the 202 + job + SSE job.patch + verify
   # server.patch + the in-flight 409 guard are exercised by code review + a LIVE mutation on a trusted
   # host — the verb must actually run, which mutates real state and is not deterministic in this
   # stub-driven smoke. The gate and all three error envelopes above ARE proven here, without mutation.
-  echo "  (note: 202/job lifecycle + WS job.patch + verify are code-path-only in smoke — live-validated on a trusted host)"
+  echo "  (note: 202/job lifecycle + SSE job.patch + verify are code-path-only in smoke — live-validated on a trusted host)"
 
   # --- M5 audit: the read surface (the append path is xUnit + a trusted-host live-validate) ---
   echo "==> M5 audit checks — GET /audit (the keyset read contract; empty here — no events fire in smoke)"
@@ -913,7 +909,7 @@ sys.exit(0 if ('data' in d and 'nextCursor' in d) else 1)
     ok "/audit accepts cursor/limit/severity/serverId/actor filters (page shape holds)"
   else bad "M5 /audit filters (code=$CODE body=$BODY)"; fi
 
-  echo "  (note: the event-sourced append + the audit.append WS topic are proven in tests/Api.Tests; the"
+  echo "  (note: the event-sourced append + the audit.append SSE topic are proven in tests/Api.Tests; the"
   echo "   live kgsm-event → audit row path is a trusted-host live-validate, like M3's mutation happy path)"
 
   # --- M6·b ports: the network surface (firewall ABSENT here → the honest degrade path) -------
@@ -1080,7 +1076,7 @@ sys.exit(0 if (isinstance(d.get('lines'),list) and len(d['lines'])==0) else 1)
     ok "/servers/{id}/console (no ?tail=, default 200) 200 + { lines: [] }"
   else bad "#8 console scrollback default (code=$CODE body=$BODY)"; fi
 
-  echo "  (note: the live WS follow on servers/{id}/console — opening a shared watchdog tail-bridge per native"
+  echo "  (note: the live SSE follow on servers/{id}/console — opening a shared watchdog tail-bridge per native"
   echo "   instance and streaming console.line frames with monotonic seq — is OWED-TO-HUMAN: it needs a real"
   echo "   running kgsm-watchdog + a native instance producing stdout. The bridge open/close/unique-seq/"
   echo "   not-capable-no-retry logic is proven in tests/Api.Tests/ConsoleBridgeTests; the controller happy/"
@@ -1540,10 +1536,11 @@ req GET /auth/discord/start
   || bad "/auth/discord/start 503 (code=$CODE body=$BODY)"
 
 # Coverage note: the 401/403/tier matrix (viewer/operator/admin), the callback verdict (ok/denied/
-# invalid/upstream-error), refresh rotation, the session snapshot and the WS ?access_token= path are
-# proven deterministically in tests/Api.Tests with the Discord seam faked. The real discord.com code
-# exchange + bot-token role lookup are the M4·b LIVE half (validated once on the trusted host when the
-# Discord app / bot token / guild / role-map are supplied).
+# invalid/upstream-error), refresh rotation, the session snapshot, and the SSE stream's bearer-header
+# auth (incl. the regression test locking that a bare ?access_token= query param — the removed WS-era
+# hack — no longer authenticates) are proven deterministically in tests/Api.Tests with the Discord seam
+# faked. The real discord.com code exchange + bot-token role lookup are the M4·b LIVE half (validated
+# once on the trusted host when the Discord app / bot token / guild / role-map are supplied).
 echo "  (note: tier matrix + callback/refresh/session are in tests/Api.Tests; live OAuth is M4·b)"
 
 stop_api

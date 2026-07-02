@@ -19,7 +19,8 @@ its leaves + this API. The API aggregates **only its own host's** leaves; cross-
 
 **Status:** M0 (skeleton + runtime/stack decision), **M1·a** (hosts — monitor scrape + §4·b
 capabilities), **M1·b** (servers — the kgsm-lib domain+run-state ⋈ monitor metrics join, the
-honest `Server` DTO), **M2** (realtime — the `GET /api/v1/stream` WebSocket + the always-on
+honest `Server` DTO), **M2** (realtime — the `GET /api/v1/stream` fetch-based SSE stream (migrated
+off WebSocket 2026-07-02) + the always-on
 leaf-health capability model), **M3** (commands — the first write path: `POST /servers/{id}/commands`
 → gate → `202` + job → `jobs` WS → verify; verbs `start`/`stop`/`restart`, `update` deferred),
 **M4·a/M4·b** (auth — Discord per-host, Model A; stateless JWT bearer + viewer/operator/admin tier
@@ -157,10 +158,11 @@ kgsm direct-spawns an orphan and run-state tracking is unreliable (PLAN §8).
 It runs two phases: Phase A degrade (no monitor,
 live kgsm) and Phase B an **embedded stub monitor** (a unix socket serving a canned `Snapshot`)
 that makes the host happy path + the M1·b servers-join present-branch deterministic with no
-external monitor. **M2** is covered by an embedded **stdlib RFC6455 WebSocket client** (no
-`websocat`/`wscat`/`websockets` dependency) that subscribes, reads honest ticks, and — killing
-**then restarting** the stub monitor mid-stream — proves the degrade→recover capability lifecycle
-(down flip + tick silence, then operational flip + ticks resume, `provisioned:true` throughout).
+external monitor. **M2** is covered by an embedded **SSE reader** (a plain `curl`/fetch-style
+`text/event-stream` read against `?topics=`, no external dependency) that subscribes, reads honest
+ticks, and — killing **then restarting** the stub monitor mid-stream — proves the degrade→recover
+capability lifecycle (down flip + tick silence, then operational flip + ticks resume,
+`provisioned:true` throughout).
 Knobs: `SMOKE_PORT`, `SMOKE_SKIP_BUILD=1`, `SMOKE_DB`, `SMOKE_KGSM_PATH` (the engine on another
 host), `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A).
 **Runtime config lives in `appsettings.json`** — the documented schema + defaults

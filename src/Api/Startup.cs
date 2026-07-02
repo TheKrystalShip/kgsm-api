@@ -199,7 +199,7 @@ public class Startup(IConfiguration configuration)
 
         // M2 — realtime. The hub is the per-host connection registry + fan-out; the three pumps poll
         // their sources (neither the monitor nor kgsm-lib pushes) and publish only while subscribed, so
-        // an idle stream costs nothing. The /stream WebSocket endpoint lives in StreamController.
+        // an idle stream costs nothing. The /stream SSE endpoint lives in StreamController.
         services.AddSingleton<StreamHub>();
         services.AddHostedService<MetricsPump>();        // ~1s monitor scrape -> servers/{id}/metrics + hosts/{id}/metrics
         services.AddHostedService<DomainPump>();         // ~3s domain join diff -> servers (status/roster)
@@ -317,8 +317,8 @@ public class Startup(IConfiguration configuration)
         // Auth is ON by default; KGSM_API_AUTH_DISABLED=1 swaps the default scheme for a synthetic-admin
         // handler so every policy passes (the explicit, loudly-logged dev/open window). When enabled, the
         // JwtBearer scheme validates the session JWTs with the SAME parameters the token service mints under
-        // (shared via the post-configure below). The WS handshake can't set an Authorization header, so the
-        // /stream path also accepts ?access_token=; a refresh token is never accepted as an access bearer.
+        // (shared via the post-configure below). SSE streams carry the bearer as an Authorization header;
+        // a refresh token is never accepted as an access bearer.
         string defaultScheme = apiOptions.AuthEnabled
             ? JwtBearerDefaults.AuthenticationScheme
             : DisabledAuthHandler.SchemeName;
@@ -330,17 +330,6 @@ public class Startup(IConfiguration configuration)
                 options.MapInboundClaims = false; // keep claim types verbatim ("sub", "tier", …)
                 options.Events = new JwtBearerEvents
                 {
-                    OnMessageReceived = ctx =>
-                    {
-                        if (string.IsNullOrEmpty(ctx.Token)
-                            && ctx.Request.Path.StartsWithSegments("/api/v1/stream"))
-                        {
-                            string? qsToken = ctx.Request.Query["access_token"];
-                            if (!string.IsNullOrEmpty(qsToken))
-                                ctx.Token = qsToken;
-                        }
-                        return Task.CompletedTask;
-                    },
                     OnTokenValidated = ctx =>
                     {
                         // A refresh token authenticates ONLY /auth/session/refresh, never a protected call.
@@ -465,9 +454,6 @@ public class Startup(IConfiguration configuration)
         // design — the bundle (incl. the login page) must load before auth; the DATA stays [Authorize]-gated.
         if (serveSpa)
             app.UseStaticFiles();
-
-        // Enable WebSocket upgrades before routing so the /api/v1/stream endpoint (M2) can accept them.
-        app.UseWebSockets();
 
         app.UseRouting();
         app.UseCors(CorsPolicy);

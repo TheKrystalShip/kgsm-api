@@ -1,16 +1,13 @@
 using System.Net;
 using System.Net.Http.Headers;
-using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
-using Microsoft.AspNetCore.TestHost;
 using TheKrystalShip.Api.Services.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
 /// Phase 1 (dynamic provisioning) coverage — connect/disconnect a leaf at runtime: the registry+capability
-/// flip, the <c>capabilities.patch</c> WS emit, the audit row, the admin gate (operator 403 / no token 401),
+/// flip, the <c>capabilities.patch</c> SSE emit, the audit row, the admin gate (operator 403 / no token 401),
 /// the foreign-host / unknown-leaf 404s, and persistence across a simulated restart. Each mutating test uses
 /// its own factory (fresh DB) so the registry state never leaks between tests.
 /// </summary>
@@ -70,30 +67,31 @@ public sealed class LeafProvisioningTests
             r => r.GetProperty("action").GetString() == "service.disconnect");
     }
 
-    // ---- the capabilities.patch is emitted on the WS when a leaf connects --------------------------
+    // ---- the capabilities.patch is emitted on the stream when a leaf connects ----------------------
     [Fact]
     public async Task Connect_EmitsCapabilitiesPatch_OnTheStream()
     {
         using var factory = new LeafTestFactory();
         string token = factory.AccessToken(AuthTier.Admin);
 
-        WebSocketClient ws = factory.Server.CreateWebSocketClient();
-        var uri = new Uri(factory.Server.BaseAddress, $"api/v1/stream?access_token={token}");
-        using WebSocket socket = await ws.ConnectAsync(uri, CancellationToken.None);
-        await Send(socket, $$"""{"type":"subscribe","topics":["hosts/{{Host}}/capabilities"]}""");
+        using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
+            factory.CreateClient(), $"/api/v1/stream?topics=hosts/{Host}/capabilities", token);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
         HttpClient admin = Client(factory, AuthTier.Admin);
 
         // Connect repeatedly across the read window so the subscription is certainly live before the flip we
         // observe (the LeafProvisioningController flip is idempotent → re-connecting stays provisioned:true).
-        string? frame = null;
+        JsonElement? frame = null;
         DateTime deadline = DateTime.UtcNow.AddSeconds(10);
         while (DateTime.UtcNow < deadline)
         {
             await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
             await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/disconnect", null);
-            string? got = await Receive(socket, TimeSpan.FromMilliseconds(500));
-            if (got is not null && got.Contains("\"type\":\"capabilities.patch\""))
+            JsonElement? got = await frames.WaitForFrame(
+                f => f.GetProperty("type").GetString() == "capabilities.patch", TimeSpan.FromMilliseconds(500));
+            if (got is not null)
             {
                 frame = got;
                 break;
@@ -101,10 +99,9 @@ public sealed class LeafProvisioningTests
         }
 
         Assert.NotNull(frame);
-        JsonElement env = JsonDocument.Parse(frame!).RootElement;
+        JsonElement env = frame!.Value;
         Assert.Equal("capabilities.patch", env.GetProperty("type").GetString());
         Assert.True(env.GetProperty("data").TryGetProperty("metrics", out _)); // the full capability block
-        await socket.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", CancellationToken.None);
     }
 
     // ---- admin gate -------------------------------------------------------------------------------
@@ -197,27 +194,5 @@ public sealed class LeafProvisioningTests
     {
         HttpResponseMessage resp = await respTask;
         return JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.Clone();
-    }
-
-    private static Task Send(WebSocket socket, string text) =>
-        socket.SendAsync(Encoding.UTF8.GetBytes(text), WebSocketMessageType.Text, true, CancellationToken.None);
-
-    private static async Task<string?> Receive(WebSocket socket, TimeSpan timeout)
-    {
-        using var cts = new CancellationTokenSource(timeout);
-        var buf = new byte[16384];
-        var sb = new StringBuilder();
-        try
-        {
-            WebSocketReceiveResult r;
-            do
-            {
-                r = await socket.ReceiveAsync(buf, cts.Token);
-                if (r.MessageType == WebSocketMessageType.Close) return null;
-                sb.Append(Encoding.UTF8.GetString(buf, 0, r.Count));
-            } while (!r.EndOfMessage);
-            return sb.ToString();
-        }
-        catch (OperationCanceledException) { return null; }
     }
 }
