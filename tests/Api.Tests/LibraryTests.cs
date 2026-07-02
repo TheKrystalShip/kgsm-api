@@ -15,12 +15,13 @@ namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
 /// M8·a coverage for the installable-game catalog (<c>GET /library</c>). The mapping/filter/degrade
-/// logic is proven at the aggregator level with a fake <see cref="IBlueprintService"/> (the populated
-/// path a box with no curated metadata can't show live), mirroring <c>NetworkAggregatorTests</c>. The
-/// load-bearing honesty invariants: a non-Steam blueprint maps to <c>null</c> (never a fabricated
-/// <c>"0"</c>); an uncurated metadata field is <c>null</c> (never a fabricated <c>0</c>); the display
-/// name falls back to the id (never guessed); <c>cover</c>/<c>rawgSlug</c> are reserved-null; ports are
-/// structured at the chokepoint. The live wire shape (real ~29 blueprints, camelCase JSON) is smoke's job.
+/// logic is proven at the aggregator level with a fake <see cref="IBlueprintService"/> wrapped in a
+/// <see cref="BlueprintCache"/> (the populated path a box with no curated metadata can't show live),
+/// mirroring <c>NetworkAggregatorTests</c>. The load-bearing honesty invariants: a non-Steam blueprint
+/// maps to <c>null</c> (never a fabricated <c>"0"</c>); an uncurated metadata field is <c>null</c>
+/// (never a fabricated <c>0</c>); the display name falls back to the id (never guessed);
+/// <c>cover</c>/<c>rawgSlug</c> are reserved-null; ports are structured at the chokepoint. The live
+/// wire shape (real ~29 blueprints, camelCase JSON) is smoke's job.
 /// </summary>
 public sealed class LibraryAggregatorTests
 {
@@ -165,8 +166,11 @@ public sealed class LibraryAggregatorTests
     [Fact]
     public async Task Engine_unconfigured_degrades_to_an_empty_catalog()
     {
-        // No IBlueprintService resolvable — the engine-is-base degrade, not a 500.
-        var agg = new LibraryAggregator(new StubProvider(null), NewStore(), NullLogger<LibraryAggregator>.Instance);
+        // Empty BlueprintCache — the engine-is-base degrade, not a 500.
+        var cache = new BlueprintCache(new ServiceCollection().BuildServiceProvider(),
+            TestOptions(), NullLogger<BlueprintCache>.Instance);
+        // Don't call StartAsync — cache stays empty (engine never configured).
+        var agg = new LibraryAggregator(cache, NewStore(), NullLogger<LibraryAggregator>.Instance);
         Assert.Empty(await agg.GetLibraryAsync(null, BaseUrl, default));
     }
 
@@ -201,7 +205,7 @@ public sealed class LibraryAggregatorTests
             Status = "ok",
         });
         var agg = new LibraryAggregator(
-            new StubProvider(new FakeBlueprints(new() { ["factorio"] = bp })),
+            NewCache(new FakeBlueprints(new() { ["factorio"] = bp })),
             store, NullLogger<LibraryAggregator>.Instance);
 
         LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, BaseUrl, default));
@@ -230,7 +234,7 @@ public sealed class LibraryAggregatorTests
             CoverFile = null, HeroFile = null, FetchedAt = DateTimeOffset.UtcNow, Status = "ok",
         });
         var agg = new LibraryAggregator(
-            new StubProvider(new FakeBlueprints(new() { ["romestead"] = bp })),
+            NewCache(new FakeBlueprints(new() { ["romestead"] = bp })),
             store, NullLogger<LibraryAggregator>.Instance);
 
         LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, BaseUrl, default));
@@ -255,7 +259,7 @@ public sealed class LibraryAggregatorTests
             FetchedAt = DateTimeOffset.UtcNow, Status = "ok",
         });
         var agg = new LibraryAggregator(
-            new StubProvider(new FakeBlueprints(new() { ["valheim"] = bp })),
+            NewCache(new FakeBlueprints(new() { ["valheim"] = bp })),
             store, NullLogger<LibraryAggregator>.Instance);
 
         LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, BaseUrl, default));
@@ -267,7 +271,40 @@ public sealed class LibraryAggregatorTests
     private const string BaseUrl = "http://test-host:8080";
 
     private static LibraryAggregator Aggregator(IBlueprintService blueprints) =>
-        new(new StubProvider(blueprints), NewStore(), NullLogger<LibraryAggregator>.Instance);
+        new(NewCache(blueprints), NewStore(), NullLogger<LibraryAggregator>.Instance);
+
+    // Build a pre-populated BlueprintCache from a fake IBlueprintService. StartAsync kicks the
+    // initial refresh so GetAll() returns the catalog before the test reads it.
+    private static BlueprintCache NewCache(IBlueprintService? blueprints)
+    {
+        var sc = new ServiceCollection();
+        if (blueprints is not null) sc.AddSingleton(blueprints);
+        IServiceProvider sp = sc.BuildServiceProvider();
+        var cache = new BlueprintCache(sp, TestOptions(), NullLogger<BlueprintCache>.Instance);
+        cache.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+        return cache;
+    }
+
+    private static ApiOptions TestOptions() => new()
+    {
+        HostId = "test", HostLabel = "test",
+        MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
+        FirewallSocketPath = "", KgsmPath = "", KgsmSocketPath = "",
+        BlueprintCacheTtlSeconds = 60,
+        LogSources = [], JournalctlPath = "journalctl", SystemctlPath = "systemctl", LogReadTimeoutMs = 5000,
+        RawgApiKey = "", RawgCacheDir = Path.GetTempPath(), PublicBaseUrl = "",
+        SteamCdnBaseUrl = "", SteamCoversDisabled = true,
+        LibraryRefreshIntervalDays = 7, LibraryRefreshHour = 6,
+        FilesMaxEntries = 200, FilesMaxEditBytes = 2 * 1024 * 1024,
+        LeafOverridesDir = "/tmp/kgsm-api-test-overrides", LeafApplyCanaryMs = 15000,
+        DomainPollMs = 5000, MetricsPollMs = 1000,
+        MetricsHistoryEnabled = false, MetricsHistoryDb = "",
+        MetricsPersistMs = 15000, MetricsRawRetentionHours = 24,
+        MetricsRollupStepMin = 5, MetricsRollupRetentionDays = 30, MetricsMaintenanceMs = 60000,
+        AuthDisabled = true, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
+        DiscordRedirectUri = "", DiscordBotToken = "", DiscordGuildId = "", AuthFrontendUrl = "",
+        RoleAdminIds = [], RoleOperatorIds = [], RoleViewerIds = [],
+    };
 
     // A RawgStore over a fresh per-call on-disk temp SQLite DB (the project's "tests use a fresh temp DB"
     // convention — parallel-safe, no shared state). EnsureCreated builds the rawg_entry table on first use;
@@ -289,12 +326,6 @@ public sealed class LibraryAggregatorTests
         BlueprintType = BlueprintType.Native,
         Metadata = display is null ? null : new BlueprintMetadata { DisplayName = display },
     };
-
-    private sealed class StubProvider(IBlueprintService? blueprints) : IServiceProvider
-    {
-        public object? GetService(Type serviceType) =>
-            serviceType == typeof(IBlueprintService) ? blueprints : null;
-    }
 
     // Switch-on-input fake (the project convention) — only ListDetailed is exercised by the aggregator.
     private sealed class FakeBlueprints : IBlueprintService

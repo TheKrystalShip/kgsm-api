@@ -1,6 +1,5 @@
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
-using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
@@ -8,18 +7,17 @@ namespace TheKrystalShip.Api.Services.Library;
 
 /// <summary>
 /// Builds this host's installable-game catalog (<c>GET /library</c>) for the M8·a read surface — a scrape of
-/// the kgsm engine's blueprints via kgsm-lib <see cref="IBlueprintService"/>, joined with this host's cached
+/// the kgsm engine's blueprints via <see cref="BlueprintCache"/>, joined with this host's cached
 /// RAWG.io cover/metadata (<see cref="RawgStore"/>), mapped to the honest <see cref="LibraryEntry"/> shape.
 /// No leaf join, no mutation, no fabricated field. Cover/hero/description/genres/tags come purely from the
-/// cached RAWG row (hydrated by <see cref="RawgHydrationWorker"/>); with no cache they degrade to null/[].
+/// cached RAWG row (hydrated by <see cref="LibraryHydrationWorker"/>); with no cache they degrade to null/[].
 /// </summary>
 /// <remarks>
 /// <para>
-/// The blueprint read (<see cref="IBlueprintService.ListDetailed"/>) is a synchronous process spawn (it shells
-/// <c>kgsm.sh</c>), so it runs on the thread pool and never blocks the request thread — the same posture as
-/// <c>ServerAggregator</c>. <see cref="IBlueprintService"/> is a <em>transient</em> kgsm-lib service, resolved
-/// per-call from the provider and only registered when the engine is provisioned; an unconfigured engine
-/// degrades to an empty catalog with a one-time log (the engine is base, not a §4·b leaf).
+/// The blueprint data is served from the in-memory <see cref="BlueprintCache"/> (refreshed every 60s by
+/// a background timer). The cache resolves <c>IBlueprintService</c> (a transient kgsm-lib service that shells
+/// <c>kgsm.sh</c>) on each refresh; an unconfigured engine degrades to an empty catalog with a one-time log
+/// (the engine is base, not a §4·b leaf).
 /// </para>
 /// <para>
 /// The RAWG-row read degrades <strong>independently</strong> of the blueprint read: a DB failure (or the
@@ -30,16 +28,16 @@ namespace TheKrystalShip.Api.Services.Library;
 /// </remarks>
 public sealed class LibraryAggregator
 {
-    private readonly IServiceProvider _services;
+    private readonly BlueprintCache _cache;
     private readonly RawgStore _rawg;
     private readonly ILogger<LibraryAggregator> _logger;
 
     // Latch so a persistent engine misconfiguration is logged once, not on every request.
     private int _engineUnavailableLogged;
 
-    public LibraryAggregator(IServiceProvider services, RawgStore rawg, ILogger<LibraryAggregator> logger)
+    public LibraryAggregator(BlueprintCache cache, RawgStore rawg, ILogger<LibraryAggregator> logger)
     {
-        _services = services;
+        _cache = cache;
         _rawg = rawg;
         _logger = logger;
     }
@@ -84,13 +82,11 @@ public sealed class LibraryAggregator
         }
     }
 
-    /// <summary>The kgsm-lib blueprint read → the mapped, deterministically-ordered catalog.</summary>
+    /// <summary>The in-memory blueprint cache read → the mapped, deterministically-ordered catalog.</summary>
     private IReadOnlyList<LibraryEntry> ReadCatalog(IReadOnlyDictionary<string, RawgEntry> rawgRows, string baseUrl)
     {
-        // IBlueprintService is transient and only registered when the engine is provisioned; resolve
-        // optionally so an unconfigured engine degrades to an empty catalog rather than throwing.
-        var blueprints = _services.GetService(typeof(IBlueprintService)) as IBlueprintService;
-        if (blueprints is null)
+        IReadOnlyDictionary<string, Blueprint> catalog = _cache.GetAll();
+        if (catalog.Count == 0)
         {
             if (Interlocked.Exchange(ref _engineUnavailableLogged, 1) == 0)
                 _logger.LogWarning(
@@ -98,28 +94,17 @@ public sealed class LibraryAggregator
             return [];
         }
 
-        try
+        var entries = new List<LibraryEntry>(catalog.Count);
+        foreach ((string id, Blueprint bp) in catalog)
         {
-            Dictionary<string, Blueprint> catalog = blueprints.ListDetailed();
-            var entries = new List<LibraryEntry>(catalog.Count);
-            foreach ((string id, Blueprint bp) in catalog)
-            {
-                string entryId = string.IsNullOrWhiteSpace(id) ? bp.Name : id;
-                rawgRows.TryGetValue(entryId, out RawgEntry? row);
-                entries.Add(MapEntry(id, bp, row, baseUrl));
-            }
+            string entryId = string.IsNullOrWhiteSpace(id) ? bp.Name : id;
+            rawgRows.TryGetValue(entryId, out RawgEntry? row);
+            entries.Add(MapEntry(id, bp, row, baseUrl));
+        }
 
-            // Deterministic order so polling/diffing and the SPA list are stable.
-            entries.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
-            return entries;
-        }
-        catch (Exception ex)
-        {
-            // A list endpoint failing closed to empty is honest (it reports nothing, not a fabricated
-            // value); surface it so an operator can see the blueprint read broke.
-            _logger.LogWarning(ex, "kgsm blueprint read failed; serving an empty catalog.");
-            return [];
-        }
+        // Deterministic order so polling/diffing and the SPA list are stable.
+        entries.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
+        return entries;
     }
 
     /// <summary>

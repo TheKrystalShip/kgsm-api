@@ -19,7 +19,7 @@ namespace TheKrystalShip.Api.Controllers;
 [Route("api/v1/library")]
 [Authorize(Policy = AuthPolicy.Viewer)] // reads — viewer and up (M4·a)
 public sealed class LibraryController(
-    LibraryAggregator aggregator, ApiOptions options, RawgHydrationWorker refresher) : ControllerBase
+    LibraryAggregator aggregator, ApiOptions options, LibraryHydrationWorker refresher) : ControllerBase
 {
     /// <summary>
     /// <c>POST /library/refresh</c> — force an immediate full re-fetch of every blueprint's cover + metadata

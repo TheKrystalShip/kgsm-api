@@ -1,5 +1,4 @@
 using TheKrystalShip.Api.Data;
-using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
 namespace TheKrystalShip.Api.Services.Library;
@@ -31,13 +30,13 @@ namespace TheKrystalShip.Api.Services.Library;
 /// art; writes are atomic (temp + rename) so a concurrent <c>GET …/cover</c> never sees a half-written JPEG.
 /// One sweep runs at a time (boot, the timer, and a manual refresh share a gate).</para>
 /// </remarks>
-public sealed class RawgHydrationWorker(
+public sealed class LibraryHydrationWorker(
     ApiOptions options,
     IRawgClient rawg,
     ISteamCoverClient steam,
     RawgStore store,
-    IServiceScopeFactory scopeFactory,
-    ILogger<RawgHydrationWorker> logger) : BackgroundService
+    BlueprintCache cache,
+    ILogger<LibraryHydrationWorker> logger) : BackgroundService
 {
     /// <summary>A small delay between per-game fetches so a cold hydration is gentle on the RAWG free tier
     /// and the Steam CDN.</summary>
@@ -296,36 +295,26 @@ public sealed class RawgHydrationWorker(
 
     // The hydration targets: each blueprint that has SOMETHING fetchable this sweep — a usable Steam appid
     // (cover, when Steam is on) and/or a curated rawg_slug (metadata + cover-fallback, when RAWG is on).
-    // Degrades to empty when the engine is unconfigured (IBlueprintService is transient, resolved per-sweep).
+    // Reads from the in-memory BlueprintCache; degrades to empty when the cache is unpopulated.
     private IReadOnlyList<(string Id, string? Slug, string? SteamAppId)> ReadTargets()
     {
-        using IServiceScope scope = scopeFactory.CreateScope();
-        var blueprints = scope.ServiceProvider.GetService<IBlueprintService>();
-        if (blueprints is null) return [];
+        IReadOnlyDictionary<string, Blueprint> catalog = cache.GetAll();
+        if (catalog.Count == 0) return [];
 
-        try
+        var targets = new List<(string, string?, string?)>();
+        foreach ((string id, Blueprint bp) in catalog)
         {
-            Dictionary<string, Blueprint> catalog = blueprints.ListDetailed();
-            var targets = new List<(string, string?, string?)>();
-            foreach ((string id, Blueprint bp) in catalog)
-            {
-                string slug = bp.Metadata?.RawgSlug?.Trim() ?? "";
-                string appId = (bp.ClientSteamAppId ?? "").Trim();
+            string slug = bp.Metadata?.RawgSlug?.Trim() ?? "";
+            string appId = (bp.ClientSteamAppId ?? "").Trim();
 
-                bool steamable = steam.Enabled && SteamCoverClient.TryParseAppId(appId, out _);
-                bool rawgable = rawg.Enabled && slug.Length > 0;
-                if (!steamable && !rawgable) continue; // nothing to fetch for this blueprint this sweep
+            bool steamable = steam.Enabled && SteamCoverClient.TryParseAppId(appId, out _);
+            bool rawgable = rawg.Enabled && slug.Length > 0;
+            if (!steamable && !rawgable) continue; // nothing to fetch for this blueprint this sweep
 
-                string entryId = string.IsNullOrWhiteSpace(id) ? bp.Name : id;
-                targets.Add((entryId, slug.Length == 0 ? null : slug, appId.Length == 0 ? null : appId));
-            }
-            return targets;
+            string entryId = string.IsNullOrWhiteSpace(id) ? bp.Name : id;
+            targets.Add((entryId, slug.Length == 0 ? null : slug, appId.Length == 0 ? null : appId));
         }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Library hydration: blueprint read failed; nothing to hydrate this sweep.");
-            return [];
-        }
+        return targets;
     }
 
     // RAWG named entities → distinct, non-blank names (top `take`, default all).

@@ -15,7 +15,7 @@ namespace TheKrystalShip.Api.Tests;
 /// good row (record <c>not_found</c>); an ok fetch → a full row + the image bytes land on disk; opt-in (no
 /// key → no-op).
 /// </summary>
-public sealed class RawgHydrationWorkerTests : IDisposable
+public sealed class LibraryHydrationWorkerTests : IDisposable
 {
     private readonly string _cacheDir = Path.Combine(Path.GetTempPath(), $"rawgcache-{Guid.NewGuid():N}");
 
@@ -42,7 +42,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
             },
         };
         RawgStore store = NewStore();
-        RawgHydrationWorker worker = Worker(rawg, store, Bp("factorio", slug: "factorio"));
+        LibraryHydrationWorker worker = Worker(rawg, store, Bp("factorio", slug: "factorio"));
 
         await worker.SweepAsync(default);
 
@@ -64,7 +64,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
     public async Task A_blueprint_with_no_slug_produces_no_row()
     {
         RawgStore store = NewStore();
-        RawgHydrationWorker worker = Worker(new FakeRawg(), store, Bp("noslug", slug: null));
+        LibraryHydrationWorker worker = Worker(new FakeRawg(), store, Bp("noslug", slug: null));
 
         await worker.SweepAsync(default);
 
@@ -83,7 +83,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
             CoverFile = "gone_cover.jpg", FetchedAt = DateTimeOffset.UtcNow.AddDays(-40), Status = "ok",
         });
         // RAWG now 404s (FakeRawg has no entry for the slug → null).
-        RawgHydrationWorker worker = Worker(new FakeRawg(), store, Bp("gone", slug: "gone"));
+        LibraryHydrationWorker worker = Worker(new FakeRawg(), store, Bp("gone", slug: "gone"));
 
         await worker.SweepAsync(default);
 
@@ -106,7 +106,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
             Genres = RawgStore.SerializeList([]), Tags = RawgStore.SerializeList([]),
             FetchedAt = DateTimeOffset.UtcNow, Status = "ok",   // fresh (< 30d)
         });
-        RawgHydrationWorker worker = Worker(rawg, store, Bp("valheim", slug: "valheim"));
+        LibraryHydrationWorker worker = Worker(rawg, store, Bp("valheim", slug: "valheim"));
 
         await worker.SweepAsync(default);
 
@@ -133,7 +133,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
         };
         var steam = new FakeSteam { Covers = { ["427520"] = SteamCoverBytes } };
         RawgStore store = NewStore();
-        RawgHydrationWorker worker = Worker(rawg, steam, store, Bp("factorio", slug: "factorio", steamAppId: "427520"));
+        LibraryHydrationWorker worker = Worker(rawg, steam, store, Bp("factorio", slug: "factorio", steamAppId: "427520"));
 
         await worker.SweepAsync(default);
 
@@ -157,7 +157,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
         };
         var steam = new FakeSteam(); // enabled, but the blueprint has no usable steam appid
         RawgStore store = NewStore();
-        RawgHydrationWorker worker = Worker(rawg, steam, store, Bp("minecraft", slug: "minecraft", steamAppId: "0"));
+        LibraryHydrationWorker worker = Worker(rawg, steam, store, Bp("minecraft", slug: "minecraft", steamAppId: "0"));
 
         await worker.SweepAsync(default);
 
@@ -177,7 +177,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
         };
         var steam = new FakeSteam(); // enabled, Covers empty → a valid appid still 404s (returns null)
         RawgStore store = NewStore();
-        RawgHydrationWorker worker = Worker(rawg, steam, store, Bp("someserver", slug: "someserver", steamAppId: "999999"));
+        LibraryHydrationWorker worker = Worker(rawg, steam, store, Bp("someserver", slug: "someserver", steamAppId: "999999"));
 
         await worker.SweepAsync(default);
 
@@ -194,7 +194,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
         var rawg = new FakeRawg { Enabled = false }; // no RAWG key — decoupled
         var steam = new FakeSteam { Covers = { ["427520"] = SteamCoverBytes } };
         RawgStore store = NewStore();
-        RawgHydrationWorker worker = Worker(rawg, steam, store, Bp("factorio", slug: "factorio", steamAppId: "427520"));
+        LibraryHydrationWorker worker = Worker(rawg, steam, store, Bp("factorio", slug: "factorio", steamAppId: "427520"));
 
         await worker.SweepAsync(default);
 
@@ -215,7 +215,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
         var rawg = new FakeRawg { Enabled = false };
         var steam = new FakeSteam { Enabled = false };
         RawgStore store = NewStore();
-        RawgHydrationWorker worker = Worker(rawg, steam, store, Bp("factorio", slug: "factorio", steamAppId: "427520"));
+        LibraryHydrationWorker worker = Worker(rawg, steam, store, Bp("factorio", slug: "factorio", steamAppId: "427520"));
 
         await worker.SweepAsync(default);
 
@@ -235,7 +235,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
         });
         var rawg = new FakeRawg { Games = { ["factorio"] = new RawgGame { DescriptionRaw = "Now with metadata." } } };
         var steam = new FakeSteam { Covers = { ["427520"] = SteamCoverBytes } };
-        RawgHydrationWorker worker = Worker(rawg, steam, store, Bp("factorio", slug: "factorio", steamAppId: "427520"));
+        LibraryHydrationWorker worker = Worker(rawg, steam, store, Bp("factorio", slug: "factorio", steamAppId: "427520"));
 
         await worker.SweepAsync(default);
 
@@ -258,7 +258,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
             Genres = RawgStore.SerializeList([]), Tags = RawgStore.SerializeList([]),
             FetchedAt = DateTimeOffset.UtcNow, Status = "ok", // fresh (< interval)
         });
-        RawgHydrationWorker worker = Worker(rawg, store, Bp("valheim", slug: "valheim"));
+        LibraryHydrationWorker worker = Worker(rawg, store, Bp("valheim", slug: "valheim"));
 
         await worker.SweepAsync(default, force: true); // the admin POST /library/refresh path
 
@@ -271,7 +271,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
     {
         var rawg = new FakeRawg { Games = { ["factorio"] = new RawgGame { BackgroundImage = "https://media.rawg.io/c.jpg" } } };
         RawgStore store = NewStore();
-        RawgHydrationWorker worker = Worker(rawg, store, Bp("factorio", slug: "factorio"));
+        LibraryHydrationWorker worker = Worker(rawg, store, Bp("factorio", slug: "factorio"));
 
         await worker.SweepAsync(default); // first hydration writes the cover
         string path = RawgCache.FilePath(_cacheDir, "factorio", RawgCache.CoverSlot);
@@ -287,10 +287,10 @@ public sealed class RawgHydrationWorkerTests : IDisposable
     // --- helpers -----------------------------------------------------------------------------------
 
     // Convenience: RAWG-only (Steam disabled) — the pre-decoupling default, so the original tests are unchanged.
-    private RawgHydrationWorker Worker(IRawgClient rawg, RawgStore store, params (string Id, Blueprint Bp)[] blueprints) =>
+    private LibraryHydrationWorker Worker(IRawgClient rawg, RawgStore store, params (string Id, Blueprint Bp)[] blueprints) =>
         Worker(rawg, new FakeSteam { Enabled = false }, store, blueprints);
 
-    private RawgHydrationWorker Worker(
+    private LibraryHydrationWorker Worker(
         IRawgClient rawg, ISteamCoverClient steam, RawgStore store, params (string Id, Blueprint Bp)[] blueprints)
     {
         var options = TestOptions(_cacheDir);
@@ -298,8 +298,10 @@ public sealed class RawgHydrationWorkerTests : IDisposable
         var sp = new ServiceCollection()
             .AddSingleton<IBlueprintService>(new FakeBlueprintsForWorker(catalog))
             .BuildServiceProvider();
-        return new RawgHydrationWorker(options, rawg, steam, store, sp.GetRequiredService<IServiceScopeFactory>(),
-            NullLogger<RawgHydrationWorker>.Instance);
+        var cache = new BlueprintCache(sp, options, NullLogger<BlueprintCache>.Instance);
+        cache.StartAsync(CancellationToken.None).GetAwaiter().GetResult();
+        return new LibraryHydrationWorker(options, rawg, steam, store, cache,
+            NullLogger<LibraryHydrationWorker>.Instance);
     }
 
     private static (string, Blueprint) Bp(string id, string? slug, string? steamAppId = null) =>
@@ -316,6 +318,7 @@ public sealed class RawgHydrationWorkerTests : IDisposable
         HostId = "test", HostLabel = "test",
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
         FirewallSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmSocketPath = "",
+        BlueprintCacheTtlSeconds = 60,
         LogSources = [], JournalctlPath = "journalctl", SystemctlPath = "systemctl", LogReadTimeoutMs = 5000,
         RawgApiKey = "test-key", RawgCacheDir = cacheDir, PublicBaseUrl = "",
         SteamCdnBaseUrl = "https://steamcdn.test/apps", // inert here: the worker uses the injected ISteamCoverClient fake

@@ -147,6 +147,11 @@ public class Startup(IConfiguration configuration)
         // RAWG.io cover/metadata. RawgStore is the single reader/writer of the rawg_entry table (own DI scope
         // per op, like IntegrationStore); the LibraryAggregator reads it per-request, degrading cover/hero to
         // null INDEPENDENTLY of the blueprint read on a cache failure.
+        // Blueprint in-memory cache: sits between consumers (LibraryAggregator, LibraryHydrationWorker) and
+        // the kgsm engine's IBlueprintService. Background refresh every BlueprintCacheTtlSeconds; degrades
+        // to empty when the engine is unconfigured.
+        services.AddSingleton<BlueprintCache>();
+        services.AddHostedService(sp => sp.GetRequiredService<BlueprintCache>());
         services.AddSingleton<RawgStore>();
         services.AddSingleton<LibraryAggregator>();
         // The RAWG client is a typed HttpClient. RemoveAllLoggers() is load-bearing, NOT cosmetic (the same as
@@ -163,8 +168,8 @@ public class Startup(IConfiguration configuration)
         // hour). Runs if EITHER source is on (Steam is on by default — keyless; RAWG is opt-in via
         // KGSM_API_RAWG_API_KEY). Off the request path; never blocks startup. Registered singleton + hosted
         // (same instance) like the other pumps, so the admin POST /library/refresh can force an immediate sweep.
-        services.AddSingleton<RawgHydrationWorker>();
-        services.AddHostedService(sp => sp.GetRequiredService<RawgHydrationWorker>());
+        services.AddSingleton<LibraryHydrationWorker>();
+        services.AddHostedService(sp => sp.GetRequiredService<LibraryHydrationWorker>());
 
         // M8·c — outbound-notification integrations (§3·e). The store persists per-provider config (a
         // second EF entity in AppDbContext, created by the same EnsureCreated). Providers are a THIN seam

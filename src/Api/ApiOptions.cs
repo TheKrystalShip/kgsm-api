@@ -148,6 +148,13 @@ public sealed class ApiOptions
     /// itself is cheap (a DB read) when nothing is stale.</summary>
     public required int LibraryRefreshHour { get; init; }
 
+    /// <summary>
+    /// How long (seconds) the in-memory blueprint cache serves before a background refresh
+    /// (<c>KGSM_API_BLUEPRINT_CACHE_TTL_SECONDS</c>, default 60). Blueprints change infrequently
+    /// (install/uninstall), so a short staleness window is acceptable. Floor: 10s.
+    /// </summary>
+    public required int BlueprintCacheTtlSeconds { get; init; }
+
     /// <summary>Whether RAWG hydration is enabled (a non-blank <see cref="RawgApiKey"/>). When false the
     /// worker skips RAWG (hero/description/genres/tags + the cover fallback); Steam covers are unaffected.</summary>
     public bool RawgProvisioned => !string.IsNullOrWhiteSpace(RawgApiKey);
@@ -436,6 +443,8 @@ public sealed class ApiOptions
             // the periodic wake), hour into 0..23.
             LibraryRefreshIntervalDays = Math.Max(0, IntOr(configuration["KGSM_API_LIBRARY_REFRESH_INTERVAL_DAYS"], 7)),
             LibraryRefreshHour = Math.Clamp(IntOr(configuration["KGSM_API_LIBRARY_REFRESH_HOUR"], 6), 0, 23),
+            // Blueprint in-memory cache TTL (background refresh interval). Floor 10s.
+            BlueprintCacheTtlSeconds = Math.Max(10, IntOr(configuration["KGSM_API_BLUEPRINT_CACHE_TTL_SECONDS"], 60)),
 
             // Metrics history (M9). The dedicated DB beside the audit DB; persist cadence floored at 5s;
             // retention/step clamped sane.

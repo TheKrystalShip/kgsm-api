@@ -3,7 +3,7 @@ namespace TheKrystalShip.Api.Data;
 /// <summary>
 /// One blueprint's cached RAWG.io metadata (cover art + a hero screenshot + a cleaned description +
 /// genres/tags), keyed by <see cref="BlueprintId"/>. The API hydrates this <b>once and refreshes ~30-day</b>
-/// from RAWG (the <see cref="Services.Library.RawgHydrationWorker"/>); after that, runtime never touches RAWG
+/// from RAWG (the <see cref="Services.Library.LibraryHydrationWorker"/>); after that, runtime never touches RAWG
 /// (the key is refresh-only). The image bytes are self-hosted on disk (never hotlinked from media.rawg.io);
 /// this row records where they landed + their ETags. The API serves them from its own
 /// <c>GET /library/{id}/cover</c> / <c>/hero</c> endpoints.

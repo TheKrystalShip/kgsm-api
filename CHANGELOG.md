@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Blueprint catalog cached in-memory (60s TTL, background refresh).** `GET /library` no longer
+  spawns a `kgsm.sh` process on every request — a singleton `BlueprintCache` serves the blueprint
+  dictionary from memory, refreshed by a background `PeriodicTimer` every 60s (configurable via
+  `KGSM_API_BLUEPRINT_CACHE_TTL_SECONDS`). First request triggers an on-demand load; subsequent
+  reads are instant. The `LibraryHydrationWorker` shares the same cache instead of making its own
+  process spawn per sweep.
+
 ## [0.4.1] - 2026-07-02
 
 ### Fixed
