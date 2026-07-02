@@ -155,6 +155,14 @@ public sealed class ApiOptions
     /// </summary>
     public required int BlueprintCacheTtlSeconds { get; init; }
 
+    /// <summary>
+    /// How long (seconds) the in-memory instance cache serves before a background refresh
+    /// (<c>KGSM_API_INSTANCE_CACHE_TTL_SECONDS</c>, default 60). Instances change infrequently
+    /// (start/stop/install/uninstall), and kgsm events update runtime state between refreshes.
+    /// Floor: 10s.
+    /// </summary>
+    public required int InstanceCacheTtlSeconds { get; init; }
+
     /// <summary>Whether RAWG hydration is enabled (a non-blank <see cref="RawgApiKey"/>). When false the
     /// worker skips RAWG (hero/description/genres/tags + the cover fallback); Steam covers are unaffected.</summary>
     public bool RawgProvisioned => !string.IsNullOrWhiteSpace(RawgApiKey);
@@ -445,6 +453,8 @@ public sealed class ApiOptions
             LibraryRefreshHour = Math.Clamp(IntOr(configuration["KGSM_API_LIBRARY_REFRESH_HOUR"], 6), 0, 23),
             // Blueprint in-memory cache TTL (background refresh interval). Floor 10s.
             BlueprintCacheTtlSeconds = Math.Max(10, IntOr(configuration["KGSM_API_BLUEPRINT_CACHE_TTL_SECONDS"], 60)),
+            // Instance in-memory cache TTL (background refresh interval). Floor 10s.
+            InstanceCacheTtlSeconds = Math.Max(10, IntOr(configuration["KGSM_API_INSTANCE_CACHE_TTL_SECONDS"], 60)),
 
             // Metrics history (M9). The dedicated DB beside the audit DB; persist cadence floored at 5s;
             // retention/step clamped sane.

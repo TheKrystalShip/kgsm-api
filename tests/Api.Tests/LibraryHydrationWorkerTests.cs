@@ -319,6 +319,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
         FirewallSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmSocketPath = "",
         BlueprintCacheTtlSeconds = 60,
+        InstanceCacheTtlSeconds = 60,
         LogSources = [], JournalctlPath = "journalctl", SystemctlPath = "systemctl", LogReadTimeoutMs = 5000,
         RawgApiKey = "test-key", RawgCacheDir = cacheDir, PublicBaseUrl = "",
         SteamCdnBaseUrl = "https://steamcdn.test/apps", // inert here: the worker uses the injected ISteamCoverClient fake

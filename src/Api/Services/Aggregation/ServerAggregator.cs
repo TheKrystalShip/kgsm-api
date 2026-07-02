@@ -2,7 +2,6 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
-using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 using Snap = TheKrystalShip.KGSM.Monitor.Contracts;
@@ -11,21 +10,16 @@ namespace TheKrystalShip.Api.Services.Aggregation;
 
 /// <summary>
 /// Builds this host's <see cref="Server"/> list (architecture §3) for the M1·b read surface — the
-/// project's central join: the kgsm engine's domain + run-state (via kgsm-lib) ⋈ the per-instance
-/// metrics (via kgsm-monitor), keyed on the instance id. The roster is authoritative from kgsm-lib
-/// (<see cref="IInstanceService.GetAll"/>); run-state/version come from
-/// <see cref="IInstanceService.GetAllStatuses"/>; metrics are looked up by id in the monitor
-/// snapshot. A server with no metrics row (monitor absent, or simply not running) gets
-/// <c>metrics: null</c> — never a fabricated zero (the honesty invariant).
+/// project's central join: the kgsm engine's domain + run-state (from <see cref="InstanceCache"/>)
+/// ⋈ the per-instance metrics (via kgsm-monitor), keyed on the instance id. The roster is served
+/// from the in-memory cache (updated by events + a 60s background refresh); metrics are looked up
+/// by id in the monitor snapshot. A server with no metrics row (monitor absent, or simply not
+/// running) gets <c>metrics: null</c> — never a fabricated zero (the honesty invariant).
 /// </summary>
 /// <remarks>
-/// The two kgsm-lib calls are synchronous process spawns (they shell <c>kgsm.sh</c>), so they run
-/// on the thread pool concurrently with the async monitor scrape and never block the request thread.
-/// <see cref="IInstanceService"/> is a <em>transient</em> kgsm-lib service, so it is resolved
-/// per-call from the provider (the same optional-resolve pattern <c>HostAggregator</c> uses for the
-/// watchdog client) rather than captured in this singleton. The engine is base, not a leaf: if it is
-/// unconfigured/unregistered the list is empty and a misconfiguration is logged once — there is no
-/// §4·b "engine" capability to render absent.
+/// The instance cache eliminates per-request process spawns — the roster + run-state are read from
+/// memory (lock-free reference swap) instead of shelling <c>kgsm.sh</c> on every call. The monitor
+/// scrape (a socket read, not a process spawn) remains on-demand and concurrent.
 /// </remarks>
 public sealed class ServerAggregator
 {
@@ -33,25 +27,22 @@ public sealed class ServerAggregator
     private readonly MonitorClient _monitor;
     private readonly NetworkAggregator _network;
     private readonly RawgStore _rawg;
-    private readonly IServiceProvider _services;
+    private readonly InstanceCache _cache;
     private readonly ILogger<ServerAggregator> _logger;
-
-    // Latch so a persistent engine misconfiguration is logged once, not on every poll.
-    private int _engineUnavailableLogged;
 
     public ServerAggregator(
         ApiOptions options,
         MonitorClient monitor,
         NetworkAggregator network,
         RawgStore rawg,
-        IServiceProvider services,
+        InstanceCache cache,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
         _monitor = monitor;
         _network = network;
         _rawg = rawg;
-        _services = services;
+        _cache = cache;
         _logger = logger;
     }
 
@@ -65,15 +56,15 @@ public sealed class ServerAggregator
     /// </summary>
     public async Task<ServersRead> GetServersReadAsync(CancellationToken ct)
     {
-        // Domain read (blocking process spawns) and the metrics scrape run concurrently.
-        Task<DomainReadout> domainTask = Task.Run(ReadDomain, ct);
-        Task<Snap.Snapshot?> snapshotTask = _monitor.GetLatestAsync(ct);
-        await Task.WhenAll(domainTask, snapshotTask).ConfigureAwait(false);
+        if (!_cache.EngineRead)
+            return new ServersRead(false, []);
 
-        DomainReadout domain = domainTask.Result;
-        return domain.EngineRead
-            ? new ServersRead(true, Join(domain, snapshotTask.Result))
-            : new ServersRead(false, []);
+        // Monitor scrape (a socket read, not a process spawn) runs concurrently with the sync cache read.
+        Task<Snap.Snapshot?> snapshotTask = _monitor.GetLatestAsync(ct);
+        await snapshotTask.ConfigureAwait(false);
+
+        IReadOnlyList<Server> servers = Join(_cache.Roster, _cache.Statuses, snapshotTask.Result);
+        return new ServersRead(true, servers);
     }
 
     /// <summary>
@@ -101,16 +92,17 @@ public sealed class ServerAggregator
     /// </summary>
     public async Task<Server?> GetServerDetailAsync(string id, string? baseUrl, CancellationToken ct)
     {
-        Task<DomainReadout> domainTask = Task.Run(ReadDomain, ct);
-        Task<Snap.Snapshot?> snapshotTask = _monitor.GetLatestAsync(ct);
-        await Task.WhenAll(domainTask, snapshotTask).ConfigureAwait(false);
-
-        DomainReadout domain = domainTask.Result;
-        if (!domain.Instances.TryGetValue(id, out Instance? instance))
+        if (!_cache.EngineRead)
             return null;
 
+        if (!_cache.Roster.TryGetValue(id, out Instance? instance))
+            return null;
+
+        Task<Snap.Snapshot?> snapshotTask = _monitor.GetLatestAsync(ct);
+        await snapshotTask.ConfigureAwait(false);
+
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshotTask.Result);
-        Server server = BuildServer(id, instance, domain.Statuses, metricsById);
+        Server server = BuildServer(id, instance, _cache.Statuses, metricsById, _options.HostId);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -155,62 +147,16 @@ public sealed class ServerAggregator
         }
     }
 
-    /// <summary>The kgsm-lib domain read: the instance roster + each instance's status reading.</summary>
-    private DomainReadout ReadDomain()
-    {
-        // IInstanceService is transient and only registered when the engine is provisioned; resolve
-        // optionally so an unconfigured engine degrades to an empty list rather than throwing.
-        var instances = _services.GetService(typeof(IInstanceService)) as IInstanceService;
-        if (instances is null)
-        {
-            if (Interlocked.Exchange(ref _engineUnavailableLogged, 1) == 0)
-                _logger.LogWarning(
-                    "kgsm engine is not configured (KGSM_API_KGSM_PATH is empty) — /servers will be empty.");
-            // A persistent misconfiguration, not a transient read failure: report an honest empty roster
-            // (EngineRead=true) so the surface shows "no servers" rather than perpetually keeping stale.
-            return DomainReadout.Empty;
-        }
-
-        try
-        {
-            // GetAllOrNull distinguishes a FAILED read (null) from a genuine empty roster (kgsm emits "{}",
-            // which deserializes to a non-null empty dict). A failed read must NOT be served as "zero
-            // servers" — that's what wiped the SPA's list (a 200 [] replacing it) and made the DomainPump
-            // tombstone every instance. Report it as unread so the caller keeps last-known state / 503s.
-            Dictionary<string, Instance>? roster = instances.GetAllOrNull();
-            if (roster is null)
-            {
-                _logger.LogWarning(
-                    "kgsm instance-roster read failed (the list command errored or returned unparseable "
-                    + "output) — preserving last-known state, NOT reporting zero servers.");
-                return DomainReadout.Unread;
-            }
-
-            // fast: skip the per-instance network update-check (~20x faster). Version.Current is still
-            // reported; only Latest/UpdatesAvailable go null — which this DTO does not emit anyway.
-            Dictionary<string, Reading<InstanceRuntimeStatus>> statuses = instances.GetAllStatuses(fast: true);
-
-            if (roster.Count == 0)
-                _logger.LogDebug("kgsm reported an empty instance roster (genuinely zero instances).");
-
-            return new DomainReadout(roster, statuses, EngineRead: true);
-        }
-        catch (Exception ex)
-        {
-            // A read that threw is a FAILED read, not "zero servers" — surface it as unread (the caller
-            // keeps last-known state) and log so an operator can see the engine read broke.
-            _logger.LogWarning(ex, "kgsm domain read threw; preserving last-known state, not reporting zero servers.");
-            return DomainReadout.Unread;
-        }
-    }
-
-    private IReadOnlyList<Server> Join(DomainReadout domain, Snap.Snapshot? snapshot)
+    private IReadOnlyList<Server> Join(
+        IReadOnlyDictionary<string, Instance> roster,
+        IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> statuses,
+        Snap.Snapshot? snapshot)
     {
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshot);
 
-        var servers = new List<Server>(domain.Instances.Count);
-        foreach ((string id, Instance instance) in domain.Instances)
-            servers.Add(BuildServer(id, instance, domain.Statuses, metricsById));
+        var servers = new List<Server>(roster.Count);
+        foreach ((string id, Instance instance) in roster)
+            servers.Add(BuildServer(id, instance, statuses, metricsById, _options.HostId));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -229,12 +175,13 @@ public sealed class ServerAggregator
 
     // Build one Server (the shared list/detail element — detail adds the network block on top). status,
     // version and metrics are all independent + honest: a non-measured reading is "unknown", a missing
-    // metrics row is null — never inferred from one another.
-    private Server BuildServer(
+    // metrics row is null — never inferred from one another. Internal static so DomainPump can reuse it.
+    internal static Server BuildServer(
         string id,
         Instance instance,
         IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> statuses,
-        IReadOnlyDictionary<string, Snap.ServerMetrics> metricsById)
+        IReadOnlyDictionary<string, Snap.ServerMetrics> metricsById,
+        string hostId)
     {
         string status = ServerStatus.Unknown;
         string? version = null;
@@ -275,7 +222,7 @@ public sealed class ServerAggregator
             Status: status,
             Version: version,
             Runtime: instance.Runtime == InstanceRuntime.Container ? "container" : "native",
-            HostId: _options.HostId,
+            HostId: hostId,
             SteamAppId: string.IsNullOrWhiteSpace(instance.SteamAppId) ? "0" : instance.SteamAppId,
             ClientSteamAppId: string.IsNullOrWhiteSpace(instance.ClientSteamAppId) ? "0" : instance.ClientSteamAppId,
             IsSteamAccountRequired: instance.IsSteamAccountRequired,
@@ -300,29 +247,6 @@ public sealed class ServerAggregator
     }
 
     private static readonly string[] BlueprintSuffixes = [".bp.yaml", ".bp.yml"];
-
-    /// <summary>
-    /// The kgsm-lib domain read result: the instance roster, the per-instance status readings, and
-    /// whether the engine was actually read. <see cref="EngineRead"/> is the honesty axis — false means
-    /// the roster read FAILED (transient), true means it succeeded (the roster may legitimately be empty).
-    /// </summary>
-    private sealed record DomainReadout(
-        IReadOnlyDictionary<string, Instance> Instances,
-        IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> Statuses,
-        bool EngineRead)
-    {
-        /// <summary>A successful read of an empty roster (or an unconfigured engine): honestly zero servers.</summary>
-        public static readonly DomainReadout Empty = new(
-            new Dictionary<string, Instance>(),
-            new Dictionary<string, Reading<InstanceRuntimeStatus>>(),
-            EngineRead: true);
-
-        /// <summary>A FAILED read: the engine could not be read, so the caller must keep last-known state.</summary>
-        public static readonly DomainReadout Unread = new(
-            new Dictionary<string, Instance>(),
-            new Dictionary<string, Reading<InstanceRuntimeStatus>>(),
-            EngineRead: false);
-    }
 }
 
 /// <summary>

@@ -26,6 +26,7 @@ namespace TheKrystalShip.Api.Services.Aggregation;
 /// </remarks>
 public sealed class NetworkAggregator(
     Leaves.LeafRegistry registry,
+    InstanceCache cache,
     IServiceProvider services,
     ILogger<NetworkAggregator> logger)
 {
@@ -164,27 +165,19 @@ public sealed class NetworkAggregator(
         }
     }
 
-    // The instance -> blueprint(app) map for the host grid's `app` join, best-effort. An absent/failed
-    // engine read leaves the map empty -> every app is null (honest, never guessed).
+    // The instance -> blueprint(app) map for the host grid's `app` join. Reads from the in-memory
+    // instance cache (no process spawn). An empty/failed cache leaves the map empty -> every app is
+    // null (honest, never guessed).
     private IReadOnlyDictionary<string, string> AppMap()
     {
-        var instances = services.GetService(typeof(IInstanceService)) as IInstanceService;
-        if (instances is null)
+        IReadOnlyDictionary<string, Instance> roster = cache.Roster;
+        if (roster.Count == 0)
             return EmptyAppMap;
 
-        try
-        {
-            Dictionary<string, Instance> roster = instances.GetAll();
-            var map = new Dictionary<string, string>(roster.Count, StringComparer.Ordinal);
-            foreach ((string id, Instance inst) in roster)
-                map[id] = ServerAggregator.CleanBlueprintId(inst);
-            return map;
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "roster read for the open-ports app join failed; apps will be null.");
-            return EmptyAppMap;
-        }
+        var map = new Dictionary<string, string>(roster.Count, StringComparer.Ordinal);
+        foreach ((string id, Instance inst) in roster)
+            map[id] = ServerAggregator.CleanBlueprintId(inst);
+        return map;
     }
 
     private static readonly IReadOnlyDictionary<string, string> EmptyAppMap =

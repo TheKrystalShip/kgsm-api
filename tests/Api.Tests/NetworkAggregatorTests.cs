@@ -222,8 +222,11 @@ public sealed class NetworkAggregatorTests
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static NetworkAggregator Aggregator(bool provisioned, IFirewallService? firewall) =>
-        new(Registry(provisioned), new StubProvider { Firewall = firewall }, NullLogger<NetworkAggregator>.Instance);
+    private static NetworkAggregator Aggregator(bool provisioned, IFirewallService? firewall)
+    {
+        var cache = new InstanceCache(new StubProvider { Firewall = firewall }, Options(provisioned), NullLogger<InstanceCache>.Instance);
+        return new(Registry(provisioned), cache, new StubProvider { Firewall = firewall }, NullLogger<NetworkAggregator>.Instance);
+    }
 
     // NetworkAggregator now gates on the runtime LeafRegistry (seeded from config). The registry's in-memory
     // seed is set in its constructor (synchronous, no DB), so IsProvisioned("firewall") is correct without a

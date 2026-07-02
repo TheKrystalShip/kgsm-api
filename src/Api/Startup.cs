@@ -141,6 +141,12 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<NetworkAggregator>();
         services.AddSingleton<ServerAggregator>();
 
+        // Instance in-memory cache: sits between consumers (ServerAggregator, DomainPump,
+        // NetworkAggregator) and the kgsm engine's IInstanceService. Background refresh every
+        // InstanceCacheTtlSeconds; kgsm lifecycle events update runtime state between refreshes.
+        services.AddSingleton<InstanceCache>();
+        services.AddHostedService(sp => sp.GetRequiredService<InstanceCache>());
+
         // M8·a — the installable-game catalog (GET /library). A blueprint scrape via kgsm-lib
         // IBlueprintService (resolved per-request, degrading to an empty catalog (logged once) when the engine
         // is unconfigured — the engine-is-base posture as ServerAggregator), joined with this host's cached
@@ -207,7 +213,7 @@ public class Startup(IConfiguration configuration)
         // an idle stream costs nothing. The /stream SSE endpoint lives in StreamController.
         services.AddSingleton<StreamHub>();
         services.AddHostedService<MetricsPump>();        // ~1s monitor scrape -> servers/{id}/metrics + hosts/{id}/metrics
-        services.AddHostedService<DomainPump>();         // ~3s domain join diff -> servers (status/roster)
+        services.AddHostedService<DomainPump>();         // cache-backed diff -> servers (status/roster)
         // The leaf health monitor is ALWAYS-ON (not gated on subscribers): it polls each provisioned
         // leaf's /health every ~2s as the canonical liveness signal, serves the cached capability block
         // to GET /hosts (HostAggregator reads it), and publishes hosts/{id}/capabilities flips. It is one

@@ -291,6 +291,7 @@ public sealed class LibraryAggregatorTests
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
         FirewallSocketPath = "", KgsmPath = "", KgsmSocketPath = "",
         BlueprintCacheTtlSeconds = 60,
+        InstanceCacheTtlSeconds = 60,
         LogSources = [], JournalctlPath = "journalctl", SystemctlPath = "systemctl", LogReadTimeoutMs = 5000,
         RawgApiKey = "", RawgCacheDir = Path.GetTempPath(), PublicBaseUrl = "",
         SteamCdnBaseUrl = "", SteamCoversDisabled = true,

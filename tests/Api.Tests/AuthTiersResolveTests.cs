@@ -21,6 +21,7 @@ public sealed class AuthTiersResolveTests
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
         FirewallSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmSocketPath = "",
         BlueprintCacheTtlSeconds = 60,
+        InstanceCacheTtlSeconds = 60,
         LogSources = [], JournalctlPath = "journalctl", SystemctlPath = "systemctl", LogReadTimeoutMs = 5000,
         RawgApiKey = "", RawgCacheDir = "covers", PublicBaseUrl = "",
         SteamCdnBaseUrl = "https://steamcdn.test/apps",

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Core.Interfaces;
@@ -31,6 +32,7 @@ public sealed class KgsmAuditConsumer(
     AlertEngine alerts,
     PlayerRosterService roster,
     PlayerHistoryService history,
+    InstanceCache instanceCache,
     ApiOptions options,
     ILogger<KgsmAuditConsumer> logger) : IHostedService
 {
@@ -100,24 +102,30 @@ public sealed class KgsmAuditConsumer(
         // Services/Players/PlayerRosterService.cs remarks).
         events.RegisterHandler<InstanceStartedData>(d =>
         {
+            instanceCache.UpdateStatus(d.InstanceName, true);
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
             return WriteServerAndBridge(d, AuditAction.ServerStart, "started");
         });
         events.RegisterHandler<InstanceStoppedData>(d =>
         {
+            instanceCache.UpdateStatus(d.InstanceName, false);
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
             return WriteServer(d, AuditAction.ServerStop, AuditSeverity.Info, "stopped");
         });
         events.RegisterHandler<InstanceRestartedData>(d =>
         {
+            instanceCache.UpdateStatus(d.InstanceName, true);
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
             return WriteServerAndBridge(d, AuditAction.ServerRestart, "restarted");
         });
         events.RegisterHandler<InstanceUninstalledData>(d =>
-            WriteServer(d, AuditAction.ServerUninstall, AuditSeverity.Warn, "uninstalled"));
+        {
+            instanceCache.TryRefresh();
+            return WriteServer(d, AuditAction.ServerUninstall, AuditSeverity.Warn, "uninstalled");
+        });
 
         // server.update — sourced from the version-changed event (it carries the meaningful old→new
         // detail). A plain instance_updated with no version change produces no row (nothing material
@@ -128,8 +136,11 @@ public sealed class KgsmAuditConsumer(
 
         // server.install — carries the blueprint it was installed from.
         events.RegisterHandler<InstanceInstalledData>(d =>
-            WriteServer(d, AuditAction.ServerInstall, AuditSeverity.Success, "installed",
-                Meta(("blueprint", d.Blueprint))));
+        {
+            instanceCache.TryRefresh();
+            return WriteServer(d, AuditAction.ServerInstall, AuditSeverity.Success, "installed",
+                Meta(("blueprint", d.Blueprint)));
+        });
 
         // backup.* — source + version of the snapshot.
         events.RegisterHandler<InstanceBackupCreatedData>(d =>
@@ -143,9 +154,15 @@ public sealed class KgsmAuditConsumer(
         // both stamped Actor/Origin = "system" upstream. Per-event policy (action/severity/summary/meta)
         // lives in the pure AuditMapping mappers so it is unit-tested without a live socket (M6·0).
         events.RegisterHandler<InstanceCrashedData>(d =>
-            audit.AppendAsync(AuditMapping.FromCrashEvent(d, options.HostId)));
+        {
+            instanceCache.UpdateStatus(d.InstanceName, false);
+            return audit.AppendAsync(AuditMapping.FromCrashEvent(d, options.HostId));
+        });
         events.RegisterHandler<InstanceFailedData>(d =>
-            audit.AppendAsync(AuditMapping.FromFailedEvent(d, options.HostId)));
+        {
+            instanceCache.UpdateStatus(d.InstanceName, false);
+            return audit.AppendAsync(AuditMapping.FromFailedEvent(d, options.HostId));
+        });
 
         // network.ports.open / .close — the CLI-path firewall echoes (kgsm bash emits these on a
         // confirmed open/close via create, firewall-enable/disable, or uninstall — kgsm-lib 1.12.0).
