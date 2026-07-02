@@ -30,6 +30,19 @@ public sealed record LogLine(
 /// </summary>
 public sealed record LogPage(IReadOnlyList<LogLine> Data, string? NextCursor);
 
+/// <summary>
+/// One configured host-log source (architecture.html §3) — the identity the frontend's source dropdown
+/// renders. Derived from the canonical <see cref="Services.Leaves.LeafCatalog"/> via
+/// <see cref="ApiOptions.LogSources"/>, so the set is stable and matches the Services board. The frontend
+/// uses this to populate the dropdown regardless of whether a source has recent journal entries (quiet
+/// services remain selectable).
+/// </summary>
+/// <param name="Id">The source id (<c>watchdog</c>, <c>monitor</c>, etc.) — matches the <c>source</c>
+/// field on <see cref="LogLine"/>.</param>
+/// <param name="Label">Human-friendly display name for the dropdown.</param>
+/// <param name="Unit">The systemd unit whose journal carries this source's lines.</param>
+public sealed record LogSourceInfo(string Id, string Label, string Unit);
+
 /// <summary>Display weight for a log line, mapped from the syslog priority (matches the frontend
 /// <c>LogConsole</c> level vocabulary). Never fabricated — an entry with no priority is <see cref="Info"/>.</summary>
 public static class LogLineLevel

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Auth;
+using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Logs;
 
 namespace TheKrystalShip.Api.Controllers;
@@ -25,6 +26,24 @@ namespace TheKrystalShip.Api.Controllers;
 [Authorize(Policy = AuthPolicy.Operator)]
 public sealed class LogsController(JournalReader journal, ApiOptions options) : ControllerBase
 {
+    /// <summary>
+    /// <c>GET /hosts/{id}/logs/sources</c> — the configured host-log sources this host can serve. Returns
+    /// the ordered set derived from the canonical <see cref="LeafCatalog"/> (via <see cref="ApiOptions.LogSources"/>),
+    /// so the frontend can populate the source dropdown regardless of whether a source has recent journal
+    /// entries. Quiet services remain selectable; the "no recent log lines" state is rendered client-side.
+    /// </summary>
+    [HttpGet("sources")]
+    public ActionResult<IReadOnlyList<LogSourceInfo>> GetSources()
+    {
+        var sources = options.LogSources.Select(s =>
+        {
+            string label = LeafCatalog.Default
+                .FirstOrDefault(l => l.Id == s.Source)?.DisplayName ?? s.Source;
+            return new LogSourceInfo(s.Source, label, s.Unit);
+        }).ToList();
+        return Ok(sources);
+    }
+
     /// <summary>
     /// <c>GET /hosts/{id}/logs?source=&amp;cursor=&amp;limit=100&amp;priority=</c> — newest first. Returns
     /// <c>{ data, nextCursor }</c>; pass <c>nextCursor</c> back as <c>?cursor=</c> for the next (older) page
