@@ -103,13 +103,23 @@ public sealed class StreamConnection
 
     private async Task WriteLoopAsync(CancellationToken ct)
     {
-        while (true)
+        while (!ct.IsCancellationRequested)
         {
-            // Wait for either a pending frame or the heartbeat interval.
-            var wakeTask = _wake.Reader.WaitToReadAsync(ct).AsTask();
-            var delayTask = Task.Delay(HeartbeatInterval, ct);
+            // Wait for either a pending frame or the heartbeat interval. A per-iteration linked CTS
+            // lets us cancel the loser once the race is decided — which both releases the abandoned
+            // 20s heartbeat timer on every wake (no timer pile-up under a busy stream) and, critically,
+            // guarantees the loop OBSERVES ct. On client disconnect ct is cancelled, so both awaited
+            // tasks complete synchronously; without the ct guards below the wake branch would drain an
+            // empty queue and `continue` forever without ever yielding — a 100% CPU spin that outlives
+            // the (now dead) connection.
+            using var tick = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            Task<bool> wakeTask = _wake.Reader.WaitToReadAsync(tick.Token).AsTask();
+            Task delayTask = Task.Delay(HeartbeatInterval, tick.Token);
 
             Task finished = await Task.WhenAny(wakeTask, delayTask).ConfigureAwait(false);
+            tick.Cancel(); // release the loser (abandoned heartbeat delay or pending wait)
+
+            if (ct.IsCancellationRequested) break; // client gone — tear down, never spin
 
             if (finished == delayTask)
             {

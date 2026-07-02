@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-02
+
+### Fixed
+- **SSE write loop no longer busy-loops (100% CPU) after a client disconnects.** On disconnect the
+  connection token (`RequestAborted`) is cancelled; the wake branch of `StreamConnection.WriteLoopAsync`
+  never checked it, so `await Task.WhenAny(canceledWait, canceledDelay)` completed synchronously every
+  iteration and the loop drained an empty queue and `continue`d forever without yielding — one orphaned
+  ThreadPool thread pegged at 100% per disconnected stream. The loop now guards on the token (loop
+  condition + a post-`WhenAny` break) and cancels the losing task each iteration via a linked CTS (which
+  also stops a 20s heartbeat timer from being abandoned on every wake). Regression-tested
+  (`StreamConnectionTests`): a cancelled token stops `RunAsync` promptly, never spins.
+
 ## [0.4.0] - 2026-07-02
 
 ### Changed
