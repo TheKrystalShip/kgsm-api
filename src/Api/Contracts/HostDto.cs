@@ -162,7 +162,8 @@ public sealed record OsInfo(string? Name, string? Kernel, string Arch);
 public sealed record HostCapabilities(
     Capability Metrics,
     Capability Assistant,
-    Capability Watchdog);
+    Capability Watchdog,
+    Capability Scheduler);
 
 /// <summary>
 /// One capability's state. <see cref="Provisioned"/> = declared on this host;

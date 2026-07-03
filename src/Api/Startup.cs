@@ -136,6 +136,15 @@ public class Startup(IConfiguration configuration)
                 : apiOptions.FirewallSocketPath;
             o.RequestTimeout = TimeSpan.FromSeconds(30);
         });
+        // Settings Phase 3 — the kgsm-scheduler leaf (NDJSON-over-unix-socket status). OPT-IN like the
+        // firewall/assistant: registered ONLY when KGSM_API_SCHEDULER_SOCKET is configured, so a host with
+        // no scheduler resolves the client as null → the capability is 'absent' and nextFireUtc is null
+        // (never a perpetually-'down' row). Consumers (LeafHealthMonitor, ServerSettingsController) resolve
+        // it optionally. Config-provisioned, NOT the runtime DB LeafRegistry (not one of the four
+        // runtime-flippable leaves) — the socket path is fixed by config for this leaf.
+        if (apiOptions.SchedulerProvisioned)
+            services.AddSingleton<SchedulerClient>();
+
         // Always registered: it degrades to firewall:"absent"/null when not provisioned, so the
         // server/host aggregators can depend on it unconditionally.
         services.AddSingleton<NetworkAggregator>();

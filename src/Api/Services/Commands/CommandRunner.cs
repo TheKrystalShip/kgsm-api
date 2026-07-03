@@ -220,6 +220,18 @@ public sealed class CommandRunner(
         if (instances is null)
             return (false, "engine not provisioned");
 
+        // Best-effort pre-stop (Phase 0 — delete hardening): stop a running instance before removing files so
+        // we never orphan a live process. A non-zero result is expected when it's already stopped — log at
+        // Debug and proceed; the stop must never block the uninstall. Skipped if lifecycle isn't provisioned.
+        var lifecycle = scope.ServiceProvider.GetService(typeof(ILifecycleService)) as ILifecycleService;
+        if (lifecycle is not null)
+        {
+            KgsmResult stop = lifecycle.Stop(job.ServerId, actor, origin);
+            if (!stop.IsSuccess)
+                logger.LogDebug("pre-uninstall stop of {ServerId} was non-zero (likely already stopped): {Detail}",
+                    job.ServerId, Detail(stop));
+        }
+
         KgsmResult result = instances.Uninstall(job.ServerId, actor, origin);
         return result.IsSuccess ? (true, null) : (false, Detail(result));
     }

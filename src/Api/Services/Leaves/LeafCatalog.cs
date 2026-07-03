@@ -23,6 +23,10 @@ public enum LeafHealthSource
 
     /// <summary>The watchdog's readiness (<see cref="LeafHealthMonitor"/> → kgsm-lib <c>IWatchdogClient.IsReadyAsync</c>).</summary>
     Watchdog,
+
+    /// <summary>The scheduler's status socket (<see cref="LeafHealthMonitor"/> → <see cref="SchedulerClient"/> —
+    /// can connect + parse the NDJSON snapshot).</summary>
+    Scheduler,
 }
 
 /// <summary>
@@ -62,6 +66,8 @@ public static class LeafCatalog
             "LLM assistant — chat & tool-calling turns", false, LeafHealthSource.Assistant),
         new("firewall", "kgsm-firewall.service", "Firewall",
             "Host firewall authority — opens & closes server ports", true, LeafHealthSource.None),
+        new("scheduler", "kgsm-scheduler.service", "Scheduler",
+            "Scheduled restart & backup — computes next-fire, drives the watchdog", false, LeafHealthSource.Scheduler),
         new("api", "kgsm-api.service", "Control Panel API",
             "The aggregator API serving this panel (this service)", false, LeafHealthSource.SelfApi),
         new("bot", "kgsm-bot.service", "Discord bot",

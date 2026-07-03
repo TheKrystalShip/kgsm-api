@@ -289,7 +289,7 @@ public sealed class LibraryAggregatorTests
     {
         HostId = "test", HostLabel = "test",
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
-        FirewallSocketPath = "", KgsmPath = "", KgsmSocketPath = "",
+        FirewallSocketPath = "", SchedulerSocketPath = "", KgsmPath = "", KgsmSocketPath = "",
         BlueprintCacheTtlSeconds = 60,
         InstanceCacheTtlSeconds = 60,
         LogSources = [], JournalctlPath = "journalctl", SystemctlPath = "systemctl", LogReadTimeoutMs = 5000,

@@ -79,6 +79,16 @@ public sealed class ApiOptions
     public required string FirewallSocketPath { get; init; }
 
     /// <summary>
+    /// kgsm-scheduler status socket (Settings Phase 3). The scheduler exposes an NDJSON-over-unix-socket
+    /// status snapshot at this path (default standard install: <c>/run/kgsm-scheduler/status.sock</c>).
+    /// Empty ⇒ the scheduler leaf is not provisioned (absent): <c>GET /servers/{id}/settings</c> still
+    /// returns 200 with <c>nextFireUtc:null</c>, and the scheduler capability renders absent — never a
+    /// perpetually-<c>down</c> row. <strong>Opt-in like the assistant/firewall</strong>: the scheduler is a
+    /// separate optional leaf (built in parallel, not yet deployed), so a host without it reports absent.
+    /// </summary>
+    public required string SchedulerSocketPath { get; init; }
+
+    /// <summary>
     /// Path to the host's <c>kgsm.sh</c> entrypoint — the single C#↔engine chokepoint kgsm-lib
     /// shells (instances, run-state). Default: the AUR-packaged symlink <c>/usr/bin/kgsm</c>.
     /// Empty ⇒ the engine is not configured (a misconfiguration: <c>/servers</c> is empty + logged).
@@ -179,6 +189,11 @@ public sealed class ApiOptions
     /// <see cref="FirewallSocketPath"/>). When false the ports surface degrades to
     /// <c>firewall:"absent"</c> (server) / null (host) — never an error.</summary>
     public bool FirewallProvisioned => !string.IsNullOrWhiteSpace(FirewallSocketPath);
+
+    /// <summary>Whether the kgsm-scheduler status socket is configured (a non-empty
+    /// <see cref="SchedulerSocketPath"/>). When false the scheduler leaf is absent — its capability renders
+    /// absent and <c>nextFireUtc</c> is null on the settings surface, never an error.</summary>
+    public bool SchedulerProvisioned => !string.IsNullOrWhiteSpace(SchedulerSocketPath);
 
     /// <summary>
     /// Whether the kgsm engine is configured (a non-empty <see cref="KgsmPath"/>). Unlike a leaf
@@ -418,6 +433,9 @@ public sealed class ApiOptions
             AssistantRelaySecret = Defaulted(configuration["KGSM_API_ASSISTANT_RELAY_SECRET"], ""),
             // Opt-in (blank = absent): the firewall authority is a separate optional install.
             FirewallSocketPath = Defaulted(configuration["KGSM_API_FIREWALL_SOCKET"], ""),
+            // Opt-in (blank = absent): the scheduler is a separate optional leaf (Settings Phase 3). Set it
+            // to /run/kgsm-scheduler/status.sock on a host that runs kgsm-scheduler.
+            SchedulerSocketPath = Defaulted(configuration["KGSM_API_SCHEDULER_SOCKET"], ""),
             KgsmPath = Defaulted(configuration["KGSM_API_KGSM_PATH"], "/usr/bin/kgsm"),
             KgsmSocketPath = Defaulted(configuration["KGSM_API_KGSM_SOCKET"], "/run/kgsm-api/kgsm-events.sock"),
 

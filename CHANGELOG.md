@@ -7,7 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Settings Phase 3 — Scheduled restart.** `GET /servers/{id}/settings` now includes
+  `scheduledRestart`, `restartTime`, `restartDay`, `timezone` (from kgsm instance config)
+  and `nextFireUtc` (from the scheduler leaf status socket, null when scheduler absent).
+  `PATCH /servers/{id}/settings` accepts all four schedule fields with validation.
+  New `scheduler` leaf registered in `LeafCatalog` + `LeafHealthMonitor`; degrades
+  gracefully when the scheduler daemon is absent (nextFireUtc null, scheduled-tasks
+  card gated in the SPA). New `SchedulerClient` reads the NDJSON-over-unix-socket status
+  snapshot at `KGSM_API_SCHEDULER_SOCKET` (opt-in — blank default). kgsm-lib upgraded to 1.33.0.
+- **Settings Phase 2 — Resources.** `GET /servers/{id}/settings` now includes `cpuPriority: string|null`
+  and `memoryCapMb: int|null`. `PATCH /servers/{id}/settings` accepts both fields: `cpuPriority`
+  (low/normal/high — validated, live-applied via `IWatchdogClient.SetCpuPriorityAsync`, best-effort)
+  and `memoryCapMb` (≥0, 0=uncapped — persisted to kgsm config, takes effect at next restart).
+  kgsm-lib upgraded to 1.32.0.
+- **`GET/PATCH /api/v1/servers/{id}/settings` (Phase 0 — Settings spine).** New settings aggregator
+  endpoint, operator-gated write. Phase 0 surfaces the `autoUpdate` toggle (the existing `auto_update`
+  kgsm config key). Later phases add autostart, resource caps, and scheduler config as those primitives
+  land. Follows the `ServerConfigController` pattern: echo-path audit (kgsm's `instance_config_changed`
+  event carries provenance), no double-write.
+
 ### Changed
+- **Settings Phase 1 — Autostart.** `GET /servers/{id}/settings` now includes `autostart: bool|null`
+  (null when the watchdog is absent/unreachable — honest unknown, never fabricated). `PATCH
+  /servers/{id}/settings` accepts `autostart: bool` and fans out to `IWatchdogClient.Enable/Disable`
+  (503 when the watchdog is not provisioned; 400 on a watchdog refusal). kgsm-lib upgraded to 1.31.0.
+- **Uninstall pre-stop (Phase 0 — delete hardening).** `CommandRunner.RunUninstall` now issues a
+  best-effort `Stop` before `Uninstall`, so we never orphan a running process. A non-zero stop result
+  (instance already stopped) is logged at Debug and ignored.
 - **Blueprint catalog cached in-memory (60s TTL, background refresh).** `GET /library` no longer
   spawns a `kgsm.sh` process on every request — a singleton `BlueprintCache` serves the blueprint
   dictionary from memory, refreshed by a background `PeriodicTimer` every 60s (configurable via

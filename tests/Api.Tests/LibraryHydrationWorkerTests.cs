@@ -317,7 +317,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
     {
         HostId = "test", HostLabel = "test",
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
-        FirewallSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmSocketPath = "",
+        FirewallSocketPath = "", SchedulerSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmSocketPath = "",
         BlueprintCacheTtlSeconds = 60,
         InstanceCacheTtlSeconds = 60,
         LogSources = [], JournalctlPath = "journalctl", SystemctlPath = "systemctl", LogReadTimeoutMs = 5000,

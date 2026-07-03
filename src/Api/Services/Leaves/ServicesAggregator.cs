@@ -57,6 +57,7 @@ public sealed class ServicesAggregator(SystemdReader systemd, LeafHealthMonitor 
         LeafHealthSource.Metrics => FromCapability(caps.Metrics),
         LeafHealthSource.Assistant => FromCapability(caps.Assistant),
         LeafHealthSource.Watchdog => FromCapability(caps.Watchdog),
+        LeafHealthSource.Scheduler => FromCapability(caps.Scheduler),
         _ => null,   // None — no probe; systemd liveness is all we honestly have
     };
 

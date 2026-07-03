@@ -296,6 +296,11 @@ public sealed class ConsoleBridgeTests
         public Task<WatchdogReadyState?> GetReadyAsync(CancellationToken cancellationToken = default) => Task.FromResult<WatchdogReadyState?>(null);
         public Task<WatchdogActionResult> StartAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<WatchdogActionResult> StopAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<WatchdogActionResult> RestartAsync(string instanceName, string origin = "scheduler", CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<WatchdogActionResult> EnableAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<WatchdogActionResult> DisableAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<WatchdogActionResult> SetCpuPriorityAsync(string instanceName, string priority, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<string>> GetEnabledNamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
         public Task<WatchdogInstanceState?> GetStatusAsync(string instanceName, CancellationToken cancellationToken = default) => Task.FromResult<WatchdogInstanceState?>(null);
         public Task<IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>?> GetAllPlayersAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>?>(null);
 

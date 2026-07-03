@@ -42,6 +42,10 @@ public sealed class LeafHealthMonitor : BackgroundService
     private readonly ILogger<LeafHealthMonitor> _logger;
 
     private readonly string _topic;
+    // Scheduler provisioning is CONFIG-based (the socket is configured ⇒ SchedulerClient is registered),
+    // NOT the runtime DB registry (the four provisionable leaves): the scheduler is an opt-in leaf resolved
+    // optionally from DI. Captured once at construction, same source as the conditional registration.
+    private readonly bool _schedulerProvisioned;
     // Serializes the poll body so the always-on 2s loop and an out-of-band PollNowAsync (a connect/disconnect
     // forcing an immediate publish) never race two writers onto _current.
     private readonly SemaphoreSlim _pollGate = new(1, 1);
@@ -63,6 +67,7 @@ public sealed class LeafHealthMonitor : BackgroundService
         _hub = hub;
         _logger = logger;
         _topic = StreamProtocol.HostCapabilitiesTopic(options.HostId);
+        _schedulerProvisioned = options.SchedulerProvisioned;
         _current = ColdBlock(); // provisioned -> unknown (declared, not yet probed); unprovisioned -> absent
     }
 
@@ -111,10 +116,17 @@ public sealed class LeafHealthMonitor : BackgroundService
             // CTS) so one hung leaf can never stall the cycle. The leaf clients own their transport (the
             // chokepoint invariant) and gate themselves on the same registry, so an unprovisioned leaf
             // returns false/null without a wire call.
+            // The scheduler client is registered only when its socket is configured; resolve it optionally
+            // and gate on presence (the config-based provisioning flag), mirroring the watchdog probe.
+            SchedulerClient? scheduler = _schedulerProvisioned
+                ? _services.GetService(typeof(SchedulerClient)) as SchedulerClient
+                : null;
+
             Task<bool> metricsTask = metricsProvisioned ? _monitor.CheckHealthAsync(ct) : Task.FromResult(false);
             Task<bool> assistantTask = assistantProvisioned ? _assistant.CheckHealthAsync(ct) : Task.FromResult(false);
             Task<bool> watchdogTask = watchdogProvisioned ? ProbeWatchdogAsync(ct) : Task.FromResult(false);
-            await Task.WhenAll(metricsTask, assistantTask, watchdogTask).ConfigureAwait(false);
+            Task<bool> schedulerTask = scheduler is not null ? scheduler.CheckHealthAsync(ct) : Task.FromResult(false);
+            await Task.WhenAll(metricsTask, assistantTask, watchdogTask, schedulerTask).ConfigureAwait(false);
 
             // info.intervalMs stays honestly sourced from the metrics snapshot (cached), only when up.
             Snap.Snapshot? snap = metricsTask.Result ? await _monitor.GetLatestAsync(ct).ConfigureAwait(false) : null;
@@ -124,7 +136,8 @@ public sealed class LeafHealthMonitor : BackgroundService
             var next = new HostCapabilities(
                 Metrics: BuildMetrics(prev.Metrics, metricsProvisioned, metricsTask.Result, snap, now),
                 Assistant: BuildLeaf(prev.Assistant, assistantProvisioned, assistantTask.Result, now, "Assistant health check failed."),
-                Watchdog: BuildLeaf(prev.Watchdog, watchdogProvisioned, watchdogTask.Result, now, "Watchdog is not ready."));
+                Watchdog: BuildLeaf(prev.Watchdog, watchdogProvisioned, watchdogTask.Result, now, "Watchdog is not ready."),
+                Scheduler: BuildLeaf(prev.Scheduler, _schedulerProvisioned, schedulerTask.Result, now, "Scheduler status check failed."));
 
             if (next.Equals(prev))
                 return; // no flip -> no emit (and provisioned/since are stable, so the block is value-equal)
@@ -203,6 +216,7 @@ public sealed class LeafHealthMonitor : BackgroundService
         return new HostCapabilities(
             Metrics: Cold(_registry.IsProvisioned(ProvisionableLeaf.Monitor)),
             Assistant: Cold(_registry.IsProvisioned(ProvisionableLeaf.Assistant)),
-            Watchdog: Cold(_registry.IsProvisioned(ProvisionableLeaf.Watchdog)));
+            Watchdog: Cold(_registry.IsProvisioned(ProvisionableLeaf.Watchdog)),
+            Scheduler: Cold(_schedulerProvisioned));
     }
 }
