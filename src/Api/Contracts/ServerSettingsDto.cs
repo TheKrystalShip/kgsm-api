@@ -27,7 +27,10 @@ public sealed record ServerSettings(
     bool? AutoBackupOnRestart,
     int? BackupRetention,
     DateTimeOffset? LastBackupUtc,
-    bool? LastBackupOk);
+    bool? LastBackupOk,
+    // Phase 6 — crash-restart policy (from kgsm instance config; null when the key is unset).
+    bool? CrashRestart,
+    int? CrashMaxRestarts);
 
 /// <summary>
 /// PATCH body for <c>PATCH /servers/{id}/settings</c>. Sparse: only non-null fields are applied.
@@ -54,6 +57,9 @@ public sealed record ServerSettingsPatch(
     // Phase 4 — auto-backup config
     bool? AutoBackupOnRestart,
     int? BackupRetention,
+    // Phase 6 — crash-restart policy
+    bool? CrashRestart = null,
+    int? CrashMaxRestarts = null,
     string? Origin = null);
 
 /// <summary>

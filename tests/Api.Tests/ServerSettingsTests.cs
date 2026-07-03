@@ -228,6 +228,55 @@ public sealed class ServerSettingsTests
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
 
+    // --- Phase 6 — crash-restart policy (crashRestart / crashMaxRestarts) --------------------------
+
+    [Fact]
+    public async Task Get_Returns_CrashRestart()
+    {
+        HttpResponseMessage resp = await Get(_engine, AuthTier.Viewer, "factorio-backup");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.True(doc.RootElement.GetProperty("crashRestart").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Get_Returns_CrashMaxRestarts()
+    {
+        HttpResponseMessage resp = await Get(_engine, AuthTier.Viewer, "factorio-backup");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.Equal(5, doc.RootElement.GetProperty("crashMaxRestarts").GetInt32());
+    }
+
+    [Fact]
+    public async Task Patch_Writes_CrashRestart()
+    {
+        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1", "{\"crashRestart\":true}");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        var applied = doc.RootElement.GetProperty("applied").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("crashRestart", applied);
+    }
+
+    [Fact]
+    public async Task Patch_CrashMaxRestarts_TooLow_Returns400()
+    {
+        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1", "{\"crashMaxRestarts\":0}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Patch_CrashMaxRestarts_TooHigh_Returns400()
+    {
+        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1", "{\"crashMaxRestarts\":11}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
     // --- helpers -----------------------------------------------------------------------------------
 
     private static HttpClient Client(AuthTestFactory factory, AuthTier? tier)
@@ -285,6 +334,8 @@ public sealed class ServerSettingsTests
                 ScheduledRestart = "daily",
                 AutoBackupOnRestart = true,
                 BackupRetention = 10,
+                CrashRestart = true,
+                CrashMaxRestarts = 5,
             };
 
         public Dictionary<string, Instance>? GetAllOrNull() => GetAll();
@@ -303,6 +354,7 @@ public sealed class ServerSettingsTests
             key is "auto_update" or "cpu_priority" or "memory_cap_mb"
                 or "scheduled_restart" or "restart_time" or "restart_day" or "timezone"
                 or "auto_backup_on_restart" or "backup_retention"
+                or "crash_restart" or "crash_max_restarts"
                 ? new KgsmResult(0)
                 : new KgsmResult(1, "", $"the engine refused '{key}'");
 

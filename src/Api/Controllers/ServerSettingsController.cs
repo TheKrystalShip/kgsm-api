@@ -48,7 +48,8 @@ public sealed class ServerSettingsController(
             instance.ScheduledRestart, instance.RestartTime, instance.RestartDay, instance.Timezone,
             schedStatus?.NextFireUtc,
             instance.AutoBackupOnRestart, instance.BackupRetention,
-            schedStatus?.LastBackupUtc, schedStatus?.LastBackupOk));
+            schedStatus?.LastBackupUtc, schedStatus?.LastBackupOk,
+            instance.CrashRestart, instance.CrashMaxRestarts));
     }
 
     [HttpPatch]
@@ -67,7 +68,8 @@ public sealed class ServerSettingsController(
             && body.CpuPriority is null && body.MemoryCapMb is null
             && body.ScheduledRestart is null && body.RestartTime is null
             && body.RestartDay is null && body.Timezone is null
-            && body.AutoBackupOnRestart is null && body.BackupRetention is null)
+            && body.AutoBackupOnRestart is null && body.BackupRetention is null
+            && body.CrashRestart is null && body.CrashMaxRestarts is null)
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "no recognized settings fields in body");
 
@@ -109,6 +111,11 @@ public sealed class ServerSettingsController(
         if (body.BackupRetention is { } retentionCheck && retentionCheck is < 1 or > 100)
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "backupRetention must be between 1 and 100");
+
+        // Phase 6 — crash-restart policy value validation (bounded, matches the UI select: 1/2/3/5/10).
+        if (body.CrashMaxRestarts is { } cmr && cmr is < 1 or > 10)
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "crashMaxRestarts must be between 1 and 10");
 
         if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
             return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
@@ -250,6 +257,16 @@ public sealed class ServerSettingsController(
                 applied, "backupRetention", out IActionResult? brErr))
             return brErr!;
 
+        // Phase 6 — crash-restart policy config keys (echo-path audit, same as the schedule keys).
+        if (body.CrashRestart is { } crashRestart && !TryApplyConfig(
+                instances, id, "crash_restart", crashRestart ? "true" : "false", actor, origin,
+                applied, "crashRestart", out IActionResult? crErr))
+            return crErr!;
+        if (body.CrashMaxRestarts is { } crashMax && !TryApplyConfig(
+                instances, id, "crash_max_restarts", crashMax.ToString(), actor, origin,
+                applied, "crashMaxRestarts", out IActionResult? cmrErr))
+            return cmrErr!;
+
         // Re-read all fields for the authoritative post-write settings.
         Instance? fresh = instances.GetInstanceInfo(id);
         bool freshAutoUpdate = fresh?.AutoUpdate ?? (body.AutoUpdate ?? false);
@@ -261,7 +278,8 @@ public sealed class ServerSettingsController(
             fresh?.ScheduledRestart, fresh?.RestartTime, fresh?.RestartDay, fresh?.Timezone,
             freshSchedStatus?.NextFireUtc,
             fresh?.AutoBackupOnRestart, fresh?.BackupRetention,
-            freshSchedStatus?.LastBackupUtc, freshSchedStatus?.LastBackupOk);
+            freshSchedStatus?.LastBackupUtc, freshSchedStatus?.LastBackupOk,
+            fresh?.CrashRestart, fresh?.CrashMaxRestarts);
         return Ok(new ServerSettingsApplied(applied, settings));
     }
 

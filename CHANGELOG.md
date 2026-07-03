@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.10.0)
+- `GET /servers/{id}/settings`: `crashRestart` (bool) + `crashMaxRestarts` (int) from
+  instance config (null when the kgsm config key is unset).
+- `PATCH /servers/{id}/settings`: `crashRestart` (bool) + `crashMaxRestarts` (int, 1–10)
+  → `crash_restart` / `crash_max_restarts` config keys. Validation: crashMaxRestarts
+  must be 1–10.
+- kgsm-lib → 1.35.0 (Instance.CrashRestart, CrashMaxRestarts).
+
 ### Added (v0.9.0)
 - `GET /servers/{id}/settings`: `autoBackupOnRestart`, `backupRetention` from instance
   config; `lastBackupUtc`, `lastBackupOk` from scheduler status socket (null when
