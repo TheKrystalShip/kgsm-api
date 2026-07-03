@@ -21,7 +21,13 @@ public sealed record ServerSettings(
     string? RestartTime,
     string? RestartDay,
     string? Timezone,
-    DateTimeOffset? NextFireUtc);
+    DateTimeOffset? NextFireUtc,
+    // Phase 4 — auto-backup: config (from kgsm instance config) + last-run status (from the scheduler
+    // status socket; null when the scheduler is absent or no backup has run yet — honest unknown).
+    bool? AutoBackupOnRestart,
+    int? BackupRetention,
+    DateTimeOffset? LastBackupUtc,
+    bool? LastBackupOk);
 
 /// <summary>
 /// PATCH body for <c>PATCH /servers/{id}/settings</c>. Sparse: only non-null fields are applied.
@@ -45,6 +51,9 @@ public sealed record ServerSettingsPatch(
     string? RestartTime,
     string? RestartDay,
     string? Timezone,
+    // Phase 4 — auto-backup config
+    bool? AutoBackupOnRestart,
+    int? BackupRetention,
     string? Origin = null);
 
 /// <summary>

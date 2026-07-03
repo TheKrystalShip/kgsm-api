@@ -435,6 +435,7 @@ public sealed class Tier1OpsTests
         public KgsmResult CreateBackup(string instanceName, string? actor = null, string? origin = null) => new(0);
 
         public KgsmResult RestoreBackup(string instanceName, string backupName, string? actor = null, string? origin = null) => new(0);
+        public KgsmResult PruneBackups(string instanceName, int keepN, string? actor = null, string? origin = null) => throw new NotImplementedException();
 
         public KgsmResult Update(string instanceName, string? actor = null, string? origin = null) => new(0);
 

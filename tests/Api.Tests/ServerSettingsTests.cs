@@ -93,6 +93,29 @@ public sealed class ServerSettingsTests
         }
     }
 
+    [Fact]
+    public async Task Get_returns_AutoBackupOnRestart_from_instance_config()
+    {
+        HttpResponseMessage resp = await Get(_engine, AuthTier.Viewer, "factorio-backup");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.True(doc.RootElement.GetProperty("autoBackupOnRestart").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Get_returns_BackupRetention_from_instance_config()
+    {
+        HttpResponseMessage resp = await Get(_engine, AuthTier.Viewer, "factorio-backup");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.Equal(10, doc.RootElement.GetProperty("backupRetention").GetInt32());
+        // No scheduler leaf on the EngineTestFactory → last-backup status is honest null (never fabricated).
+        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("lastBackupUtc").ValueKind);
+        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("lastBackupOk").ValueKind);
+    }
+
     // --- PATCH /servers/{id}/settings --------------------------------------------------------------
 
     [Fact]
@@ -165,6 +188,46 @@ public sealed class ServerSettingsTests
         Assert.Equal("factorio-1", doc.RootElement.GetProperty("settings").GetProperty("serverId").GetString());
     }
 
+    // --- Phase 4 — auto-backup (autoBackupOnRestart / backupRetention) ------------------------------
+
+    [Fact]
+    public async Task Patch_AutoBackupOnRestart_writes_config_key()
+    {
+        // A concurrently-set cadence satisfies the "auto-backup needs a schedule" guard → the write applies.
+        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1",
+            "{\"autoBackupOnRestart\":true,\"scheduledRestart\":\"daily\"}");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        var applied = doc.RootElement.GetProperty("applied").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("autoBackupOnRestart", applied);
+    }
+
+    [Fact]
+    public async Task Patch_BackupRetention_invalid_low_returns_400()
+    {
+        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1", "{\"backupRetention\":0}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Patch_BackupRetention_invalid_high_returns_400()
+    {
+        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1", "{\"backupRetention\":101}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Patch_AutoBackupOnRestart_true_without_cadence_returns_400()
+    {
+        // factorio-1 has no scheduled_restart and the patch supplies none → enabling auto-backup is rejected.
+        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1", "{\"autoBackupOnRestart\":true}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
     // --- helpers -----------------------------------------------------------------------------------
 
     private static HttpClient Client(AuthTestFactory factory, AuthTier? tier)
@@ -212,16 +275,34 @@ public sealed class ServerSettingsTests
         private static Instance Factorio1() =>
             new() { Name = "factorio-1", BlueprintFile = "factorio.bp.yaml", AutoUpdate = false };
 
-        public Dictionary<string, Instance>? GetAllOrNull() => GetAll();
-        public Dictionary<string, Instance> GetAll() => new() { ["factorio-1"] = Factorio1() };
+        // Phase 4 — a second instance carrying auto-backup config, so the GET path has something to surface.
+        private static Instance FactorioBackup() =>
+            new()
+            {
+                Name = "factorio-backup",
+                BlueprintFile = "factorio.bp.yaml",
+                AutoUpdate = false,
+                ScheduledRestart = "daily",
+                AutoBackupOnRestart = true,
+                BackupRetention = 10,
+            };
 
-        public Instance? GetInstanceInfo(string instanceName) =>
-            string.Equals(instanceName, "factorio-1", StringComparison.Ordinal) ? Factorio1() : null;
+        public Dictionary<string, Instance>? GetAllOrNull() => GetAll();
+        public Dictionary<string, Instance> GetAll() =>
+            new() { ["factorio-1"] = Factorio1(), ["factorio-backup"] = FactorioBackup() };
+
+        public Instance? GetInstanceInfo(string instanceName) => instanceName switch
+        {
+            "factorio-1" => Factorio1(),
+            "factorio-backup" => FactorioBackup(),
+            _ => null,
+        };
 
         public KgsmResult SetInstanceConfigValue(string instanceName, string key, string value,
             string? actor = null, string? origin = null) =>
             key is "auto_update" or "cpu_priority" or "memory_cap_mb"
                 or "scheduled_restart" or "restart_time" or "restart_day" or "timezone"
+                or "auto_backup_on_restart" or "backup_retention"
                 ? new KgsmResult(0)
                 : new KgsmResult(1, "", $"the engine refused '{key}'");
 
@@ -247,6 +328,7 @@ public sealed class ServerSettingsTests
         public KgsmResult GetBackups(string instanceName) => throw new NotImplementedException();
         public KgsmResult CreateBackup(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult RestoreBackup(string instanceName, string backupName, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public KgsmResult PruneBackups(string instanceName, int keepN, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult Save(string instanceName) => throw new NotImplementedException();
         public KgsmResult SendInput(string instanceName, string command, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult FindConfigPath(string instanceName) => throw new NotImplementedException();

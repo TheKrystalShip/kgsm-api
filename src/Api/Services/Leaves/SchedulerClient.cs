@@ -90,4 +90,9 @@ public sealed record SchedulerInstanceStatus(
     DateTimeOffset? NextFireUtc,
     DateTimeOffset? LastRunUtc,
     bool? LastRunOk,
-    string? LastRunMessage);
+    string? LastRunMessage,
+    // Phase 4 — auto-backup last-run outcome (all nullable: null when the scheduler hasn't run a backup yet
+    // or predates the feature). Honest unknown, never guessed.
+    DateTimeOffset? LastBackupUtc = null,
+    bool? LastBackupOk = null,
+    string? LastBackupMessage = null);

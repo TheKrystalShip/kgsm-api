@@ -41,11 +41,14 @@ public sealed class ServerSettingsController(
             return NotFound();
 
         bool? autostart = await ReadAutostartAsync(id, ct).ConfigureAwait(false);
-        DateTimeOffset? nextFireUtc = await ReadNextFireAsync(id, ct).ConfigureAwait(false);
+        SchedulerInstanceStatus? schedStatus = await ReadSchedulerStatusAsync(id, ct).ConfigureAwait(false);
 
         return Ok(new ServerSettings(
             id, instance.AutoUpdate, autostart, instance.CpuPriority, instance.MemoryCapMb,
-            instance.ScheduledRestart, instance.RestartTime, instance.RestartDay, instance.Timezone, nextFireUtc));
+            instance.ScheduledRestart, instance.RestartTime, instance.RestartDay, instance.Timezone,
+            schedStatus?.NextFireUtc,
+            instance.AutoBackupOnRestart, instance.BackupRetention,
+            schedStatus?.LastBackupUtc, schedStatus?.LastBackupOk));
     }
 
     [HttpPatch]
@@ -63,7 +66,8 @@ public sealed class ServerSettingsController(
         if (body.AutoUpdate is null && body.Autostart is null
             && body.CpuPriority is null && body.MemoryCapMb is null
             && body.ScheduledRestart is null && body.RestartTime is null
-            && body.RestartDay is null && body.Timezone is null)
+            && body.RestartDay is null && body.Timezone is null
+            && body.AutoBackupOnRestart is null && body.BackupRetention is null)
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "no recognized settings fields in body");
 
@@ -101,12 +105,30 @@ public sealed class ServerSettingsController(
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 $"timezone '{tz}' is not a recognized IANA timezone");
 
+        // Phase 4 — auto-backup value validation (pure, no instance needed): retention is a bounded count.
+        if (body.BackupRetention is { } retentionCheck && retentionCheck is < 1 or > 100)
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "backupRetention must be between 1 and 100");
+
         if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
             return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
                 "the kgsm engine is not provisioned on this host");
 
         if (!await ExistsAsync(id, ct).ConfigureAwait(false))
             return NotFound();
+
+        // Phase 4 — auto-backup-on-restart needs a scheduled cadence to hook onto (backup runs in the restart
+        // window). Guard here, before any write: effective cadence = the patch value if it's also being set,
+        // else the instance's current one. Reject enabling auto-backup with no/off schedule.
+        if (body.AutoBackupOnRestart == true)
+        {
+            string? effectiveCadence = body.ScheduledRestart is { } patchCadence
+                ? patchCadence.Trim().ToLowerInvariant()
+                : instances.GetInstanceInfo(id)?.ScheduledRestart;
+            if (string.IsNullOrEmpty(effectiveCadence) || effectiveCadence == "off")
+                return Error(StatusCodes.Status400BadRequest, "bad_request",
+                    "autoBackupOnRestart requires scheduledRestart to be set (not 'off')");
+        }
 
         string? actor = AuditPrincipal.ActorString(User);
         var applied = new List<string>(4);
@@ -217,15 +239,29 @@ public sealed class ServerSettingsController(
                 applied, "timezone", out IActionResult? tzErr))
             return tzErr!;
 
+        // Phase 4 — auto-backup config keys (echo-path audit, same as the schedule keys — the scheduler leaf
+        // re-reads kgsm config as its source of truth, so persisting the key is the whole apply).
+        if (body.AutoBackupOnRestart is { } autoBackup && !TryApplyConfig(
+                instances, id, "auto_backup_on_restart", autoBackup ? "true" : "false", actor, origin,
+                applied, "autoBackupOnRestart", out IActionResult? abErr))
+            return abErr!;
+        if (body.BackupRetention is { } retention && !TryApplyConfig(
+                instances, id, "backup_retention", retention.ToString(), actor, origin,
+                applied, "backupRetention", out IActionResult? brErr))
+            return brErr!;
+
         // Re-read all fields for the authoritative post-write settings.
         Instance? fresh = instances.GetInstanceInfo(id);
         bool freshAutoUpdate = fresh?.AutoUpdate ?? (body.AutoUpdate ?? false);
         bool? freshAutostart = await ReadAutostartAsync(id, ct).ConfigureAwait(false);
-        DateTimeOffset? freshNextFire = await ReadNextFireAsync(id, ct).ConfigureAwait(false);
+        SchedulerInstanceStatus? freshSchedStatus = await ReadSchedulerStatusAsync(id, ct).ConfigureAwait(false);
 
         var settings = new ServerSettings(
             id, freshAutoUpdate, freshAutostart, fresh?.CpuPriority, fresh?.MemoryCapMb,
-            fresh?.ScheduledRestart, fresh?.RestartTime, fresh?.RestartDay, fresh?.Timezone, freshNextFire);
+            fresh?.ScheduledRestart, fresh?.RestartTime, fresh?.RestartDay, fresh?.Timezone,
+            freshSchedStatus?.NextFireUtc,
+            fresh?.AutoBackupOnRestart, fresh?.BackupRetention,
+            freshSchedStatus?.LastBackupUtc, freshSchedStatus?.LastBackupOk);
         return Ok(new ServerSettingsApplied(applied, settings));
     }
 
@@ -273,18 +309,18 @@ public sealed class ServerSettingsController(
         return true;
     }
 
-    // The next scheduled-restart time comes ONLY from the scheduler leaf's status socket (it computes it from
-    // the cadence + timezone). Null when the scheduler is not provisioned (client unregistered) or unreachable
-    // — honest unknown, never a fabricated fire time. GetStatusAsync never throws (returns null on failure).
-    private async Task<DateTimeOffset?> ReadNextFireAsync(string id, CancellationToken ct)
+    // This instance's scheduler-computed state (nextFireUtc + last-backup outcome) comes ONLY from the
+    // scheduler leaf's status socket. Null when the scheduler is not provisioned (client unregistered) or
+    // unreachable, or when the leaf reports no row for this instance — honest unknown, never fabricated.
+    // GetStatusAsync never throws (returns null on failure).
+    private async Task<SchedulerInstanceStatus?> ReadSchedulerStatusAsync(string id, CancellationToken ct)
     {
         if (HttpContext.RequestServices.GetService(typeof(SchedulerClient)) is not SchedulerClient scheduler)
             return null;
 
         SchedulerStatusResponse? status = await scheduler.GetStatusAsync(ct).ConfigureAwait(false);
         return status?.Instances
-            .FirstOrDefault(i => string.Equals(i.Name, id, StringComparison.Ordinal))
-            ?.NextFireUtc;
+            .FirstOrDefault(i => string.Equals(i.Name, id, StringComparison.Ordinal));
     }
 
     private static bool IsValidHhMm(string value)

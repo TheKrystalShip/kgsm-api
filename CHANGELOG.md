@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.9.0)
+- `GET /servers/{id}/settings`: `autoBackupOnRestart`, `backupRetention` from instance
+  config; `lastBackupUtc`, `lastBackupOk` from scheduler status socket (null when
+  scheduler leaf absent or no backup run yet).
+- `PATCH /servers/{id}/settings`: `autoBackupOnRestart` (bool) + `backupRetention`
+  (int, 1–100). Validation: retention must be 1–100; auto-backup=true requires a
+  non-off scheduled cadence.
+- kgsm-lib → 1.34.0 (Instance.AutoBackupOnRestart, BackupRetention, PruneBackups).
+
 ### Added
 - **Settings Phase 3 — Scheduled restart.** `GET /servers/{id}/settings` now includes
   `scheduledRestart`, `restartTime`, `restartDay`, `timezone` (from kgsm instance config)
