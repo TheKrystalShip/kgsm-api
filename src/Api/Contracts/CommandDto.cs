@@ -126,7 +126,9 @@ public sealed record Job(
     string State,
     DateTimeOffset CreatedAt,
     DateTimeOffset? SettledAt,
-    string? Error);
+    string? Error,
+    string? Phase = null,
+    string? Blueprint = null);
 
 /// <summary>The <c>202 Accepted</c> body: <c>{ "job": { ... } }</c> (architecture.html §3).</summary>
 public sealed record CommandAccepted(Job Job);

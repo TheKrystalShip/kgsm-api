@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.11.0)
+- `Job` DTO gains `phase` (install sub-phase: `"preparing"` | `"downloading"` | `"deploying"`)
+  and `blueprint` fields; both are null for non-install jobs.
+- `job.patch` SSE frames for install jobs now carry `blueprint` (stamped immediately in
+  `StartInstall` before the background task runs) so any connected user can create a phantom card.
+- `KgsmAuditConsumer` handles `instance_installation_started`, `instance_download_started`, and
+  `instance_deploy_started` events and emits `job.patch` SSE frames with the corresponding
+  `phase` value so clients show granular install progress.
+
 ### Added (v0.10.0)
 - `GET /servers/{id}/settings`: `crashRestart` (bool) + `crashMaxRestarts` (int) from
   instance config (null when the kgsm config key is unset).

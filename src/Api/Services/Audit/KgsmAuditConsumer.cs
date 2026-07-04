@@ -1,7 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Alerts;
+using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Events;
@@ -34,6 +36,8 @@ public sealed class KgsmAuditConsumer(
     PlayerHistoryService history,
     InstanceCache instanceCache,
     ApiOptions options,
+    StreamHub hub,
+    JobRegistry jobRegistry,
     ILogger<KgsmAuditConsumer> logger) : IHostedService
 {
     public async Task StartAsync(CancellationToken cancellationToken)
@@ -221,6 +225,28 @@ public sealed class KgsmAuditConsumer(
         // config.set, the FULL command text rides in meta (recording what was run — see AuditAction.ConsoleInput).
         events.RegisterHandler<InstanceInputSentData>(d =>
             audit.AppendAsync(AuditMapping.FromInputSentEvent(d, options.HostId)));
+
+        // install phase progression — surface sub-phases via job.patch so connected clients can show
+        // granular progress on phantom cards. No audit row: these are transient UI signals, not domain
+        // facts. The job's Blueprint was stamped on the in-flight record by CommandRunner.StartInstall
+        // and is copied through each `with` expression, so every phase frame carries it. Handlers are
+        // no-ops when no in-flight install job exists for the instance (e.g. a manual kgsm install from
+        // the CLI that bypasses the API — honest, no phantom was created, no phase update is needed).
+        events.RegisterHandler<InstanceInstallationStartedData>(d => PublishPhase(d.InstanceName, "preparing"));
+        events.RegisterHandler<InstanceDownloadStartedData>(d => PublishPhase(d.InstanceName, "downloading"));
+        events.RegisterHandler<InstanceDeployStartedData>(d => PublishPhase(d.InstanceName, "deploying"));
+    }
+
+    private Task PublishPhase(string instanceName, string phase)
+    {
+        Job? job = jobRegistry.InFlightFor(instanceName);
+        if (job is not null)
+        {
+            Job patched = jobRegistry.Update(job with { Phase = phase });
+            hub.Publish(StreamProtocol.JobsTopic, StreamProtocol.JobEntityKey(patched.Id),
+                new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, patched));
+        }
+        return Task.CompletedTask;
     }
 
     private Task WriteServer(

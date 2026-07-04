@@ -65,8 +65,14 @@ public sealed class CommandRunner(
     /// blueprint default). No audit row is written here — kgsm's <c>instance_installed</c> echo carries the
     /// stamped provenance (the lifecycle case).
     /// </summary>
-    public void StartInstall(Job job, string blueprint, int? port = null, string? actor = null, string? origin = null) =>
-        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint, backupName: null, installPort: port));
+    public void StartInstall(Job job, string blueprint, int? port = null, string? actor = null, string? origin = null)
+    {
+        // Stamp the blueprint onto the job and broadcast immediately so all connected
+        // clients can create a phantom card without waiting for the `running` publish.
+        Job withBlueprint = registry.Update(job with { Blueprint = blueprint });
+        Publish(withBlueprint);
+        _ = Task.Run(() => ExecuteAsync(withBlueprint, actor, origin, blueprint, backupName: null, installPort: port));
+    }
 
     /// <summary>
     /// Fire-and-forget an <c>uninstall</c> job (M8·b — <c>DELETE /servers/{id}</c>). Same echo-path
