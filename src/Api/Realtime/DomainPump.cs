@@ -80,7 +80,7 @@ public sealed class DomainPump(
                     // Build the current server list from cache data.
                     var byId = new Dictionary<string, Server>(StringComparer.Ordinal);
                     foreach ((string id, var instance) in roster)
-                        byId[id] = ServerAggregator.BuildServer(id, instance, statuses, metricsById, options.HostId);
+                        byId[id] = ServerAggregator.BuildServer(id, instance, statuses, metricsById, options.HostId, cache.IsStarting);
 
                     if (!primed)
                     {

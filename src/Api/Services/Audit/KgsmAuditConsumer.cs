@@ -106,10 +106,27 @@ public sealed class KgsmAuditConsumer(
         // Services/Players/PlayerRosterService.cs remarks).
         events.RegisterHandler<InstanceStartedData>(d =>
         {
-            instanceCache.UpdateStatus(d.InstanceName, true);
+            // MarkStarting (not UpdateStatus) — the process has only just spawned, not finished booting.
+            // It still flips the boolean run-state to "up" (same as before), but ALSO opens the
+            // InstanceCache starting latch, so ServerAggregator.BuildServer reports `starting`, not
+            // `running`, until the matching instance_ready arrives below (or a stop/crash closes it).
+            instanceCache.MarkStarting(d.InstanceName);
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
             return WriteServerAndBridge(d, AuditAction.ServerStart, "started");
+        });
+        // instance_ready (kgsm-lib 1.35.0) — the watchdog's readiness signal: its log-scrape confirms the
+        // game finished booting, distinct from instance_started (the process merely spawned). AUDIT-SILENT
+        // by design, like the install-phase progress handlers below: server.start already recorded the
+        // meaningful fact ("this server was started"); "it finished booting" is a run-state refinement of
+        // that SAME action, not a new fact worth its own append-only row, and there is no honest slot in
+        // the closed AuditAction vocabulary for it that wouldn't just duplicate server.start. Only closes
+        // the starting latch (InstanceCache.MarkReady) so status flips starting -> running; DomainPump's
+        // existing Status diff (Realtime/CLAUDE.md) fans that out over SSE with no pump change needed.
+        events.RegisterHandler<InstanceReadyData>(d =>
+        {
+            instanceCache.MarkReady(d.InstanceName);
+            return Task.CompletedTask;
         });
         events.RegisterHandler<InstanceStoppedData>(d =>
         {

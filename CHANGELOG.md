@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.12.0)
+- New server run-state `starting`, distinct from `running`: the window between
+  `instance_started` (process spawned) and `instance_ready` (the watchdog's
+  log-scrape confirms the game finished booting) — both events observe the process
+  as "up," so the distinction is tracked out-of-band by a new `InstanceCache`
+  "starting latch" (`MarkStarting`/`MarkReady`/`IsStarting`), not derivable from the
+  boolean run-state reading alone.
+- `KgsmAuditConsumer` registers a handler for the new `instance_ready` event
+  (kgsm-lib 1.35.0, `InstanceReadyData`) — audit-silent by design (a run-state
+  refinement of the already-recorded `server.start`, not a new fact); it only
+  clears the starting latch.
+- `ServerAggregator.BuildServer` folds the starting latch into `Server.status`
+  (`ServerStatus.Starting = "starting"`); `DomainPump`'s existing status diff fans
+  `starting`/`running` transitions out over the `servers` SSE topic with no pump
+  change.
+- `InstanceCache`'s background boolean reconcile can no longer promote
+  `starting → running` on its own (the reconcile-hazard guard,
+  `ReconcileStartingLatch`) — it only ever closes the latch on new evidence (the
+  process measured down, the instance vanished from the roster, or a 5-minute
+  safety timeout, which resolves honestly to `running` since the process is
+  observed up in that same pass).
+- `CommandGate`: `start` against a `starting` server is now inadmissible (409,
+  same no-op class as start-when-running); `update` against `starting` is
+  inadmissible (same "files in use" reason as running); `stop` against `starting`
+  remains admissible (an operator can abort a server stuck mid-boot).
+
 ### Added (v0.11.0)
 - `Job` DTO gains `phase` (install sub-phase: `"preparing"` | `"downloading"` | `"deploying"`)
   and `blueprint` fields; both are null for non-install jobs.

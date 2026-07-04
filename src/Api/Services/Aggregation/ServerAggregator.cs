@@ -102,7 +102,7 @@ public sealed class ServerAggregator
         await snapshotTask.ConfigureAwait(false);
 
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshotTask.Result);
-        Server server = BuildServer(id, instance, _cache.Statuses, metricsById, _options.HostId);
+        Server server = BuildServer(id, instance, _cache.Statuses, metricsById, _options.HostId, _cache.IsStarting);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -156,7 +156,7 @@ public sealed class ServerAggregator
 
         var servers = new List<Server>(roster.Count);
         foreach ((string id, Instance instance) in roster)
-            servers.Add(BuildServer(id, instance, statuses, metricsById, _options.HostId));
+            servers.Add(BuildServer(id, instance, statuses, metricsById, _options.HostId, _cache.IsStarting));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -176,12 +176,17 @@ public sealed class ServerAggregator
     // Build one Server (the shared list/detail element — detail adds the network block on top). status,
     // version and metrics are all independent + honest: a non-measured reading is "unknown", a missing
     // metrics row is null — never inferred from one another. Internal static so DomainPump can reuse it.
+    // `isStarting` is InstanceCache.IsStarting — the ONE place the starting-latch tri-state (see
+    // InstanceCache's remarks) folds into the DTO's status; only consulted when the boolean reading
+    // itself is already "up" (a stopped/crashed instance is never reported starting, even if the latch
+    // somehow hadn't cleared — belt-and-suspenders alongside UpdateStatus's own latch-clear on stop/crash).
     internal static Server BuildServer(
         string id,
         Instance instance,
         IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> statuses,
         IReadOnlyDictionary<string, Snap.ServerMetrics> metricsById,
-        string hostId)
+        string hostId,
+        Func<string, bool> isStarting)
     {
         string status = ServerStatus.Unknown;
         string? version = null;
@@ -190,7 +195,9 @@ public sealed class ServerAggregator
         if (statuses.TryGetValue(id, out Reading<InstanceRuntimeStatus>? reading)
             && reading is { IsMeasured: true, Value: { } runtimeStatus })
         {
-            status = runtimeStatus.Status ? ServerStatus.Running : ServerStatus.Stopped;
+            status = runtimeStatus.Status
+                ? (isStarting(id) ? ServerStatus.Starting : ServerStatus.Running)
+                : ServerStatus.Stopped;
             version = string.IsNullOrWhiteSpace(runtimeStatus.Version.Current)
                 ? null
                 : runtimeStatus.Version.Current;

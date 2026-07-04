@@ -13,10 +13,17 @@ namespace TheKrystalShip.Api.Contracts;
 /// kgsm-api). So this DTO deliberately diverges, and that divergence is the contract:
 /// </para>
 /// <list type="bullet">
-///   <item><description><c>status</c> is the tri-state <c>running|stopped|unknown</c> derived from
-///     kgsm-lib's <c>Reading&lt;InstanceRuntimeStatus&gt;</c> — never the aspirational
-///     <c>online|offline|updating|crashed|installing</c> (the transitional states need the M3 job
-///     tracker and crash detection that don't exist yet).</description></item>
+///   <item><description><c>status</c> is the honest, closed <c>running|starting|stopped|unknown</c>
+///     vocabulary — never the aspirational <c>online|offline|updating|crashed|installing</c> (the other
+///     transitional states still need the M3 job tracker and crash detection). <c>running</c>/<c>stopped</c>/
+///     <c>unknown</c> derive from kgsm-lib's <c>Reading&lt;InstanceRuntimeStatus&gt;</c> as before.
+///     <c>starting</c> is a REAL run-state, not a job state: the window between an <c>instance_started</c>
+///     event (the process spawned) and the matching <c>instance_ready</c> event (the watchdog's log-scrape
+///     confirms the game finished booting) — the boolean status reading alone can't tell these apart (the
+///     process is genuinely "up" for both), so <see cref="Services.Aggregation.InstanceCache"/> tracks the
+///     window explicitly (a "starting latch") and <c>ServerAggregator.BuildServer</c> is the one place that
+///     folds it into <c>status</c>. See <c>InstanceCache</c>'s remarks for why the periodic boolean
+///     reconcile must never be allowed to promote <c>starting</c> back to <c>running</c> on its own.</description></item>
 ///   <item><description><c>metrics</c> preserves the monitor's native units: <c>cpuPctCore</c>
 ///     (% of <em>one</em> core, can exceed 100 — NOT the host's 0–100), <c>memBytes</c>, nullable
 ///     <c>io*</c>. The whole block is <c>null</c> when no per-server sample is available.</description></item>
@@ -40,7 +47,9 @@ public sealed record Server(
     string Name,
     // Blueprint id this instance was installed from (the honest analog of the aspirational `game`).
     string Blueprint,
-    // running | stopped | unknown — see ServerStatus. From Reading<InstanceRuntimeStatus>.
+    // running | starting | stopped | unknown — see ServerStatus. running/stopped/unknown come from
+    // Reading<InstanceRuntimeStatus>; starting is the InstanceCache starting-latch window layered on top
+    // by ServerAggregator.BuildServer (see the class remarks above).
     string Status,
     // Installed version (InstanceRuntimeStatus.Version.Current). Null when the status is unknown
     // or kgsm reports no version. NOT an update check — `latest`/`updates_available` need the slow
@@ -127,15 +136,24 @@ public sealed record ServerMetricsDto(
     long? TxBps);
 
 /// <summary>
-/// The honest run-state vocabulary (M1·b). Derived from kgsm-lib's
-/// <c>Reading&lt;InstanceRuntimeStatus&gt;</c>: a measured reading maps its boolean
+/// The honest run-state vocabulary (M1·b, extended with <see cref="Starting"/>). Derived from
+/// kgsm-lib's <c>Reading&lt;InstanceRuntimeStatus&gt;</c>: a measured reading maps its boolean
 /// <c>Status</c> to <see cref="Running"/>/<see cref="Stopped"/>; any non-measured reading
 /// (unavailable / unsupported / skipped, or a missing entry) is <see cref="Unknown"/> — the
 /// status was not readable, distinct from a confident "stopped".
+/// <para>
+/// <see cref="Starting"/> is layered on top of a measured "up" (<c>Status: true</c>) reading: the
+/// process has spawned (<c>instance_started</c>) but the watchdog hasn't yet confirmed the game
+/// finished booting (<c>instance_ready</c>). The boolean reading alone cannot distinguish this from
+/// <see cref="Running"/> — both observe the process as up — so it is tracked out-of-band by
+/// <see cref="Services.Aggregation.InstanceCache"/>'s starting latch, not derivable from the reading
+/// by itself. See <c>InstanceCache</c> for the latch design and its reconcile-hazard guard.
+/// </para>
 /// </summary>
 public static class ServerStatus
 {
     public const string Running = "running";
+    public const string Starting = "starting";
     public const string Stopped = "stopped";
     public const string Unknown = "unknown";
 }
