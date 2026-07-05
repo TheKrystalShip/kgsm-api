@@ -60,7 +60,7 @@ WD_SOCK="${SMOKE_WATCHDOG_SOCKET:-}"                                    # empty 
 
 # M1·b engine wiring. kgsm-lib is base, not a leaf: point it at the canonical dev checkout so
 # GET /servers reads a real roster. Override with SMOKE_KGSM_PATH on another host.
-KGSM_PATH="${SMOKE_KGSM_PATH:-/home/heisen/tks/kgsm/kgsm.sh}"
+KGSM_PATH="${SMOKE_KGSM_PATH:-/usr/local/bin/kgsm}"
 # M5 event socket: a DEDICATED temp path the audit consumer binds — NEVER the shared default
 # (/run/kgsm-api/kgsm-events.sock), since the listener deletes any file at its path before binding and
 # could clobber another consumer's live socket. Smoke fires no kgsm events, so this just proves the
