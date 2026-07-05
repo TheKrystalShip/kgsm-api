@@ -36,7 +36,7 @@ public sealed class PlayerRosterService
         string? key = ResolveKey(sessionKey, id, name, addr);
         if (string.IsNullOrEmpty(serverId) || key is null) return null;
 
-        string playerIdentity = ResolvePlayerIdentity(id, addr, name, sessionKey);
+        string playerIdentity = PlayerIdentityResolver.Resolve(id, name, addr, sessionKey);
         var roster = _rosters.GetOrAdd(serverId, static _ => new ConcurrentDictionary<string, RosterPlayer>());
         var player = new RosterPlayer(playerIdentity, id, name, addr, PlayerStatus.online, since, since, null);
         roster[key] = player;
@@ -52,7 +52,7 @@ public sealed class PlayerRosterService
         if (string.IsNullOrEmpty(serverId) || key is null) return null;
         if (!_rosters.TryGetValue(serverId, out var roster)) return null;
 
-        string playerIdentity = ResolvePlayerIdentity(id, addr, name, sessionKey);
+        string playerIdentity = PlayerIdentityResolver.Resolve(id, name, addr, sessionKey);
         RosterPlayer last = roster.TryRemove(key, out RosterPlayer? existing)
             ? existing
             : new RosterPlayer(playerIdentity, id, name, addr, PlayerStatus.offline, at, at, null);
@@ -83,13 +83,4 @@ public sealed class PlayerRosterService
         : !string.IsNullOrEmpty(id) ? id
         : !string.IsNullOrEmpty(name) ? name
         : null;
-
-    /// <summary>Resolve the stable player identity (first non-blank of id, addr, name, sessionKey).
-    /// Deliberately different from ResolveKey: the player identity prioritizes the stable account id.</summary>
-    private static string ResolvePlayerIdentity(string? id, string? addr, string? name, string? sessionKey) =>
-        !string.IsNullOrEmpty(id) ? id
-        : !string.IsNullOrEmpty(addr) ? addr
-        : !string.IsNullOrEmpty(name) ? name
-        : !string.IsNullOrEmpty(sessionKey) ? sessionKey
-        : "unknown";
 }

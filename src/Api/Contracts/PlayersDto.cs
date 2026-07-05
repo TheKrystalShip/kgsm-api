@@ -23,12 +23,13 @@ public sealed record PlayersResponse(string Detection, IReadOnlyList<RosterPlaye
 
 /// <summary>
 /// A player in the permanent roster (player-presence-contract.md §5), keyed on
-/// <see cref="PlayerIdentity"/> — the stable dedup key (first non-empty of PlayerId, PlayerAddr,
-/// PlayerName, SessionKey). One row per unique player per server; never deleted, only status changes.
+/// <see cref="PlayerIdentity"/> — the stable dedup key (first non-blank of PlayerId, PlayerName,
+/// PlayerAddr, SessionKey). One row per unique player per server; never deleted, only status changes.
 /// </summary>
 /// <param name="PlayerIdentity">The stable player-level dedup key — deliberately different from
 /// the session-level <c>sessionKey</c> (which is <c>key ?? addr ?? id ?? name</c>). The player-level
-/// identity prioritizes the stable account id (SteamID64/UUID) when available.</param>
+/// identity prioritizes the stable account id (SteamID64/UUID), then the character <c>name</c> (the
+/// person, for account-less games), before the ephemeral network <c>addr</c>.</param>
 /// <param name="PlayerId">The stable account-layer id (SteamID64/UUID) when the game exposes one safely,
 /// otherwise <see langword="null"/>. Never fabricated.</param>
 /// <param name="PlayerName">The display label the game gave at join, or <see langword="null"/> when the

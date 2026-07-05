@@ -11,11 +11,13 @@ namespace TheKrystalShip.Api.Data;
 /// is a fast session-level projection for WS coalescing only.
 /// </summary>
 /// <remarks>
-/// <para><b>Identity resolution.</b> <see cref="PlayerIdentity"/> is the stable dedup key, resolved as the
-/// first non-empty of: <c>PlayerId</c> (SteamID64/UUID — the gold standard), <c>PlayerAddr</c>,
-/// <c>PlayerName</c>, <c>SessionKey</c> (fallback). This is deliberately different from the session-level
-/// <c>sessionKey</c> (which is <c>key ?? addr ?? id ?? name</c>) — the player-level identity prioritizes
-/// the stable account id.</para>
+/// <para><b>Identity resolution.</b> <see cref="PlayerIdentity"/> is the stable dedup key, resolved by
+/// <see cref="Services.Players.PlayerIdentityResolver"/> as the first non-blank of: <c>PlayerId</c>
+/// (SteamID64/UUID — the gold standard), <c>PlayerName</c> (the character — the person, for account-less
+/// games), <c>PlayerAddr</c>, <c>SessionKey</c> (fallback). Name ranks <b>above</b> the network address:
+/// <c>addr</c> is <c>ip:port</c>, and both the port (ephemeral) and ip (ISP-mutable) fracture a durable
+/// person-row on every reconnect. This is deliberately different from the session-level <c>sessionKey</c>
+/// (which is <c>key ?? addr ?? id ?? name</c>, and correctly disambiguates concurrent connections).</para>
 /// <para><b>Unknown resolution.</b> On API startup, all <c>online</c> entries are set to <c>unknown</c>
 /// (we missed events during downtime). They resolve to <c>online</c> or <c>offline</c> only on the next
 /// definitive event — no probing, no timeouts. Honest.</para>

@@ -46,6 +46,11 @@ public sealed class PlayerHistoryService(
     {
         await EnsureCreatedAsync(ct).ConfigureAwait(false);
 
+        // One-time re-key: collapse rows minted under the old addr-first identity onto the
+        // name-first person key, merging reconnect-duplicates. Runs before the watchdog reconcile
+        // so the merged rows are what gets marked online/offline below. Idempotent.
+        await MergeDuplicatesAsync(ct).ConfigureAwait(false);
+
         // Try to get the watchdog's live session map.
         IWatchdogClient? watchdog = serviceProvider.GetService(typeof(IWatchdogClient)) as IWatchdogClient;
         if (watchdog is null)
@@ -151,7 +156,7 @@ public sealed class PlayerHistoryService(
 
                 if (!exists)
                 {
-                    string playerIdentity = session.Id ?? session.Addr ?? session.Name ?? session.SessionKey;
+                    string playerIdentity = PlayerIdentityResolver.Resolve(session.Id, session.Name, session.Addr, session.SessionKey);
                     DateTimeOffset now = DateTimeOffset.UtcNow;
                     db.PlayerHistory.Add(new PlayerRecord
                     {
@@ -188,7 +193,7 @@ public sealed class PlayerHistoryService(
             foreach (var session in kvp.Value)
             {
                 if (session.SessionKey is null) continue;
-                string playerIdentity = session.Id ?? session.Addr ?? session.Name ?? session.SessionKey;
+                string playerIdentity = PlayerIdentityResolver.Resolve(session.Id, session.Name, session.Addr, session.SessionKey);
 
                 if (_cache.TryGetValue(serverId, out var roster) && roster.TryGetValue(playerIdentity, out var player) && player.Status == PlayerStatus.online)
                 {
@@ -226,13 +231,97 @@ public sealed class PlayerHistoryService(
         await RebuildCacheAsync(ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// One-time re-key of the permanent roster onto the name-first person identity
+    /// (<see cref="PlayerIdentityResolver"/>). Every existing row is regrouped by its recomputed
+    /// person key; rows that collapse to the same key (a reconnect from a new port/ip that the old
+    /// addr-first key split into duplicates) are merged into a single survivor. Preserves history:
+    /// <c>FirstSeen</c> = earliest, <c>LastSeen</c> = latest, <c>banned</c> status and its reason are
+    /// never lost, and the freshest non-blank name/addr/id are carried forward. Idempotent — after the
+    /// first pass every group is a singleton already keyed on its person identity, so it no-ops.
+    /// </summary>
+    private async Task MergeDuplicatesAsync(CancellationToken ct)
+    {
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using IServiceScope scope = scopeFactory.CreateScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            PlayerRecord[] all = await db.PlayerHistory.ToArrayAsync(ct).ConfigureAwait(false);
+
+            // Group by (server, recomputed person identity). Pass the stored PlayerIdentity as the
+            // sessionKey fallback so an id/name/addr-less row keeps its existing key (never collapses
+            // distinct such rows onto "unknown").
+            var groups = all
+                .GroupBy(r => (r.ServerId,
+                    Identity: PlayerIdentityResolver.Resolve(r.PlayerId, r.PlayerName, r.PlayerAddr, r.PlayerIdentity)));
+
+            int mergedRows = 0;
+            int rekeyedRows = 0;
+
+            foreach (var group in groups)
+            {
+                string newIdentity = group.Key.Identity;
+                // Newest first — used to pick the freshest non-blank name/addr/id.
+                PlayerRecord[] rows = group.OrderByDescending(r => r.LastSeen).ToArray();
+                PlayerRecord survivor = rows[0];
+
+                if (rows.Length == 1)
+                {
+                    // No duplicate — but the person key may still differ from the old addr-first key.
+                    if (survivor.PlayerIdentity != newIdentity)
+                    {
+                        survivor.PlayerIdentity = newIdentity;
+                        rekeyedRows++;
+                    }
+                    continue;
+                }
+
+                // Merge duplicates onto the survivor.
+                survivor.PlayerIdentity = newIdentity;
+                survivor.FirstSeen = rows.Min(r => r.FirstSeen);
+                survivor.LastSeen = rows.Max(r => r.LastSeen);
+                survivor.PlayerId = rows.Select(r => r.PlayerId).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+                survivor.PlayerName = rows.Select(r => r.PlayerName).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+                survivor.PlayerAddr = rows.Select(r => r.PlayerAddr).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+                // Status precedence: a manual ban is authoritative and never lost; then online > offline > unknown.
+                PlayerRecord? banned = rows.FirstOrDefault(r => r.Status == PlayerStatus.banned);
+                survivor.Status = banned is not null ? PlayerStatus.banned
+                    : rows.Any(r => r.Status == PlayerStatus.online) ? PlayerStatus.online
+                    : rows.Any(r => r.Status == PlayerStatus.offline) ? PlayerStatus.offline
+                    : PlayerStatus.unknown;
+                survivor.BanReason = banned?.BanReason
+                    ?? rows.Select(r => r.BanReason).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+
+                for (int i = 1; i < rows.Length; i++)
+                    db.PlayerHistory.Remove(rows[i]);
+
+                mergedRows += rows.Length - 1;
+            }
+
+            if (mergedRows > 0 || rekeyedRows > 0)
+            {
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                logger.LogInformation(
+                    "Player history: re-keyed onto name-first identity — {Merged} duplicate rows merged, {Rekeyed} rows re-keyed",
+                    mergedRows, rekeyedRows);
+            }
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+    }
+
     /// <summary>Upsert a player on <c>player.join</c>. Sets status to <c>online</c>, updates
     /// <c>LastSeen</c>, and publishes a <c>players.join</c> WS frame. Preserves <c>FirstSeen</c>
     /// if the player already exists in the roster.</summary>
     public void Join(string serverId, string? sessionKey, string? id, string? name, string? addr, DateTimeOffset since)
     {
         if (string.IsNullOrEmpty(serverId)) return;
-        string playerIdentity = ResolvePlayerIdentity(id, addr, name, sessionKey);
+        string playerIdentity = PlayerIdentityResolver.Resolve(id, name, addr, sessionKey);
 
         // Preserve FirstSeen from existing record if present.
         DateTimeOffset firstSeen = since;
@@ -259,7 +348,7 @@ public sealed class PlayerHistoryService(
     public void Leave(string serverId, string? sessionKey, string? id, string? name, string? addr, DateTimeOffset at)
     {
         if (string.IsNullOrEmpty(serverId)) return;
-        string playerIdentity = ResolvePlayerIdentity(id, addr, name, sessionKey);
+        string playerIdentity = PlayerIdentityResolver.Resolve(id, name, addr, sessionKey);
 
         // Update in-memory cache: prefer the existing record's FirstSeen.
         DateTimeOffset firstSeen = at;
@@ -471,16 +560,6 @@ public sealed class PlayerHistoryService(
             _ensureGate.Release();
         }
     }
-
-    /// <summary>Resolve the stable player identity (first non-blank of id, addr, name, sessionKey).
-    /// Deliberately different from the session-level sessionKey: the player identity prioritizes
-    /// the stable account id.</summary>
-    private static string ResolvePlayerIdentity(string? id, string? addr, string? name, string? sessionKey) =>
-        !string.IsNullOrEmpty(id) ? id
-        : !string.IsNullOrEmpty(addr) ? addr
-        : !string.IsNullOrEmpty(name) ? name
-        : !string.IsNullOrEmpty(sessionKey) ? sessionKey
-        : "unknown";
 
     /// <summary>Status sort order: online=0, unknown=1, offline=2, banned=3.</summary>
     private static int StatusOrder(PlayerStatus status) => status switch

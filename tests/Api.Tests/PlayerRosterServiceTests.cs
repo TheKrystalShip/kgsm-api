@@ -45,15 +45,17 @@ public sealed class PlayerRosterServiceTests
     }
 
     [Theory]
-    [InlineData(null, "1.2.3.4:9999", "id-1", "name-1", "id-1")]       // sessionKey missing -> identity from id
-    [InlineData(null, null, "id-1", "name-1", "id-1")]                  // sessionKey+addr missing -> id
+    [InlineData(null, "1.2.3.4:9999", "id-1", "name-1", "id-1")]        // id wins over all
+    [InlineData(null, null, "id-1", "name-1", "id-1")]                  // only id
     [InlineData(null, null, null, "name-1", "name-1")]                  // only name -> name
-    [InlineData("key-1", "1.2.3.4:9999", "id-1", "name-1", "id-1")]    // sessionKey present -> identity from id (player-level)
-    public void Join_PlayerIdentity_UsesStableId(
+    [InlineData("key-1", "1.2.3.4:9999", "id-1", "name-1", "id-1")]     // id wins even with sessionKey+addr present
+    [InlineData("key-1", "1.2.3.4:9999", null, "name-1", "name-1")]     // name wins over addr (the fix: the person, not the connection)
+    public void Join_PlayerIdentity_PrefersIdThenNameThenAddr(
         string? sessionKey, string? addr, string? id, string? name, string expectedIdentity)
     {
-        // PlayerIdentity resolves as: id ?? addr ?? name ?? sessionKey — deliberately different
-        // from the session-level sessionKey (key ?? addr ?? id ?? name).
+        // PlayerIdentity resolves as: id ?? name ?? addr ?? sessionKey — name above addr so a reconnect
+        // from a new ip:port doesn't mint a duplicate. Deliberately different from the session-level
+        // sessionKey (key ?? addr ?? id ?? name), which correctly keys on the connection.
         var roster = NewService();
         roster.Join("core-keeper-1", sessionKey, id, name, addr, DateTimeOffset.UtcNow);
 

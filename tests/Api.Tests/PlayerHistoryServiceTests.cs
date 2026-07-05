@@ -56,12 +56,14 @@ public sealed class PlayerHistoryServiceTests
     }
 
     [Theory]
-    [InlineData(null, "1.2.3.4:9999", "id-1", "name-1", "id-1")]       // id wins
-    [InlineData(null, null, "id-1", "name-1", "id-1")]                  // only id
-    [InlineData(null, null, null, "name-1", "name-1")]                  // only name
-    [InlineData("key-1", "1.2.3.4:9999", "id-1", "name-1", "id-1")]    // id wins over all
-    [InlineData("key-1", "1.2.3.4:9999", null, "name-1", "1.2.3.4:9999")] // addr wins over name
-    public void Join_PlayerIdentity_UsesStableId(
+    [InlineData(null, "1.2.3.4:9999", "id-1", "name-1", "id-1")]        // id wins
+    [InlineData(null, null, "id-1", "name-1", "id-1")]                   // only id
+    [InlineData(null, null, null, "name-1", "name-1")]                   // only name
+    [InlineData("key-1", "1.2.3.4:9999", "id-1", "name-1", "id-1")]     // id wins over all
+    [InlineData("key-1", "1.2.3.4:9999", null, "name-1", "name-1")]     // name wins over addr (the fix: the person, not the connection)
+    [InlineData("key-1", "1.2.3.4:9999", null, null, "1.2.3.4:9999")]   // addr wins over sessionKey
+    [InlineData("key-1", null, null, null, "key-1")]                    // sessionKey is the last-resort fallback
+    public void Join_PlayerIdentity_PrefersIdThenNameThenAddr(
         string? sessionKey, string? addr, string? id, string? name, string expectedIdentity)
     {
         var history = NewService();

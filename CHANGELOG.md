@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (v0.13.0)
+- Player roster identity is now **name-first**: the durable person key resolves as
+  `id → name → addr → sessionKey` (was `id → addr → name → sessionKey`). For
+  account-less direct-socket games (e.g. romestead) the character **name** now keys the
+  roster instead of `ip:port` — a reconnect from a new ephemeral port, or after an ISP IP
+  change, no longer mints a duplicate roster row. The name is present on both join and
+  leave (the watchdog's `PlayerSessionMap` backfills it onto an `addr`-only leave line), so
+  leave still correlates to the right person-row. Resolution is consolidated into a single
+  `PlayerIdentityResolver` (was duplicated across four sites); the name is trimmed but not
+  case-folded. The session-level key (`PlayerRosterService.ResolveKey`) is unchanged — a
+  session is still keyed on the connection. (player-presence-contract.md §5.)
+- On startup, `PlayerHistoryService` runs a one-time idempotent **re-key + merge** of the
+  existing roster: every row is regrouped onto its recomputed person key, and rows that
+  collapse together (old addr-first duplicates of the same character) are merged into one
+  survivor — earliest `FirstSeen`, latest `LastSeen`, `banned` status/reason never lost,
+  freshest non-blank name/addr/id carried forward.
+
 ### Added (v0.12.0)
 - New server run-state `starting`, distinct from `running`: the window between
   `instance_started` (process spawned) and `instance_ready` (the watchdog's
