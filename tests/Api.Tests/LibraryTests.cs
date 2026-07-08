@@ -305,6 +305,7 @@ public sealed class LibraryAggregatorTests
         AuthDisabled = true, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
         DiscordRedirectUri = "", DiscordBotToken = "", DiscordGuildId = "", AuthFrontendUrl = "",
         RoleAdminIds = [], RoleOperatorIds = [], RoleViewerIds = [],
+        SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
     };
 
     // A RawgStore over a fresh per-call on-disk temp SQLite DB (the project's "tests use a fresh temp DB"

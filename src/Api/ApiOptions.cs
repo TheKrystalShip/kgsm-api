@@ -407,6 +407,58 @@ public sealed class ApiOptions
     /// <summary>Auth is on unless the dev escape hatch is set.</summary>
     public bool AuthEnabled => !AuthDisabled;
 
+    // --- Sessions (M4·c) — the session registry + cached per-request validator
+    // (re-opens the M4·a "no session table" lock — see docs/session-management-plan.md).
+    // Sessions are operational state, NOT a user profile row; identity stays in the JWT claims.
+    // The registry is the authority the cached validator reads to decide "is this session alive"
+    // — what the stateless JWT alone cannot answer (close the 30d-refresh revocation gap).
+
+    /// <summary>
+    /// Master switch for the session registry + the cached per-request validator +
+    /// the revocation surface (<c>KGSM_API_SESSIONS_DISABLED</c>, default <see langword="false"/>
+    /// → sessions ON). When <see langword="true"/> the registry is inert — no per-request check,
+    /// no <c>GET /auth/sessions</c>, no revoke endpoints (the M4·a stateless-JWT posture, an
+    /// escape hatch for debugging). ⚠ In-flight tokens under <c>DISABLED</c> are always alive
+    /// (no <c>sid</c> check); only set this for a deliberate debugging window, never on a real
+    /// host. <b>Default ON</b> like <see cref="AuthEnabled"/>.
+    /// </summary>
+    public bool SessionsEnabled { get; init; } = true;
+
+    /// <summary>
+    /// The in-memory cache TTL (ms) for the per-request session validator
+    /// (<c>KGSM_API_SESSIONS_CACHE_TTL_MS</c>, default 5000 = 5s, floor 500). The accepted
+    /// revocation-lag bound (D2): a revoke evicts the cache entry immediately (best-effort), and
+    /// the TTL is the backstop — worst case a revoked session lives up to this long before the
+    /// next access → 401. Per-host single-instance so no cross-node coherence is needed. Lower
+    /// values trade DB load for faster revoke; the access-token TTL (15min) is the hard ceiling
+    /// regardless. Bumping to 0 effectively disables the cache (per-request DB read).
+    /// </summary>
+    public required int SessionsCacheTtlMs { get; init; }
+
+    /// <summary>
+    /// How often the session GC worker deletes expired rows
+    /// (<c>KGSM_API_SESSIONS_GC_MS</c>, default 600000 = 10 min, floor 60000). Both revoked and
+    /// non-revoked rows whose <c>Expires &lt; now</c> are deleted (expired is dead regardless of
+    /// revocation) — keeps the table permanently bounded. Runs once at startup for catch-up after
+    /// downtime. Inert when <see cref="SessionsEnabled"/> is <see langword="false"/>.
+    /// </summary>
+    public required int SessionsGcMs { get; init; }
+
+    /// <summary>
+    /// The session absolute-cap window in days (<c>KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS</c>,
+    /// default 30, floor 1). A session row's <c>Expires = Created + this</c>. <b>No sliding</b>
+    /// on refresh (the cap stays absolute, per the original M4·a lock rationale) — D8. ⚠ Must
+    /// stay in lockstep with <see cref="Services.Auth.SessionTokenService"/>'s refresh-token TTL:
+    /// if you change one, change both. A mismatch means the registry treats alive tokens as
+    /// dead (or vice versa) — the registry is the revocation authority, the JWT TTL is the mint
+    /// bound, and they must agree.
+    /// </summary>
+    public required int SessionsRefreshAbsoluteDays { get; init; }
+
+    /// <summary>Sessions are on unless the master switch is unset. Mirrors
+    /// <see cref="AuthEnabled"/>'s default-ON posture.</summary>
+    public bool SessionsProvisioned => SessionsEnabled;
+
     /// <summary>
     /// Whether the Discord OAuth login flow can run — all of client id/secret, redirect URI, bot
     /// token and guild id are configured. Auth (JWT validation, tier gates) is enforced regardless;
@@ -533,6 +585,15 @@ public sealed class ApiOptions
             RoleAdminIds = Csv(configuration["KGSM_API_AUTH_ROLE_ADMIN"]),
             RoleOperatorIds = Csv(configuration["KGSM_API_AUTH_ROLE_OPERATOR"]),
             RoleViewerIds = Csv(configuration["KGSM_API_AUTH_ROLE_VIEWER"]),
+
+            // Sessions (M4·c). Mirrors the MetricsHistory kill-switch polarity: SessionsEnabled is the
+            // default-ON twin of `!KGSM_API_SESSIONS_DISABLED`. The cache TTL bounds the revocation lag
+            // (D2); the GC cadence bounds the table; the refresh-absolute-days mirrors the JWT refresh
+            // TTL (the two must stay in lockstep — see the property's doc).
+            SessionsEnabled = !Flag(configuration["KGSM_API_SESSIONS_DISABLED"]),
+            SessionsCacheTtlMs = Math.Max(500, IntOr(configuration["KGSM_API_SESSIONS_CACHE_TTL_MS"], 5000)),
+            SessionsGcMs = Math.Max(60000, IntOr(configuration["KGSM_API_SESSIONS_GC_MS"], 600000)),
+            SessionsRefreshAbsoluteDays = Math.Max(1, IntOr(configuration["KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS"], 30)),
         };
     }
 

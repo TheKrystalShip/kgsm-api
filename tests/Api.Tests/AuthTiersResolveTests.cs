@@ -34,6 +34,7 @@ public sealed class AuthTiersResolveTests
         AuthDisabled = false, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
         DiscordRedirectUri = "", DiscordBotToken = "", DiscordGuildId = "", AuthFrontendUrl = "",
         RoleAdminIds = [AdminRole], RoleOperatorIds = [OpsRole], RoleViewerIds = [],
+        SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
     };
 
     [Fact]

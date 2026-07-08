@@ -50,6 +50,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// Created by the same <c>EnsureCreated</c>; the deployed DB needs a one-time wipe when it lands.</summary>
     public DbSet<PlayerRecord> PlayerHistory => Set<PlayerRecord>();
 
+    /// <summary>The M4·c session registry — one row per (login × device), keyed by the JWT <c>sid</c>
+    /// claim (see <see cref="SessionEntry"/>). The authority the per-request validator reads (cached)
+    /// to decide "is this session still alive" — what the stateless JWT alone cannot answer. Created
+    /// automatically by <c>EnsureCreated</c> on a fresh DB (registered in <see cref="OnModelCreating"/>);
+    /// on the already-deployed DB the table is added by a one-shot <c>sqlite3</c> command (D11), so
+    /// the audit log is untouched. ⚠ Re-opens the M4·a "no session table" lock — see
+    /// <c>Services/Auth/CLAUDE.md</c> + <c>docs/session-management-plan.md</c>.</summary>
+    public DbSet<SessionEntry> Sessions => Set<SessionEntry>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<IntegrationEntity>(e =>
@@ -147,6 +156,37 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(a => new { a.HostId, a.RowId }).IsDescending(false, true);
             e.HasIndex(a => new { a.ActorName, a.RowId }).IsDescending(false, true);
             e.HasIndex(a => new { a.Severity, a.RowId }).IsDescending(false, true);
+        });
+
+        // M4·c — the session registry (re-opens the M4·a "no session table" lock; see
+        // SessionEntry + docs/session-management-plan.md). Timestamps are stored as UTC ticks
+        // (INTEGER) via ValueConverter — the same posture as AuditEntry.Ts/HostSettingsEntity.UpdatedAt
+        // — because SQLite has no date type and EF can't translate a DateTimeOffset >= stored as TEXT,
+        // which the per-request validator's `Expires > now` query needs (SQLite single-writer style: the
+        // 5s-cached check bounds hot-path DB reads). The active-set query is WHERE UserId=? AND Revoked=0
+        // AND Expires>now — ix_sessions_user covers it.
+        modelBuilder.Entity<SessionEntry>(e =>
+        {
+            e.ToTable("sessions");
+            e.HasKey(s => s.Id);
+            // Created/LastSeen/Expires as UTC ticks (long). Round-trips to a UTC DateTimeOffset on read.
+            e.Property(s => s.Created).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            e.Property(s => s.LastSeen).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            e.Property(s => s.Expires).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            e.Property(s => s.RevokedAt).HasConversion(
+                new ValueConverter<DateTimeOffset, long>(
+                    v => v.UtcTicks,
+                    v => new DateTimeOffset(v, TimeSpan.Zero)));
+            // The active-sessions lookup: WHERE UserId=? AND Revoked=? AND Expires>? — covered by the
+            // composite index. A second index backs the GC worker's expired-row sweep (Expires < now).
+            e.HasIndex(s => new { s.UserId, s.Revoked, s.Expires });
+            e.HasIndex(s => s.Expires);
         });
     }
 }

@@ -334,6 +334,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
         AuthDisabled = true, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
         DiscordRedirectUri = "", DiscordBotToken = "", DiscordGuildId = "", AuthFrontendUrl = "",
         RoleAdminIds = [], RoleOperatorIds = [], RoleViewerIds = [],
+        SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
     };
 
     private static RawgStore NewStore()
