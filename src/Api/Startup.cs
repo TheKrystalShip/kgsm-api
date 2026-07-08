@@ -223,6 +223,7 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<StreamHub>();
         services.AddHostedService<MetricsPump>();        // ~1s monitor scrape -> servers/{id}/metrics + hosts/{id}/metrics
         services.AddHostedService<DomainPump>();         // cache-backed diff -> servers (status/roster)
+        services.AddHostedService<ServicesPump>();        // ~5s systemd poll -> hosts/{id}/services (service.patch)
         // The leaf health monitor is ALWAYS-ON (not gated on subscribers): it polls each provisioned
         // leaf's /health every ~2s as the canonical liveness signal, serves the cached capability block
         // to GET /hosts (HostAggregator reads it), and publishes hosts/{id}/capabilities flips. It is one

@@ -225,6 +225,16 @@ public sealed class ApiOptions
     /// </summary>
     public required int MetricsPollMs { get; init; }
 
+    /// <summary>
+    /// How often the <see cref="Realtime.ServicesPump"/> polls systemd for leaf-service state changes and
+    /// emits <c>service.patch</c> on the <c>hosts/{id}/services</c> topic (<c>KGSM_API_SERVICES_POLL_MS</c>,
+    /// default 5000 = 5s, floor 2000). Subscriber-gated — an idle stream costs nothing. Coarser than the
+    /// metrics tick (1s) because systemd state changes are infrequent and the UI doesn't need sub-second
+    /// granularity for service status. Distinct from the <see cref="Realtime.LeafHealthMonitor"/> 2s
+    /// capability probe (which handles the deep-health axis independently).
+    /// </summary>
+    public required int ServicesPollMs { get; init; }
+
     // --- Metrics history (M9) — durable tiered metrics store (metrics.db) -------------------------
 
     /// <summary>Master switch for the metrics history store (<c>KGSM_API_METRICS_HISTORY_ENABLED</c>,
@@ -445,6 +455,7 @@ public sealed class ApiOptions
             // 250ms. Blueprints have no poll — GET /library reads them live per request.
             DomainPollMs = Math.Max(1000, IntOr(configuration["KGSM_API_DOMAIN_POLL_MS"], 5000)),
             MetricsPollMs = Math.Max(250, IntOr(configuration["KGSM_API_METRICS_POLL_MS"], 1000)),
+            ServicesPollMs = Math.Max(2000, IntOr(configuration["KGSM_API_SERVICES_POLL_MS"], 5000)),
 
             // Library RAWG cover/metadata. Opt-in (blank key => worker no-ops). The cache dir always resolves
             // to a concrete path: an explicit KGSM_API_RAWG_CACHE_DIR wins, else (unset OR blank — the

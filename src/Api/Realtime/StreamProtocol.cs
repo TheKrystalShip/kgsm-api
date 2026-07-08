@@ -48,6 +48,12 @@ public static class StreamProtocol
     /// <summary>This host's capability status flips: <c>hosts/{hostId}/capabilities</c>.</summary>
     public static string HostCapabilitiesTopic(string hostId) => $"hosts/{hostId}/capabilities";
 
+    /// <summary>This host's leaf-service state changes: <c>hosts/{hostId}/services</c> (the live companion
+    /// to the REST <c>GET /hosts/{id}/services</c>). The canonical source for service health and running
+    /// status — the client hydrates the initial list via REST and applies <see cref="ServicePatch"/> frames
+    /// from here on. Operator-gated like the REST endpoint (systemd unit names, pids, memory).</summary>
+    public static string HostServicesTopic(string hostId) => $"hosts/{hostId}/services";
+
     /// <summary>This host's live aggregated leaf logs: <c>hosts/{hostId}/logs</c> (the live-tail companion to
     /// the REST <c>GET /hosts/{id}/logs</c>). A <strong>follow-only</strong>, <strong>operator-gated</strong>
     /// topic — the client hydrates history via REST and applies live lines from here on (patch-only, §3·j).
@@ -61,10 +67,16 @@ public static class StreamProtocol
     public static bool IsHostLogsTopic(string topic) =>
         topic.StartsWith("hosts/", StringComparison.Ordinal) && topic.EndsWith("/logs", StringComparison.Ordinal);
 
+    /// <summary>Does <paramref name="topic"/> name some <c>hosts/{id}/services</c> topic? (the services pump's
+    /// idle-gate + the operator predicate).</summary>
+    public static bool IsHostServicesTopic(string topic) =>
+        topic.StartsWith("hosts/", StringComparison.Ordinal) && topic.EndsWith("/services", StringComparison.Ordinal);
+
     /// <summary>Topics that require <c>operator</c> to subscribe, refused for a viewer at the socket even though
     /// the <c>/stream</c> handshake is only viewer-gated. Today: the host-logs tail (raw journald can leak
-    /// secrets — stricter than the viewer-gated audit feed, matching the REST endpoint's gate).</summary>
-    public static bool RequiresOperator(string topic) => IsHostLogsTopic(topic);
+    /// secrets) and the host-services board (systemd unit names, pids, memory) — both stricter than the
+    /// viewer-gated audit feed, matching their REST endpoint's operator gate.</summary>
+    public static bool RequiresOperator(string topic) => IsHostLogsTopic(topic) || IsHostServicesTopic(topic);
 
     // --- server -> client message types (the `type` field of the { topic, type, data } envelope) ---
     /// <summary>A full honest <c>Server</c> element to merge by id (doc-given). Fired on status/roster change.</summary>
@@ -77,6 +89,12 @@ public static class StreamProtocol
     public const string HostMetrics = "host.metrics";
     /// <summary>The host's capability block after a status flip (<c>HostCapabilities</c>).</summary>
     public const string CapabilitiesPatch = "capabilities.patch";
+
+    /// <summary>A leaf service's state changed on the <see cref="HostServicesTopic"/>: <c>data</c> is a full
+    /// <see cref="Contracts.LeafService"/> element (the same shape the REST <c>GET /hosts/{id}/services</c>
+    /// returns) — merged by the client by <c>id</c>. Emitted when systemd state, health, or provisioning
+    /// flips for any leaf in the <see cref="Leaves.LeafCatalog"/>.</summary>
+    public const string ServicePatch = "service.patch";
 
     /// <summary>A fresh <see cref="Contracts.ServerNetwork"/> block (M6·b) on <see cref="ServerNetworkTopic"/>,
     /// after an <c>open_ports</c> command re-probes the firewall. Patch-only, supersede-by-latest per server
@@ -211,6 +229,14 @@ public static class StreamProtocol
     /// <c>GET /alerts</c> on reconnect (§3·j), so coalescing never loses durable truth.
     /// </summary>
     public static string AlertEntityKey(string id) => $"alerts:{id}";
+
+    /// <summary>
+    /// The per-connection coalesce key for a leaf service on the <see cref="HostServicesTopic"/>: a
+    /// <see cref="ServicePatch"/> for the same leaf id supersedes any earlier queued patch — a slow client
+    /// gets the latest state per leaf, never a backlog. Distinct from the audit/console append precedent
+    /// (which are unique-per-event) — service state is supersede-by-latest.
+    /// </summary>
+    public static string ServiceEntityKey(string leafId) => $"services:{leafId}";
 
     /// <summary>
     /// The per-connection coalesce key for a server entity on the <see cref="ServersTopic"/>. A patch
