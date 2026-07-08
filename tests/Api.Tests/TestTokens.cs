@@ -19,6 +19,6 @@ internal static class TestTokens
             })
             .Build();
         var tokens = new SessionTokenService(ApiOptions.FromConfiguration(config), NullLogger<SessionTokenService>.Instance);
-        return tokens.MintAccess(FakeDiscordResolver.Identity, tier);
+        return tokens.MintAccess(FakeDiscordResolver.Identity, tier, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
     }
 }

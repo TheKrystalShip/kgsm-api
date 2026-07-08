@@ -55,17 +55,20 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>Mint a real access token at <paramref name="tier"/> using the server's own token
-    /// service (same key + host the running pipeline validates against).</summary>
+    /// service (same key + host the running pipeline validates against). A M4·c token carries a
+    /// <c>sid</c> claim; tests don't care about the value (the tier matrix keys off the <c>tier</c>
+    /// claim, and the per-request session validator isn't wired in these pre-Increment-4 tests), so
+    /// a fresh random sid per call keeps the matrix stable + parallel-safe.</summary>
     public string AccessToken(AuthTier tier)
     {
         var tokens = Services.GetRequiredService<ISessionTokenService>();
-        return tokens.MintAccess(FakeDiscordResolver.Identity, tier);
+        return tokens.MintAccess(FakeDiscordResolver.Identity, tier, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
     }
 
-    /// <summary>Mint a real refresh token (8h cap) at <paramref name="tier"/>.</summary>
+    /// <summary>Mint a real refresh token (30d cap) at <paramref name="tier"/>.</summary>
     public string RefreshToken(AuthTier tier)
     {
         var tokens = Services.GetRequiredService<ISessionTokenService>();
-        return tokens.MintRefresh(FakeDiscordResolver.Identity, tier);
+        return tokens.MintRefresh(FakeDiscordResolver.Identity, tier, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
     }
 }

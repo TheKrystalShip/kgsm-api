@@ -112,8 +112,15 @@ public sealed class AuthController(
                 : StatusCode(StatusCodes.Status403Forbidden,
                     new CallbackResult("denied", null, null, null, userHandle));
 
-        string access = tokens.MintAccess(resolved.Identity, resolved.Tier);
-        string refresh = tokens.MintRefresh(resolved.Identity, resolved.Tier);
+        // M4·c — generate the session id here. The SessionEntry row write + the auth.login Meta's
+        // `sid` stamp land in Increment 3 (this increment just mints the sid claim); the per-request
+        // validator (Increment 4) will reject a token whose sid has no row (D10 clean break, but only
+        // once Increment 4's check lands — until then every sid-bearing token is accepted). The Expires
+        // surfaces (MintedToken.ExpiresAt) are computed-but-unused this increment — Increment 7 wires
+        // them into CallbackResult / RefreshResponse (the Group E #12 session-TTL display).
+        string sessionId = "sid_" + Guid.NewGuid().ToString("N");
+        MintedToken access = tokens.MintAccess(resolved.Identity, resolved.Tier, sessionId);
+        MintedToken refresh = tokens.MintRefresh(resolved.Identity, resolved.Tier, sessionId);
 
         // M5: an auth.login is an API-internal action (no kgsm event), so it is written directly here
         // — no double-write risk. Best-effort: a failed audit write must never break the login.
@@ -125,8 +132,8 @@ public sealed class AuthController(
         // reads them, adopts the session, and strips the fragment. Otherwise return the JSON contract
         // (API-only deployments + the auth tests). The redirect target is the single configured URL.
         return options.FrontendRedirectEnabled
-            ? FrontendRedirect(Frag(("access", access), ("refresh", refresh)))
-            : Ok(new CallbackResult("ok", AuthTiers.ToWire(resolved.Tier), access, refresh, userHandle));
+            ? FrontendRedirect(Frag(("access", access.Token), ("refresh", refresh.Token)))
+            : Ok(new CallbackResult("ok", AuthTiers.ToWire(resolved.Tier), access.Token, refresh.Token, userHandle));
     }
 
     /// <summary>302 the SPA with the OAuth outcome in the URL fragment. The target is the single
@@ -157,7 +164,7 @@ public sealed class AuthController(
 
     /// <summary>
     /// Rotate the access token from a still-valid refresh token (presented as the <c>Authorization:
-    /// Bearer</c>), no Discord round-trip. Past the 8h cap the refresh token is invalid → <c>401</c>
+    /// Bearer</c>), no Discord round-trip. Past the 30-day cap the refresh token is invalid → <c>401</c>
     /// → the client re-bounces through the anchor. Role is not re-checked here (see <see cref="RefreshClaims"/>).
     /// </summary>
     [AllowAnonymous]
@@ -173,8 +180,13 @@ public sealed class AuthController(
             return Error(StatusCodes.Status401Unauthorized, "unauthorized",
                 "the refresh token is invalid or expired");
 
-        string access = tokens.MintAccess(claims.Identity, claims.Tier);
-        return Ok(new RefreshResponse(access, AuthTiers.ToWire(claims.Tier)));
+        // M4·c — read the sid from the refresh token's claims (already surfaced by ReadRefreshAsync
+        // as claims.SessionId) and carry it into the re-minted access (D7/D8: same sid across the
+        // session's lifetime; no sliding window, the 30d cap is on the session row not the token kind).
+        // The session-row validity check + LastSeen bump land in Increment 5 (this increment just
+        // mints the access with the carried sid). ExpiresAt is computed-but-unused until Increment 7.
+        MintedToken access = tokens.MintAccess(claims.Identity, claims.Tier, claims.SessionId);
+        return Ok(new RefreshResponse(access.Token, AuthTiers.ToWire(claims.Tier)));
     }
 
     /// <summary>

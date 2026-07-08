@@ -22,11 +22,14 @@ public sealed record ResolvedPrincipal(DiscordIdentity Identity, AuthTier Tier);
 
 /// <summary>
 /// The claims read back from a valid refresh token at <c>/auth/session/refresh</c> — enough to
-/// re-mint a fresh access token (same identity, tier and profile snapshot) with no Discord
-/// round-trip. Role is NOT re-checked on refresh, so a role change only takes effect at the next
-/// full bounce (≤ the 8h refresh cap) — an accepted, documented trade.
+/// re-mint a fresh access token (same identity, tier, profile snapshot AND <see cref="SessionId"/>)
+/// with no Discord round-trip. Role is NOT re-checked on refresh, so a role change only takes effect
+/// at the next full bounce (≤ the 30-day refresh cap) — an accepted, documented trade. The
+/// <see cref="SessionId"/> is carried through so the re-minted access keeps the same session (D7/D8 —
+/// a refresh re-mints access with the same <c>sid</c>; the absolute cap is on the session row, not
+/// the token kind).
 /// </summary>
-public sealed record RefreshClaims(DiscordIdentity Identity, AuthTier Tier);
+public sealed record RefreshClaims(DiscordIdentity Identity, AuthTier Tier, string SessionId);
 
 /// <summary>
 /// Reads the identity + tier back out of a validated session token's claims — shared by the refresh
@@ -57,4 +60,12 @@ public static class SessionClaims
 
     public static AuthTier ReadTier(ClaimsIdentity ci) =>
         AuthTiers.Parse(ci.FindFirst(AuthClaims.Tier)?.Value);
+
+    /// <summary>
+    /// The <see cref="AuthClaims.SessionId"/> claim (<c>sid_&lt;guid&gt;</c>), or <see langword="null"/>
+    /// when absent (a pre-M4·c token — the validator rejects it). Read at refresh (carried into the
+    /// re-minted access) and by the per-request session validator (the registry lookup key).
+    /// </summary>
+    public static string? ReadSessionId(ClaimsIdentity ci) =>
+        ci.FindFirst(AuthClaims.SessionId)?.Value;
 }

@@ -77,6 +77,15 @@ public static class AuthClaims
     public const string Display = "disp";
     /// <summary>Discord avatar URL (profile snapshot; optional).</summary>
     public const string Avatar = "avatar";
+    /// <summary>
+    /// The session id (<c>sid_&lt;guid&gt;</c>) — the M4·c session-registry key (see
+    /// <c>docs/session-management-plan.md</c>). Stable across a session's lifetime: carried by BOTH
+    /// the access and the refresh token, and survives access rotation within the 30-day absolute cap
+    /// (refresh re-mints the access with the same <c>sid</c>). Read by the per-request validator
+    /// (cached) to decide "is this session still alive" — the one fact a stateless JWT alone cannot
+    /// answer. Absent on a pre-M4·c token → the validator rejects it (the D10 clean break).
+    /// </summary>
+    public const string SessionId = "sid";
 }
 
 /// <summary>The two token kinds carried in the <see cref="AuthClaims.TokenKind"/> claim.</summary>

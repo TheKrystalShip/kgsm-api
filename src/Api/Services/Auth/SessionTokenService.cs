@@ -22,6 +22,11 @@ public sealed class SessionTokenService : ISessionTokenService
     // a strict refresh window (user directive 2026-06-23). ⚠ A refresh token only survives this
     // long if the signing key is STABLE (KGSM_API_AUTH_SIGNING_KEY set) — an ephemeral per-process
     // key invalidates every token on restart, see the ctor warning below.
+    //
+    // M4·c: this is the MINT-side mirror of ApiOptions.SessionsRefreshAbsoluteDays — the two MUST
+    // stay in lockstep (if you change one, change both). The session row's `Expires` column =
+    // `Created + this` (D8); a refresh within the window re-mints access with the same `sid`, no
+    // sliding window (the cap stays absolute, per the original M4·a lock rationale).
     private static readonly TimeSpan RefreshTtl = TimeSpan.FromDays(30);
 
     private readonly string _host;
@@ -66,13 +71,13 @@ public sealed class SessionTokenService : ISessionTokenService
         };
     }
 
-    public string MintAccess(DiscordIdentity identity, AuthTier tier) =>
-        Mint(identity, tier, TokenKind.Access, AccessTtl);
+    public MintedToken MintAccess(DiscordIdentity identity, AuthTier tier, string sessionId) =>
+        Mint(identity, tier, TokenKind.Access, AccessTtl, sessionId);
 
-    public string MintRefresh(DiscordIdentity identity, AuthTier tier) =>
-        Mint(identity, tier, TokenKind.Refresh, RefreshTtl);
+    public MintedToken MintRefresh(DiscordIdentity identity, AuthTier tier, string sessionId) =>
+        Mint(identity, tier, TokenKind.Refresh, RefreshTtl, sessionId);
 
-    private string Mint(DiscordIdentity identity, AuthTier tier, string kind, TimeSpan ttl)
+    private MintedToken Mint(DiscordIdentity identity, AuthTier tier, string kind, TimeSpan ttl, string sessionId)
     {
         var claims = new List<Claim>
         {
@@ -80,6 +85,9 @@ public sealed class SessionTokenService : ISessionTokenService
             new(AuthClaims.Tier, AuthTiers.ToWire(tier)),
             new(AuthClaims.Host, _host),
             new(AuthClaims.TokenKind, kind),
+            // M4·c — the session id, stable across a session's lifetime (carried by access + refresh;
+            // survives access rotation). Absent on a pre-M4·c token (the D10 validator rejects those).
+            new(AuthClaims.SessionId, sessionId),
             new(AuthClaims.Username, identity.Username),
             new(AuthClaims.Display, identity.Display),
             new("scope", string.Join(' ', identity.Scopes)),
@@ -87,16 +95,22 @@ public sealed class SessionTokenService : ISessionTokenService
         if (identity.AvatarUrl is not null)
             claims.Add(new Claim(AuthClaims.Avatar, identity.AvatarUrl));
 
+        DateTime expires = DateTime.UtcNow.Add(ttl);
         var descriptor = new SecurityTokenDescriptor
         {
             Issuer = Issuer,
             Audience = _host,
             Subject = new ClaimsIdentity(claims),
-            Expires = DateTime.UtcNow.Add(ttl),
+            Expires = expires,
             IssuedAt = DateTime.UtcNow,
             SigningCredentials = _signing,
         };
-        return _handler.CreateToken(descriptor);
+        string token = _handler.CreateToken(descriptor);
+        // Surface the mint-time expiry alongside the token so the login/refresh handoffs can pass it
+        // to the SPA (Increment 7 — the Group E #12 "when will I be logged out" display). This is the
+        // one point the API knows the TTL exactly; reading `exp` back off a validated ClaimsPrincipal
+        // is handler-dependent (not all surfaces populate it as a Claim), so we carry it from mint.
+        return new MintedToken(token, new DateTimeOffset(expires, TimeSpan.Zero));
     }
 
     public async Task<RefreshClaims?> ReadRefreshAsync(string token)
@@ -113,6 +127,14 @@ public sealed class SessionTokenService : ISessionTokenService
         if (identity is null)
             return null;
 
-        return new RefreshClaims(identity, SessionClaims.ReadTier(ci));
+        // M4·c — carry the session id through so the re-minted access keeps the same `sid` (D7/D8).
+        // A pre-M4·c refresh token has no `sid` claim → null. The refresh action treats null as
+        // "no session" (this is the same D10 clean-break path the per-request validator enforces) —
+        // 401 → relogin. (The refresh path's session-row validation lands in Increment 5.)
+        string? sid = SessionClaims.ReadSessionId(ci);
+        if (sid is null)
+            return null;
+
+        return new RefreshClaims(identity, SessionClaims.ReadTier(ci), sid);
     }
 }

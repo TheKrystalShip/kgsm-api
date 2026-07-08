@@ -22,7 +22,7 @@ wire-string tier display; #11 moves here off audit onto a real registry, #12 is 
 | # | Increment | Status | Done-marker (commit / verify result) |
 |---|---|---|---|
 | 1 | `SessionEntry` entity + DB context wiring + `EnsureCreated` | ☑ **BUILT** | build 0-warn green; tests **615/615** (no regression); smoke 78 passed (the 4 pre-existing M5/M2/M7 failures are unrelated — audit/console/assistant paths, not the sessions table) |
-| 2 | `sid` JWT claim + `SessionTokenService` mint changes | ☐ planned | |
+| 2 | `sid` JWT claim + `SessionTokenService` mint changes | ☑ **BUILT** | build 0-warn green; tests **615/615** (no regression). Call sites updated inline (login generates `sid_<guid>`; refresh carries sid from the refresh token's claims) so build stays green; the SessionEntry row write + audit Meta `sid` stamp wait for Increment 3, the ExpiresAt wire waits for Increment 7. ⚠ A pre-M4·c refresh token (no `sid` claim) now `401`s on `/refresh` (ReadRefreshAsync returns null) — D10 clean break at the refresh surface, intentional. |
 | 3 | Login flow creates a session row + `auth.login` Meta gains `sid` | ☐ planned | |
 | 4 | Per-request session validation (cached) + in-flight-token clean break | ☐ planned | |
 | 5 | Refresh + logout honor the session (revoke on logout; same-`sid` rotation on refresh) | ☐ planned | |
