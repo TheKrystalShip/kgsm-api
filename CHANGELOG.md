@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.15.0) — session revocation endpoints (M4·c Increment 6)
+- **`GET /auth/sessions`** — the caller's own active-session set (id, created/lastSeen/expires,
+  user-agent, a `current` flag on the calling bearer's own session), or, for an admin passing
+  `?userId=`, another user's active set. Reads the registry (`SessionEntry`), never the audit log —
+  the honest "Active Sessions" source per D3.
+- **`POST /auth/session/revoke`** (self) — `{ sid? }` revokes one of the caller's own sessions
+  (`404` if the sid doesn't belong to them — never leaks whether it exists for someone else),
+  `{ all: true }` revokes every session the caller owns including the calling one ("log out
+  everywhere"), and neither field revokes the calling session (logout-equivalent). Both fields set
+  at once → `400`.
+- **`POST /auth/sessions/{sid}/revoke`** (admin) — revoke any session cross-user by id (D4). `404`
+  on an unknown sid.
+- **`POST /auth/users/{userId}/sessions/revoke-all`** (admin) — "log out this user everywhere."
+  Always `204`, including when the user has no active sessions.
+- Every revoke evicts the session from the per-request validator cache (same ~instant-revoke
+  posture as `POST /auth/logout`) — the 5s cache TTL (D2) is only the backstop.
+- Three new direct-write audit actions (no kgsm event backs a revocation, so this is the single
+  writer — the same posture as `auth.login`/`auth.logout`, no double-write): `auth.session.revoke`
+  and `auth.session.revoke.all` (self-service, info), `auth.session.revoke.admin` (an admin acting
+  on another user's session(s) — warn, covering both admin endpoints).
+
 ### Added (v0.14.0) — rolling refresh tokens + session revocation (M4·c Inc 4·b)
 - **Rolling (sliding) refresh window.** `POST /auth/session/refresh` now slides the session's
   `Expires` forward to `now + KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS` (default 30d) on every

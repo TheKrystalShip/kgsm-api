@@ -39,3 +39,27 @@ public sealed record SessionUser(
     string Username,
     string Display,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AvatarUrl);
+
+// ── M4·c Increment 6 — the revocation surface (docs/session-management-plan.md §5) ──────────────
+
+// GET /auth/sessions — the caller's own active-session set (or, for an admin passing ?userId=,
+// another user's). `data` mirrors the SessionEntry registry row-for-row (D5 fields), never the
+// audit placebo. `current` is true on exactly the row whose sid matches the calling bearer's own
+// sid (so the SPA can label "this device").
+public sealed record SessionsPage(IReadOnlyList<SessionRecord> Data);
+
+public sealed record SessionRecord(
+    string Sid,
+    string UserId,
+    DateTimeOffset Created,
+    DateTimeOffset LastSeen,
+    DateTimeOffset Expires,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UserAgent,
+    bool Current);
+
+// POST /auth/session/revoke — the viewer self-revoke body. Exactly one of `sid`/`all` is meaningful:
+// `all:true` revokes every session the caller owns (incl. the calling one — "log out everywhere");
+// `sid` revokes that one session, but ONLY if it belongs to the caller (else 404 — a viewer must not
+// be able to revoke another user's session by guessing/leaking a sid; that power is admin-only, see
+// POST /auth/sessions/{sid}/revoke). Neither set ⇒ revoke the calling session (logout-equivalent).
+public sealed record RevokeRequest(string? Sid, bool? All);

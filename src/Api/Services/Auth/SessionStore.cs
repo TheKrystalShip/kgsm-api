@@ -149,4 +149,78 @@ public sealed class SessionStore(
         }
         finally { _writeGate.Release(); }
     }
+
+    /// <summary>
+    /// M4·c Increment 6 — the active set for <c>GET /auth/sessions</c> (a caller's own set, or, for an
+    /// admin, another user's set via <c>?userId=</c>). Matches the composite index
+    /// <c>ix_sessions_user (UserId, Revoked, Expires)</c> — a read, no write-gate needed. AsNoTracking
+    /// (display-only; nothing here is mutated). Ordered newest-active-first (<see cref="SessionEntry.LastSeen"/>
+    /// descending) so the caller's most recently used device/browser sorts first, matching the "Active
+    /// Sessions" display's expected order.
+    /// </summary>
+    public async Task<IReadOnlyList<SessionEntry>> ListActiveAsync(
+        string userId, string hostId, CancellationToken ct = default)
+    {
+        using IServiceScope scope = scopeFactory.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        return await db.Sessions.AsNoTracking()
+            .Where(s => s.UserId == userId && s.HostId == hostId && !s.Revoked && s.Expires > now)
+            .OrderByDescending(s => s.LastSeen)
+            .ToListAsync(ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// M4·c Increment 6 — a single row lookup by sid, AsNoTracking. Used by the viewer self-revoke
+    /// endpoint to check OWNERSHIP before revoking (a viewer must not revoke another user's session by
+    /// guessing/leaking a sid — see <c>SessionController.RevokeSelf</c>), and by any future read-only
+    /// sid probe. Returns <see langword="null"/> when no row exists (already GC'd, or never created).
+    /// </summary>
+    public async Task<SessionEntry?> GetByIdAsync(string sid, CancellationToken ct = default)
+    {
+        using IServiceScope scope = scopeFactory.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.Sessions.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == sid, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// M4·c Increment 6 — "log out user everywhere" (self <c>{ all: true }</c> OR the admin
+    /// cross-user <c>POST /auth/users/{userId}/sessions/revoke-all</c>). Soft-deletes every currently
+    /// ACTIVE row (<c>!Revoked &amp;&amp; Expires &gt; now</c> — an already-revoked or already-expired
+    /// row is left untouched, same idempotent posture as <see cref="RevokeAsync"/>) for
+    /// <paramref name="userId"/> on <paramref name="hostId"/>, and returns the affected sids so the
+    /// caller can <see cref="ISessionValidator.Evict"/> each one (the cache doesn't know to invalidate
+    /// on a bulk write). Serialized on the same <see cref="_writeGate"/> as every other write (SQLite
+    /// single-writer).
+    /// </summary>
+    public async Task<IReadOnlyList<string>> RevokeAllForUserAsync(
+        string userId, string hostId, CancellationToken ct = default)
+    {
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using IServiceScope scope = scopeFactory.CreateScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            List<SessionEntry> rows = await db.Sessions
+                .Where(s => s.UserId == userId && s.HostId == hostId && !s.Revoked && s.Expires > now)
+                .ToListAsync(ct).ConfigureAwait(false);
+            if (rows.Count == 0)
+                return [];
+            DateTimeOffset revokedAt = DateTimeOffset.UtcNow;
+            var sids = new List<string>(rows.Count);
+            foreach (SessionEntry row in rows)
+            {
+                row.Revoked = true;
+                row.RevokedAt = revokedAt;
+                sids.Add(row.Id);
+            }
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            logger.LogDebug("session revoke-all: user={User} host={Host} count={Count}", userId, hostId, sids.Count);
+            return sids;
+        }
+        finally { _writeGate.Release(); }
+    }
 }

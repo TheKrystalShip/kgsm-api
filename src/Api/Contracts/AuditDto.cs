@@ -124,6 +124,16 @@ public static class AuditAction
     public const string AuthLogin = "auth.login";
     public const string AuthLogout = "auth.logout";
 
+    // auth.session.* — M4·c Increment 6, the revocation surface. Same direct-write posture as
+    // auth.login/.logout (no kgsm event, no double-write). meta carries the revoked `sid`, and for
+    // the admin action also the target `userId` (the caller's own identity is the audit row's actor).
+    // revoke/.revoke.all are self-service (info — a user managing their own sessions is routine);
+    // .revoke.admin is an admin acting on ANOTHER user's session (warn — the substantial-power case
+    // D4 flagged, worth a louder trail entry than a routine self-revoke).
+    public const string AuthSessionRevoke = "auth.session.revoke";
+    public const string AuthSessionRevokeAll = "auth.session.revoke.all";
+    public const string AuthSessionRevokeAdmin = "auth.session.revoke.admin";
+
     // service.* — API-internal admin actions on a leaf service (the leaf-runtime-provisioning/config
     // feature). kgsm runs nothing and emits no event, so these are DIRECT writes (the auth.* case — no echo,
     // no double-write). connect/disconnect flip a leaf's runtime provisioning; config applies a config
