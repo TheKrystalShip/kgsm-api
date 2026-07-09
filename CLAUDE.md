@@ -23,8 +23,13 @@ honest `Server` DTO), **M2** (realtime — the `GET /api/v1/stream` fetch-based 
 off WebSocket 2026-07-02) + the always-on
 leaf-health capability model), **M3** (commands — the first write path: `POST /servers/{id}/commands`
 → gate → `202` + job → `jobs` WS → verify; verbs `start`/`stop`/`restart`, `update` deferred),
-**M4·a/M4·b** (auth — Discord per-host, Model A; stateless JWT bearer + viewer/operator/admin tier
-policies + `[Authorize]` everywhere, live OAuth round-trip validated) and now **M5** (audit — the
+**M4·a/M4·b** (auth — Discord per-host, Model A; HMAC JWT bearer + viewer/operator/admin tier
+policies + `[Authorize]` everywhere, live OAuth round-trip validated) and **M4·c** (session management +
+revocation: a `SessionEntry` registry + a `sid`-claim per-request check cached 5s is the revocation authority;
+sliding-window refresh with `jti` rotation/reuse-detection, server-side logout, the `GET /auth/sessions` +
+self/admin revoke surface, three `auth.session.*` audit actions, `/me.recentLogins`, mint-time `expiresAt`,
+and a 10-min GC worker; identity stays a login-time JWT-claim snapshot — no user-profile row.
+`docs/session-management-plan.md` authoritative; 655/655 tests) and now **M5** (audit — the
 append-only action log: kgsm events → audit rows via kgsm-lib `IEventService`, the command path stamping
 actor+origin so the engine echo carries provenance with **no double-write**, `GET /audit` keyset +
 the `audit` WS topic; SQLite via `EnsureCreated`, no EF migration) are `built` & self-validated, plus
@@ -272,8 +277,9 @@ of leaves present.
    Record every frozen shape in `PLAN.md §6`.
 4. **Additive-only within `/api/v1`** (path-versioned). Grow into reserved fields, no break.
 5. **Persistence is downstream of the stateless engine.** The API persists only its *own*
-   operational metadata — the append-only **audit log** (M5; M4 auth is stateless JWT, no
-   rows) via EF; the domain is live-scraped, never stored. KGSM stays stateless (the watchdog
+   operational metadata — the append-only **audit log** (M5) and the **session registry** (M4·c,
+   revocation state — see `Services/Auth/CLAUDE.md`; identity itself stays in the JWT, no user
+   row) via EF; the domain is live-scraped, never stored. KGSM stays stateless (the watchdog
    is the lone resident exception, and it's engine, not this API). **The audit is event-sourced,
    single-writer, no double-write:** kgsm owns `server.*`/`backup.*`, so the API records the
    engine's event **echo** (`KgsmAuditConsumer` → `AuditService`) — it never writes a row when it

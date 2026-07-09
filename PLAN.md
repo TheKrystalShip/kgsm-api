@@ -358,6 +358,45 @@ migrated WebSocket→SSE 2026-07-02, `sse-migration-plan.md`; frontend gate pend
   `KGSM_API_AUTH_SIGNING_KEY` on any real host (dev ran ephemeral — tokens die on restart).
 - **Risk:** the security boundary itself.
 
+**M4·c — session management + revocation.** · `built` (self-validated 2026-07-09; live OAuth soak owed) — authority: `docs/session-management-plan.md`
+- **Goal:** revocation. A ~15-min access token is honestly bounded by its TTL, but a 30-day refresh token
+  mints fresh access tokens for a month with no kill switch short of rotating the signing key (which betrays
+  every user). M4·c adds the narrow operational state that lets an operator revoke one session, or all of a
+  user's, in ≤5s — and gives the Settings page a real Active Sessions surface reading live state, not the
+  append-only audit log (which can't revoke).
+- **Built:** a `SessionEntry` registry (`Data/SessionEntry.cs` + `Services/Auth/SessionStore.cs`, on the
+  existing `AppDbContext` via `EnsureCreated`; UTC-ticks `ValueConverter`s so `Expires > now` is a translatable
+  indexed `INTEGER` compare) keyed by a stable **`sid`** JWT claim; a **cached per-request validator**
+  (`SessionValidator`, `IMemoryCache` 5s TTL, evicted on revoke — not a per-request DB hit), wired into the
+  JwtBearer `OnTokenValidated` so REST + SSE both check it; **sliding-window refresh with `jti` rotation +
+  reuse-detection** (each refresh slides `Expires` to `now+30d` and rotates both tokens; a stale `jti` → `401`);
+  **server-side logout** (revoke + evict); the **revoke surface** `Controllers/SessionController.cs`
+  (`GET /auth/sessions` viewer-self / admin `?userId=`; `POST /auth/session/revoke {sid?|all?}`; admin
+  `POST /auth/sessions/{sid}/revoke` + `POST /auth/users/{userId}/sessions/revoke-all`); three additive
+  **`auth.session.*`** audit actions (direct-write, the `auth.login` case — no double-write); **`/me.recentLogins`**
+  (read off `auth.login` audit rows, `/me`'s first DB read); mint-time **`expiresAt`** on `CallbackResult`/
+  `RefreshResponse`; and a 10-min **`SessionCleanupWorker`** GC (hard-deletes expired rows; inert under the
+  master switch). Identity is unchanged — the login-time JWT-claim snapshot; no user-profile row.
+- **Invariants intact:** #1 honest (UA from the header, expiry from the just-minted token, revocation from real
+  state) · #4 additive within `/api/v1` (the `/auth` refresh wire adds a field) · #5 audit still single-writer,
+  the new actions additive + direct-write. The session table is the API's own **operational state** (revocation),
+  the second such table after the audit log — the domain stays live-scraped.
+- **Config:** four `KGSM_API_SESSIONS_*` keys (documented in `appsettings.json`) — `_DISABLED` (master switch,
+  makes the registry inert), `_CACHE_TTL_MS` (5000, the revocation-lag bound), `_GC_MS` (600000), and
+  `_REFRESH_ABSOLUTE_DAYS` (30, in lockstep with the JWT refresh TTL).
+- **Self-validated:** `dotnet test` **655/655** (0-warn Release) — the xUnit matrix covers login-creates-a-row,
+  the cached per-request check (valid→200 / revoked→401-in-window / expired→401 / no-`sid`→401 / disabled-bypass /
+  cache-serves-stale-then-Evict), rotation + reuse-detection + logout-revoke, the self + admin revoke tier matrix,
+  `GET /auth/sessions` (`current` flag + admin `?userId=`), `/me.recentLogins`, mint-time `expiresAt`, and the GC
+  worker. Smoke is unchanged (it runs under `KGSM_API_AUTH_DISABLED=1`, so the JwtBearer pipeline — and thus the
+  session check — never fires).
+- **Outstanding:** the **live OAuth soak** (a real Discord bounce leaving a real device's UA in the row + a real
+  self-revoke-all forcing a relogin) — records in §8 when done. **⚠ Deploy note:** a token with no `sid` claim
+  `401`s, so at the first deploy of the registry every pre-existing refresh token dies → all users force-relogin;
+  smoke a forced relogin before any live redeploy. Fresh DBs get the `sessions` table from `EnsureCreated`; an
+  already-deployed DB needs the table + `CurrentJti` column created once in place (audit rows untouched). **No
+  kgsm-lib bump** (entirely within the API); **no `Migrations/`** (the `EnsureCreated`-for-fresh posture holds).
+
 ### M5 — Audit log + SQLite (the event-persistence consumer)  ·  `partial` (backend built & self-validated 2026-06-15; frontend gate pending)  ←  *resolves keystone O3*
 - **Goal:** the durable, append-only action record — **persistence downstream of the
   stateless engine**, exactly where O3 says it belongs (a consumer, never KGSM).
