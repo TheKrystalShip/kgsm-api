@@ -291,6 +291,12 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<SessionValidator>();
         services.AddSingleton<ISessionValidator>(sp => sp.GetRequiredService<SessionValidator>());
 
+        // M4·c Increment 8 — the session GC worker: deletes expired rows (revoked or not) on a timer
+        // (KGSM_API_SESSIONS_GC_MS, default 10min) so the sessions table stays permanently bounded.
+        // Startup catch-up pass + PeriodicTimer, mirrors MetricsMaintenanceService. Inert (no timer at
+        // all) when SessionsEnabled is false.
+        services.AddHostedService<SessionCleanupWorker>();
+
         // Player-presence live roster (player-presence-contract.md §5) — an in-memory projection driven
         // FROM KgsmAuditConsumer's own player.join/player.leave (+ start/stop reset) handlers, never via a
         // second IEventService registration for the same event types (kgsm-lib keeps one handler per type;

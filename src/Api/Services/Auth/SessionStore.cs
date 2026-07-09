@@ -186,6 +186,40 @@ public sealed class SessionStore(
     }
 
     /// <summary>
+    /// M4·c Increment 8 — the session GC worker's delete. A permanent storage bound: any row whose
+    /// <see cref="SessionEntry.Expires"/> has passed is dead **regardless of <see cref="SessionEntry.Revoked"/></see>
+    /// (a revoked row would eventually age out anyway; an expired-but-never-revoked row is just as dead
+    /// — the 30-day absolute cap already killed it, revoke or not) — so this deletes both. Uses EF Core's
+    /// bulk <c>ExecuteDeleteAsync</c> (.NET 10) rather than load-then-remove: one indexed <c>DELETE FROM
+    /// sessions WHERE Expires &lt; ?</c>, no change-tracker materialization of rows nobody needs to see.
+    /// <see cref="SessionEntry.Expires"/>'s <c>ValueConverter</c> stores UTC ticks as <c>INTEGER</c>
+    /// (see <see cref="AppDbContext.OnModelCreating"/>), so <c>s.Expires &lt; now</c> translates to a
+    /// plain integer comparison that rides the <c>ix_sessions_expires</c> index — the same translatable
+    /// shape <see cref="SessionValidator"/>'s <c>Expires &gt; now</c> query relies on. Serialized on the
+    /// same <see cref="_writeGate"/> as every other write (SQLite single-writer) so the GC sweep can't
+    /// race a concurrent login insert / refresh rotation update. Returns the number of rows deleted.
+    /// </summary>
+    public async Task<int> DeleteExpiredAsync(DateTimeOffset now, CancellationToken ct = default)
+    {
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using IServiceScope scope = scopeFactory.CreateScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            int deleted = await db.Sessions
+                .Where(s => s.Expires < now)
+                .ExecuteDeleteAsync(ct)
+                .ConfigureAwait(false);
+            // Debug level, unconditional (even when 0) — a per-pass debug line is cheap noise at this
+            // level and useful to confirm the worker is actually ticking; it's not INFO so it doesn't
+            // spam production logs at the default level.
+            logger.LogDebug("session GC: deleted {Count} expired row(s)", deleted);
+            return deleted;
+        }
+        finally { _writeGate.Release(); }
+    }
+
+    /// <summary>
     /// M4·c Increment 6 — "log out user everywhere" (self <c>{ all: true }</c> OR the admin
     /// cross-user <c>POST /auth/users/{userId}/sessions/revoke-all</c>). Soft-deletes every currently
     /// ACTIVE row (<c>!Revoked &amp;&amp; Expires &gt; now</c> — an already-revoked or already-expired

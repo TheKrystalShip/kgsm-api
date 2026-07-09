@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.17.0) — session GC worker (M4·c Increment 8)
+- **`SessionCleanupWorker`** — a new `BackgroundService` that permanently bounds the `sessions`
+  table: on a timer (`KGSM_API_SESSIONS_GC_MS`, default 10 min, floor 60s), it bulk-deletes every
+  session row whose `Expires` has passed — **both revoked and non-revoked** (an expired row is dead
+  regardless of whether it was ever revoked; the 30-day absolute cap already killed it). Runs once at
+  startup as a catch-up pass (a host that was down doesn't wait a full interval to start shedding
+  rows), then on the `PeriodicTimer`. **Inert when `KGSM_API_SESSIONS_DISABLED=1`** (the master
+  switch) — logs once and returns with no timer at all, matching the registry's "whole thing is
+  off" posture.
+- **`SessionStore.DeleteExpiredAsync(DateTimeOffset now)`** — the new store method backing the
+  worker; a single indexed `ExecuteDeleteAsync` bulk delete (EF Core, .NET 10) on `ix_sessions_expires`,
+  serialized on the store's existing write gate (same posture as every other `SessionStore` write) so
+  it can't race a concurrent login/refresh write on SQLite's single writer. Returns the deleted count.
+
 ### Added (v0.16.0) — `/me.recentLogins` + mint-time `expiresAt` (M4·c Increment 7)
 - **`GET /me` gains `recentLogins[]`** — the last 10 `auth.login` audit rows for the caller (`{ ts,
   device }`, newest first), each `device` sourced from the login's `User-Agent` header. This is
