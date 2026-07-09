@@ -86,10 +86,12 @@ public class AuthTestFactory : WebApplicationFactory<Program>
             : tokens.MintRefresh(FakeDiscordResolver.Identity, tier, sid);
         // Insert the session row synchronously (sync-over-async — test-only, production never does
         // this). The row's Expires mirrors SessionsRefreshAbsoluteDays (the same value the controller
-        // uses at login), so the validator's `Expires > now` check passes.
+        // uses at login), so the validator's `Expires > now` check passes. The row's CurrentJti is the
+        // MINTED token's jti — so a refresh token from RefreshToken(tier) passes reuse-detection at
+        // /auth/session/refresh (the row's stored jti == the presented refresh's jti).
         store.CreateAsync(sid, $"discord:{FakeDiscordResolver.Identity.UserId}", opts.HostId,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(opts.SessionsRefreshAbsoluteDays),
-            userAgent: null, CancellationToken.None).GetAwaiter().GetResult();
+            userAgent: null, initialJti: minted.Jti, CancellationToken.None).GetAwaiter().GetResult();
         return minted.Token;
     }
 }

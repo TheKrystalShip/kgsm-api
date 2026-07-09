@@ -184,7 +184,11 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.RefreshToken(AuthTier.Operator));
         HttpResponseMessage resp = await c.PostAsync("/auth/session/refresh", content: null);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        string access = (await Json(resp)).GetProperty("token").GetString()!;
+        JsonElement body = await Json(resp);
+        string access = body.GetProperty("token").GetString()!;
+        // M4·c rolling rotation: the response ALSO carries a rotated refresh token the SPA must adopt
+        // (the previous one is now dead — reuse detection). See SessionRotationTests for the full matrix.
+        Assert.False(string.IsNullOrEmpty(body.GetProperty("refresh").GetString()));
 
         // The rotated access token carries the operator tier through to a protected mutation.
         HttpClient authed = factory.CreateClient();

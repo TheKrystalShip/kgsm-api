@@ -79,6 +79,12 @@ public sealed class SessionTokenService : ISessionTokenService
 
     private MintedToken Mint(DiscordIdentity identity, AuthTier tier, string kind, TimeSpan ttl, string sessionId)
     {
+        // M4·c rotation — a fresh jti per mint (per-token JWT ID). For refresh tokens this is the
+        // reuse-detection key: the session row stores the CURRENT refresh's jti, /refresh rejects a
+        // stale jti (old/stolen token → 401). For access tokens the jti is informational only (the
+        // per-request validator + the short 15min TTL are enough); we add it uniformly so every token
+        // is uniquely identifiable (forensics) without a per-kind code path.
+        string jti = Guid.NewGuid().ToString("N");
         var claims = new List<Claim>
         {
             new("sub", $"discord:{identity.UserId}"),
@@ -88,6 +94,8 @@ public sealed class SessionTokenService : ISessionTokenService
             // M4·c — the session id, stable across a session's lifetime (carried by access + refresh;
             // survives access rotation). Absent on a pre-M4·c token (the D10 validator rejects those).
             new(AuthClaims.SessionId, sessionId),
+            // M4·c rotation — a unique jti per token (see comment above).
+            new(AuthClaims.Jti, jti),
             new(AuthClaims.Username, identity.Username),
             new(AuthClaims.Display, identity.Display),
             new("scope", string.Join(' ', identity.Scopes)),
@@ -106,11 +114,7 @@ public sealed class SessionTokenService : ISessionTokenService
             SigningCredentials = _signing,
         };
         string token = _handler.CreateToken(descriptor);
-        // Surface the mint-time expiry alongside the token so the login/refresh handoffs can pass it
-        // to the SPA (Increment 7 — the Group E #12 "when will I be logged out" display). This is the
-        // one point the API knows the TTL exactly; reading `exp` back off a validated ClaimsPrincipal
-        // is handler-dependent (not all surfaces populate it as a Claim), so we carry it from mint.
-        return new MintedToken(token, new DateTimeOffset(expires, TimeSpan.Zero));
+        return new MintedToken(token, new DateTimeOffset(expires, TimeSpan.Zero), jti);
     }
 
     public async Task<RefreshClaims?> ReadRefreshAsync(string token)
@@ -128,13 +132,19 @@ public sealed class SessionTokenService : ISessionTokenService
             return null;
 
         // M4·c — carry the session id through so the re-minted access keeps the same `sid` (D7/D8).
-        // A pre-M4·c refresh token has no `sid` claim → null. The refresh action treats null as
-        // "no session" (this is the same D10 clean-break path the per-request validator enforces) —
-        // 401 → relogin. (The refresh path's session-row validation lands in Increment 5.)
+        // A pre-M4·c refresh token has no `sid` claim → null → caller 401s (the D10 clean break).
         string? sid = SessionClaims.ReadSessionId(ci);
         if (sid is null)
             return null;
 
-        return new RefreshClaims(identity, SessionClaims.ReadTier(ci), sid);
+        // M4·c rotation — carry the presented refresh's jti through; the controller validates it
+        // against the session row's stored CurrentJti (reuse detection — a stale jti → 401). A
+        // pre-rotation refresh token has no `jti` claim → null → caller 401s (the same clean-break
+        // posture as the sid check: pre-rotation tokens stop working once this increment ships).
+        string? jti = SessionClaims.ReadJti(ci);
+        if (jti is null)
+            return null;
+
+        return new RefreshClaims(identity, SessionClaims.ReadTier(ci), sid, jti);
     }
 }

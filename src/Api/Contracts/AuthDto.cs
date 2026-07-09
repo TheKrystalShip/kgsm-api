@@ -24,7 +24,12 @@ public sealed record CallbackResult(
 // `tier` rides along (from the refresh token's own claims, not a re-check) so a client
 // that rotates a session WITHOUT a /me round-trip — e.g. a returning visitor whose
 // in-memory tier is gone after a browser close — still knows its role for UI gating.
-public sealed record RefreshResponse(string Token, string Tier);
+// POST /auth/session/refresh — rotate the access token (+ rotate the refresh token — M4·c rotation).
+    // The `token` field is the new ACCESS bearer (15min); `refresh` is the new refresh token (rotated,
+    // 30d sliding window). The SPA MUST adopt BOTH on every refresh call — the previous refresh token
+    // is dead (its jti no longer matches the session row's stored CurrentJti → reuse detection → 401
+    // on the next /refresh). `tier` rides along so a client without a /me round-trip knows its role.
+    public sealed record RefreshResponse(string Token, string Refresh, string Tier);
 
 // GET /auth/session — the profile snapshot behind the bearer (captured at login), or 401.
 public sealed record SessionResponse(SessionUser User, IReadOnlyList<string> Scopes);

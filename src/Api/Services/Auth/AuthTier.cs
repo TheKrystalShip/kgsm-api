@@ -86,6 +86,17 @@ public static class AuthClaims
     /// answer. Absent on a pre-M4·c token → the validator rejects it (the D10 clean break).
     /// </summary>
     public const string SessionId = "sid";
+
+    /// <summary>
+    /// The JWT ID (<c>jti</c>) — a per-token unique id (a fresh <c>Guid</c> per mint). M4·c with refresh
+    /// rotation: each refresh token carries its own <c>jti</c>; the session row stores the
+    /// <em>current</em> refresh token's <c>jti</c>, and <c>/auth/session/refresh</c> rejects a refresh
+    /// whose <c>jti</c> is stale — reuse detection. A stolen OLD refresh token (its <c>jti</c> differs
+    /// from the row's <c>CurrentJti</c> once the legitimate user has rotated) → 401 (the API never
+    /// silently accepts it). Access tokens also carry a <c>jti</c> (harmless; surface for forensics /
+    /// a future reuse-check on protected paths if ever needed).
+    /// </summary>
+    public const string Jti = "jti";
 }
 
 /// <summary>The two token kinds carried in the <see cref="AuthClaims.TokenKind"/> claim.</summary>

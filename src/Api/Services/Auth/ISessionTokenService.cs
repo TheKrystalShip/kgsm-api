@@ -39,9 +39,12 @@ public interface ISessionTokenService
 }
 
 /// <summary>
-/// A just-minted JWT plus its absolute expiry — the one point the API knows the TTL exactly. Carried
-/// from the mint straight to the login/refresh handoff so the SPA gets a server-authoritative
-/// "when does this token expire" without having to base64-decode the JWT's <c>exp</c> claim (M4·c
-/// Increment 7 — the Group E #12 "session TTL" display). <see cref="ExpiresAt"/> is UTC.
+/// A just-minted JWT plus its absolute expiry and unique jti — the one point the API knows the TTL
+/// exactly and the per-token id it minted. Carried from the mint straight to the login/refresh
+/// handoff (so the SPA gets a server-authoritative "when does this token expire" in Increment 7 —
+/// the Group E #12 "session TTL" display — without having to base64-decode the JWT's <c>exp</c>
+/// claim), AND to the session store (the refresh jti becomes the row's stored <c>CurrentJti</c> —
+/// the reuse-detection key). <see cref="ExpiresAt"/> is UTC; <see cref="Jti"/> is a fresh
+/// <c>Guid</c> per mint.
 /// </summary>
-public sealed record MintedToken(string Token, DateTimeOffset ExpiresAt);
+public sealed record MintedToken(string Token, DateTimeOffset ExpiresAt, string Jti);

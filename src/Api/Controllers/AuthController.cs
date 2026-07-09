@@ -25,6 +25,7 @@ public sealed class AuthController(
     IDiscordIdentityResolver discord,
     ISessionTokenService tokens,
     SessionStore sessions,
+    ISessionValidator sessionValidator,
     ApiOptions options,
     AuditService audit,
     ILogger<AuthController> logger) : ControllerBase
@@ -113,22 +114,25 @@ public sealed class AuthController(
                 : StatusCode(StatusCodes.Status403Forbidden,
                     new CallbackResult("denied", null, null, null, userHandle));
 
-        // M4·c — generate the session id, mint both tokens carrying it, and persist the session row
-        // (the registry is the authority the per-request validator, landing in Increment 4, reads to
-        // decide "is this session still alive"). The `Expires` on the row mirrors the refresh-token TTL
-        // (SessionsRefreshAbsoluteDays, kept in lockstep with SessionTokenService.RefreshTtl — D8).
-        // The Expires surfaces on MintedToken are computed-but-unused this increment — Increment 7
-        // wires them into CallbackResult / RefreshResponse (the Group E #12 session-TTL display).
+        // M4·c — generate the session id, mint both tokens carrying it (each also carries its own jti
+        // for reuse-detection on the refresh path), and persist the session row (the registry is the
+        // authority the per-request validator reads to decide "is this session still alive"). The row's
+        // `Expires` starts at now + SessionsRefreshAbsoluteDays (the 30d cap, kept in lockstep with
+        // SessionTokenService.RefreshTtl); the window is now SLIDING (user directive) — each successful
+        // /refresh slides Expires forward + rotates CurrentJti, so a user who opens the panel at least
+        // once inside the window stays logged in indefinitely. The row stores the refresh's jti as its
+        // initial CurrentJti (the reuse-detection key the refresh action validates against).
         string sessionId = "sid_" + Guid.NewGuid().ToString("N");
         DateTimeOffset now = DateTimeOffset.UtcNow;
         MintedToken access = tokens.MintAccess(resolved.Identity, resolved.Tier, sessionId);
         MintedToken refresh = tokens.MintRefresh(resolved.Identity, resolved.Tier, sessionId);
 
         // Persist the session row. Best-effort: a failed write must never break login — BUT log it
-        // loudly, because once Increment 4's per-request validator lands, a token whose sid has no row
-        // is rejected (D10 clean break), so a silent insert failure would defeat the milestone at the
-        // next request. The honest recovery for a missing row is a forced relogin (≤15min, the access
-        // TTL hard ceiling); we surface the failure as a warning so the operator notices.
+        // loudly, because the per-request validator rejects a token whose sid has no row (D10 clean break,
+        // live since Increment 4), so a silent insert failure would defeat the milestone at the next
+        // request. The honest recovery for a missing row is a forced relogin (≤15min, the access TTL hard
+        // ceiling); we surface the failure as a warning so the operator notices. The row stores the
+        // refresh's jti as its initial CurrentJti — the reuse-detection key the refresh action validates.
         string? userAgent = Request.Headers.UserAgent.ToString();
         if (string.IsNullOrWhiteSpace(userAgent)) userAgent = null;
         try
@@ -137,12 +141,12 @@ public sealed class AuthController(
                 sessionId, userHandle, options.HostId,
                 created: now,
                 expires: now + TimeSpan.FromDays(options.SessionsRefreshAbsoluteDays),
-                userAgent, ct);
+                userAgent, refresh.Jti, ct);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex,
-                "Session row insert failed (non-fatal to login, but the validator will reject sid={Sid} once Increment 4 lands — forced relogin follows)",
+                "Session row insert failed (non-fatal to login, but the validator will reject sid={Sid} — forced relogin follows)",
                 sessionId);
         }
 
@@ -189,9 +193,14 @@ public sealed class AuthController(
     }
 
     /// <summary>
-    /// Rotate the access token from a still-valid refresh token (presented as the <c>Authorization:
-    /// Bearer</c>), no Discord round-trip. Past the 30-day cap the refresh token is invalid → <c>401</c>
-    /// → the client re-bounces through the anchor. Role is not re-checked here (see <see cref="RefreshClaims"/>).
+    /// Rotate the access AND refresh tokens from a still-valid refresh token (presented as the
+    /// <c>Authorization: Bearer</c>), no Discord round-trip. M4·c with rotation: the session row's
+    /// <c>CurrentJti</c> is validated against the presented refresh's <c>jti</c> (reuse detection — a
+    /// stale jti = an OLD/STOLEN refresh token → <c>401</c>); on a match, BOTH tokens are re-minted
+    /// (the refresh's <c>jti</c> rotates, the row slides its <c>Expires</c> forward — the rolling 30-day
+    /// window the user directive opened — and bumps <c>LastSeen</c>). The SPA MUST adopt the new
+    /// refresh token from the response body on every call (the old one is dead). Role is NOT re-checked
+    /// here (the long-term "transparent role changes" idea, deferred).
     /// </summary>
     [AllowAnonymous]
     [HttpPost("/auth/session/refresh")]
@@ -206,13 +215,31 @@ public sealed class AuthController(
             return Error(StatusCodes.Status401Unauthorized, "unauthorized",
                 "the refresh token is invalid or expired");
 
-        // M4·c — read the sid from the refresh token's claims (already surfaced by ReadRefreshAsync
-        // as claims.SessionId) and carry it into the re-minted access (D7/D8: same sid across the
-        // session's lifetime; no sliding window, the 30d cap is on the session row not the token kind).
-        // The session-row validity check + LastSeen bump land in Increment 5 (this increment just
-        // mints the access with the carried sid). ExpiresAt is computed-but-unused until Increment 7.
+        // M4·c rotation — mint BOTH tokens upfront. Each gets a fresh jti; the access jti is
+        // informational only (the per-request validator doesn't check jti), the refresh jti is the
+        // reuse-detection key that becomes the row's stored CurrentJti. We mint before the row-update
+        // so the row-update can store the new refresh's jti in a single serialized round-trip. Both
+        // carry the SAME sid (D7/D8: same sid across a session's lifetime). The new refresh
+        // SURFACES from the response to the SPA.
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         MintedToken access = tokens.MintAccess(claims.Identity, claims.Tier, claims.SessionId);
-        return Ok(new RefreshResponse(access.Token, AuthTiers.ToWire(claims.Tier)));
+        MintedToken refresh = tokens.MintRefresh(claims.Identity, claims.Tier, claims.SessionId);
+
+        // Validate the presented refresh's jti against the row's stored CurrentJti + slide Expires
+        // + bump LastSeen + store the new refresh's jti (rotation). Returns false when: no row / row
+        // revoked / jti mismatch (stale/old/stolen refresh — reuse detection). The 401 here is the
+        // SPA's signal to re-authenticate via Discord OAuth; an attacker with an old refresh token
+        // keeps getting 401s while the legit user's NEW token (from their previous refresh) succeeds.
+        // ⚠ No grace period — a tab race resolves to ONE tab 401ing (re-auth on reload); acceptable
+        // for a small panel (the alternative — grace-period jti tracking — needs another column).
+        DateTimeOffset newExpires = now + TimeSpan.FromDays(options.SessionsRefreshAbsoluteDays);
+        bool rotated = await sessions.UpdateForRefreshAsync(
+            claims.SessionId, claims.Jti, refresh.Jti, newExpires, CancellationToken.None);
+        if (!rotated)
+            return Error(StatusCodes.Status401Unauthorized, "unauthorized",
+                "the refresh token is invalid, expired, or has been superseded");
+
+        return Ok(new RefreshResponse(access.Token, refresh.Token, AuthTiers.ToWire(claims.Tier)));
     }
 
     /// <summary>
@@ -235,10 +262,13 @@ public sealed class AuthController(
     }
 
     /// <summary>
-    /// End the session. Stateless JWT — there is nothing server-side to revoke, so the client drops
-    /// its tokens; the short access TTL bounds the window. Always <c>204</c> (idempotent). If the call
-    /// carries a resolvable bearer we record an <c>auth.logout</c> (best-effort) — anonymous, so we
-    /// can't attribute an unauthenticated logout and simply skip the row.
+    /// End the session — server-side (M4·c). Reads the <c>sid</c> off the bearer, revokes the session
+    /// row (<c>Revoked=true</c>) and evicts it from the validator cache, so every token carrying that
+    /// sid (the access bearer AND the refresh token) stops authorizing on its next request (~instant via
+    /// the cache eviction; the ≤15min access TTL is the hard ceiling regardless). Always <c>204</c>
+    /// (idempotent — an already-revoked or absent session is a no-op). If the call carries a resolvable
+    /// bearer we also record an <c>auth.logout</c> audit row (best-effort); an unauthenticated logout
+    /// (no bearer) can't be attributed, so it simply returns 204 with no revoke and no row.
     /// </summary>
     [AllowAnonymous]
     [HttpPost("/auth/logout")]
@@ -247,10 +277,25 @@ public sealed class AuthController(
         if (User.Identity is ClaimsIdentity ci && ci.IsAuthenticated
             && SessionClaims.ReadIdentity(ci) is { } id)
         {
-            // M4·c — stamp the audit Meta with the sid (best-effort forensics link; pre-M4·c tokens
-            // have no sid claim → null → Meta omits it, which is honest for a token minted before
-            // the milestone shipped). The actual session-row revoke (Revoked=true) lands in Increment 5.
+            // M4·c — revoke the session server-side. Read the sid off the bearer, flip the row to
+            // Revoked=true (idempotent) and evict the validator cache so the next request on this sid
+            // 401s immediately rather than waiting for the 5s TTL backstop. Best-effort: a failed
+            // revoke must never turn a logout into an error (the client is dropping its tokens anyway,
+            // and the access TTL still bounds the window) — log it, then still write the audit row.
             string? sid = SessionClaims.ReadSessionId(ci);
+            if (!string.IsNullOrEmpty(sid))
+            {
+                try
+                {
+                    await sessions.RevokeAsync(sid, ct);
+                    sessionValidator.Evict(sid);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "session revoke on logout failed (non-fatal) sid={Sid}", sid);
+                }
+            }
+            // The audit Meta carries the sid (forensics: links logout → the revoked session row).
             await RecordAuthAsync(AuditAction.AuthLogout, id, SessionClaims.ReadTier(ci),
                 $"{id.Display} logged out", sid, ct);
         }

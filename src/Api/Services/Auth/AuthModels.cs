@@ -22,14 +22,16 @@ public sealed record ResolvedPrincipal(DiscordIdentity Identity, AuthTier Tier);
 
 /// <summary>
 /// The claims read back from a valid refresh token at <c>/auth/session/refresh</c> — enough to
-/// re-mint a fresh access token (same identity, tier, profile snapshot AND <see cref="SessionId"/>)
-/// with no Discord round-trip. Role is NOT re-checked on refresh, so a role change only takes effect
-/// at the next full bounce (≤ the 30-day refresh cap) — an accepted, documented trade. The
-/// <see cref="SessionId"/> is carried through so the re-minted access keeps the same session (D7/D8 —
-/// a refresh re-mints access with the same <c>sid</c>; the absolute cap is on the session row, not
-/// the token kind).
+/// re-mint a fresh access token (same identity, tier, profile snapshot, <see cref="SessionId"/> AND
+/// the rotating <see cref="Jti"/>) with no Discord round-trip. Role is NOT re-checked on refresh
+/// (deferred — the long-term "transparent role changes" idea); today a role change still takes effect
+/// at the next full OAuth bounce (≤ the 30-day absolute cap of the LAST refresh). The
+/// <see cref="SessionId"/> is carried through so the re-minted access keeps the same session
+/// (D7/D8 — same sid across a session's lifetime, sliding window on the session row's Expires).
+/// The <see cref="Jti"/> is the presented refresh's id — the controller validates it against the
+/// session row's stored CurrentJti (reuse detection); a stale jti → 401 (old/stolen token).
 /// </summary>
-public sealed record RefreshClaims(DiscordIdentity Identity, AuthTier Tier, string SessionId);
+public sealed record RefreshClaims(DiscordIdentity Identity, AuthTier Tier, string SessionId, string Jti);
 
 /// <summary>
 /// Reads the identity + tier back out of a validated session token's claims — shared by the refresh
@@ -68,4 +70,14 @@ public static class SessionClaims
     /// </summary>
     public static string? ReadSessionId(ClaimsIdentity ci) =>
         ci.FindFirst(AuthClaims.SessionId)?.Value;
+
+    /// <summary>
+    /// The <see cref="AuthClaims.Jti"/> claim (the per-token JWT ID), or <see langword="null"/> when
+    /// absent (a pre-rotation token). Read on the refresh path; the controller validates it against
+    /// the session row's stored <c>CurrentJti</c> (reuse detection — a stale jti → 401). For access
+    /// tokens <c>jti</c> is informational only (the per-request validator does NOT check jti —
+    /// short-lived access tokens rely on the session registry, not on per-token reuse detection).
+    /// </summary>
+    public static string? ReadJti(ClaimsIdentity ci) =>
+        ci.FindFirst(AuthClaims.Jti)?.Value;
 }

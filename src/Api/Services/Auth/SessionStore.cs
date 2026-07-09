@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Data;
 
@@ -29,15 +30,17 @@ public sealed class SessionStore(
     /// <summary>
     /// Insert a new session row minted at the OAuth callback. Called once per login — this row IS
     /// the session (its <see cref="SessionEntry.Id"/> is the JWT <c>sid</c> claim). <paramref name="userAgent"/>
-    /// is the raw <c>User-Agent</c> header (D5 — raw, no IP). Best-effort: a failed insert must
-    /// never break login (the caller catches + continues — the per-request validator will only land in
-    /// Increment 4, so a missing row here is inert until then; once it lands, a missing row rejects,
-    /// which forces a relogin — the honest recovery for a missing session).
+    /// is the raw <c>User-Agent</c> header (D5 — raw, no IP). <paramref name="initialJti"/> is the
+    /// jti of the refresh token minted alongside this row — stored as <see cref="SessionEntry.CurrentJti"/>,
+    /// the reuse-detection key the refresh action validates against. Best-effort: a failed insert must
+    /// never break login (the caller catches + continues — a missing row is rejected by the per-request
+    /// validator once the token is used, which forces a relogin — the honest recovery for a missing session).
     /// </summary>
     public async Task CreateAsync(
         string sessionId, string userId, string hostId,
         DateTimeOffset created, DateTimeOffset expires,
-        string? userAgent, CancellationToken ct = default)
+        string? userAgent, string? initialJti,
+        CancellationToken ct = default)
     {
         var entity = new SessionEntry
         {
@@ -50,6 +53,7 @@ public sealed class SessionStore(
             UserAgent = userAgent,
             Revoked = false,
             RevokedAt = null,
+            CurrentJti = initialJti,
         };
         await _writeGate.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -60,6 +64,88 @@ public sealed class SessionStore(
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
             logger.LogDebug("session row created: sid={Sid} user={User} host={Host} expires={Expires:O}",
                 sessionId, userId, hostId, expires);
+        }
+        finally { _writeGate.Release(); }
+    }
+
+    /// <summary>
+    /// The refresh rotation handler. Validates the presented refresh token's jti against the row's
+    /// stored <see cref="SessionEntry.CurrentJti"/> (reuse detection — a stale jti means an
+    /// OLD/STOLEN refresh token was presented, reject it), and on a match rotates: stores the
+    /// <paramref name="newJti"/> as <see cref="SessionEntry.CurrentJti"/>, slides
+    /// <see cref="SessionEntry.Expires"/> to <paramref name="newExpires"/> (the rolling 30-day
+    /// window — D8 re-opened by user directive), and bumps <see cref="SessionEntry.LastSeen"/> to now.
+    /// Returns <see langword="false"/> (caller → 401) when:
+    /// <list type="bullet">
+    /// <item>The row doesn't exist (no sid match — pre-M4·c sid claim, or a malformed sid).</item>
+    /// <item>The row is already <see cref="SessionEntry.Revoked"/> (logout / admin revoke happened).</item>
+    /// <item>The presented jti DIFFERS from the stored <see cref="SessionEntry.CurrentJti"/> (stale
+    /// refresh token — reuse detection fires). ⚠ No grace period for tab races; a 401 here means the
+    /// caller re-auths via Discord OAuth once. <b>Honest adoption boundary:</b> a row whose
+    /// <see cref="SessionEntry.CurrentJti"/> is <see langword="null"/> (created before the rotation
+    /// feature shipped — the one-shot ALTER TABLE on prod) accepts the FIRST non-null presented jti
+    /// and adopts it; subsequent refreshes use the now-set CurrentJti. Post-deploy sessions always
+    /// have a CurrentJti from login, so the null-accept branch is a deploy-boundary convenience only.</item>
+    /// </list>
+    /// Serialized (SQLite single-writer) so two concurrent refreshes on the same sid can't both
+    /// pass the jti check and split the row into two "current" jtis.
+    /// </summary>
+    public async Task<bool> UpdateForRefreshAsync(
+        string sid, string presentedJti, string newJti, DateTimeOffset newExpires,
+        CancellationToken ct = default)
+    {
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using IServiceScope scope = scopeFactory.CreateScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            SessionEntry? row = await db.Sessions
+                .FirstOrDefaultAsync(s => s.Id == sid, ct).ConfigureAwait(false);
+            // No row → reject (the validator would also reject downstream, but the refresh path
+            // validates first so a meaningful 401 returns without an extra round-trip later).
+            if (row is null || row.Revoked)
+                return false;
+            // Reuse detection — the presented jti must match the stored current jti. The null-accept
+            // branch (row.CurrentJti == null) is the one-shot ALTER TABLE deploy boundary: a session
+            // created BEFORE this increment shipped has no CurrentJti; the first /refresh on it adopts
+            // the presented jti. Every newly-created row sets CurrentJti from the login mint.
+            if (row.CurrentJti is not null && row.CurrentJti != presentedJti)
+                return false;
+            // Rotate: store the new refresh's jti, slide Expires (rolling window D8), bump LastSeen.
+            row.CurrentJti = newJti;
+            row.Expires = newExpires;
+            row.LastSeen = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+        finally { _writeGate.Release(); }
+    }
+
+    /// <summary>
+    /// Revoke a session by sid (the per-session soft-delete — <see cref="SessionEntry.Revoked"/>=true).
+    /// Idempotent: an already-revoked row is a no-op (the first revoke's <see cref="SessionEntry.RevokedAt"/>
+    /// is preserved). Called by the auth.logout POST, the self-revoke endpoint, and the admin
+    /// cross-user revoke (Increment 6). The caller is expected to <c>Evict</c> the session from the
+    /// per-request cache (via <see cref="ISessionValidator.Evict"/>) afterwards so the revoke is
+    /// immediate rather than waiting for the 5s TTL backstop. Returns <see langword="false"/> if no
+    /// row exists for the sid (already GC'd, or never created — silent for the revoke UX).
+    /// </summary>
+    public async Task<bool> RevokeAsync(string sid, CancellationToken ct = default)
+    {
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using IServiceScope scope = scopeFactory.CreateScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            SessionEntry? row = await db.Sessions
+                .FirstOrDefaultAsync(s => s.Id == sid, ct).ConfigureAwait(false);
+            if (row is null || row.Revoked)
+                return false;
+            row.Revoked = true;
+            row.RevokedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            logger.LogDebug("session revoked: sid={Sid}", sid);
+            return true;
         }
         finally { _writeGate.Release(); }
     }

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.14.0) — rolling refresh tokens + session revocation (M4·c Inc 4·b)
+- **Rolling (sliding) refresh window.** `POST /auth/session/refresh` now slides the session's
+  `Expires` forward to `now + KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS` (default 30d) on every
+  successful refresh and bumps `LastSeen`. A session used at least once inside the window stays
+  logged in indefinitely; an idle session still dies N days after its last use. (Supersedes the
+  M4·c plan's D8 "no sliding" — user directive.)
+- **Refresh-token rotation + reuse detection.** Each token now carries a per-token `jti` claim, and
+  the session row stores the current refresh token's jti (`SessionEntry.CurrentJti`). A refresh
+  rotates **both** tokens; presenting a stale/old/reused refresh token (its `jti` no longer matches
+  the row's `CurrentJti`) → `401`. (Supersedes the plan's D9 "no rotation".)
+- **`POST /auth/logout` now revokes server-side.** It flips the session row `Revoked=true` and evicts
+  the validator cache, so every token on that `sid` (access + refresh) stops authorizing (~instant
+  via eviction; ≤15min access-TTL hard ceiling). Previously logout was client-side-only.
+
+### Changed (v0.14.0) — BREAKING (wire)
+- **`RefreshResponse` gains a `refresh` field.** `{ token, refresh, tier }` (was `{ token, tier }`).
+  The SPA MUST adopt the rotated `refresh` token on every refresh call — the previously-held refresh
+  token is dead after one use (reuse detection). A pre-rotation refresh token (no `jti` claim) is
+  rejected with `401` (the same clean-break posture as the M4·c `sid` check).
+- **Migration:** the existing prod DB needs a one-shot
+  `ALTER TABLE sessions ADD COLUMN "CurrentJti" TEXT` (fresh DBs get it via `EnsureCreated`). Rows
+  created before this ships have a null `CurrentJti` and adopt the first presented jti on their next
+  refresh.
+
 ### Changed (v0.13.0)
 - Player roster identity is now **name-first**: the durable person key resolves as
   `id → name → addr → sessionKey` (was `id → addr → name → sessionKey`). For

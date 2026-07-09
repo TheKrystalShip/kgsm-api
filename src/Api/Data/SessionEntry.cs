@@ -34,8 +34,8 @@ public sealed class SessionEntry
 {
     /// <summary>
     /// The opaque session id (<c>sid_&lt;guid&gt;</c>) — the JWT <c>sid</c> claim value. Stable
-    /// across a session's lifetime (carried by access + refresh tokens; survives access rotation
-    /// within the 30-day absolute cap). Primary key.
+    /// across a session's lifetime (carried by access + refresh tokens; survives token rotation
+    /// within the sliding refresh window — see <see cref="Expires"/>). Primary key.
     /// </summary>
     public string Id { get; set; } = "";
 
@@ -61,10 +61,13 @@ public sealed class SessionEntry
     public DateTimeOffset LastSeen { get; set; }
 
     /// <summary>
-    /// The session's absolute expiry — <c>Created + KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS</c>
-    /// (default 30 days). <b>No sliding</b> on refresh (the 30-day cap stays absolute, per the
-    /// original M4·a lock rationale). A refresh within this window re-mints access with the same
-    /// <see cref="Id"/>; past it the session is dead regardless of <see cref="Revoked"/>. UTC.
+    /// The session's expiry — at login <c>Created + KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS</c>
+    /// (default 30 days). <b>Sliding</b> on refresh (the rolling-refresh step — user directive
+    /// supersedes the plan's D8 "no sliding"): each successful <c>/auth/session/refresh</c> slides
+    /// this to <c>now + KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS</c> and re-mints both tokens with the
+    /// same <see cref="Id"/> — so a session used at least once inside the window stays alive. An idle
+    /// session dies `this`-days after its LAST refresh; past <see cref="Expires"/> the session is dead
+    /// regardless of <see cref="Revoked"/>. UTC.
     /// </summary>
     public DateTimeOffset Expires { get; set; }
 
@@ -91,4 +94,18 @@ public sealed class SessionEntry
     /// stays the first-revoke timestamp).
     /// </summary>
     public DateTimeOffset? RevokedAt { get; set; }
+
+    /// <summary>
+    /// The <c>jti</c> claim of the session's CURRENT refresh token (M4·c rotation — reuse
+    /// detection). Set at login to the initial refresh's jti; rotated on each successful
+    /// <c>/auth/session/refresh</c>. The refresh action validates the presented refresh's <c>jti</c>
+    /// against this — a stale <c>jti</c> (an OLD refresh token, e.g. stolen before the legit user
+    /// rotated) → 401. <b>No grace period</b> (a tab race resolves to one tab 401ing → re-auth via
+    /// Discord OAuth; acceptable for a small panel — see <c>docs/session-management-plan.md</c>).
+    /// <see langword="null"/> only on rows created before this increment shipped (the one-shot
+    /// ALTER TABLE on the prod DB); every newly-created row sets it from the login mint. The refresh
+    /// action treats a null row jti + non-null presented jti as "first-rotation adoption" — accepts
+    /// once, then the row carries its jti going forward.
+    /// </summary>
+    public string? CurrentJti { get; set; }
 }
