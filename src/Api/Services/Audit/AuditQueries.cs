@@ -89,4 +89,21 @@ public static class AuditQueries
         IReadOnlyList<AuditRecord> data = rows.Select(AuditMapping.ToRecord).ToList();
         return new AuditPage(data, next);
     }
+
+    /// <summary>
+    /// The most recent <paramref name="limit"/> rows for an EXACT <paramref name="action"/> by a given
+    /// <paramref name="actorName"/>, newest first — the read behind <c>/me.recentLogins</c> (M4·c
+    /// Increment 7). Deliberately NOT a thin wrapper over <see cref="PageAsync"/>: that method's
+    /// <c>category</c> filter matches a dotted PREFIX (<c>"auth."</c> → <c>auth.login</c> AND
+    /// <c>auth.logout</c>), which would silently pull logouts into a "recent logins" list. This filters
+    /// <see cref="AuditEntry.Action"/> by equality instead, so a login-only read is honest by
+    /// construction rather than by caller discipline.
+    /// </summary>
+    public static Task<List<AuditEntry>> RecentByActionAsync(
+        AppDbContext db, string action, string actorName, int limit, CancellationToken ct) =>
+        db.Audit.AsNoTracking()
+            .Where(a => a.Action == action && a.ActorName == actorName)
+            .OrderByDescending(a => a.RowId)
+            .Take(limit)
+            .ToListAsync(ct);
 }

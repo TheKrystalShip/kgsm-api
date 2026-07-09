@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.16.0) — `/me.recentLogins` + mint-time `expiresAt` (M4·c Increment 7)
+- **`GET /me` gains `recentLogins[]`** — the last 10 `auth.login` audit rows for the caller (`{ ts,
+  device }`, newest first), each `device` sourced from the login's `User-Agent` header. This is
+  `/me`'s first DB read (every other field is projected off the bearer's claims, no I/O); it
+  complements — and reads a different source than — `GET /auth/sessions` (Increment 6, the live,
+  revocable registry): recentLogins is append-only provenance ("what happened"), sessions is current
+  state ("what's active now"). A fresh actor with no prior login gets `[]` (honest, never fabricated).
+- **`auth.login`'s audit `meta` now also carries `userAgent`** (alongside the existing `tier`/`sid`) —
+  the login-time UA is threaded from the same value already written to the `SessionEntry` row.
+  Additive to the existing direct audit write; not a new writer or a new action (invariant #5 intact).
+  `auth.logout` is unaffected (still `tier`+`sid` only).
+- **`CallbackResult` gains `accessTokenExpiresAt`/`refreshExpiresAt`** (both `DateTimeOffset?`,
+  omitted-when-null) — the mint-time expiry of each token, so the SPA can learn expiry without
+  decoding the JWT. Omitted on every `"denied"` response (no tokens are minted there), so that
+  branch's wire shape is byte-for-byte unchanged.
+- **`RefreshResponse` gains `expiresAt`** (non-nullable) — the new access token's mint-time expiry,
+  letting the SPA schedule a proactive re-refresh instead of reacting to a `401`.
+- Both are tail-additive fields on existing DTOs (invariant #4); no existing consumer breaks.
+
 ### Added (v0.15.0) — session revocation endpoints (M4·c Increment 6)
 - **`GET /auth/sessions`** — the caller's own active-session set (id, created/lastSeen/expires,
   user-agent, a `current` flag on the calling bearer's own session), or, for an admin passing

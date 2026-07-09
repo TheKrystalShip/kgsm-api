@@ -64,6 +64,37 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
         Assert.Equal("denied", (await Json(resp)).GetProperty("verdict").GetString());
     }
 
+    // --- M4·c Increment 7 (Group E #12) — mint-time expiresAt on CallbackResult ---------------------
+    [Fact]
+    public async Task Callback_Authorized_200_IncludesBothTokenExpiries()
+    {
+        (HttpClient c, string state) = await BeginLogin();
+        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=operator&state={state}");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        JsonElement body = await Json(resp);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        // Access ~ now + 15min (SessionTokenService.AccessTtl); generous skew for test latency.
+        DateTimeOffset accessExp = body.GetProperty("accessTokenExpiresAt").GetDateTimeOffset();
+        Assert.InRange(accessExp, now.AddMinutes(10), now.AddMinutes(20));
+        // Refresh ~ now + 30d (SessionsRefreshAbsoluteDays default).
+        DateTimeOffset refreshExp = body.GetProperty("refreshExpiresAt").GetDateTimeOffset();
+        Assert.InRange(refreshExp, now.AddDays(29), now.AddDays(31));
+    }
+
+    [Fact]
+    public async Task Callback_NoRole_403_OmitsBothTokenExpiries()
+    {
+        // A denial mints no tokens -> both expiry fields are null -> WhenWritingNull omits the keys
+        // entirely (not `null` literals) — assert absence, not a null value, to lock the wire shape.
+        (HttpClient c, string state) = await BeginLogin();
+        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=none&state={state}");
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+        string raw = await resp.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("accessTokenExpiresAt", raw);
+        Assert.DoesNotContain("refreshExpiresAt", raw);
+    }
+
     [Fact]
     public async Task Callback_BadCode_401()
     {
@@ -196,6 +227,22 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
         HttpResponseMessage cmd = await authed.PostAsync("/api/v1/servers/nope/commands",
             new StringContent("""{"verb":"start"}""", System.Text.Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.NotFound, cmd.StatusCode);
+    }
+
+    // --- M4·c Increment 7 (Group E #12) — mint-time expiresAt on RefreshResponse --------------------
+    [Fact]
+    public async Task Refresh_IncludesExpiresAt_NearFifteenMinutes()
+    {
+        HttpClient c = factory.CreateClient();
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.RefreshToken(AuthTier.Operator));
+        HttpResponseMessage resp = await c.PostAsync("/auth/session/refresh", content: null);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        JsonElement body = await Json(resp);
+        DateTimeOffset expiresAt = body.GetProperty("expiresAt").GetDateTimeOffset();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        // Generous window around the 15min access TTL (SessionTokenService.AccessTtl) to absorb test latency.
+        Assert.InRange(expiresAt, now.AddMinutes(10), now.AddMinutes(20));
     }
 
     [Fact]

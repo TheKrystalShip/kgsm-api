@@ -13,12 +13,18 @@ namespace TheKrystalShip.Api.Contracts;
 /// </remarks>
 // GET /auth/discord/callback — bootstrap a host session. verdict "ok" (200) | "denied" (403).
 // userId is the prefixed handle (discord:{id}) — the only identity handle the panel references.
+// M4·c Increment 7 (Group E #12) — AccessTokenExpiresAt/RefreshExpiresAt ride along at mint time so
+// the SPA learns expiry without decoding the JWT itself. Both are WhenWritingNull-omitted (like the
+// existing Tier/Token/Refresh/UserId fields), so the "denied" branch — which passes null for both —
+// stays byte-for-byte wire-identical to before this increment (additive-only, invariant #4).
 public sealed record CallbackResult(
     string Verdict,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Tier,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Token,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Refresh,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UserId);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? UserId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? AccessTokenExpiresAt,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? RefreshExpiresAt);
 
 // POST /auth/session/refresh — a freshly minted access token (no Discord round-trip).
 // `tier` rides along (from the refresh token's own claims, not a re-check) so a client
@@ -29,7 +35,10 @@ public sealed record CallbackResult(
     // 30d sliding window). The SPA MUST adopt BOTH on every refresh call — the previous refresh token
     // is dead (its jti no longer matches the session row's stored CurrentJti → reuse detection → 401
     // on the next /refresh). `tier` rides along so a client without a /me round-trip knows its role.
-    public sealed record RefreshResponse(string Token, string Refresh, string Tier);
+    // `expiresAt` (M4·c Increment 7, Group E #12) is the new ACCESS token's expiry — always present
+    // (non-nullable) on a successful refresh, so the SPA can schedule its own proactive re-refresh
+    // instead of waiting for a 401. Tail-additive; every existing field/consumer is unaffected.
+    public sealed record RefreshResponse(string Token, string Refresh, string Tier, DateTimeOffset ExpiresAt);
 
 // GET /auth/session — the profile snapshot behind the bearer (captured at login), or 401.
 public sealed record SessionResponse(SessionUser User, IReadOnlyList<string> Scopes);

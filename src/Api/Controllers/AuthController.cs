@@ -112,7 +112,9 @@ public sealed class AuthController(
             return options.FrontendRedirectEnabled
                 ? FrontendRedirect(Frag(("error", "denied")))
                 : StatusCode(StatusCodes.Status403Forbidden,
-                    new CallbackResult("denied", null, null, null, userHandle));
+                    // M4·c Increment 7: no tokens are minted on a denial, so both expiry fields stay
+                    // null — WhenWritingNull omits them, keeping this branch's wire shape unchanged.
+                    new CallbackResult("denied", null, null, null, userHandle, null, null));
 
         // M4·c — generate the session id, mint both tokens carrying it (each also carries its own jti
         // for reuse-detection on the refresh path), and persist the session row (the registry is the
@@ -153,17 +155,26 @@ public sealed class AuthController(
         // M5: an auth.login is an API-internal action (no kgsm event), so it is written directly here
         // — no double-write risk. Best-effort: a failed audit write must never break the login. M4·c
         // adds the `sid` to Meta so a login event links to its session row (forensics: "this login
-        // created session sid_X, which was later revoked").
+        // created session sid_X, which was later revoked"). M4·c Increment 7 (Group E #11) additionally
+        // stamps `userAgent` (the same value just persisted on the session row above) so `/me`'s
+        // recent-logins read can honestly label "which device" without a second UA capture — additive
+        // to the existing direct-write, NOT a new writer (invariant #5).
         await RecordAuthAsync(AuditAction.AuthLogin, resolved.Identity, resolved.Tier,
-            $"{resolved.Identity.Display} logged in", sessionId, ct);
+            $"{resolved.Identity.Display} logged in", sessionId, userAgent, ct);
 
         // SPA handoff (when a frontend URL is configured): 302 to the SPA with the tokens in the URL
         // FRAGMENT — never the query, so they don't reach access logs or the Referer header. The SPA
         // reads them, adopts the session, and strips the fragment. Otherwise return the JSON contract
         // (API-only deployments + the auth tests). The redirect target is the single configured URL.
+        // M4·c Increment 7 (Group E #12): the JSON contract carries both tokens' mint-time expiry so
+        // the SPA can schedule proactive refresh instead of reacting to a 401. Out of scope: the SPA
+        // fragment-redirect handoff above is untouched — expiresAt is a JSON-contract-only addition
+        // this increment (the fragment already omits `tier` too; adding query params there is a
+        // separate, not-yet-needed contract change).
         return options.FrontendRedirectEnabled
             ? FrontendRedirect(Frag(("access", access.Token), ("refresh", refresh.Token)))
-            : Ok(new CallbackResult("ok", AuthTiers.ToWire(resolved.Tier), access.Token, refresh.Token, userHandle));
+            : Ok(new CallbackResult("ok", AuthTiers.ToWire(resolved.Tier), access.Token, refresh.Token, userHandle,
+                access.ExpiresAt, refresh.ExpiresAt));
     }
 
     /// <summary>302 the SPA with the OAuth outcome in the URL fragment. The target is the single
@@ -239,7 +250,7 @@ public sealed class AuthController(
             return Error(StatusCodes.Status401Unauthorized, "unauthorized",
                 "the refresh token is invalid, expired, or has been superseded");
 
-        return Ok(new RefreshResponse(access.Token, refresh.Token, AuthTiers.ToWire(claims.Tier)));
+        return Ok(new RefreshResponse(access.Token, refresh.Token, AuthTiers.ToWire(claims.Tier), access.ExpiresAt));
     }
 
     /// <summary>
@@ -295,9 +306,11 @@ public sealed class AuthController(
                     logger.LogWarning(ex, "session revoke on logout failed (non-fatal) sid={Sid}", sid);
                 }
             }
-            // The audit Meta carries the sid (forensics: links logout → the revoked session row).
+            // The audit Meta carries the sid (forensics: links logout → the revoked session row). No
+            // userAgent here — recentLogins reads `auth.login` rows only, and logout's own UA isn't
+            // otherwise useful; keep the meta minimal for the action it's on.
             await RecordAuthAsync(AuditAction.AuthLogout, id, SessionClaims.ReadTier(ci),
-                $"{id.Display} logged out", sid, ct);
+                $"{id.Display} logged out", sid, null, ct);
         }
         return NoContent();
     }
@@ -320,14 +333,19 @@ public sealed class AuthController(
     // is a human acting through the web surface (there is no headless login path). actor = the Discord
     // identity (kind=user, provider=discord). Best-effort: a failed audit write is logged, never fatal.
     // M4·c — the `sid` lands in Meta so a login/logout event links to its session row (forensics).
+    // M4·c Increment 7 — `userAgent` lands in Meta (additive to the existing direct-write, not a new
+    // action or a second writer) so `/me`'s recent-logins read can honestly report "which device";
+    // omitted (not empty-string) when blank, matching the never-fabricate posture elsewhere in Meta.
     private async Task RecordAuthAsync(string action, DiscordIdentity id, AuthTier tier, string summary,
-        string? sid, CancellationToken ct)
+        string? sid, string? userAgent, CancellationToken ct)
     {
         try
         {
             var meta = new Dictionary<string, string> { ["tier"] = AuthTiers.ToWire(tier) };
             if (!string.IsNullOrEmpty(sid))
                 meta["sid"] = sid;
+            if (!string.IsNullOrEmpty(userAgent))
+                meta["userAgent"] = userAgent;
             await audit.AppendAsync(new AuditWrite(
                 Ts: DateTimeOffset.UtcNow,
                 Origin: AuditOrigin.Ui,
