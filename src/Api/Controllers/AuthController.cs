@@ -24,6 +24,7 @@ namespace TheKrystalShip.Api.Controllers;
 public sealed class AuthController(
     IDiscordIdentityResolver discord,
     ISessionTokenService tokens,
+    SessionStore sessions,
     ApiOptions options,
     AuditService audit,
     ILogger<AuthController> logger) : ControllerBase
@@ -112,20 +113,45 @@ public sealed class AuthController(
                 : StatusCode(StatusCodes.Status403Forbidden,
                     new CallbackResult("denied", null, null, null, userHandle));
 
-        // M4·c — generate the session id here. The SessionEntry row write + the auth.login Meta's
-        // `sid` stamp land in Increment 3 (this increment just mints the sid claim); the per-request
-        // validator (Increment 4) will reject a token whose sid has no row (D10 clean break, but only
-        // once Increment 4's check lands — until then every sid-bearing token is accepted). The Expires
-        // surfaces (MintedToken.ExpiresAt) are computed-but-unused this increment — Increment 7 wires
-        // them into CallbackResult / RefreshResponse (the Group E #12 session-TTL display).
+        // M4·c — generate the session id, mint both tokens carrying it, and persist the session row
+        // (the registry is the authority the per-request validator, landing in Increment 4, reads to
+        // decide "is this session still alive"). The `Expires` on the row mirrors the refresh-token TTL
+        // (SessionsRefreshAbsoluteDays, kept in lockstep with SessionTokenService.RefreshTtl — D8).
+        // The Expires surfaces on MintedToken are computed-but-unused this increment — Increment 7
+        // wires them into CallbackResult / RefreshResponse (the Group E #12 session-TTL display).
         string sessionId = "sid_" + Guid.NewGuid().ToString("N");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         MintedToken access = tokens.MintAccess(resolved.Identity, resolved.Tier, sessionId);
         MintedToken refresh = tokens.MintRefresh(resolved.Identity, resolved.Tier, sessionId);
 
+        // Persist the session row. Best-effort: a failed write must never break login — BUT log it
+        // loudly, because once Increment 4's per-request validator lands, a token whose sid has no row
+        // is rejected (D10 clean break), so a silent insert failure would defeat the milestone at the
+        // next request. The honest recovery for a missing row is a forced relogin (≤15min, the access
+        // TTL hard ceiling); we surface the failure as a warning so the operator notices.
+        string? userAgent = Request.Headers.UserAgent.ToString();
+        if (string.IsNullOrWhiteSpace(userAgent)) userAgent = null;
+        try
+        {
+            await sessions.CreateAsync(
+                sessionId, userHandle, options.HostId,
+                created: now,
+                expires: now + TimeSpan.FromDays(options.SessionsRefreshAbsoluteDays),
+                userAgent, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Session row insert failed (non-fatal to login, but the validator will reject sid={Sid} once Increment 4 lands — forced relogin follows)",
+                sessionId);
+        }
+
         // M5: an auth.login is an API-internal action (no kgsm event), so it is written directly here
-        // — no double-write risk. Best-effort: a failed audit write must never break the login.
+        // — no double-write risk. Best-effort: a failed audit write must never break the login. M4·c
+        // adds the `sid` to Meta so a login event links to its session row (forensics: "this login
+        // created session sid_X, which was later revoked").
         await RecordAuthAsync(AuditAction.AuthLogin, resolved.Identity, resolved.Tier,
-            $"{resolved.Identity.Display} logged in", ct);
+            $"{resolved.Identity.Display} logged in", sessionId, ct);
 
         // SPA handoff (when a frontend URL is configured): 302 to the SPA with the tokens in the URL
         // FRAGMENT — never the query, so they don't reach access logs or the Referer header. The SPA
@@ -221,8 +247,12 @@ public sealed class AuthController(
         if (User.Identity is ClaimsIdentity ci && ci.IsAuthenticated
             && SessionClaims.ReadIdentity(ci) is { } id)
         {
+            // M4·c — stamp the audit Meta with the sid (best-effort forensics link; pre-M4·c tokens
+            // have no sid claim → null → Meta omits it, which is honest for a token minted before
+            // the milestone shipped). The actual session-row revoke (Revoked=true) lands in Increment 5.
+            string? sid = SessionClaims.ReadSessionId(ci);
             await RecordAuthAsync(AuditAction.AuthLogout, id, SessionClaims.ReadTier(ci),
-                $"{id.Display} logged out", ct);
+                $"{id.Display} logged out", sid, ct);
         }
         return NoContent();
     }
@@ -244,11 +274,15 @@ public sealed class AuthController(
     // Write an API-internal auth.* audit row. origin = "ui": an interactive Discord OAuth login/logout
     // is a human acting through the web surface (there is no headless login path). actor = the Discord
     // identity (kind=user, provider=discord). Best-effort: a failed audit write is logged, never fatal.
+    // M4·c — the `sid` lands in Meta so a login/logout event links to its session row (forensics).
     private async Task RecordAuthAsync(string action, DiscordIdentity id, AuthTier tier, string summary,
-        CancellationToken ct)
+        string? sid, CancellationToken ct)
     {
         try
         {
+            var meta = new Dictionary<string, string> { ["tier"] = AuthTiers.ToWire(tier) };
+            if (!string.IsNullOrEmpty(sid))
+                meta["sid"] = sid;
             await audit.AppendAsync(new AuditWrite(
                 Ts: DateTimeOffset.UtcNow,
                 Origin: AuditOrigin.Ui,
@@ -259,7 +293,7 @@ public sealed class AuthController(
                 ServerId: null,
                 HostId: options.HostId,
                 Summary: summary,
-                Meta: new Dictionary<string, string> { ["tier"] = AuthTiers.ToWire(tier) }),
+                Meta: meta),
                 ct);
         }
         catch (Exception ex)

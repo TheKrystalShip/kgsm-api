@@ -28,15 +28,22 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     }
 
     // A factory variant that registers a fake IWatchdogClient (the base leaves it unprovisioned/absent).
+    // ⚠ WithWebHostBuilder builds a DERIVED factory with its OWN random KGSM_API_DB + service provider —
+    // different from the base factory. The session row MUST land in the derived factory's DB (the request
+    // goes through the derived pipeline, whose SessionValidator queries the derived DB), so the token is
+    // minted + inserted via the derived factory's Services (AuthTestFactory.MintTokenWithRow), NOTfactory.AccessToken
+    // (which uses the base factory's Services + DB — the row would be invisible to the derived validator → 401).
     private HttpClient ClientWithWatchdog(IWatchdogClient watchdog, AuthTier tier)
     {
-        HttpClient c = factory.WithWebHostBuilder(b =>
+        var derived = factory.WithWebHostBuilder(b =>
             b.ConfigureTestServices(s =>
             {
                 s.RemoveAll<IWatchdogClient>();
                 s.AddSingleton(watchdog);
-            })).CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(tier));
+            }));
+        HttpClient c = derived.CreateClient();
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            AuthTestFactory.MintTokenWithRow(derived.Services, tier, access: true));
         return c;
     }
 

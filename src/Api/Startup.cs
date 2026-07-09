@@ -273,6 +273,24 @@ public class Startup(IConfiguration configuration)
         // migrations — the schema is EnsureCreated (greenfield/dev authority; PLAN M5).
         services.AddSingleton<AuditService>();
 
+        // M4·c — the session registry's single writer (one row per login × device, keyed by the JWT
+        // `sid` claim). Own DI scope per write + a write gate (SQLite single-writer), the same
+        // posture as AuditService above. Reads (the per-request validator, GET /auth/sessions) go
+        // through AppDbContext on the request scope directly, NOT through this store. The table is
+        // created by EnsureCreated on a fresh DB and by a one-shot sqlite3 command on the existing
+        // prod DB (D11) — this store assumes the table exists.
+        services.AddSingleton<SessionStore>();
+
+        // M4·c — the per-request session validator (cached): an IMemoryCache keyed by sid → bool,
+        // backed by a DB query on cache miss. The 5s TTL (SessionsCacheTtlMs) is the accepted
+        // revocation-lag bound (D2); the Evict call in the revoke path (Increment 5/6) makes a revoke
+        // ~instant, the TTL is the backstop. MemoryCache is process-local (per-host single-instance —
+        // D2, no cross-node coherence). Registered as a singleton + the IMemoryCache it depends on
+        // (AddMemoryCache is the standard Microsoft.Extensions.Caching.Memory registration).
+        services.AddMemoryCache();
+        services.AddSingleton<SessionValidator>();
+        services.AddSingleton<ISessionValidator>(sp => sp.GetRequiredService<SessionValidator>());
+
         // Player-presence live roster (player-presence-contract.md §5) — an in-memory projection driven
         // FROM KgsmAuditConsumer's own player.join/player.leave (+ start/stop reset) handlers, never via a
         // second IEventService registration for the same event types (kgsm-lib keeps one handler per type;
@@ -351,12 +369,44 @@ public class Startup(IConfiguration configuration)
                 options.MapInboundClaims = false; // keep claim types verbatim ("sub", "tier", …)
                 options.Events = new JwtBearerEvents
                 {
-                    OnTokenValidated = ctx =>
+                    OnTokenValidated = async ctx =>
                     {
                         // A refresh token authenticates ONLY /auth/session/refresh, never a protected call.
                         if (ctx.Principal?.FindFirst(AuthClaims.TokenKind)?.Value != TokenKind.Access)
+                        {
                             ctx.Fail("not an access token");
-                        return Task.CompletedTask;
+                            return;
+                        }
+
+                        // M4·c — the per-request session check (cached). The sid claim is the session
+                        // registry key; the validator consults the SessionEntry row (≤5s cache) for
+                        // `Id == sid && !Revoked && Expires > now`. The escape hatch
+                        // (KGSM_API_SESSIONS_DISABLED) bypasses the whole block — the pre-M4·c stateless
+                        // posture, for debugging. ⚠ D10: a pre-M4·c token (no sid claim) is REJECTED here
+                        // → 401 → relogin. That's the clean break the milestone ships — only sid-bearing
+                        // tokens pass. The check runs AFTER the access-kind gate (a refresh token never
+                        // reaches here) and AFTER the signature/payload validation (JwtBearer has already
+                        // confirmed the issuer/audience/lifetime/signing). The SSE path rides the same
+                        // event (the bearer is set by OnMessageReceived for /stream → OnTokenValidated
+                        // fires here).
+                        var svc = ctx.HttpContext.RequestServices;
+                        var opts = svc.GetRequiredService<ApiOptions>();
+                        if (!opts.SessionsEnabled)
+                            return;
+
+                        string? sid = ctx.Principal?.FindFirst(AuthClaims.SessionId)?.Value;
+                        if (string.IsNullOrEmpty(sid))
+                        {
+                            ctx.Fail("no session id (pre-M4·c token)");
+                            return;
+                        }
+
+                        var validator = svc.GetRequiredService<ISessionValidator>();
+                        if (!await validator.IsValidAsync(sid, ctx.HttpContext.RequestAborted)
+                            .ConfigureAwait(false))
+                        {
+                            ctx.Fail("session revoked or expired");
+                        }
                     },
                 };
             });

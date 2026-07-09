@@ -56,19 +56,40 @@ public class AuthTestFactory : WebApplicationFactory<Program>
 
     /// <summary>Mint a real access token at <paramref name="tier"/> using the server's own token
     /// service (same key + host the running pipeline validates against). A M4·c token carries a
-    /// <c>sid</c> claim; tests don't care about the value (the tier matrix keys off the <c>tier</c>
-    /// claim, and the per-request session validator isn't wired in these pre-Increment-4 tests), so
-    /// a fresh random sid per call keeps the matrix stable + parallel-safe.</summary>
-    public string AccessToken(AuthTier tier)
-    {
-        var tokens = Services.GetRequiredService<ISessionTokenService>();
-        return tokens.MintAccess(FakeDiscordResolver.Identity, tier, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
-    }
+    /// <c>sid</c> claim; this helper ALSO inserts a <c>SessionEntry</c> row for that sid so the per-request
+    /// session validator (Increment 4) passes — the 56 existing tier-matrix call sites exercise the real
+    /// production path (valid session → validator passes → tier check is what differs). A fresh random
+    /// sid per call keeps the matrix parallel-safe. Sync-over-async in a test helper only — production
+    /// never does this.</summary>
+    public string AccessToken(AuthTier tier) => MintTokenWithRow(Services, tier, access: true);
 
-    /// <summary>Mint a real refresh token (30d cap) at <paramref name="tier"/>.</summary>
-    public string RefreshToken(AuthTier tier)
+    /// <summary>Mint a real refresh token (30d cap) at <paramref name="tier"/> + insert its session
+    /// row (same rationale as <see cref="AccessToken"/> — the validator honors the sid on refresh).</summary>
+    public string RefreshToken(AuthTier tier) => MintTokenWithRow(Services, tier, access: false);
+
+    /// <summary>
+    /// Shared mint+insert behind <see cref="AccessToken"/>/<see cref="RefreshToken"/>. Takes an
+    /// <see cref="IServiceProvider"/> so a <see cref="Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory{TEntryPoint}"/>
+    /// built via <c>WithWebHostBuilder</c> (a DERIVED factory with its OWN random DB + service
+    /// provider — different from the base factory's) can mint + insert through the SAME provider the
+    /// request will go through. The validator runs on the request's service provider; the row must
+    /// land in the request's DB, not the base factory's.
+    /// </summary>
+    internal static string MintTokenWithRow(IServiceProvider services, AuthTier tier, bool access)
     {
-        var tokens = Services.GetRequiredService<ISessionTokenService>();
-        return tokens.MintRefresh(FakeDiscordResolver.Identity, tier, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
+        var tokens = services.GetRequiredService<ISessionTokenService>();
+        var store = services.GetRequiredService<SessionStore>();
+        var opts = services.GetRequiredService<ApiOptions>();
+        string sid = "sid_test_" + Guid.NewGuid().ToString("N");
+        MintedToken minted = access
+            ? tokens.MintAccess(FakeDiscordResolver.Identity, tier, sid)
+            : tokens.MintRefresh(FakeDiscordResolver.Identity, tier, sid);
+        // Insert the session row synchronously (sync-over-async — test-only, production never does
+        // this). The row's Expires mirrors SessionsRefreshAbsoluteDays (the same value the controller
+        // uses at login), so the validator's `Expires > now` check passes.
+        store.CreateAsync(sid, $"discord:{FakeDiscordResolver.Identity.UserId}", opts.HostId,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(opts.SessionsRefreshAbsoluteDays),
+            userAgent: null, CancellationToken.None).GetAwaiter().GetResult();
+        return minted.Token;
     }
 }
