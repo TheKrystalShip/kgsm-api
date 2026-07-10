@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (v0.20.2) — quiet EF command logging
+- **`src/Api/appsettings.json`** — set `Microsoft.EntityFrameworkCore.Database.Command` to `Warning`.
+  EF logs every executed SQL statement at Information; with the cluster outbox drainer running a
+  due-scan every second (once `KGSM_API_CLUSTER_SECRET` is set), that flooded journald with a
+  full SELECT line per second. Warning keeps failures/warnings; drop back to Information transiently
+  when debugging a query.
+
 ### Added (v0.20.1) — cluster message bus two-node self-validation (Phase 4)
 - **`tests/Api.Tests/ClusterTwoNodeTests.cs`** — proves the cluster bus (Phases 1–3) across two real
   nodes in-process: `ClusterNodeFactory` (an `AuthTestFactory` re-configured with its own node id,
