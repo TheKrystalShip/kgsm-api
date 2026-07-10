@@ -353,6 +353,78 @@ public sealed class ApiOptions
     /// </summary>
     public required int LeafApplyCanaryMs { get; init; }
 
+    // --- Cluster message bus (docs/cluster-message-bus-plan.md, PLAN-peers.md §3) — the shared
+    //     secret + node identity behind the cluster service token (node-to-node auth). Opt-in like
+    //     the assistant/firewall: a blank secret means this host is not part of a cluster and the
+    //     bus stays dormant (no inbox endpoint, no drainer — those land in later phases). -------------
+
+    /// <summary>
+    /// The shared cluster HMAC secret (<c>KGSM_API_CLUSTER_SECRET</c>) every node in the guild is
+    /// configured with — distinct from <see cref="SigningKey"/> (leaking one never hands over the
+    /// other's forgery). Blank ⇒ the cluster capability is not provisioned (<see cref="ClusterEnabled"/>
+    /// is <see langword="false"/>): no service token can be minted or validated on this host.
+    /// </summary>
+    public required string ClusterSecret { get; init; }
+
+    /// <summary>
+    /// The previous cluster secret (<c>KGSM_API_CLUSTER_SECRET_PREVIOUS</c>), accepted alongside
+    /// <see cref="ClusterSecret"/> during a rotation overlap window (<c>PLAN-peers.md §2</c> #9): roll
+    /// one node at a time, then drop this once every node is on the new secret. Blank ⇒ no previous
+    /// secret is accepted (the normal, non-rotating posture).
+    /// </summary>
+    public required string ClusterSecretPrevious { get; init; }
+
+    /// <summary>
+    /// This node's cluster identity (<c>KGSM_API_NODE_ID</c>) — the <c>sub</c>/<c>iss</c> a minted
+    /// service token carries. Defaults to <see cref="HostId"/> (<c>PLAN-peers.md §2</c> #2: "config-driven
+    /// nodeId, default: machine name, same as HostId") — a cluster node's identity is the same stable id
+    /// already used for the host card, never a second independent name.
+    /// </summary>
+    public required string NodeId { get; init; }
+
+    /// <summary>
+    /// Whether this host is part of a cluster (a non-blank <see cref="ClusterSecret"/>). When
+    /// <see langword="false"/> the cluster service token cannot be minted (<see
+    /// cref="Services.Cluster.IClusterTokenService.Mint"/> throws) and never validates — the bus,
+    /// the inbox endpoint, and every peer feature built on top of it (later phases) stay dormant.
+    /// </summary>
+    public bool ClusterEnabled => !string.IsNullOrWhiteSpace(ClusterSecret);
+
+    // --- Cluster message bus, Phase 3 (the outbox drainer + GC — docs/cluster-message-bus-plan.md
+    //     §6/§7). Not `required`: like MetricsHistoryEnabled/Policy above, these carry a sane default
+    //     so the many existing test-built ApiOptions literals don't need updating for an opt-in feature
+    //     that is inert whenever ClusterEnabled is false. -----------------------------------------------
+
+    /// <summary>
+    /// How often (ms) the outbox drainer ticks (<c>KGSM_API_CLUSTER_DRAIN_MS</c>, default 1000 = 1s,
+    /// floor 250). Each tick pulls the due <c>pending</c> rows (<c>NextAttemptAt &lt;= now</c>) and
+    /// attempts delivery; a row's own backoff — not this cadence — governs its individual retry spacing.
+    /// </summary>
+    public int ClusterDrainMs { get; init; } = 1000;
+
+    /// <summary>
+    /// Days a still-<c>pending</c> outbox row may keep retrying before the drainer dead-letters it
+    /// (<c>KGSM_API_CLUSTER_RETRY_TTL_DAYS</c>, default 7, floor 1). Anchored on the row's
+    /// <c>CreatedAt</c> — seven days covers any realistic node outage; a message still queued after
+    /// that is an operational alarm (a loud log), not a silent loss (plan §6).
+    /// </summary>
+    public int ClusterRetryTtlDays { get; init; } = 7;
+
+    /// <summary>
+    /// Days a <c>delivered</c>/<c>dead</c> outbox row or an inbox dedupe-ledger row is kept before the
+    /// GC worker prunes it (<c>KGSM_API_CLUSTER_RETENTION_DAYS</c>, default 30). <b>Must exceed
+    /// <see cref="ClusterRetryTtlDays"/></b> — <see cref="FromConfiguration"/> clamps it to at least
+    /// <c>ClusterRetryTtlDays + 1</c> so a message redelivered right at the retry TTL boundary is still
+    /// recognized as a duplicate by the (not-yet-pruned) inbox ledger, never re-applied (plan §7).
+    /// </summary>
+    public int ClusterRetentionDays { get; init; } = 30;
+
+    /// <summary>
+    /// How often (ms) the cluster bus GC worker sweeps (<c>KGSM_API_CLUSTER_GC_MS</c>, default 600000 =
+    /// 10 min, floor 60000) — the same cadence family as <see cref="SessionsGcMs"/>.
+    /// </summary>
+    public int ClusterGcMs { get; init; } = 600000;
+
     // --- Auth (M4·a) — Discord per-host, Model A (architecture.html §3·f, keystone O5) -----------
     // Identity is a global Discord SSO anchor; authorization is a short-lived host-scoped bearer
     // this host mints after verifying identity once and resolving the role via the host's bot.
@@ -480,6 +552,10 @@ public sealed class ApiOptions
         string? hostId = Clean(configuration["KGSM_API_HOST_ID"]);
         hostId ??= Environment.MachineName;
 
+        // Computed ahead of the object initializer so ClusterRetentionDays's floor can reference it
+        // (an initializer can't read a sibling property off the object being constructed).
+        int clusterRetryTtlDays = Math.Max(1, IntOr(configuration["KGSM_API_CLUSTER_RETRY_TTL_DAYS"], 7));
+
         return new ApiOptions
         {
             HostId = hostId,
@@ -572,6 +648,22 @@ public sealed class ApiOptions
             // before the leaf has even restarted.
             LeafOverridesDir = BlankFallback(configuration["KGSM_API_LEAF_OVERRIDES_DIR"], "/var/lib/kgsm-api/leaf-overrides"),
             LeafApplyCanaryMs = Math.Max(2000, IntOr(configuration["KGSM_API_LEAF_APPLY_CANARY_MS"], 15000)),
+
+            // Cluster message bus foundation. Blank secret => ClusterEnabled false => the cluster
+            // service token seam stays dormant (PLAN-peers.md §2 #3/#9). NodeId defaults to the
+            // already-resolved HostId (#2), not Environment.MachineName a second time.
+            ClusterSecret = Defaulted(configuration["KGSM_API_CLUSTER_SECRET"], ""),
+            ClusterSecretPrevious = Defaulted(configuration["KGSM_API_CLUSTER_SECRET_PREVIOUS"], ""),
+            NodeId = Clean(configuration["KGSM_API_NODE_ID"]) ?? hostId,
+
+            // Phase 3 — the outbox drainer + GC cadence/TTL. The retention floor is computed from the
+            // just-parsed retry TTL (Math.Max(ClusterRetryTtlDays + 1, …)) so a custom TTL still gets a
+            // sane retention margin, not a fixed constant that could undercut it.
+            ClusterDrainMs = Math.Max(250, IntOr(configuration["KGSM_API_CLUSTER_DRAIN_MS"], 1000)),
+            ClusterRetryTtlDays = clusterRetryTtlDays,
+            ClusterRetentionDays = Math.Max(
+                clusterRetryTtlDays + 1, IntOr(configuration["KGSM_API_CLUSTER_RETENTION_DAYS"], 30)),
+            ClusterGcMs = Math.Max(60000, IntOr(configuration["KGSM_API_CLUSTER_GC_MS"], 600000)),
 
             // Auth (M4·a). On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = Flag(configuration["KGSM_API_AUTH_DISABLED"]),

@@ -1,12 +1,13 @@
 # KGSM Cluster — Peer Federation (Constellation)
 
-> Living document. Design + locked decisions + phased delivery for
-> **node-to-node peer federation** — the mesh that lets independently-deployed
-> `kgsm-api` nodes discover each other's resources, recommend placement, and
-> federate the assistant across a cluster.
+> Living design doc. The mesh that lets independently-deployed `kgsm-api` nodes,
+> all belonging to **one Discord guild**, discover each other's resources,
+> recommend placement, share a single sign-on, and federate the assistant.
 >
 > Extends the O7 stub in `system-architecture.md §5`; companion to
-> `kgsm-api/PLAN.md` (the per-host milestone plan).
+> `kgsm-api/PLAN.md` (the per-host milestone plan). The node-to-node transport it
+> rides on has its own authority: **`docs/cluster-message-bus-plan.md`** (built
+> first — it is the foundation every peer feature depends on).
 
 ---
 
@@ -16,437 +17,378 @@ designed, not built · `open` = not yet decided.
 
 ---
 
-## Terminology
+## 0 · The security boundary (read this first)
 
-| Old | New | Scope |
-|---|---|---|
-| Fleet | **Cluster** | SPA page, all docs, all code |
-| Host | **Node** | Everywhere a kgsm-api deployment is referenced |
-| Host capabilities | **Node capabilities** | §4·b model |
-| `localStorage` host registry | `localStorage` **nodes** registry | SPA persistence |
-| Fleet page | **Cluster page** (replaces, new route) | SPA |
+**A cluster is one Discord guild, and therefore one trust domain, single-owner.**
+Every node in a cluster is configured with the **same** Discord application, the
+**same** `KGSM_API_AUTH_SIGNING_KEY`, and the **same** `KGSM_API_AUTH_ROLE_*`
+tier map. This is a hard cluster-formation precondition, not an implementation
+detail:
 
-**Node** = a kgsm-api deployment with the `cluster` capability explicitly
-provisioned. A kgsm-api that does not advertise `cluster` is **invisible** to
-the mesh — not queryable, not listed, not discoverable. The `cluster` capability
-is a **gate only** — it does not carry its own status line on the Cluster page;
-participation is binary (in or out), and node health is derived from latency +
-per-leaf status.
+- It is what makes cross-node authorization coherent — a user's tier is identical
+  on every node, so "operator on the node I logged into" means "operator
+  everywhere."
+- It is what makes single sign-on possible — a session vouched by one node is
+  honored by the others because they share the guild and the signing key.
+- **The cost, accepted eyes-open:** the nodes are not security-independent. A
+  fully-compromised node can mint or vouch identities cluster-wide (it already can
+  forge user tokens, because the HMAC signing key is shared). Treat the whole
+  cluster's blast radius as the blast radius of its weakest node. This is
+  acceptable **only** because a cluster is single-owner by definition. A
+  multi-owner mesh is out of scope and would require per-node asymmetric identity
+  (see §3, mTLS upgrade path).
+
+This does **not** break the "leaves independently deployable" doctrine
+(`system-architecture.md §4`): a node still runs fully standalone; `cluster` is an
+additive capability. Membership requires config homogeneity; operation does not.
 
 ---
 
-## 1 · Design decisions (all locked)
+## 1 · Terminology
+
+| Concept | Term | Scope |
+|---|---|---|
+| A federation of nodes | **Cluster** | SPA page, all docs, all code |
+| A single kgsm-api deployment | **Node** | Everywhere a deployment is referenced |
+| Node capability set | **Node capabilities** | §4·b capability model |
+| SPA connection registry | `localStorage` **nodes** | SPA persistence |
+| The cluster overview page | **Cluster page** | SPA (replaces the Fleet route) |
+
+**Node** = a kgsm-api deployment that provisions the `cluster` capability. A
+kgsm-api that does not advertise `cluster` is **invisible** to the mesh — not
+queryable, not listed, not discoverable. `cluster` is a **gate**: participation is
+binary (in or out). Node health on the Cluster page is derived from latency +
+per-leaf status, not from a status line on the capability itself.
+
+---
+
+## 2 · Design decisions (locked)
+
+### Identity, trust & transport
 
 | # | Decision | Choice |
 |---|---|---|
-| 1 | Renaming | Fleet → Cluster; host → node; ecosystem-wide |
-| 2 | Node definition | kgsm-api with `cluster` capability provisioned |
-| 3 | Non-cluster APIs | Invisible — not queryable, not listed |
-| 4 | Peer transport | REST over HTTPS on existing API surface |
-| 5 | Node identity | Config-driven id (same as HostId) + Ed25519 public key (separate field) |
-| 6 | Trust model | TOFU — first connection trusted if admin confirms |
-| 7 | Auth layers | Node keypair (channel) + user JWT (authorization, re-verified) |
-| 8 | Request signing | `Ed25519(<timestamp>\|<method>\|<path>\|<bodyHash>)` — prevents replay + body tampering |
-| 9 | Discovery | Admin introduces (paste URL) |
-| 10 | Peer list storage | SQLite (same DB, `Peers` table) |
-| 11 | Keypair storage | SQLite blob column |
-| 12 | Keypair generation | First startup (always, even if cluster disabled) |
-| 13 | Data shapes | Reuse existing Host/Server/Library DTOs |
-| 14 | State sharing | On-demand fan-out; validate-at-use |
-| 15 | Version policy | Strict match enforced at handshake |
-| 16 | Failure mode | Fail-open (report and continue) |
-| 17 | Compromised key | Node disabled (not deleted); admin manually re-trusts |
-| 18 | Library | Per-node, can differ — fan-out needed |
-| 19 | Peer health | Latency endpoint, 10s interval |
-| 20 | Leaf health per peer | SSE to SPA (already handled per-node) |
-| 21 | Replay window | Configurable via env var (`KGSM_API_PEER_REPLAY_WINDOW_S`), default ±30s |
-| 22 | URL validation at add | Validate reachability before storing (fail-fast) |
-| 23 | Cluster page | Replaces Fleet page; peer management only (add/remove/enable/disable, latency) |
-| 24 | SPA node registry | Rename existing `localStorage` "hosts" → "nodes" |
-| 25 | Install modal peer data | Cached from Cluster page |
-| 26 | SPA install flow | Modal updates host dropdown → SPA talks directly to target node → source node out of loop |
-| 27 | Cluster page route | New route replaces old Fleet route; breaking change acceptable |
-| 28 | Cross-node install | SPA updates host dropdown, talks directly to target node |
-| 29 | SPA host switching | Already supported (multi-host client) |
+| 1 | Peer transport | REST over HTTPS on the existing API surface |
+| 2 | Node identity | Config-driven `nodeId` (default: machine name, same as HostId) |
+| 3 | Cluster membership proof | A shared **`KGSM_API_CLUSTER_SECRET`** (HMAC), distinct from the user JWT signing key |
+| 4 | Node-to-node auth | A **service JWT** signed with the cluster secret (`sub=node:<id>`, `aud=cluster`, `iss=<id>`, short TTL) |
+| 5 | No per-node keypairs | Symmetric shared secret only — no Ed25519, no per-request asymmetric signing |
+| 6 | Handshake | Admin pastes a URL → local node pulls the remote `/identity` over TLS → stores it. No key exchange, no fingerprint confirmation |
+| 7 | Trust direction | **Symmetric by construction** — a node trusts any caller bearing a valid cluster-secret service token whose `iss` is an enabled peer |
+| 8 | Node disable | A row flag in the `Peers` table — disabled ⇒ its service tokens rejected (`403`); stays in DB for re-enable |
+| 9 | Secret rotation | Dual-secret overlap window: nodes accept `{current, previous}`, roll one at a time, drop `previous` |
+| 10 | Version policy | **Match on `apiVersion` (`v1`)**, not build version — allows rolling upgrades across a heterogeneous-build mesh |
+| 11 | Discovery | Admin introduces (paste URL); no gossip/auto-discovery (cluster is small, hand-formed) |
+| 12 | Peer + secret storage | SQLite (`Peers` table; secret from config/env, never stored) |
 
----
+### Single sign-on across the cluster
 
-## 2 · The peer protocol
+| # | Decision | Choice |
+|---|---|---|
+| 13 | One login, whole cluster | A user authenticates **once** at any node (all nodes are equal); that grants cluster-wide access, tier-gated |
+| 14 | Per-node native sessions | Each node mints its **own** session (own `sid` in its own registry) so per-node revocation keeps working |
+| 15 | Provisioning mechanism | **Lazy vouch-on-first-use** — the SPA hits a node it has no session for, that node's session is transparently provisioned, retry. Eager pre-warm is an optional later optimization |
+| 16 | Vouch endpoint | `POST {node}/auth/cluster-session` — service-token authed, carries the vouched identity, the target mints its own session and returns it |
+| 17 | SPA connection model | Unchanged: a **direct multi-host client** — per-node session, per-node SSE, browser fans out. SSO just automates the N logins |
+| 18 | Session presentation | The Active-Sessions UI **aggregates per device** across the cluster (one row = "this browser, cluster-wide"), not N rows per login |
+| 19 | Logout everywhere | A cluster-wide fan-out over the message bus (`session.revoke`) — durable, so a node that is down when you log out is revoked when it returns |
 
-### 2.1 Node handshake
+### Placement & failure
 
-```
-Admin: POST /api/v1/peers { url: "https://node-b:8097", nickname: "Gaming Box" }
-  → node A calls GET {peer}/api/v1/peers/identity
-  → node B returns { nodeId, publicKey, apiVersion, build }
-  → node A checks: apiVersion matches (strict) → trustStatus = "trusted"
-  → node A checks: node B advertises cluster capability
-  → stores (url, nickname, nodeId, publicKey, trustStatus, apiVersion, build)
-  → node A can now query node B's peer endpoints
-```
-
-### 2.2 Endpoint surface
-
-**Peer management (admin-gated, local node):**
-- `GET /api/v1/peers` — list known peers
-- `POST /api/v1/peers` — add a peer → handshake + trust
-- `DELETE /api/v1/peers/{id}` — remove a peer
-- `PATCH /api/v1/peers/{id}` — update nickname, disable/enable
-- `GET /api/v1/peers/{id}/latency` — measure round-trip
-
-**Node-to-node (cluster-authenticated, signed):**
-- `GET /api/v1/peers/identity` — this node's identity
-- `GET /api/v1/peers/identity/verify` — verify a remote node's key
-- `GET /api/v1/peers/self/resources` — CPU/RAM/Disk (host DTO shape)
-- `GET /api/v1/peers/self/capabilities` — capability set
-- `GET /api/v1/peers/self/library` — game catalog (library DTO shape)
-- `GET /api/v1/peers/self/servers` — running servers (server DTO shape)
-
-### 2.3 Request signing format
-
-```
-Headers on every node-to-node request:
-  X-Node-Id: <requesting node's id>
-  X-Timestamp: <unix timestamp, seconds>
-  X-Signature: <base64 Ed25519 signature>
-
-Signature payload (UTF-8 bytes):
-  <timestamp>|<HTTP method>|<path>|<SHA256 of request body, or empty string for GET>
-
-Verification:
-  1. Look up publicKey for X-Node-Id in trust store
-  2. Check X-Timestamp is within ±30s of server time (configurable)
-  3. Verify Ed25519 signature against the payload
-  4. Reject if any step fails
-```
-
-### 2.4 On-demand fan-out with validate-at-use
-
-```
-User selects "Install factorio" on node A
-  → node A checks own resources (GET /hosts/primary)
-  → If insufficient: fan out GET /peers/{id}/resources to all enabled peers
-  → Find peers with headroom → sort by most free
-  → Propose: "Node B has capacity — install there?"
-  → User clicks "Install on Node B"
-  → SPA opens node B's install page (pre-filled with blueprint: factorio)
-  → node B validates resources at install time (validate-at-use)
-  → If still available → proceed. If not → honest error.
-```
+| # | Decision | Choice |
+|---|---|---|
+| 20 | State sharing | On-demand fan-out; validate-at-use; no cross-node state store |
+| 21 | Data shapes | Reuse existing Host/Server/Library DTOs |
+| 22 | Capacity inputs | Blueprint-declared RAM/disk (where present) + the target node's live free disk/RAM + current CPU saturation |
+| 23 | Capacity honesty | Undeclared requirement ⇒ **"unknown fit," never a guess.** Placement = `free disk ≥ declared AND free RAM ≥ declared`, else `unknown`. CPU is a coarse "is the node already saturated" gate, not a fit prediction |
+| 24 | Placement race (TOCTOU) | **Accept the race + honest failure** at start time (MVP). Soft reservations deferred |
+| 25 | Availability failures | **Fail-open**: an unreachable/slow/silent peer degrades to an honest "unknown," never a 500 |
+| 26 | Auth/authz failures | **Fail-closed**: an invalid service token, a failed tier check, an unverifiable identity ⇒ reject (`4xx`). Distinct code path from #25 — never conflate the two |
 
 ---
 
 ## 3 · Trust & auth model
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Node A                                                  │
-│  Ed25519 keypair (generated at first startup)            │
-│  Config-driven nodeId (default: hostname)                │
-│  Trust store: { nodeB: trusted, nodeC: disabled }        │
-└───────────────────┬─────────────────────────────────────┘
-                    │
-                    │  HTTPS to node B:
-                    │  X-Node-Id: A
-                    │  X-Timestamp: 1719000000
-                    │  X-Signature: Ed25519("1719000000|GET|/api/v1/peers/self/resources|")
-                    │  Authorization: Bearer <user's JWT>
-                    │
-                    ▼
-┌─────────────────────────────────────────────────────────┐
-│  Node B                                                  │
-│  1. Look up node A's publicKey from trust store          │
-│  2. Verify X-Signature (Ed25519)                         │
-│  3. Check X-Timestamp freshness (±30s)                   │
-│  4. Verify user JWT (same Discord app, node B's key)     │
-│  5. Check user tier for the operation                    │
-│  6. Execute + return result                              │
-└─────────────────────────────────────────────────────────┘
+Cluster secret  KGSM_API_CLUSTER_SECRET   (HMAC, shared by every node in the guild)
+JWT signing key KGSM_API_AUTH_SIGNING_KEY (HMAC, shared — signs user tokens)
+                └─ deliberately two secrets: leaking the cluster secret does not
+                   also hand over user-token forgery, and vice-versa.
 ```
 
-- **Node keypair** proves the request is from a known peer
-- **User JWT** is from node A; node B **re-verifies** it (same Discord application, same signing key)
-- **Timestamp** prevents replay attacks (configurable window)
-- **Disabled node** → requests rejected with 403; node stays in DB for re-trust
+### Node-to-node call
+
+```
+┌── Node A ──────────────────────────────────────────┐
+│  Wants: GET {B}/api/v1/peers/self/resources          │
+│  Mints a service JWT:                                 │
+│    { sub:"node:A", iss:"A", aud:"cluster", exp:+60s } │
+│    signed with KGSM_API_CLUSTER_SECRET                │
+│  Sends: Authorization: Bearer <service JWT>           │
+└───────────────────┬───────────────────────────────────┘
+                    ▼
+┌── Node B ──────────────────────────────────────────┐
+│  1. Verify service-JWT signature (cluster secret,     │
+│     current OR previous during a rotation window)     │
+│  2. aud == "cluster"                                  │
+│  3. iss ("A") is a row in Peers AND enabled           │
+│  4. Not expired                                       │
+│  → authorized as peer A. Execute + return.            │
+│  (Auth failure at any step ⇒ 401/403, fail-closed.)   │
+└───────────────────────────────────────────────────────┘
+```
+
+There is **no per-node keypair and no per-request Ed25519 signature.** The
+node-to-node surface is read-only GETs plus the message-bus inbox; TLS provides
+channel security, the service token provides membership + attribution, and the
+message-bus dedupe id (`docs/cluster-message-bus-plan.md`) provides replay safety
+where it matters. Ed25519-per-request was considered and dropped: it hardened node
+identity while user identity stayed forgeable under the shared HMAC key — an
+inconsistent, unjustified cost.
+
+### User single sign-on (vouch)
+
+```
+User → Node A: Discord OAuth round-trip (only A talks to Discord)
+  A mints its own session (sid_A in A's registry) + returns tokens to the SPA.
+
+Later the SPA needs Node B (renders B's data / issues a B action):
+  SPA → B with no B session → 401
+  SPA → A: "vouch me a session on B"     (or A proactively pre-warms)
+  A → POST {B}/auth/cluster-session       (service token + { discordId, roles, disp })
+  B trusts the assertion (cluster member) → mints sid_B in B's own registry → returns tokens
+  SPA stores B's tokens; retries the B call.
+```
+
+- Only the **login node** contacts Discord. Peers mint from the vouched assertion.
+- Every node's session is **native** to that node — its own `sid`, its own
+  sliding-window refresh, its own revocation authority. `sid`-based revocation
+  (the `SessionEntry` registry) keeps working per node.
+- **Keep only the active node's session warm.** Idle-node sessions may lapse and
+  are re-provisioned lazily on next use — do not run N background refresh loops.
+
+### Compromise & rotation
+
+- **Disabled node:** its service tokens are rejected (`403`); it stays in the
+  `Peers` table for one-click re-enable.
+- **Stolen cluster secret:** rotate `KGSM_API_CLUSTER_SECRET` across all nodes via
+  the dual-secret overlap window (#9). The `Peers.enabled` gate is an operational
+  on/off, **not** a cryptographic boundary against a stolen secret (a thief can set
+  `iss` to any enabled peer) — rotation is the real remedy.
+- **Upgrade path (documented, not built):** if a multi-owner or large mesh ever
+  becomes a requirement, replace the shared secret with **mTLS + a shared CA** —
+  per-node certs give granular CRL revocation without a cluster-wide rotation. Out
+  of scope while clusters are single-owner.
 
 ---
 
 ## 4 · Peer health (latency)
 
-- Node A periodically calls `GET /peers/{id}/latency` every **10s**
-- Measures round-trip time, stores in `latencyMs`
-- If no response within timeout → mark `status: "unreachable"`
-- Cluster page reads `GET /peers` which includes `latencyMs` + `status`
-- Individual leaf health per peer is pushed via the existing SSE stream (each
-  node's `capabilities` channel carries its own leaf health — no new SSE topic)
+- Each node polls every **enabled** peer's `GET /peers/{id}/latency` on a **10s**
+  interval, stores `latencyMs` + `status`.
+- No response within timeout ⇒ `status: "unreachable"`. Disabled ⇒ no ping,
+  `status: "disabled"`.
+- The Cluster page reads `GET /peers` (includes `latencyMs` + `status`). Per-leaf
+  health of each peer rides the SPA's existing per-node `capabilities` SSE — no new
+  SSE topic.
+- The poller doubles as the **message-bus liveness signal**: an
+  `unreachable → reachable` flip triggers an immediate outbox flush toward that
+  peer (see the bus spec).
 
 ---
 
 ## 5 · Assistant federation (P3)
 
-### Design decisions
-
 | # | Decision | Choice |
 |---|---|---|
-| A1 | Assistant awareness | Always aware of peers (via cached state), acts only on local failure |
-| A2 | Cross-node execution | Recommend only — user confirms on target node |
-| A3 | Cross-node memory | On-demand queries only — no persistent cross-node context |
-| A4 | Peer tools | Extend existing tools with optional `nodeId` parameter |
-| A5 | Tool call format | `nodeId` as tool parameter |
-| A6 | Auth for peer queries | Relay-auth (same as M7) — local API proxies, handles node signing |
-| A7 | Wire path | Assistant → local API → proxy to peer → result back |
-| A8 | Peer data freshness | Real-time query (always live) |
-| A9 | Recommendation UX | Triggers install modal on target node (pre-filled) |
-| A10 | Peer query failure | Single retry, then honest failure |
+| A1 | Awareness | Always aware of peers (cached), acts only on local shortfall |
+| A2 | Cross-node execution | Recommend only — the user confirms on the target node |
+| A3 | Cross-node memory | On-demand live queries; no persistent cross-node context |
+| A4 | Peer tools | Existing tools gain an optional `nodeId` parameter |
+| A5 | Auth for peer queries | Relay: the local API proxies with a **service token**; no user token leaves the origin |
+| A6 | Wire path | Assistant → local API → service-token call to peer → result back |
+| A7 | Freshness | Real-time query, always live |
+| A8 | Peer query failure | Single retry, then honest failure (`peer_unreachable`); a dead peer yields a **partial** cluster answer, never a whole-cluster failure |
 
-### Tool extension
-
-The assistant's existing tools gain an optional `nodeId` parameter:
-
-```
-// Before (local only):
-get_servers() → [{ id: "factorio", status: "running", ... }]
-
-// After (with nodeId):
-get_servers() → [{ id: "factorio", status: "running", ... }]
-get_servers(nodeId: "node-b") → [{ id: "terraria", status: "stopped", ... }]
-```
-
-Affected tools (at minimum):
-- `get_servers` — query running servers on a node
-- `get_library` — query available blueprints on a node
-- `get_host_status` — query resources/capabilities on a node
-
-New tool (or extension):
-- `get_cluster_overview` — aggregate resources across all nodes (fan-out)
-
-### Wire path (relay through local API)
-
-```
-User: "What games can I install across my cluster?"
-
-Assistant calls: get_library() [no nodeId — local]
-  → API resolves locally → returns local library
-
-Assistant calls: get_library(nodeId: "node-b") [peer query]
-  → API sees nodeId parameter
-  → API routes to: GET /api/v1/peers/self/library on node B
-    (signed with node A's keypair, user JWT re-verified at node B)
-  → node B returns its library
-  → API returns to assistant
-  → Assistant aggregates and responds to user
-```
-
-### Failure handling
-
-```
-Assistant calls: get_servers(nodeId: "node-b")
-  → node B unreachable
-  → API retries once (after 2s)
-  → Still unreachable
-  → API returns: { error: { code: "peer_unreachable" } }
-  → Assistant tells user: "Node B is currently unreachable."
-```
-
-### Implementation scope
-
-- **API side:** extend tool schemas with `nodeId`; add peer-routing logic; handle
-  peer query failures; expose `get_cluster_overview` tool
-- **Assistant side (kgsm-llm):** tool definitions gain `nodeId` optional parameter;
-  no new implementations — routing is API-side
-- **SPA side:** handle assistant trigger for cross-node install modal; existing
-  modal flow handles the rest
+Tools gaining an optional `nodeId`: `get_servers`, `get_library`,
+`get_host_status`; plus a new `get_cluster_overview` (fan-out aggregate). Routing
+is entirely API-side — the assistant only learns the parameter.
 
 ---
 
 ## 6 · Phased delivery
 
-### P0 — Peer foundation (protocol + trust) · `planned`
+> **P-1 (foundation, its own spec) — Cluster message bus · `planned`.**
+> The transactional outbox/inbox transport. **Built first.** Everything below
+> assumes it. Authority: `docs/cluster-message-bus-plan.md`.
 
-- Ed25519 keypair generation at startup, stored in SQLite
-- `Peers` table (id, url, nickname, nodeId, publicKey, trustStatus, lastSeen,
-  latencyMs, apiVersion, build, enabled)
-- `NodeIdentity` table or column (nodeId, publicKey, privateKey)
-- `cluster` capability added to `LeafCatalog`
-- `PeersController` (CRUD + identity endpoint)
-- Request signing middleware + Ed25519 verification
-- Version check at handshake (strict match)
-- Disabled-peer rejection (403)
-- Latency measurement (`GET /peers/{id}/latency`)
-- Latency background poller (10s interval, stores in DB)
-- **Self-validated:** smoke test adds peer, signs request, verifies identity,
-  rejects version mismatch, rejects disabled peer, rejects stale timestamp
+### P0 — Peer foundation (membership + trust) · `planned`
+- `KGSM_API_CLUSTER_SECRET` config + the service-token mint/verify seam
+  (current + previous secret during rotation).
+- `Peers` table (id, url, nickname, nodeId, status, latencyMs, lastSeen,
+  apiVersion, enabled).
+- `cluster` capability in `LeafCatalog`.
+- `PeersController`: CRUD + `GET /peers/identity` + `GET /peers/{id}/latency`.
+- Handshake (paste URL → pull identity → `apiVersion` match → store); reachability
+  validated at add time; disabled-peer rejection (`403`).
+- Latency poller (10s), feeding bus liveness.
+- **Self-validated:** add a peer, mint+verify a service token, reject a version
+  mismatch, reject a non-cluster peer, reject a disabled peer.
 
-### P1 — Resource visibility (MVP) · `planned`
+### P1 — Single sign-on · `planned`
+- `POST /auth/cluster-session` vouch endpoint (service-token authed → native
+  session mint).
+- SPA lazy vouch-on-401 + per-device session aggregation in Active Sessions.
+- Cluster-wide logout: `session.revoke` over the bus (durable to down nodes).
+- **Self-validated:** log into A, hit B without a B session → transparent vouch →
+  B session minted; logout-everywhere revokes A and B; a down node is revoked on
+  return (bus redelivery).
 
-- `GET /peers/{id}/resources` (reuses host DTO shape)
-- `GET /peers/{id}/capabilities` (reuses capability model)
-- `GET /peers/{id}/library` (reuses library DTO shape)
-- On-demand fan-out: "find node with capacity" logic
-- **Frontend gate:** Cluster page renders peer nodes alongside local node;
-  capacity strip shows all nodes
+### P2 — Resource visibility · `planned`
+- `GET /peers/{id}/resources | /capabilities | /library` (reuse existing DTOs).
+- On-demand "find a node with capacity" fan-out (§2 #22–#24 honesty rules).
+- **Frontend gate:** Cluster page renders local node + peers; capacity honestly
+  labels `unknown` where a blueprint declares no requirement.
 
-### P2 — Placement recommendation · `planned`
+### P3 — Placement recommendation · `planned`
+- Advisory redirect: a full node suggests a peer with headroom; the SPA opens the
+  target's install form pre-filled; the target validates-at-use.
 
-- Advisory: when install is attempted on a full node, recommend a peer with headroom
-- SPA shows "Node B has free resources — install on Node B?" redirect
-- Pre-filled redirect: SPA opens target node's install form with blueprint pre-selected
-- Validate-at-use: target node re-checks resources before executing
+### P4 — Federated assistant · `planned`
+- Optional `nodeId` on existing tools; API-side peer routing (service-token relay);
+  `get_cluster_overview`.
 
-### P3 — Federated assistant · `planned`
-
-- Extend existing tools with optional `nodeId` parameter
-- Peer routing logic in API (proxy to peer endpoints)
-- Assistant-to-assistant communication (if peer has `assistant` capability)
-- Direct API fallback (if peer has no assistant)
-- `/peers/{id}/assistant/turn` relay endpoint
-- `get_cluster_overview` tool (fan-out across all nodes)
-
-### P4 — Cross-node audit (optional, future) · `open`
-
-- Cross-node audit trail visibility (query a peer's audit log)
-- "All cluster events" view
+### P5 — Cross-node audit · `open`
+- Query a peer's audit log; an "all cluster events" view.
 
 ---
 
 ## 7 · Wire contracts
 
 ### `GET /api/v1/peers` (admin-gated)
-
 ```json
-{
-  "peers": [
-    {
-      "id": "abc123",
-      "url": "https://node-b:8097",
-      "nickname": "Gaming Box",
-      "nodeId": "node-b",
-      "status": "reachable",
-      "latencyMs": 12,
-      "lastSeen": "2026-07-06T12:00:00Z",
-      "apiVersion": "v1",
-      "build": "0.1.0+abc123",
-      "enabled": true
-    }
-  ]
-}
+{ "peers": [ {
+  "id": "abc123", "url": "https://node-b:8097", "nickname": "Gaming Box",
+  "nodeId": "node-b", "status": "reachable", "latencyMs": 12,
+  "lastSeen": "2026-07-10T12:00:00Z", "apiVersion": "v1", "enabled": true
+} ] }
 ```
 
 ### `POST /api/v1/peers` (admin-gated)
-
 ```json
 { "url": "https://node-b:8097", "nickname": "Gaming Box" }
-→ 201 { id, url, nickname, nodeId, status: "trusted", ... }
+→ 201 { id, url, nickname, nodeId, apiVersion, status:"reachable", enabled:true }
 → 400 { error: { code: "invalid_url" } }
-→ 409 { error: { code: "version_mismatch", details: { remote: "0.5.0", local: "0.1.0" } } }
-→ 422 { error: { code: "peer_not_cluster", message: "Remote node does not advertise cluster capability" } }
+→ 409 { error: { code: "version_mismatch", details: { remote:"v2", local:"v1" } } }
+→ 422 { error: { code: "peer_not_cluster",
+        message: "Remote node does not advertise the cluster capability" } }
+→ 502 { error: { code: "peer_unreachable" } }
 ```
 
-### `GET /api/v1/peers/identity` (cluster-authenticated)
-
+### `GET /api/v1/peers/identity` (cluster-token authed)
 ```json
-{
-  "nodeId": "node-b",
-  "publicKey": "<base64 Ed25519 public key>",
-  "apiVersion": "v1",
-  "build": "0.1.0+abc123"
-}
+{ "nodeId": "node-b", "apiVersion": "v1", "build": "0.1.0+abc123",
+  "capabilities": ["monitor","watchdog","cluster"] }
 ```
 
-### `GET /api/v1/peers/self/resources` (cluster-authenticated)
-
+### `POST /auth/cluster-session` (cluster-token authed)
 ```json
-{
-  "id": "node-b",
-  "label": "Gaming Box",
-  "status": "online",
-  "cpuPct": 37,
-  "mem": { "used": 9.2, "total": 32 },
-  "disks": [{ "mount": "/", "used": 180, "total": 512 }]
-}
+// body: the vouched identity asserted by the calling node
+{ "discordId": "1234", "username": "krystal", "displayName": "Krystal",
+  "roles": ["operator"] }
+→ 201 { accessToken, refreshToken, sid, expiresAt }   // B's OWN native session
+→ 401 { error: { code: "invalid_cluster_token" } }
+→ 403 { error: { code: "peer_disabled" } }
 ```
 
-### `GET /api/v1/peers/self/capabilities` (cluster-authenticated)
-
+### `GET /api/v1/peers/self/resources` (cluster-token authed)
 ```json
-{
-  "monitor": { "provisioned": true, "status": "operational" },
-  "watchdog": { "provisioned": true, "status": "operational" },
-  "assistant": { "provisioned": false, "status": "absent" },
-  "cluster": { "provisioned": true, "status": "operational" }
-}
+{ "id": "node-b", "label": "Gaming Box", "status": "online",
+  "cpuPct": 37, "mem": { "used": 9.2, "total": 32 },
+  "disks": [ { "mount": "/", "used": 180, "total": 512 } ] }
 ```
 
-### `GET /api/v1/peers/self/library` (cluster-authenticated)
+(`/peers/self/capabilities` and `/peers/self/library` reuse the existing
+capability and `LibraryEntry` shapes verbatim.)
 
-```json
-{
-  "entries": [
-    { "id": "factorio", "name": "Factorio", "type": "native", "steamAppId": 427520 }
-  ]
-}
-```
+### `POST /api/v1/peers/inbox` (cluster-token authed)
+The message-bus receive endpoint — one endpoint, typed envelope. Full contract:
+`docs/cluster-message-bus-plan.md`.
 
 ---
 
 ## 8 · SPA changes
 
-- Rename `localStorage` host registry → "nodes"
-- Fleet page → **Cluster page** (new route, replaces old):
-  - Lists local node + all peers
-  - Add/remove/enable/disable peers
-  - Shows latency per peer
-  - Peer status (reachable/unreachable)
-  - **No resource dashboard** — that stays on the per-node pages
-- Install modal:
-  - Host dropdown populated from cached node data (local + peers from Cluster page)
-  - When selected node lacks capacity: suggest peer with headroom
-  - User agrees → dropdown switches to peer → SPA talks directly to peer
-  - Source node is out of the loop from that point
+- Rename the `localStorage` connection registry `hosts → nodes` (same structure;
+  provide a one-time in-place migration so existing connections survive the
+  rename).
+- **Fleet page → Cluster page** (new route, replaces the old):
+  - Lists the local node + all peers; add/remove/enable/disable; latency;
+    reachable/unreachable/disabled status.
+  - **No resource dashboard** — per-node resources stay on the per-node pages.
+- **Single sign-on:** one Discord login; the SPA lazily vouches a native session
+  on each node as it is first touched (401 → vouch → retry). Active Sessions
+  aggregates per device across the cluster; "Sign out everywhere" fans out over the
+  bus.
+- **Cross-node install:** the install modal's node dropdown is populated from the
+  cached Cluster-page data. Selecting a peer switches the SPA to talk **directly**
+  to that peer (it already holds, or lazily vouches, a native session there); the
+  source node drops out of the loop.
+- **CORS is a setup requirement:** for the browser to call a peer directly, that
+  peer's `KGSM_API_CORS_ORIGINS` must list the SPA origin. The Cluster page runs a
+  browser-side preflight probe per peer and **warns** on a CORS/reachability
+  mismatch rather than failing opaquely mid-install.
 
 ---
 
 ## 9 · Self-validation plan
 
-### P0 smoke
+### P0
+- Add a peer (reachable → stored; unreachable → `502`; non-cluster → `422`;
+  version mismatch → `409`).
+- Mint a service token, verify it passes; verify a `previous`-secret token during a
+  simulated rotation window; reject a disabled peer (`403`).
 
-- Add a peer (validate-at-add: reachable → stored; unreachable → rejected)
-- Reject version mismatch
-- Reject non-cluster peer
-- Sign a request, verify it passes
-- Reject a disabled peer
-- Reject a stale timestamp (outside replay window)
+### P1
+- Log into A; hit B with no B session → transparent vouch → native B session.
+- Logout-everywhere revokes A **and** B.
+- Down-node revocation: stop B, logout-everywhere on A, restart B → the queued
+  `session.revoke` is delivered on B's return (bus redelivery), session gone.
 
-### P1 smoke
-
-- Query peer resources (real peer or stub)
-- Query peer capabilities
-- Query peer library
-- Fan-out: find node with capacity when local node is full
-- Cluster page renders peer data
+### P2
+- Query a peer's resources/capabilities/library.
+- Fan-out "find capacity": honest `unknown` for an undeclared blueprint; a correct
+  pick for a declared one.
+- Cluster page renders peer data; a down peer degrades to honest "unreachable," not
+  a 500.
 
 ---
 
-## 10 · Open items (implementation-level)
+## 10 · Open items
 
-These resolve naturally during build — they don't need upfront design:
+Resolved by earlier rounds and no longer open: handshake model, node auth, trust
+direction, version policy, SSO mechanism, logout durability, capacity honesty,
+fail-open/closed split, Ed25519 (dropped).
 
-1. **Keypair storage** — SQLite blob column in a `NodeIdentity` table or inline
-   in `Peers`.
-2. **Key generation timing** — first startup (always). Key exists even if
-   cluster is disabled.
-3. **SPA redirect model** — inline modal: SPA updates host dropdown, talks
-   directly to target node, source node out of loop.
-4. **URL validation** — validate at add time (fail-fast on bad URL).
-5. **Latency interval** — 10s default, configurable via env var.
-6. **Replay window** — ±30s default, configurable via
-   `KGSM_API_PEER_REPLAY_WINDOW_S`.
-7. **Body hash** — GET: empty string after final `|`. POST: SHA256(body).
-8. **Cluster capability placement** — new entry in `LeafCatalog`, same
-   `provisioned`/`status` model as existing capabilities.
-9. **SPA localStorage rename** — rename host registry key to "nodes"; same data
-   structure, new name.
-10. **Disabled peer behavior** — no latency ping, shown as disabled on Cluster
-    page, requests rejected with 403.
-11. **Cross-node install modal** — SPA stays on source node, updates host
-    dropdown with target, then talks directly to target node's API.
+Still open — to resolve before or during the relevant phase:
+
+1. **Clock skew.** Service-token `exp` and any timestamped envelope assume rough
+   NTP sync across nodes. Decide the tolerance and the honest error when a node's
+   clock is badly off (it must fail-closed, not silently accept).
+2. **Topology: LAN vs WAN.** `GET /peers/identity` is reachable **before** any
+   trust is established (you can't authenticate before you know the peer). If nodes
+   span the public internet, that endpoint is an internet-exposed enumeration/DoS
+   surface — decide LAN-only (VPN/overlay) vs WAN, and rate-limit `/identity` +
+   `/inbox` accordingly. Ties into who opens the cross-node port
+   (kgsm-firewall/watchdog own port-opening).
+3. **TLS cert validation.** Over the shared-secret model, is TLS validated
+   (proper certs / internal CA) or is it encryption-only with the service token as
+   the sole identity layer? Pin one; if self-signed, document the accepted risk.
+4. **Placement soft-reservation.** #24 accepts the TOCTOU race for MVP; revisit if
+   double-booking bites in practice (a short-lived reservation on the target).
+5. **Nickname divergence.** Nicknames are node-local; the SPA aggregates — decide
+   which label wins when two nodes name the same peer differently (cosmetic).
+6. **`peer_disabled` after cluster opt-out.** A node that drops the `cluster`
+   capability while peers still list it: its `/peers/self/*` and `/inbox` must
+   `404`/`403` cleanly, and peers must reflect it as unavailable, not fabricate a
+   status.

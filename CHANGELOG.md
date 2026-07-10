@@ -7,6 +7,145 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.20.1) — cluster message bus two-node self-validation (Phase 4)
+- **`tests/Api.Tests/ClusterTwoNodeTests.cs`** — proves the cluster bus (Phases 1–3) across two real
+  nodes in-process: `ClusterNodeFactory` (an `AuthTestFactory` re-configured with its own node id,
+  host id, cluster secret, drain interval, and DB) plus the routing trick of pointing node A's real
+  `OutboxDrainer` HTTP client (`"cluster-outbox-drainer"`) at node B's `TestServer.CreateHandler()` —
+  every message crosses the real `PeersController`/`ClusterTokenService`/`SessionRevokeHandler` code
+  paths with no sockets involved. Three tests: happy path (A enqueues, B revokes, A's outbox row
+  reaches `delivered`); down-then-up (a togglable `DelegatingHandler` returns `503` while "B is down" —
+  the row is observed genuinely `pending`/`Attempts>=1` before the toggle flips, then `delivered` after);
+  and auth fail-closed (mismatched cluster secrets → B's `401` dead-letters the row, the session on B
+  stays untouched). No Phase 1–3 defects surfaced — all three passed against the existing code
+  unmodified. 680/680 tests green.
+
+### Added (v0.20.0) — cluster message bus outbox drainer + GC (Phase 3)
+- **`ClusterTarget`** (`Services/Cluster/ClusterTarget.cs`) — `record(NodeId, Url)`, the delivery
+  address a caller of `IClusterBus.EnqueueAsync` supplies per peer. No `Peers` table yet (a later,
+  separate peer-foundation milestone), so the caller passes the target set itself.
+- **`IClusterBus` / `ClusterBus`** (`Services/Cluster/`) — the send seam:
+  `EnqueueAsync(type, payload, targets, ct)` mints one shared `messageId` per broadcast and writes one
+  `OutboxMessage` row per target (`Id = "<messageId>:<targetNodeId>"`, `Status="pending"`), gated the
+  same way as `SessionStore`/`ClusterInbox` (an `IServiceScopeFactory` + a write-serializing
+  `SemaphoreSlim`). `IClusterBus`'s XML-doc records the deliberate gap: the plan (§6) wants this
+  enqueue to share the caller's own DB transaction with the local effect it announces (e.g. cluster
+  logout revoking local sessions then enqueuing peer notifications atomically); today it is a
+  standalone gated write run right after the caller's local effect commits — narrow crash window,
+  accepted because the first transactional caller (cluster logout, `PLAN-peers.md` P1) isn't built
+  yet. `ClusterBus` also carries the drainer/GC's store-side helpers (not part of the public seam):
+  `ListDueAsync`, `MarkDeliveredAsync`, `MarkTransientFailureAsync`, `MarkDeadAsync`, `PruneAsync`.
+- **`OutboxDrainer`** (`Services/Cluster/OutboxDrainer.cs`) — the `BackgroundService` that actually
+  sends. Inert (no timer) when `ClusterEnabled` is false; a startup catch-up pass, then a
+  `PeriodicTimer` loop (`KGSM_API_CLUSTER_DRAIN_MS`, default 1s) with a per-tick swallow so one bad
+  tick never kills it. Per due row (`pending`, `NextAttemptAt<=now`, capped at 100/tick,
+  oldest-first): a TTL check first (`KGSM_API_CLUSTER_RETRY_TTL_DAYS`, default 7 — a row this old is
+  dead-lettered with a loud log without ever being sent); else rebuilds the `ClusterEnvelope`
+  (`from=NodeId`, `ts=CreatedAt`) and POSTs it, freshly bearer-tokened via `IClusterTokenService`, to
+  `{TargetUrl}/api/v1/peers/inbox` through a named `HttpClient` (10s timeout, via
+  `IHttpClientFactory`). `2xx` → delivered; `400`/`401`/`403`/`413` → dead-lettered with a loud log
+  (a LOCAL misconfiguration signal — wrong secret, or the peer disabled us — not a lost message);
+  anything else (a thrown exception, a `5xx`, any other status) → transient: `Attempts++`,
+  `NextAttemptAt = now + backoff(Attempts)`, stays `pending`. Backoff: capped exponential with jitter,
+  `min(5min, 1s · 2^(attempts-1)) + up to 20% jitter`. The latency-poller / `node.online`
+  immediate-flush coupling (plan §6, M-bus·b) is deliberately NOT built this phase — the durable retry
+  loop is correct without it, just slower to notice a recovered peer.
+- **`ClusterBusGcWorker`** (`Services/Cluster/ClusterBusGcWorker.cs`) — mirrors
+  `SessionCleanupWorker` exactly (inert when `ClusterEnabled` is false, startup catch-up, then a
+  `PeriodicTimer` loop at `KGSM_API_CLUSTER_GC_MS`, default 10 min). Each pass calls
+  `ClusterBus.PruneAsync(now - ClusterRetentionDays, now)`, deleting `delivered`/`dead` outbox rows
+  and old inbox dedupe-ledger rows; a `pending` row is never pruned regardless of age.
+- **Config** (`ApiOptions` + `appsettings.json`): `KGSM_API_CLUSTER_DRAIN_MS` (default 1000, floor
+  250), `KGSM_API_CLUSTER_RETRY_TTL_DAYS` (default 7, floor 1), `KGSM_API_CLUSTER_RETENTION_DAYS`
+  (default 30, clamped to at least `ClusterRetryTtlDays + 1` so a late redelivery right at the TTL
+  boundary is still recognized as a duplicate rather than re-applied), `KGSM_API_CLUSTER_GC_MS`
+  (default 600000, floor 60000). All four are non-`required` (defaulted), so the many existing
+  test-built `ApiOptions` literals needed no changes.
+- **`Startup.cs`**: registers the named `cluster-outbox-drainer` `HttpClient` (10s timeout, via
+  `AddHttpClient`), `ClusterBus` as both `IClusterBus` and its concrete type, and hosts both
+  `OutboxDrainer` and `ClusterBusGcWorker`.
+- **`tests/Api.Tests/OutboxDrainerTests.cs`** — a real temp-file SQLite `AppDbContext` (no
+  `WebApplicationFactory`; there is no HTTP endpoint under test here) + a fake `HttpMessageHandler`
+  standing in for the peer. Covers: `EnqueueAsync` with 2 targets → 2 correctly-shaped pending rows
+  (and a no-targets no-op); a 200 peer response → both rows delivered, the sent envelope's `from`
+  equals `NodeId` and the URL ends `/api/v1/peers/inbox`; a 503 → stays pending, `Attempts=1`,
+  `NextAttemptAt` in the future, `LastError` set; a 400 → dead; a row seeded past the retry TTL →
+  dead-lettered without ever calling the peer; `PruneAsync` deletes old delivered/dead outbox rows
+  and old inbox rows while keeping fresh ones and any still-`pending` row regardless of age.
+- **Not built this phase** (M-bus·b, per the plan's own phasing): the latency-poller /
+  `node.online` immediate-flush coupling — a pure latency optimization; the durable retry loop is
+  correct without it.
+
+### Added (v0.19.0) — cluster message bus receive path (Phase 2)
+- **`POST /api/v1/peers/inbox`** (`Controllers/PeersController.cs`) — the wire endpoint
+  (`docs/cluster-message-bus-plan.md §4`). `[AllowAnonymous]` w.r.t. the user auth scheme (it runs
+  regardless of `KGSM_API_AUTH_DISABLED`); does its own fail-closed cluster-token auth inline. Status
+  mapping: `401 invalid_cluster_token` (no/invalid bearer), `403 peer_disabled` (the `IClusterPeerGate`
+  seam, below), `403 from_mismatch` (`envelope.from` ≠ the token's node id), `413 payload_too_large`
+  (over 64 KiB — checked against `Content-Length` up front, then re-enforced by a hard-capped manual
+  body read so a chunked request can't lie its way past the header check), `400 bad_request`
+  (unparseable JSON or a missing `id`/`type`/`from`), `200 { status: "accepted" }` for a fresh apply, a
+  de-duplicated replay, or a dropped-unknown-type message alike (the sender cannot and needn't tell
+  them apart), `500 internal` only for a genuinely transient handler failure (so the sender keeps
+  retrying).
+- **`ClusterEnvelope`** (`Services/Cluster/ClusterEnvelope.cs`) — the §3 envelope record
+  (`id`/`type`/`from`/`ts`/`payload`), camelCase, `payload` left as a raw `JsonElement` so each
+  handler owns its own payload shape.
+- **`IClusterMessageHandler`** (`Services/Cluster/IClusterMessageHandler.cs`) — the discriminated-union
+  handler seam (`Type` + `HandleAsync`), registered in DI as a collection and dispatched by `type`.
+  Handlers are contractually idempotent (applying twice is harmless) — the safety property the whole
+  receive algorithm leans on.
+- **`SessionRevokeHandler`** (`Services/Cluster/Handlers/SessionRevokeHandler.cs`) — the first handler,
+  `session.revoke`. `scope:"sid"` → `SessionStore.RevokeAsync` + `ISessionValidator.Evict`;
+  `scope:"user"` → resolves `discordId` to `discord:<id>`, calls `RevokeAllForUserAsync`, evicts every
+  returned sid; `scope:"all"` is logged as RESERVED and no-ops (a node-wide nuke is out of MVP scope); a
+  missing/unrecognized field for the given scope logs a warning and no-ops rather than throwing (a
+  throw would 500 and wedge the sender into an infinite retry against a payload that can never become
+  valid).
+- **`ClusterInbox`** (`Services/Cluster/ClusterInbox.cs`) — the §7 receive/dedupe/dispatch algorithm, a
+  scoped-singleton store mirroring `SessionStore`'s idiom (an `IServiceScopeFactory` + a write gate).
+  Deliberately **handler-first**, not the spec's literal insert-first: a handler's effect (e.g.
+  `session.revoke` writing the `sessions` table) lands in a different `AppDbContext` scope/transaction
+  than this class's own inbox-ledger write, so there is no single transaction to roll both back
+  together. Handler-first is safe precisely because handlers are idempotent — a crash between "handler
+  succeeded" and "ledger row committed" just means the next redelivery re-runs a no-op. An unknown
+  `type` is recorded (ledger row, `ProcessedAt` left `null`) and dropped rather than 500'd; a handler
+  exception is NOT recorded, so the sender's retry re-dispatches from scratch.
+- **`IClusterPeerGate` / `AllowAllClusterPeerGate`** (`Services/Cluster/IClusterPeerGate.cs`) — the §4
+  "`iss` is an enabled peer" seam. There is no `Peers` table yet (a later peer-foundation milestone), so
+  the default implementation treats any node that already presented a validly-signed cluster service
+  token as enabled — correct under today's one-guild trust boundary; swap the registration for a
+  `Peers`-table-backed implementation when that milestone lands, no controller change needed.
+- **`tests/Api.Tests/ClusterInboxTests.cs`** — boots the real pipeline with a configured
+  `KGSM_API_CLUSTER_SECRET`/`KGSM_API_NODE_ID`, mints real cluster tokens through the running
+  `IClusterTokenService`. Covers: a valid `session.revoke` (scope `sid`) actually revoking the row and
+  evicting the validator cache; no bearer → `401`; a token signed with the wrong secret → `401`; a
+  `from`/token mismatch → `403`; the same envelope id delivered twice → both `200`, exactly one ledger
+  row, the effect applied once; an unknown `type` → `200`, never a `500`.
+- **Not built this phase** (Phase 3): the outbox drainer, `IClusterBus.Enqueue`, and inbox/outbox GC.
+
+### Added (v0.18.0) — cluster message bus foundation (Phase 1)
+- **`KGSM_API_CLUSTER_SECRET` / `KGSM_API_CLUSTER_SECRET_PREVIOUS` / `KGSM_API_NODE_ID`** —
+  the config keys behind the cluster service token (`docs/cluster-message-bus-plan.md`,
+  `PLAN-peers.md §3`). Blank secret (the default) ⇒ `ApiOptions.ClusterEnabled` is `false` — this
+  host is not part of a cluster. `NodeId` defaults to `HostId` (`PLAN-peers.md §2` #2).
+- **`IClusterTokenService` / `ClusterTokenService`** (`Services/Cluster/`) — mints and validates the
+  node-to-node service JWT (`sub=node:<id>`, `iss=<id>`, `aud=cluster`, 60s TTL), HMAC-SHA256 signed
+  with the cluster secret (distinct from the user-token signing key). Validation accepts the current
+  secret or, during a rotation overlap window, the previous one. Fail-closed: any invalid, expired,
+  wrong-audience, wrong-signature, or malformed token — or a blank cluster secret — validates to
+  `null`, never throws. Registered as a singleton in `Startup`; nothing consumes it yet.
+- **`OutboxMessage` / `InboxMessage`** (`Data/`) — the transactional-outbox/inbox schema
+  (`docs/cluster-message-bus-plan.md §5`), mapped onto `AppDbContext` as `cluster_outbox`/
+  `cluster_inbox` (`EnsureCreated`, UTC-ticks timestamps, the same posture as every other table
+  here). `OutboxMessage` adds one field beyond the spec table, `TargetUrl` — denormalizing the
+  delivery address onto the row since the `Peers` table (a separate, later increment) doesn't exist
+  yet. **No writer or reader exists yet** — this milestone is schema + the auth seam only; the
+  `/peers/inbox` endpoint, the outbox drainer, and `IClusterBus` are later phases.
+- **`tests/Api.Tests/ClusterTokenServiceTests.cs`** — mint↔validate round-trip, previous-secret
+  rotation window, wrong secret / garbage token / expired token / wrong audience all fail closed,
+  and a blank cluster secret makes `Mint()` throw and `ValidateAsync` always return `null`.
+
 ### Added (v0.17.0) — session GC worker (M4·c Increment 8)
 - **`SessionCleanupWorker`** — a new `BackgroundService` that permanently bounds the `sessions`
   table: on a timer (`KGSM_API_SESSIONS_GC_MS`, default 10 min, floor 60s), it bulk-deletes every

@@ -12,6 +12,7 @@ using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
+using TheKrystalShip.Api.Services.Cluster;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Files;
 using TheKrystalShip.Api.Services.Integrations;
@@ -348,6 +349,39 @@ public class Startup(IConfiguration configuration)
         // poll loop (hosted service). With no watchdog provisioned it logs once and serves an empty feed.
         services.AddSingleton<AlertEngine>();
         services.AddHostedService(sp => sp.GetRequiredService<AlertEngine>());
+
+        // Cluster message bus — Phase 1 foundation (docs/cluster-message-bus-plan.md, PLAN-peers.md §3).
+        // The service-token mint/validate seam. Registered unconditionally — ClusterTokenService itself
+        // degrades to a throwing Mint()/always-null ValidateAsync when KGSM_API_CLUSTER_SECRET is blank
+        // (the normal, opt-in-and-off-by-default posture, mirroring the assistant relay secret).
+        services.AddSingleton<IClusterTokenService, ClusterTokenService>();
+
+        // Cluster message bus — Phase 2, the receive path (§4/§7). ClusterInbox is the dedupe+dispatch
+        // store (scoped-singleton, mirrors SessionStore); IClusterPeerGate is the §4 "iss is an enabled
+        // peer" seam (AllowAllClusterPeerGate until the Peers-table peer-foundation milestone lands);
+        // IClusterMessageHandler is registered as a collection (resolved as IEnumerable<> by ClusterInbox)
+        // — session.revoke is the first, and so far only, message type. All inert on a non-cluster node:
+        // PeersController's own auth 401s everything before ClusterInbox is ever reached (ClusterTokenService
+        // never validates a token when KGSM_API_CLUSTER_SECRET is blank). No outbox drainer / IClusterBus
+        // yet — Phase 3.
+        services.AddSingleton<ClusterInbox>();
+        services.AddSingleton<IClusterPeerGate, AllowAllClusterPeerGate>();
+        services.AddSingleton<IClusterMessageHandler, Services.Cluster.Handlers.SessionRevokeHandler>();
+
+        // Cluster message bus — Phase 3, the send path (§6/§7/§8). ClusterBus is the outbox
+        // reader/writer (scoped-singleton, mirrors SessionStore/ClusterInbox), exposed both as the public
+        // IClusterBus.EnqueueAsync seam (a future caller, e.g. cluster logout, PLAN-peers.md P1) and as
+        // its concrete type (the drainer/GC's store-side helpers, which aren't part of that public seam).
+        // The drainer POSTs through a named HttpClient with a short (~10s) per-request timeout — deliberately
+        // short: a hung peer must not pin a drain-pass slot for long, the row just retries next tick.
+        // OutboxDrainer/ClusterBusGcWorker are BOTH inert (no timer at all) when ClusterEnabled is false,
+        // the same opt-in-and-off-by-default posture as the token seam and the inbox above.
+        services.AddHttpClient(OutboxDrainer.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddSingleton<ClusterBus>();
+        services.AddSingleton<IClusterBus>(sp => sp.GetRequiredService<ClusterBus>());
+        services.AddSingleton<OutboxDrainer>();
+        services.AddHostedService(sp => sp.GetRequiredService<OutboxDrainer>());
+        services.AddHostedService<ClusterBusGcWorker>();
 
         // M4·a — auth (Discord per-host, Model A). Stateless JWT bearer (the M4 decision): no session
         // table, no user row — keeps M5 as the first EF migration. The Discord seam (IDiscordIdentityResolver)
