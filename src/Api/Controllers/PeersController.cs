@@ -40,6 +40,7 @@ public sealed class PeersController(
     ClusterInbox inbox,
     PeersStore peers,
     PeerHandshakeService handshake,
+    GossipService gossip,
     ApiOptions options,
     HostIdentityProvider hostIdentity,
     LeafHealthMonitor leafHealth,
@@ -133,6 +134,60 @@ public sealed class PeersController(
             // them apart, and none of them should keep the message in the sender's outbox (§4/§8).
             _ => Ok(new { status = "accepted" }),
         };
+    }
+
+    /// <summary><c>POST /api/v1/peers/sync</c> — the ephemeral membership-gossip roster exchange
+    /// (PLAN-peers.md §2·b, G4). Cluster-token authed + disable-list gated, same fail-closed posture as
+    /// <see cref="Inbox"/>; DELIBERATELY separate from the durable message bus — a best-effort push-pull, no
+    /// outbox row, no retry. The caller pushes its roster (request body); this node merges it and returns its
+    /// own roster for the caller to merge back.</summary>
+    [HttpPost("sync")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Sync(CancellationToken ct)
+    {
+        string? token = ExtractBearerToken(Request);
+        if (token is null)
+            return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token", "missing bearer token");
+
+        ClusterPrincipal? principal = await clusterTokens.ValidateAsync(token).ConfigureAwait(false);
+        if (principal is null)
+            return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token",
+                "invalid, expired, or unsigned cluster service token");
+
+        if (!await peerGate.IsEnabledAsync(principal.NodeId).ConfigureAwait(false))
+            return Error(StatusCodes.Status403Forbidden, "peer_disabled",
+                $"node '{principal.NodeId}' is not an enabled peer of this cluster");
+
+        (bool withinLimit, string body) = await ReadBoundedBodyAsync(Request.Body, MaxEnvelopeBytes, ct)
+            .ConfigureAwait(false);
+        if (!withinLimit)
+            return TooLarge();
+
+        SyncRequest? request;
+        try
+        {
+            request = JsonSerializer.Deserialize<SyncRequest>(body, EnvelopeJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "the sync body is not valid JSON");
+        }
+
+        if (request is null || request.Members is null)
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "the sync body is missing members");
+
+        // Unlike Inbox, no from-spoof guard here — a sync payload describes many nodes at once, so `From`
+        // is informational only, not a single actor to authenticate.
+        await gossip.MergeIncomingAsync(request.Members, ct).ConfigureAwait(false);
+
+        // The caller authenticated a valid cluster token and reached us — first-hand liveness evidence for
+        // it, from the opposite direction to our own probe (PLAN-peers.md §2·b G5). Records it against the
+        // token's node id (never the spoofable body `From`), so a peer we can't probe but that still gossips
+        // to us stays alive instead of falsely dying.
+        await gossip.RecordInboundContactAsync(principal.NodeId, ct).ConfigureAwait(false);
+
+        IReadOnlyList<SyncMember> members = await gossip.BuildLocalRosterAsync(ct).ConfigureAwait(false);
+        return Ok(new SyncResponse(options.NodeId, members));
     }
 
     /// <summary><c>GET /api/v1/peers</c> — the full roster, enabled and disabled alike (admin-gated,
@@ -252,7 +307,9 @@ public sealed class PeersController(
     }
 
     private static PeerView ToView(PeerEntity p) =>
-        new(p.Id, p.Url, p.Nickname, p.NodeId, p.Status, p.LatencyMs, p.LastSeen, p.ApiVersion, p.Enabled);
+        new(p.Id, p.Url, p.Nickname, p.NodeId, p.Status,
+            GossipState.Display(p.MembershipState, p.LastSeen),
+            p.LatencyMs, p.LastSeen, p.ApiVersion, p.Enabled);
 
     private ObjectResult TooLarge() =>
         Error(StatusCodes.Status413PayloadTooLarge, "payload_too_large",

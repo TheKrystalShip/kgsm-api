@@ -374,7 +374,14 @@ public sealed class ClusterNodeFactory(
     int drainMs = 250,
     string? dbPath = null,
     Func<HttpMessageHandler>? drainerHandlerFactory = null,
-    Func<HttpMessageHandler>? handshakeHandlerFactory = null) : AuthTestFactory
+    Func<HttpMessageHandler>? handshakeHandlerFactory = null,
+    Func<HttpMessageHandler>? gossipHandlerFactory = null,
+    Func<HttpMessageHandler>? latencyHandlerFactory = null,
+    string? advertiseUrl = null,
+    int gossipMs = 250,
+    int suspectMs = 1500,
+    int reapMs = 4000,
+    int pollMs = 250) : AuthTestFactory
 {
     public string NodeId { get; } = nodeId;
     public string ClusterHostId { get; } = hostId;
@@ -385,7 +392,8 @@ public sealed class ClusterNodeFactory(
         base.ConfigureWebHost(builder);
 
         builder.ConfigureAppConfiguration((_, config) =>
-            config.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            var settings = new Dictionary<string, string?>
             {
                 ["KGSM_API_HOST_ID"] = ClusterHostId,
                 ["KGSM_API_NODE_ID"] = NodeId,
@@ -393,7 +401,18 @@ public sealed class ClusterNodeFactory(
                 ["KGSM_API_CLUSTER_SECRET"] = clusterSecret,
                 // Clamped to a 250ms floor by ApiOptions.FromConfiguration regardless of what's passed.
                 ["KGSM_API_CLUSTER_DRAIN_MS"] = drainMs.ToString(CultureInfo.InvariantCulture),
-            }));
+                // P0.5 gossip cadence — floored by ApiOptions.FromConfiguration (gossip 250ms,
+                // suspect/reap 1000ms) regardless of what's passed here.
+                ["KGSM_API_CLUSTER_GOSSIP_MS"] = gossipMs.ToString(CultureInfo.InvariantCulture),
+                ["KGSM_API_CLUSTER_SUSPECT_MS"] = suspectMs.ToString(CultureInfo.InvariantCulture),
+                ["KGSM_API_CLUSTER_REAP_MS"] = reapMs.ToString(CultureInfo.InvariantCulture),
+                // PeerLatencyPoller's first-hand probe cadence — floored at 250ms, same as gossip.
+                ["KGSM_API_CLUSTER_POLL_MS"] = pollMs.ToString(CultureInfo.InvariantCulture),
+            };
+            if (advertiseUrl is not null)
+                settings["KGSM_API_CLUSTER_ADVERTISE_URL"] = advertiseUrl;
+            config.AddInMemoryCollection(settings);
+        });
 
         if (drainerHandlerFactory is not null)
         {
@@ -407,6 +426,20 @@ public sealed class ClusterNodeFactory(
             builder.ConfigureTestServices(services =>
                 services.AddHttpClient(PeerHandshakeService.HttpClientName)
                     .ConfigurePrimaryHttpMessageHandler(handshakeHandlerFactory));
+        }
+
+        if (gossipHandlerFactory is not null)
+        {
+            builder.ConfigureTestServices(services =>
+                services.AddHttpClient(GossipWorker.HttpClientName)
+                    .ConfigurePrimaryHttpMessageHandler(gossipHandlerFactory));
+        }
+
+        if (latencyHandlerFactory is not null)
+        {
+            builder.ConfigureTestServices(services =>
+                services.AddHttpClient(PeerLatencyPoller.HttpClientName)
+                    .ConfigurePrimaryHttpMessageHandler(latencyHandlerFactory));
         }
     }
 }

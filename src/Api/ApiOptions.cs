@@ -425,6 +425,57 @@ public sealed class ApiOptions
     /// </summary>
     public int ClusterGcMs { get; init; } = 600000;
 
+    // --- Cluster membership gossip (PLAN-peers.md §2·b, P0.5) — the masterless anti-entropy layer that
+    //     converges the roster ("add one, join all"). All inert whenever ClusterEnabled is false; sane
+    //     defaults so existing ApiOptions literals need no update. ------------------------------------------
+
+    /// <summary>
+    /// This node's <b>advertised, browser-reachable client URL</b> (<c>KGSM_API_CLUSTER_ADVERTISE_URL</c>,
+    /// <c>PLAN-peers.md §2</c> #13a) — the address it puts in its own gossip self-entry so peers that learn
+    /// it via gossip know where the SPA should reach it. Blank ⇒ this node omits its own URL from gossip
+    /// (peers still learn it from whoever seeded it by handshake); a node discovered ONLY through this node's
+    /// self-entry then has no client address and stays provisional. Honest default: unset.
+    /// </summary>
+    public string ClusterAdvertiseUrl { get; init; } = "";
+
+    /// <summary>
+    /// This node's <b>node-to-node gossip URL</b> (<c>KGSM_API_CLUSTER_GOSSIP_URL</c>, <c>PLAN-peers.md
+    /// §2</c> #13a), when it differs from <see cref="ClusterAdvertiseUrl"/> (e.g. an internal/VPN address).
+    /// Blank ⇒ falls back to <see cref="ClusterAdvertiseUrl"/> in the self-entry.
+    /// </summary>
+    public string ClusterGossipUrl { get; init; } = "";
+
+    /// <summary>
+    /// How often (ms) the gossip worker runs one random-peer push-pull sync round
+    /// (<c>KGSM_API_CLUSTER_GOSSIP_MS</c>, default 5000 = 5s, floor 250) — one peer per round, O(1) work
+    /// per node (<c>PLAN-peers.md §2·b</c>, G1). Each round also advances the failure timers.
+    /// </summary>
+    public int ClusterGossipMs { get; init; } = 5000;
+
+    /// <summary>
+    /// How often (ms) the latency poller probes each enabled peer's <c>/identity</c> first-hand
+    /// (<c>KGSM_API_CLUSTER_POLL_MS</c>, default 10000 = 10s, floor 250; <c>PLAN-peers.md §4</c>). This is
+    /// the failure detector's sampling rate: a peer must go unreachable across probes before the timers
+    /// escalate it, so keep it comfortably below <see cref="ClusterSuspectMs"/> (several probes per suspect
+    /// window). It is also the first-hand-auth cadence that promotes a gossip-discovered peer to <c>alive</c>.
+    /// </summary>
+    public int ClusterPollMs { get; init; } = 10000;
+
+    /// <summary>
+    /// How long (ms) a peer stays <c>suspect</c> — no successful first-hand probe — before the failure timer
+    /// escalates it to <c>dead</c> (<c>KGSM_API_CLUSTER_SUSPECT_MS</c>, default 30000 = 30s, floor 1000;
+    /// <c>PLAN-peers.md §2·b</c>, G5).
+    /// </summary>
+    public int ClusterSuspectMs { get; init; } = 30000;
+
+    /// <summary>
+    /// How long (ms) a peer stays <c>dead</c>/<c>left</c> before it is reaped (row deleted) from the roster
+    /// (<c>KGSM_API_CLUSTER_REAP_MS</c>, default 300000 = 5 min, floor 1000; <c>PLAN-peers.md §2·b</c>, G5 /
+    /// §6 P0.5). Long enough that a briefly-bounced node refutes its own <c>dead</c> (via a higher
+    /// incarnation) before it is forgotten.
+    /// </summary>
+    public int ClusterReapMs { get; init; } = 300000;
+
     // --- Auth (M4·a) — Discord per-host, Model A (architecture.html §3·f, keystone O5) -----------
     // Identity is a global Discord SSO anchor; authorization is a short-lived host-scoped bearer
     // this host mints after verifying identity once and resolving the role via the host's bot.
@@ -664,6 +715,16 @@ public sealed class ApiOptions
             ClusterRetentionDays = Math.Max(
                 clusterRetryTtlDays + 1, IntOr(configuration["KGSM_API_CLUSTER_RETENTION_DAYS"], 30)),
             ClusterGcMs = Math.Max(60000, IntOr(configuration["KGSM_API_CLUSTER_GC_MS"], 600000)),
+
+            // P0.5 — membership gossip. Advertised/gossip URLs default blank (honest: a node that doesn't
+            // know its own client address just doesn't advertise it). Intervals share the drainer's
+            // clamp-to-a-floor posture so a fat-fingered tiny value can't spin the loop.
+            ClusterAdvertiseUrl = Defaulted(configuration["KGSM_API_CLUSTER_ADVERTISE_URL"], ""),
+            ClusterGossipUrl = Defaulted(configuration["KGSM_API_CLUSTER_GOSSIP_URL"], ""),
+            ClusterGossipMs = Math.Max(250, IntOr(configuration["KGSM_API_CLUSTER_GOSSIP_MS"], 5000)),
+            ClusterPollMs = Math.Max(250, IntOr(configuration["KGSM_API_CLUSTER_POLL_MS"], 10000)),
+            ClusterSuspectMs = Math.Max(1000, IntOr(configuration["KGSM_API_CLUSTER_SUSPECT_MS"], 30000)),
+            ClusterReapMs = Math.Max(1000, IntOr(configuration["KGSM_API_CLUSTER_REAP_MS"], 300000)),
 
             // Auth (M4·a). On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = Flag(configuration["KGSM_API_AUTH_DISABLED"]),

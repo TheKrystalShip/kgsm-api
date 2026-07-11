@@ -6,8 +6,11 @@ namespace TheKrystalShip.Api.Contracts;
 /// metadata an admin needs to see/manage membership.
 /// </summary>
 // GET /peers — one row per roster entry (enabled and disabled).
+// Status = this node's FIRST-HAND probe (reachable/unreachable/unknown); Membership = the gossip-converged
+// SWIM state (alive/suspect/dead/left, or the derived "joining" when gossip says alive but this node has
+// never reached it first-hand). Two axes, never conflated (PLAN-peers.md §2·b).
 public sealed record PeerView(
-    string Id, string Url, string? Nickname, string NodeId, string Status,
+    string Id, string Url, string? Nickname, string NodeId, string Status, string Membership,
     int? LatencyMs, DateTimeOffset? LastSeen, string ApiVersion, bool Enabled);
 
 /// <summary>GET /peers — the envelope (a bare array would preclude adding pagination/metadata later).</summary>

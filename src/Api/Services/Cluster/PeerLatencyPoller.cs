@@ -1,11 +1,15 @@
 using System.Diagnostics;
 using System.Net.Http.Headers;
+using System.Text.Json;
+using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
+using TheKrystalShip.Api.Json;
 
 namespace TheKrystalShip.Api.Services.Cluster;
 
 /// <summary>
-/// Polls every enabled peer's identity endpoint on a 10s interval (<c>PLAN-peers.md §4</c>), recording
+/// Polls every enabled peer's identity endpoint on the <see cref="ApiOptions.ClusterPollMs"/> interval
+/// (<c>PLAN-peers.md §4</c>, default 10s), recording
 /// <c>latencyMs</c>/<c>status</c> via <see cref="PeersStore.UpdateLivenessAsync"/>. No response within
 /// timeout (or a non-2xx) ⇒ <c>"unreachable"</c> with a null latency and an untouched <c>lastSeen</c> —
 /// never a fabricated value; a disabled peer is never pinged (<see cref="PeersStore.ListEnabledAsync"/>
@@ -24,10 +28,10 @@ public sealed class PeerLatencyPoller : BackgroundService
 {
     /// <summary>The named <see cref="HttpClient"/> (via <see cref="IHttpClientFactory"/>) this poller calls
     /// each peer's identity endpoint with — registered in <c>Startup</c> with a short timeout (one
-    /// slow/hung peer must not stall the whole 10s tick).</summary>
+    /// slow/hung peer must not stall the whole tick).</summary>
     public const string HttpClientName = "cluster-peer-latency";
 
-    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(10);
+    private static readonly JsonSerializerOptions IdentityJsonOptions = BuildJsonOptions();
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly PeersStore _peers;
@@ -46,6 +50,13 @@ public sealed class PeerLatencyPoller : BackgroundService
         _logger = logger;
     }
 
+    private static JsonSerializerOptions BuildJsonOptions()
+    {
+        var options = new JsonSerializerOptions();
+        ApiJson.Configure(options);
+        return options;
+    }
+
     /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -55,9 +66,9 @@ public sealed class PeerLatencyPoller : BackgroundService
             return;
         }
 
-        _logger.LogInformation("peer latency poller: started (interval={IntervalMs}ms)", PollInterval.TotalMilliseconds);
+        _logger.LogInformation("peer latency poller: started (interval={IntervalMs}ms)", _options.ClusterPollMs);
 
-        using var timer = new PeriodicTimer(PollInterval);
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_options.ClusterPollMs));
         try
         {
             while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
@@ -131,6 +142,49 @@ public sealed class PeerLatencyPoller : BackgroundService
                         _logger.LogInformation(
                             "peer {Id} ({NodeId}) is now reachable ({LatencyMs}ms)", peer.Id, peer.NodeId, latencyMs);
                     }
+
+                    // First-hand authentication (PLAN-peers.md §2·b, G3): a peer we just reached directly
+                    // is promoted to alive only once its own /identity confirms it's a real cluster member
+                    // at our route version — direct reachability alone isn't membership proof. A body we
+                    // can't parse still counts as reachable above; it just isn't vouched for.
+                    PeerIdentityView? identity = null;
+                    try
+                    {
+                        await using Stream identityBody = await response.Content.ReadAsStreamAsync(ct)
+                            .ConfigureAwait(false);
+                        identity = await JsonSerializer
+                            .DeserializeAsync<PeerIdentityView>(identityBody, IdentityJsonOptions, ct)
+                            .ConfigureAwait(false);
+                    }
+                    catch (JsonException)
+                    {
+                        _logger.LogDebug(
+                            "peer {Id} ({NodeId}) identity body did not parse — reachable, not promoted",
+                            peer.Id, peer.NodeId);
+                    }
+
+                    if (identity is not null
+                        && identity.Capabilities?.Contains("cluster") == true
+                        && string.Equals(identity.ApiVersion, ApiInfo.ApiVersion, StringComparison.Ordinal))
+                    {
+                        bool wasAlive = peer.MembershipState == GossipState.Alive;
+                        await _peers.PromoteAliveAsync(peer.Id, identity.ApiVersion, DateTimeOffset.UtcNow, ct)
+                            .ConfigureAwait(false);
+                        if (!wasAlive)
+                        {
+                            _logger.LogInformation(
+                                "peer {NodeId} promoted alive (first-hand authenticated)", peer.NodeId);
+                        }
+                    }
+                    else if (identity is not null)
+                    {
+                        _logger.LogDebug(
+                            "peer {NodeId} reached but not a matching cluster member: caps={Caps} version={Version}",
+                            peer.NodeId,
+                            identity.Capabilities is null ? "(none)" : string.Join(",", identity.Capabilities),
+                            identity.ApiVersion);
+                    }
+
                     return;
                 }
 

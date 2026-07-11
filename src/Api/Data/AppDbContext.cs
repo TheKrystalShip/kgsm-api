@@ -266,6 +266,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 new ValueConverter<DateTimeOffset, long>(
                     v => v.UtcTicks,
                     v => new DateTimeOffset(v, TimeSpan.Zero)));
+            // StateChangedAt — the gossip failure-timer clock (PLAN-peers.md §2·b, G5). Same nullable-ticks
+            // posture as LastSeen; SQLite has no date type.
+            e.Property(p => p.StateChangedAt).HasConversion(
+                new ValueConverter<DateTimeOffset, long>(
+                    v => v.UtcTicks,
+                    v => new DateTimeOffset(v, TimeSpan.Zero)));
         });
     }
 }

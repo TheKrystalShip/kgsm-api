@@ -264,22 +264,39 @@ mesh that works fully before gossip lands:
   verify a `previous`-secret token in a rotation window; reject a disabled peer
   (`403`).
 
-### P0.5 — Membership convergence (gossip) · `planned`
+### P0.5 — Membership convergence (gossip) · `built`
 Promotes the manual mesh into "add one, join all." Builds on P0's tables; no new
 service or dependency (§2·b).
-- Anti-entropy push-pull loop (`IHostedService`, random-peer each interval) +
-  incarnation numbers (G1/G2).
+- Anti-entropy push-pull loop (`GossipWorker : BackgroundService`, one random enabled
+  non-terminal peer each `ClusterGossipMs` round; inert when `!ClusterEnabled`) +
+  incarnation numbers (G1/G2). The pure merge core is `RosterMerger.Decide` — strictly
+  higher incarnation always wins (refutation), equal incarnation breaks by state
+  precedence, and **fresh first-hand evidence outranks equal-incarnation hearsay**;
+  self-refutation raises `SelfIncarnation`.
 - The ephemeral `POST /api/v1/peers/sync` roster-exchange endpoint — cluster-token
-  authed, fire-and-forget, distinct from the durable outbox (G4).
-- Hearsay-provisional promotion: a gossiped node is `suspect`/`joining` until this
-  node directly authenticates it (G3).
-- Graceful `left` + reap of long-dead members; the outbox target set excludes
-  `left` (down-then-up still handled by the outbox's 7-day retry).
+  authed + disable-list gated, fire-and-forget, leaves **no** `cluster_outbox` row (G4).
+- **Two liveness axes, never conflated:** `Status` (this node's first-hand probe:
+  reachable/unreachable/unknown, poller-owned) and `MembershipState` (the gossip-converged
+  SWIM state). A gossip-learned peer is hearsay-provisional — displayed `joining` until
+  this node authenticates it first-hand (poller pulls its `/identity`, checks `cluster`
+  cap + `apiVersion`, then promotes to `alive`, G3).
+- **Failure detection = a last-evidence clock**, evidence from either direction (our probe
+  succeeding OR an authenticated inbound sync FROM the peer): no evidence for
+  `ClusterSuspectMs` → `suspect`, another `ClusterSuspectMs` silent → `dead`, then reaped
+  after `ClusterReapMs`. Mutual evidence means a node we can't probe but that still gossips
+  to us stays `alive` (an asymmetric partition resolves for the demonstrably-live node, and
+  the refute/re-suspect oscillation can't run away) — the honest first cut of the SWIM
+  suspicion+indirect-probe refinement G5 defers.
 - **Frontend mirror:** the SPA populates its `nodes` registry from one connected
-  node's converged roster — "add one, see all" for humans (§8).
-- **Self-validated:** seed A→B, B→C; A converges to know C without a direct add; a
-  killed node → `suspect` → `dead` → reaped; a node refutes a false `dead` via a
-  higher incarnation; a phantom gossiped node never reaches `alive`.
+  node's converged roster — "add one, see all" for humans (§8). *(SPA-side, kgsm-web —
+  not part of this backend milestone.)*
+- **Self-validated (712/712 tests):** `RosterMergerTests` pins the merge decision table
+  (incarnation ordering, equal-incarnation precedence, first-hand-fresh guard,
+  self-refutation `+1`, disabled-not-resurrected, unknown-node insert); the in-process
+  multi-node `GossipConvergenceTests` prove seed A→B + B→C converges A to know C with **no**
+  direct A→C add; a genuinely-silenced node → `suspect` → `dead` → reaped; a node refutes a
+  false `dead` about itself via a higher incarnation; a phantom gossiped node never reaches
+  first-hand `alive`; and gossip writes **zero** `cluster_outbox` rows.
 
 ### P1 — Single sign-on · `planned`
 - `POST /auth/cluster-session` vouch endpoint (service-token authed → native

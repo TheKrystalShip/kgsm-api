@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.22.0) — cluster membership gossip (convergence, P0.5)
+- **Masterless anti-entropy gossip** (`PLAN-peers.md §2·b`, P0.5) turns the manually-seeded mesh into
+  "add one, join all" — no new service or dependency. `GossipWorker` (a `BackgroundService`, inert unless
+  `ClusterEnabled`) each `KGSM_API_CLUSTER_GOSSIP_MS` round advances the failure timers, picks one random
+  enabled non-terminal peer, and runs a push-pull roster exchange with it.
+- **`POST /api/v1/peers/sync`** — the ephemeral roster-exchange endpoint (cluster-token authed +
+  disable-list gated, same fail-closed posture as `/inbox`). Deliberately separate from the durable message
+  bus: fire-and-forget, **no `cluster_outbox` row**, no retry (G4). The caller pushes its roster; this node
+  merges it and returns its own for the caller to merge back.
+- **`RosterMerger`** — the pure, unit-tested merge core (G2): a strictly higher incarnation always wins
+  (refutation), equal incarnation breaks by SWIM state precedence, **fresh first-hand evidence outranks
+  equal-incarnation hearsay**, a locally-disabled row is never resurrected by gossip, and a stale/negative
+  report about ourselves raises `SelfIncarnation` to refute it.
+- **Two liveness axes on `PeerEntity`, never conflated:** `Status` (this node's first-hand probe,
+  poller-owned) and the new `MembershipState` (`alive`/`suspect`/`dead`/`left`, gossip-converged, ordered
+  by `Incarnation`). A gossip-learned peer is hearsay-provisional — surfaced as the derived `joining` on
+  `GET /peers` until this node authenticates it first-hand (the poller now pulls `/identity`, checks the
+  `cluster` cap + `apiVersion`, then promotes it to `alive`, G3). New `StateChangedAt` column drives the
+  failure timers; an idempotent `ALTER TABLE peers ADD COLUMN` lands both on an existing P0-shape DB
+  without a wipe.
+- **Failure detection = a last-evidence clock** (`GossipService.AdvanceFailureTimersAsync`): evidence is
+  mutual — our own successful probe OR an authenticated inbound sync **from** the peer (`RecordInboundContactAsync`,
+  stamped against the token's node id, never the spoofable body `From`). No evidence for
+  `KGSM_API_CLUSTER_SUSPECT_MS` → `suspect`, another window silent → `dead`, reaped after
+  `KGSM_API_CLUSTER_REAP_MS`. So a node we can't probe but that still gossips to us stays `alive` (an
+  asymmetric partition resolves for the demonstrably-live node; the refute/re-suspect oscillation can't run
+  away) — the honest first cut of the indirect-probe refinement `§2·b` G5 defers.
+- **New knobs** (`ApiOptions`, all floored, inert off-cluster): `KGSM_API_CLUSTER_ADVERTISE_URL` /
+  `_GOSSIP_URL` (the two-URL split, §2 #13a), `KGSM_API_CLUSTER_GOSSIP_MS` (5s), `KGSM_API_CLUSTER_POLL_MS`
+  (the latency poller's cadence, now configurable, 10s), `KGSM_API_CLUSTER_SUSPECT_MS` (30s),
+  `KGSM_API_CLUSTER_REAP_MS` (5 min).
+- **Self-validated** (§9 P0.5): `RosterMergerTests` (9 facts pin the decision table) + the in-process
+  multi-node `GossipConvergenceTests` (seed A→B + B→C converges A to know C with no direct add; a silenced
+  node → suspect → dead → reaped; a false-`dead`-about-self refuted via a higher incarnation; a phantom
+  never reaches first-hand `alive`; gossip writes zero outbox rows). **712/712 tests green (+14).**
+
 ### Added (v0.21.0) — cluster peer foundation (membership + trust, P0)
 - **The peer roster + management surface** (`PLAN-peers.md` P0). `PeerEntity` + the `peers` table
   (`PeersStore`, idempotent `CREATE TABLE IF NOT EXISTS` — the live DB shares the audit log, never a

@@ -64,11 +64,34 @@ public sealed class PeerEntity
     public long Incarnation { get; set; }
 
     /// <summary>
-    /// This peer's last-observed liveness: <c>"reachable"</c>, <c>"unreachable"</c>, or <c>"unknown"</c>
-    /// (the honest cold-start default before the first latency poll ever completes — never fabricated as
-    /// reachable). Written by <see cref="Services.Cluster.PeerLatencyPoller"/>.
+    /// This peer's last-observed <b>first-hand</b> liveness: <c>"reachable"</c>, <c>"unreachable"</c>, or
+    /// <c>"unknown"</c> (the honest cold-start default before the first latency poll ever completes — never
+    /// fabricated as reachable). Written ONLY by <see cref="Services.Cluster.PeerLatencyPoller"/> from THIS
+    /// node's own probes — never by gossip. One of the two orthogonal liveness axes (the codebase's
+    /// metric-presence ≠ status rule applied to the mesh): <see cref="Status"/> is what I directly observed,
+    /// <see cref="MembershipState"/> is what the mesh converged on.
     /// </summary>
     public string Status { get; set; } = "unknown";
+
+    /// <summary>
+    /// This peer's <b>gossip-converged</b> membership state (<c>PLAN-peers.md §2·b</c>, G2/G3) — the SWIM
+    /// state the anti-entropy sync exchanges and orders by <see cref="Incarnation"/>: <c>"alive"</c>,
+    /// <c>"suspect"</c>, <c>"dead"</c>, or <c>"left"</c> (see <see cref="Services.Cluster.GossipState"/>).
+    /// Distinct from <see cref="Status"/> (my first-hand probe): a peer can be gossip-<c>alive</c> while I
+    /// have never reached it first-hand — that hearsay-provisional case is surfaced to consumers as the
+    /// derived <c>"joining"</c> display (alive-per-gossip but <see cref="LastSeen"/> still null), so an
+    /// unverified peer is never shown a plain <c>alive</c> (G3). A handshake-added peer starts <c>alive</c>
+    /// (it was authenticated first-hand at add time); a gossip-learned peer takes the state the mesh reports.
+    /// </summary>
+    public string MembershipState { get; set; } = "alive";
+
+    /// <summary>
+    /// When <see cref="MembershipState"/> last transitioned (UTC), the clock the failure-timer escalation
+    /// runs off (<c>PLAN-peers.md §2·b</c>, G5): <c>alive→suspect</c> on a first-hand probe failure, then
+    /// <c>suspect→dead</c> after the suspect timeout, then reap after the dead/left retention. Never
+    /// fabricated; <see langword="null"/> until the first transition this node records.
+    /// </summary>
+    public DateTimeOffset? StateChangedAt { get; set; }
 
     /// <summary>Round-trip latency of the last successful poll, in milliseconds. <see langword="null"/>
     /// when never successfully probed.</summary>

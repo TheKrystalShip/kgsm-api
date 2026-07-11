@@ -397,6 +397,16 @@ public class Startup(IConfiguration configuration)
         services.AddHttpClient(PeerLatencyPoller.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
         services.AddHostedService<PeerLatencyPoller>();
 
+        // Cluster membership gossip (PLAN-peers.md §2·b, P0.5). SelfIncarnation is this node's monotonic
+        // refutation counter (a process-lifetime singleton); GossipService is the stateful shell around the
+        // pure RosterMerger (merge + roster projection + failure-timer escalation); GossipWorker is the
+        // random-peer push-pull loop (a hosted service, inert when ClusterEnabled is false). Its named
+        // HttpClient carries the short-timeout, ephemeral (never-outboxed) sync round-trip.
+        services.AddSingleton<SelfIncarnation>();
+        services.AddSingleton<GossipService>();
+        services.AddHttpClient(GossipWorker.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddHostedService<GossipWorker>();
+
         // M4·a — auth (Discord per-host, Model A). Stateless JWT bearer (the M4 decision): no session
         // table, no user row — keeps M5 as the first EF migration. The Discord seam (IDiscordIdentityResolver)
         // keeps everything that talks to discord.com behind one interface, so the whole 401/403/tier matrix
