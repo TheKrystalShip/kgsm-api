@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.21.0) — cluster peer foundation (membership + trust, P0)
+- **The peer roster + management surface** (`PLAN-peers.md` P0). `PeerEntity` + the `peers` table
+  (`PeersStore`, idempotent `CREATE TABLE IF NOT EXISTS` — the live DB shares the audit log, never a
+  wipe); `PeersController` grows admin-gated CRUD (`GET`/`POST`/`DELETE`/`PATCH /api/v1/peers`) + the
+  `GET /peers/{id}/latency` read alongside the existing `/inbox`.
+- **Join-via-seed handshake** (`PeerHandshakeService`) — paste one peer URL → pull its cluster-token-authed
+  `GET /peers/identity` (this node mints + presents its own service token) → require an `apiVersion` match
+  and the advertised `cluster` capability → persist. Frozen status mapping: `201` / `400 invalid_url` /
+  `409 version_mismatch` (`details:{remote,local}`) / `422 peer_not_cluster` / `502 peer_unreachable`.
+- **`GET /api/v1/peers/identity`** — this node's identity card (`{nodeId, apiVersion, build, capabilities}`),
+  cluster-token authed (token-only, no enabled-peer gate — a joining node has no roster row yet). The
+  `cluster` capability is advertised by the capability model (`NodeCapabilities`) when `ClusterEnabled`, not
+  a `LeafCatalog` entry (it has no systemd unit).
+- **Disable-list gate** (`PeersTableGate` replaces the allow-all seam) — the shared cluster secret is the
+  trust boundary, so an unknown validly-tokened node is accepted; only a node explicitly present-and-disabled
+  in the roster is rejected (`403 peer_disabled`). Makes trust transitive under a partial topology view
+  (`PLAN-peers.md §2` #7/#8).
+- **Roster-fed outbox fan-out** (`RosterClusterTargetProvider`) — the bus draws its delivery targets from the
+  enabled roster (`GossipUrl ?? Url`) instead of hand-supplied ones.
+- **10s latency poller** (`PeerLatencyPoller`) — probes each enabled peer's `/identity` (minting a token per
+  tick), recording `reachable`/`unreachable` + latency; honest null latency and an untouched `lastSeen` on
+  failure, fail-open per peer.
+- **Self-validated** (§9): the add-peer outcome matrix (201/502/422/409 + invalid-url + admin gate), the
+  disable-list gate (unknown/enabled/disabled + a real in-process two-node handshake and disable→403→re-enable
+  cycle), and `/identity` auth (401/200). Token mint/verify + previous-secret rotation stay covered by
+  `ClusterTokenServiceTests`. 698/698 tests green (+18).
+
 ### Changed (v0.20.2) — quiet EF command logging
 - **`src/Api/appsettings.json`** — set `Microsoft.EntityFrameworkCore.Database.Command` to `Warning`.
   EF logs every executed SQL statement at Information; with the cluster outbox drainer running a

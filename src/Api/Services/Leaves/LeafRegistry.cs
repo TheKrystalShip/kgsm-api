@@ -147,6 +147,7 @@ public sealed class LeafRegistry : IHostedService
         ProvisionableLeaf.Watchdog => _options.WatchdogProvisioned,
         ProvisionableLeaf.Assistant => _options.AssistantProvisioned,
         ProvisionableLeaf.Firewall => _options.FirewallProvisioned,
+        ProvisionableLeaf.Scheduler => _options.SchedulerProvisioned,
         _ => false,
     };
 

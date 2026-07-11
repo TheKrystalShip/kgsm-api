@@ -17,12 +17,13 @@ public static class ProvisionableLeaf
     public const string Watchdog = "watchdog";
     public const string Assistant = "assistant";
     public const string Firewall = "firewall";
+    public const string Scheduler = "scheduler";
 
     /// <summary>The four provisionable + config-target leaf ids, in Services-board order.</summary>
-    public static readonly IReadOnlyList<string> All = [Monitor, Watchdog, Assistant, Firewall];
+    public static readonly IReadOnlyList<string> All = [Monitor, Watchdog, Assistant, Firewall, Scheduler];
 
     /// <summary>True when <paramref name="leafId"/> is one of the four runtime-provisionable leaves
     /// (everything else — <c>api</c>/<c>bot</c>/unknown — is not).</summary>
     public static bool IsProvisionable(string? leafId) =>
-        leafId is Monitor or Watchdog or Assistant or Firewall;
+        leafId is Monitor or Watchdog or Assistant or Firewall or Scheduler;
 }

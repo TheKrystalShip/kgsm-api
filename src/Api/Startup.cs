@@ -358,14 +358,14 @@ public class Startup(IConfiguration configuration)
 
         // Cluster message bus — Phase 2, the receive path (§4/§7). ClusterInbox is the dedupe+dispatch
         // store (scoped-singleton, mirrors SessionStore); IClusterPeerGate is the §4 "iss is an enabled
-        // peer" seam (AllowAllClusterPeerGate until the Peers-table peer-foundation milestone lands);
+        // peer" seam — now PeersTableGate (the Peers-table-backed disable-list gate, PLAN-peers.md §0 #8;
+        // AllowAllClusterPeerGate stays in place as the documented pre-registry default, just unregistered);
         // IClusterMessageHandler is registered as a collection (resolved as IEnumerable<> by ClusterInbox)
         // — session.revoke is the first, and so far only, message type. All inert on a non-cluster node:
         // PeersController's own auth 401s everything before ClusterInbox is ever reached (ClusterTokenService
-        // never validates a token when KGSM_API_CLUSTER_SECRET is blank). No outbox drainer / IClusterBus
-        // yet — Phase 3.
+        // never validates a token when KGSM_API_CLUSTER_SECRET is blank).
         services.AddSingleton<ClusterInbox>();
-        services.AddSingleton<IClusterPeerGate, AllowAllClusterPeerGate>();
+        services.AddSingleton<IClusterPeerGate, PeersTableGate>();
         services.AddSingleton<IClusterMessageHandler, Services.Cluster.Handlers.SessionRevokeHandler>();
 
         // Cluster message bus — Phase 3, the send path (§6/§7/§8). ClusterBus is the outbox
@@ -382,6 +382,20 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<OutboxDrainer>();
         services.AddHostedService(sp => sp.GetRequiredService<OutboxDrainer>());
         services.AddHostedService<ClusterBusGcWorker>();
+
+        // Cluster peer foundation (PLAN-peers.md §6, P0). PeersStore is the roster's single data-access
+        // seam (the LeafRegistry idiom: a singleton owning an IServiceScopeFactory, also a hosted service so
+        // its idempotent CREATE TABLE IF NOT EXISTS runs once at boot). PeerHandshakeService/
+        // RosterClusterTargetProvider/PeerLatencyPoller are P0 skeletons — DI-wired and compiling now so a
+        // later slice fills in their bodies without touching this file again. Named HttpClients, short
+        // timeouts (a hung candidate/peer must not stall an admin request or a poll tick).
+        services.AddSingleton<PeersStore>();
+        services.AddHostedService(sp => sp.GetRequiredService<PeersStore>());
+        services.AddHttpClient(PeerHandshakeService.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddSingleton<PeerHandshakeService>();
+        services.AddSingleton<RosterClusterTargetProvider>();
+        services.AddHttpClient(PeerLatencyPoller.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddHostedService<PeerLatencyPoller>();
 
         // M4·a — auth (Discord per-host, Model A). Stateless JWT bearer (the M4 decision): no session
         // table, no user row — keeps M5 as the first EF migration. The Discord seam (IDiscordIdentityResolver)

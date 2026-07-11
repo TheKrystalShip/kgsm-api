@@ -75,6 +75,10 @@ public static class LeafConfigManifest
             [
                 LogLevelField(),
             ],
+            [ProvisionableLeaf.Scheduler] =
+            [
+                LogLevelField(),
+            ],
         };
 
     /// <summary>True when <paramref name="leafId"/> is a config target (has a manifest).</summary>

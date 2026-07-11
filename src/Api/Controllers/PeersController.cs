@@ -4,32 +4,45 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Json;
+using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.Api.Services.Leaves;
 
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// The cluster message bus's receive endpoint (<c>docs/cluster-message-bus-plan.md §4</c>). Named
-/// <c>Peers</c>, not <c>ClusterInbox</c>, because a later peer-management milestone
-/// (<c>PLAN-peers.md</c>) adds sibling actions here (peer listing/registration) — this is that
-/// controller's natural first action, not a one-off.
+/// The cluster message bus's receive endpoint (<c>docs/cluster-message-bus-plan.md §4</c>) plus the
+/// peer-management surface (<c>PLAN-peers.md §7</c>, P0): roster CRUD, the join-via-seed handshake, this
+/// node's own identity card, and per-peer latency. Named <c>Peers</c>, not <c>ClusterInbox</c>, because
+/// the roster actions are this controller's natural home, not a one-off.
 /// </summary>
 /// <remarks>
-/// <b><see cref="AllowAnonymousAttribute"/> w.r.t. the user auth scheme.</b> The inbox authenticates
-/// callers with the cluster service token (<see cref="IClusterTokenService"/>), a completely separate
-/// credential from the Discord-derived user JWT the rest of the API's <c>[Authorize]</c> tier policies
-/// check. It must work identically whether <c>KGSM_API_AUTH_DISABLED</c> is set or not — a node-to-node
-/// call is not a browser session, so it must NOT be gated (or auto-granted) by the user auth pipeline
-/// at all. <see cref="Inbox"/> does its OWN fail-closed auth inline, first thing, every call.
+/// <b><see cref="AllowAnonymousAttribute"/> w.r.t. the user auth scheme.</b> <see cref="Inbox"/> and
+/// <see cref="GetIdentity"/> authenticate callers with the cluster service token
+/// (<see cref="IClusterTokenService"/>), a completely separate credential from the Discord-derived user
+/// JWT the rest of the API's <c>[Authorize]</c> tier policies check — they carry <c>[AllowAnonymous]</c>
+/// individually and do their OWN fail-closed auth inline, first thing, every call. It must work
+/// identically whether <c>KGSM_API_AUTH_DISABLED</c> is set or not — a node-to-node call is not a
+/// browser session, so it must NOT be gated (or auto-granted) by the user auth pipeline at all.
+/// <b>Deliberately NOT a class-level <see cref="AllowAnonymousAttribute"/></b> — that would win over
+/// every action-level <c>[Authorize]</c> below (ASP.NET Core resolves <c>AllowAnonymous</c> at the
+/// highest scope it appears), silently exposing the admin-gated roster CRUD. Each action carries its
+/// own attribute instead.
 /// </remarks>
 [ApiController]
 [Route("api/v1/peers")]
-[AllowAnonymous]
 public sealed class PeersController(
     IClusterTokenService clusterTokens,
     IClusterPeerGate peerGate,
     ClusterInbox inbox,
+    PeersStore peers,
+    PeerHandshakeService handshake,
+    ApiOptions options,
+    HostIdentityProvider hostIdentity,
+    LeafHealthMonitor leafHealth,
     ILogger<PeersController> logger) : ControllerBase
 {
     /// <summary>Max envelope size (§3) — a request over this is rejected before its body is even
@@ -50,6 +63,7 @@ public sealed class PeersController(
     /// contract in <c>docs/cluster-message-bus-plan.md §4</c> for the full status-code table.
     /// </summary>
     [HttpPost("inbox")]
+    [AllowAnonymous]
     public async Task<IActionResult> Inbox(CancellationToken ct)
     {
         // Cheap pre-check: reject on a lying/oversized Content-Length before touching the body at all.
@@ -67,8 +81,9 @@ public sealed class PeersController(
             return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token",
                 "invalid, expired, or unsigned cluster service token");
 
-        // The §4 peer-enabled gate. No Peers table yet (a later milestone) — AllowAllClusterPeerGate
-        // treats any validly-tokened node as enabled today; see IClusterPeerGate's remarks.
+        // The §4 peer-enabled gate — a disable-list (PLAN-peers.md §2 #7/#8): the shared cluster secret
+        // is the trust boundary, so an unknown validly-tokened node is accepted; only a node explicitly
+        // present-and-disabled in the Peers table is rejected here.
         if (!await peerGate.IsEnabledAsync(principal.NodeId).ConfigureAwait(false))
             return Error(StatusCodes.Status403Forbidden, "peer_disabled",
                 $"node '{principal.NodeId}' is not an enabled peer of this cluster");
@@ -120,6 +135,125 @@ public sealed class PeersController(
         };
     }
 
+    /// <summary><c>GET /api/v1/peers</c> — the full roster, enabled and disabled alike (admin-gated,
+    /// <c>PLAN-peers.md §7</c>).</summary>
+    [HttpGet]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public async Task<PeerListResponse> List(CancellationToken ct)
+    {
+        IReadOnlyList<PeerEntity> rows = await peers.ListAsync(ct).ConfigureAwait(false);
+        return new PeerListResponse(rows.Select(ToView).ToList());
+    }
+
+    /// <summary><c>POST /api/v1/peers</c> — the admin "paste a URL" join-via-seed action. Maps every
+    /// <see cref="PeerAddOutcome"/> to its frozen status code (<c>PLAN-peers.md §7</c>).</summary>
+    [HttpPost]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public async Task<IActionResult> Add([FromBody] PeerAddRequest? body, CancellationToken ct)
+    {
+        if (body is null || string.IsNullOrWhiteSpace(body.Url))
+            return Error(StatusCodes.Status400BadRequest, "invalid_url", "url is required");
+
+        PeerAddResult result = await handshake.AddPeerAsync(body.Url.Trim(), body.Nickname, ct)
+            .ConfigureAwait(false);
+
+        switch (result.Outcome)
+        {
+            case PeerAddOutcome.Added:
+                PeerEntity peer = result.Peer!;
+                var added = new PeerAddedResponse(
+                    peer.Id, peer.Url, peer.Nickname, peer.NodeId, peer.ApiVersion, peer.Status, peer.Enabled);
+                return StatusCode(StatusCodes.Status201Created, added);
+
+            case PeerAddOutcome.InvalidUrl:
+                return Error(StatusCodes.Status400BadRequest, "invalid_url",
+                    "url is not a valid absolute http(s) address");
+
+            case PeerAddOutcome.VersionMismatch:
+                JsonElement details = JsonSerializer.SerializeToElement(
+                    new PeerVersionMismatchDetails(result.RemoteApiVersion ?? "unknown", ApiInfo.ApiVersion),
+                    EnvelopeJsonOptions);
+                return Error(StatusCodes.Status409Conflict, "version_mismatch",
+                    "the candidate node's api version does not match this node's", details);
+
+            case PeerAddOutcome.NotCluster:
+                return Error(StatusCodes.Status422UnprocessableEntity, "peer_not_cluster",
+                    "remote node does not advertise the cluster capability");
+
+            case PeerAddOutcome.Unreachable:
+            default:
+                return Error(StatusCodes.Status502BadGateway, "peer_unreachable",
+                    "could not reach the candidate node");
+        }
+    }
+
+    /// <summary><c>DELETE /api/v1/peers/{id}</c> — forget a roster row entirely (admin-gated).</summary>
+    [HttpDelete("{id}")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public async Task<IActionResult> Delete(string id, CancellationToken ct)
+    {
+        bool removed = await peers.DeleteAsync(id, ct).ConfigureAwait(false);
+        return removed ? NoContent() : NotFound();
+    }
+
+    /// <summary><c>PATCH /api/v1/peers/{id}</c> — the disable-list toggle (admin-gated,
+    /// <c>PLAN-peers.md §0</c> #8). Only <see cref="PeerPatchRequest.Enabled"/> is settable.</summary>
+    [HttpPatch("{id}")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public async Task<IActionResult> SetEnabled(string id, [FromBody] PeerPatchRequest? body, CancellationToken ct)
+    {
+        if (body is null)
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "enabled is required");
+
+        bool updated = await peers.SetEnabledAsync(id, body.Enabled, ct).ConfigureAwait(false);
+        if (!updated)
+            return NotFound();
+
+        PeerEntity? row = await peers.GetAsync(id, ct).ConfigureAwait(false);
+        return row is null ? NotFound() : Ok(ToView(row));
+    }
+
+    /// <summary><c>GET /api/v1/peers/identity</c> — this node's identity card
+    /// (<c>PLAN-peers.md §7</c>), the payload a candidate's join-via-seed handshake pulls. Cluster-token
+    /// authed, NOT user-authed — same inline fail-closed check as <see cref="Inbox"/>, minus the
+    /// enabled-peer gate (a node that hasn't joined the roster yet must still be able to identify
+    /// itself; the gate only matters for calls that act on this node's state).</summary>
+    [HttpGet("identity")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetIdentity(CancellationToken ct)
+    {
+        string? token = ExtractBearerToken(Request);
+        if (token is null)
+            return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token", "missing bearer token");
+
+        ClusterPrincipal? principal = await clusterTokens.ValidateAsync(token).ConfigureAwait(false);
+        if (principal is null)
+            return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token",
+                "invalid, expired, or unsigned cluster service token");
+
+        var view = new PeerIdentityView(
+            options.NodeId,
+            ApiInfo.ApiVersion,
+            hostIdentity.Build,
+            NodeCapabilities.Current(leafHealth.Current, options.ClusterEnabled));
+        return Ok(view);
+    }
+
+    /// <summary><c>GET /api/v1/peers/{id}/latency</c> — the roster row's last-observed liveness sample
+    /// (admin-gated, §4). <c>404</c> if <paramref name="id"/> isn't a known row.</summary>
+    [HttpGet("{id}/latency")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public async Task<IActionResult> Latency(string id, CancellationToken ct)
+    {
+        PeerEntity? row = await peers.GetAsync(id, ct).ConfigureAwait(false);
+        if (row is null)
+            return NotFound();
+        return Ok(new PeerLatencyView(row.LatencyMs, row.Status, row.LastSeen));
+    }
+
+    private static PeerView ToView(PeerEntity p) =>
+        new(p.Id, p.Url, p.Nickname, p.NodeId, p.Status, p.LatencyMs, p.LastSeen, p.ApiVersion, p.Enabled);
+
     private ObjectResult TooLarge() =>
         Error(StatusCodes.Status413PayloadTooLarge, "payload_too_large",
             $"envelope exceeds the {MaxEnvelopeBytes}-byte limit");
@@ -156,4 +290,7 @@ public sealed class PeersController(
 
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
+
+    private ObjectResult Error(int statusCode, string code, string message, JsonElement details) =>
+        StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message, details)));
 }

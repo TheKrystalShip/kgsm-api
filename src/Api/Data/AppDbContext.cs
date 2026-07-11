@@ -74,6 +74,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// <c>/peers/inbox</c> endpoint and its dispatch handler are later phases.</summary>
     public DbSet<InboxMessage> ClusterInbox => Set<InboxMessage>();
 
+    /// <summary>The cluster membership roster (the peer-foundation milestone — see <see cref="PeerEntity"/>;
+    /// <c>PLAN-peers.md §2</c> #12, P0). One row per known peer, this node's own copy (the mesh is
+    /// masterless — there is no shared roster table). Created automatically by <c>EnsureCreated</c> on a
+    /// fresh DB (registered in <see cref="OnModelCreating"/>); on an already-deployed DB the table is added
+    /// by <see cref="Services.Cluster.PeersStore"/>'s idempotent <c>CREATE TABLE IF NOT EXISTS</c>, the same
+    /// posture as <see cref="LeafRegistryEntries"/>/<see cref="HostSettings"/> — never a wipe of the shared
+    /// audit log.</summary>
+    public DbSet<PeerEntity> Peers => Set<PeerEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<IntegrationEntity>(e =>
@@ -242,6 +251,21 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                     v => new DateTimeOffset(v, TimeSpan.Zero)));
             // The GC sweep: rows older than the retention window (≥ the outbox retry TTL + margin).
             e.HasIndex(i => i.ReceivedAt);
+        });
+
+        // Cluster membership roster — the peer-foundation milestone (PLAN-peers.md §2 #12, P0). This
+        // node's own copy of the mesh (masterless — no shared table). LastSeen as UTC ticks (long) via the
+        // nullable-converter form (the HostSettingsEntity.UpdatedAt posture) — SQLite has no date type.
+        modelBuilder.Entity<PeerEntity>(e =>
+        {
+            e.ToTable("peers");
+            e.HasKey(p => p.Id);
+            // The disable-list gate's and the outbox/poller's "enabled peers only" read.
+            e.HasIndex(p => p.Enabled);
+            e.Property(p => p.LastSeen).HasConversion(
+                new ValueConverter<DateTimeOffset, long>(
+                    v => v.UtcTicks,
+                    v => new DateTimeOffset(v, TimeSpan.Zero)));
         });
     }
 }

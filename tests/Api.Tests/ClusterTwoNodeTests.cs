@@ -1,5 +1,9 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
@@ -194,6 +198,113 @@ public sealed class ClusterTwoNodeTests
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
     }
 
+    // ── 4. Join-via-seed: the real handshake against a real second node (P0 §9 checklist item 1) ─────
+
+    [Fact]
+    public async Task JoinViaSeed_NodeA_HandshakesRealNodeB_Returns201_AndNodeBListedEnabled()
+    {
+        const string secret = "two-node-join-secret";
+        string dbA = NewDbPath("a-join"), dbB = NewDbPath("b-join");
+        try
+        {
+            await using var factoryB = new ClusterNodeFactory("node-b", "host-b", secret, dbPath: dbB);
+            // Route node A's handshake client at node B's real in-memory pipeline — the same routing
+            // trick as the outbox drainer above, applied to PeerHandshakeService's named client instead.
+            HttpMessageHandler handlerToB = factoryB.Server.CreateHandler();
+            await using var factoryA = new ClusterNodeFactory(
+                "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
+
+            using HttpClient clientA = factoryA.CreateClient();
+            string adminToken = AuthTestFactory.MintTokenWithRow(factoryA.Services, AuthTier.Admin, access: true);
+
+            var addRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/peers")
+            {
+                Content = JsonContent.Create(new { url = "http://node-b", nickname = "Node B" }),
+            };
+            addRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+            HttpResponseMessage addResp = await clientA.SendAsync(addRequest);
+
+            Assert.Equal(HttpStatusCode.Created, addResp.StatusCode);
+            JsonElement added = JsonDocument.Parse(await addResp.Content.ReadAsStringAsync()).RootElement;
+            Assert.Equal("node-b", added.GetProperty("nodeId").GetString());
+            Assert.True(added.GetProperty("enabled").GetBoolean());
+
+            var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers");
+            listRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+            HttpResponseMessage listResp = await clientA.SendAsync(listRequest);
+            JsonElement peers = JsonDocument.Parse(await listResp.Content.ReadAsStringAsync())
+                .RootElement.GetProperty("peers");
+            Assert.Contains(peers.EnumerateArray(), p => p.GetProperty("nodeId").GetString() == "node-b");
+        }
+        finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
+    }
+
+    // ── 5. Disable-list gate, cross-node (P0 §9 checklist item 3) ────────────────────────────────────
+
+    [Fact]
+    public async Task DisableListGate_UnknownAccepted_DisabledRejected403_ReEnabledAccepted()
+    {
+        const string secret = "two-node-disable-gate-secret";
+        string dbA = NewDbPath("a-gate"), dbB = NewDbPath("b-gate");
+        try
+        {
+            await using var factoryA = new ClusterNodeFactory("node-a", "host-a", secret, dbPath: dbA);
+            await using var factoryB = new ClusterNodeFactory("node-b", "host-b", secret, dbPath: dbB);
+
+            // Node B mints its OWN real service token (iss = "node-b") — posted straight at node A's
+            // inbox, no drainer/outbox involved; this file's earlier tests already exercise that path.
+            IClusterTokenService tokensB = factoryB.Services.GetRequiredService<IClusterTokenService>();
+
+            string Envelope() => JsonSerializer.Serialize(new
+            {
+                id = Guid.NewGuid().ToString("N"),
+                type = "session.revoke",
+                from = "node-b",
+                ts = DateTimeOffset.UtcNow,
+                payload = new { scope = "sid", sid = "does-not-matter" },
+            });
+
+            // node-b is unknown to A's roster — absence is not rejection.
+            HttpResponseMessage before = await PostInboxAsync(factoryA, tokensB.Mint().Token, Envelope());
+            Assert.Equal(HttpStatusCode.OK, before.StatusCode);
+
+            // A explicitly disables node-b.
+            PeersStore peersOnA = factoryA.Services.GetRequiredService<PeersStore>();
+            await peersOnA.UpsertAsync(new PeerEntity
+            {
+                Id = "peer_node_b_gate_test",
+                Url = "http://node-b",
+                NodeId = "node-b",
+                Status = "unknown",
+                ApiVersion = "v1",
+                Enabled = false,
+            }, default);
+
+            HttpResponseMessage whileDisabled = await PostInboxAsync(factoryA, tokensB.Mint().Token, Envelope());
+            Assert.Equal(HttpStatusCode.Forbidden, whileDisabled.StatusCode);
+            JsonElement error = JsonDocument.Parse(await whileDisabled.Content.ReadAsStringAsync())
+                .RootElement.GetProperty("error");
+            Assert.Equal("peer_disabled", error.GetProperty("code").GetString());
+
+            // Re-enabling restores acceptance — the row is a toggle, not a one-way ban.
+            await peersOnA.SetEnabledAsync("peer_node_b_gate_test", true, default);
+            HttpResponseMessage afterReEnable = await PostInboxAsync(factoryA, tokensB.Mint().Token, Envelope());
+            Assert.Equal(HttpStatusCode.OK, afterReEnable.StatusCode);
+        }
+        finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
+    }
+
+    private static async Task<HttpResponseMessage> PostInboxAsync(ClusterNodeFactory factory, string token, string body)
+    {
+        using HttpClient client = factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/peers/inbox")
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await client.SendAsync(request);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────────────────────────────
 
     private static string NewDbPath(string label) =>
@@ -251,7 +362,8 @@ public sealed class ClusterTwoNodeTests
 /// ON, a known signing key, the Discord seam faked, engine/monitor unprovisioned) re-configured with its
 /// OWN node identity, host identity, cluster secret, drain interval, and DB file, so two instances can run
 /// side by side in one process as genuinely independent nodes. Optionally rewires the outbox drainer's
-/// named <see cref="HttpClient"/> (<see cref="OutboxDrainer.HttpClientName"/>) onto a caller-supplied
+/// named <see cref="HttpClient"/> (<see cref="OutboxDrainer.HttpClientName"/>) and/or the join-via-seed
+/// handshake's named client (<see cref="PeerHandshakeService.HttpClientName"/>) onto a caller-supplied
 /// handler — the seam <see cref="ClusterTwoNodeTests"/> uses to route this node's outbound cluster traffic
 /// into another node's in-memory <c>TestServer</c> pipeline instead of a real socket.
 /// </summary>
@@ -261,7 +373,8 @@ public sealed class ClusterNodeFactory(
     string clusterSecret,
     int drainMs = 250,
     string? dbPath = null,
-    Func<HttpMessageHandler>? drainerHandlerFactory = null) : AuthTestFactory
+    Func<HttpMessageHandler>? drainerHandlerFactory = null,
+    Func<HttpMessageHandler>? handshakeHandlerFactory = null) : AuthTestFactory
 {
     public string NodeId { get; } = nodeId;
     public string ClusterHostId { get; } = hostId;
@@ -287,6 +400,13 @@ public sealed class ClusterNodeFactory(
             builder.ConfigureTestServices(services =>
                 services.AddHttpClient(OutboxDrainer.HttpClientName)
                     .ConfigurePrimaryHttpMessageHandler(drainerHandlerFactory));
+        }
+
+        if (handshakeHandlerFactory is not null)
+        {
+            builder.ConfigureTestServices(services =>
+                services.AddHttpClient(PeerHandshakeService.HttpClientName)
+                    .ConfigurePrimaryHttpMessageHandler(handshakeHandlerFactory));
         }
     }
 }
