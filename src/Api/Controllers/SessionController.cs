@@ -5,6 +5,7 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
+using TheKrystalShip.Api.Services.Cluster;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -35,8 +36,31 @@ public sealed class SessionController(
     ISessionValidator sessionValidator,
     ApiOptions options,
     AuditService audit,
+    IClusterBus clusterBus,
+    RosterClusterTargetProvider rosterTargets,
     ILogger<SessionController> logger) : ControllerBase
 {
+    /// <summary>
+    /// Fans a "log out user everywhere" out to the rest of the cluster (<c>PLAN-peers.md §P1</c>) —
+    /// called AFTER this node's own local revoke + evict has already committed, from both
+    /// revoke-all-for-user surfaces (self <c>all:true</c> and the admin by-user endpoint). No-ops when
+    /// this node isn't in a cluster; targets only first-hand-alive peers
+    /// (<see cref="RosterClusterTargetProvider.GetEnabledTargetsAsync"/>) — never this node itself, since
+    /// the local effect already happened in-process. <paramref name="rawDiscordId"/> is the bare Discord
+    /// id (no <c>discord:</c> prefix) — <c>SessionRevokeHandler</c> re-adds it on the receiving end.
+    /// </summary>
+    private async Task FanOutRevokeAllAsync(string rawDiscordId, CancellationToken ct)
+    {
+        if (!options.ClusterEnabled)
+            return;
+
+        IReadOnlyList<ClusterTarget> targets = await rosterTargets.GetEnabledTargetsAsync(ct).ConfigureAwait(false);
+        await clusterBus.EnqueueAsync(
+            "session.revoke",
+            new { scope = "user", discordId = rawDiscordId },
+            targets, ct).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// <c>GET /auth/sessions</c> — the caller's own active session set (D5 fields), or, for an
     /// admin passing <c>?userId=</c>, another user's. <c>userId</c> is the prefixed handle
@@ -106,6 +130,7 @@ public sealed class SessionController(
             await RecordAsync(AuditAction.AuthSessionRevokeAll, AuditSeverity.Info, ci,
                 $"{caller.Display} logged out everywhere ({revokedSids.Count} session(s))",
                 meta: new Dictionary<string, string> { ["count"] = revokedSids.Count.ToString() }, ct);
+            await FanOutRevokeAllAsync(caller.UserId, ct);
             return NoContent();
         }
 
@@ -185,6 +210,13 @@ public sealed class SessionController(
                 $"admin logged out {userId} everywhere ({revokedSids.Count} session(s))",
                 meta: new Dictionary<string, string> { ["userId"] = userId, ["count"] = revokedSids.Count.ToString() },
                 ct);
+
+        // userId is the prefixed handle (discord:<id>); the cluster payload/handler wants the bare id
+        // (SessionRevokeHandler re-adds the prefix on the receiving end — see FanOutRevokeAllAsync).
+        string rawDiscordId = userId.StartsWith("discord:", StringComparison.Ordinal)
+            ? userId["discord:".Length..]
+            : userId;
+        await FanOutRevokeAllAsync(rawDiscordId, ct);
         return NoContent();
     }
 

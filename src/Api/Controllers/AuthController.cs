@@ -2,9 +2,11 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Net.Http.Headers;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
+using TheKrystalShip.Api.Services.Cluster;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -28,6 +30,8 @@ public sealed class AuthController(
     ISessionValidator sessionValidator,
     ApiOptions options,
     AuditService audit,
+    IClusterTokenService clusterTokens,
+    IClusterPeerGate peerGate,
     ILogger<AuthController> logger) : ControllerBase
 {
     // The OAuth CSRF state cookie — set at /start, verified at /callback. This is the stateless
@@ -175,6 +179,95 @@ public sealed class AuthController(
             ? FrontendRedirect(Frag(("access", access.Token), ("refresh", refresh.Token)))
             : Ok(new CallbackResult("ok", AuthTiers.ToWire(resolved.Tier), access.Token, refresh.Token, userHandle,
                 access.ExpiresAt, refresh.ExpiresAt));
+    }
+
+    /// <summary>
+    /// <c>POST /auth/cluster-session</c> — the cluster SSO vouch (<c>PLAN-peers.md</c>): a peer node
+    /// presents a valid cluster service token and asserts an already-authenticated user's identity;
+    /// this node mints its OWN native session for that user and returns the tokens — the SSO grant
+    /// that lets a login on one node carry onto another. Cluster-token authed + disable-list gated,
+    /// the same inline fail-closed preamble as <see cref="PeersController.Inbox"/>
+    /// (root-routed here, alongside the rest of this controller, not under <c>/api/v1</c>).
+    /// <para>
+    /// This node does <b>not</b> re-check Discord guild membership — it has no Discord round-trip to
+    /// make here; it trusts the cluster-token-authenticated peer's tier assertion (that peer already
+    /// resolved it via its own guild-role lookup at the user's original login). An unparseable/unknown/
+    /// empty tier floors to <see cref="AuthTier.Viewer"/> — never escalated, never denied outright.
+    /// </para>
+    /// <para>
+    /// Mints exactly like <see cref="Callback"/>: a fresh <c>sid</c>, both tokens minted carrying it,
+    /// the refresh's <c>jti</c> stored as the session row's initial <c>CurrentJti</c>. Always JSON
+    /// (<c>201</c>) — this is a node-to-node call, never the browser fragment handoff.
+    /// </para>
+    /// </summary>
+    [AllowAnonymous]
+    [HttpPost("/auth/cluster-session")]
+    public async Task<IActionResult> ClusterSession([FromBody] ClusterSessionRequest? body, CancellationToken ct)
+    {
+        string? token = ExtractBearerToken(Request);
+        if (token is null)
+            return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token", "missing bearer token");
+
+        ClusterPrincipal? principal = await clusterTokens.ValidateAsync(token).ConfigureAwait(false);
+        if (principal is null)
+            return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token",
+                "invalid, expired, or unsigned cluster service token");
+
+        if (!await peerGate.IsEnabledAsync(principal.NodeId).ConfigureAwait(false))
+            return Error(StatusCodes.Status403Forbidden, "peer_disabled",
+                $"node '{principal.NodeId}' is not an enabled peer of this cluster");
+
+        if (body is null || string.IsNullOrWhiteSpace(body.DiscordId))
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "discordId is required");
+
+        // The vouching peer already authenticated this user (its own OAuth login) — never re-check
+        // Discord here (no token to check with). AuthTiers.Parse alone floors an unparseable/unknown/
+        // empty tier to None (a terminal denial elsewhere, e.g. Callback) — wrong here: a caller that
+        // reached this far already cleared the cluster-token + peer-enabled gate above, so an ambiguous
+        // tier assertion floors to Viewer instead (honest and safe — never escalated past what the
+        // peer asserted, never denied outright for a merely-unparseable string).
+        AuthTier parsedTier = AuthTiers.Parse(body.Tier);
+        AuthTier tier = parsedTier == AuthTier.None ? AuthTier.Viewer : parsedTier;
+        string userHandle = $"discord:{body.DiscordId}";
+        var identity = new DiscordIdentity(body.DiscordId, body.Username, body.DisplayName, null, Array.Empty<string>());
+
+        // Mirror Callback's mint+persist sequence exactly (same jti choice, same expiry choice): a
+        // fresh sid, both tokens minted carrying it, the refresh's jti stored as the row's initial
+        // CurrentJti (the reuse-detection key /refresh validates against).
+        string sessionId = "sid_" + Guid.NewGuid().ToString("N");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        MintedToken access = tokens.MintAccess(identity, tier, sessionId);
+        MintedToken refresh = tokens.MintRefresh(identity, tier, sessionId);
+
+        // Best-effort, same posture as Callback: a failed row insert must never fail the vouch, but the
+        // per-request validator rejects a token whose sid has no row — the honest recovery is a forced
+        // re-vouch/relogin, so log it loudly.
+        try
+        {
+            await sessions.CreateAsync(
+                sessionId, userHandle, options.HostId,
+                created: now,
+                expires: now + TimeSpan.FromDays(options.SessionsRefreshAbsoluteDays),
+                userAgent: null, refresh.Jti, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "cluster-session row insert failed (non-fatal to the vouch, but the validator will reject sid={Sid} — forced re-vouch follows)",
+                sessionId);
+        }
+
+        // API-internal, no kgsm event -> written directly (the auth.* posture, no double-write risk).
+        // origin="api" (NOT the default "ui" — this is a node-to-node call, not a browser session).
+        // The closed origin vocabulary has no per-node value, so the vouching peer's node id rides in
+        // Meta instead — the forensic detail ("this session was minted on a vouch FROM node X"), never
+        // fabricated into a fake origin.
+        await RecordAuthAsync(AuditAction.AuthClusterSession, identity, tier,
+            $"{identity.Display} joined via a cluster vouch from node '{principal.NodeId}'",
+            sessionId, userAgent: null, ct, peerNode: principal.NodeId, origin: AuditOrigin.Api);
+
+        return StatusCode(StatusCodes.Status201Created,
+            new ClusterSessionResult(access.Token, refresh.Token, sessionId, access.ExpiresAt));
     }
 
     /// <summary>302 the SPA with the OAuth outcome in the URL fragment. The target is the single
@@ -326,18 +419,37 @@ public sealed class AuthController(
         return token.Length == 0 ? null : token;
     }
 
+    /// <summary>Extract a bearer token from the <c>Authorization</c> header, or <see langword="null"/>
+    /// if absent/not a bearer. Used by <see cref="ClusterSession"/> — a node-to-node call authenticates
+    /// via the cluster service token, not the Discord-derived user session (<see cref="BearerToken"/>
+    /// above), and has no other credential form. Mirrors <c>PeersController.ExtractBearerToken</c> exactly.</summary>
+    private static string? ExtractBearerToken(HttpRequest request)
+    {
+        string? header = request.Headers[HeaderNames.Authorization];
+        const string prefix = "Bearer ";
+        return header is not null && header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? header[prefix.Length..].Trim()
+            : null;
+    }
+
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
 
-    // Write an API-internal auth.* audit row. origin = "ui": an interactive Discord OAuth login/logout
-    // is a human acting through the web surface (there is no headless login path). actor = the Discord
-    // identity (kind=user, provider=discord). Best-effort: a failed audit write is logged, never fatal.
-    // M4·c — the `sid` lands in Meta so a login/logout event links to its session row (forensics).
-    // M4·c Increment 7 — `userAgent` lands in Meta (additive to the existing direct-write, not a new
-    // action or a second writer) so `/me`'s recent-logins read can honestly report "which device";
-    // omitted (not empty-string) when blank, matching the never-fabricate posture elsewhere in Meta.
+    // Write an API-internal auth.* audit row. origin defaults to "ui": an interactive Discord OAuth
+    // login/logout is a human acting through the web surface (there is no headless login path); the
+    // cluster SSO vouch (ClusterSession) is the one caller that overrides it to "api" (origin="ui"
+    // would misattribute a node-to-node call as a browser session). actor = the Discord identity
+    // (kind=user, provider=discord) either way — a vouched session still belongs to that Discord user,
+    // just asserted by a peer instead of a fresh OAuth round-trip. Best-effort: a failed audit write is
+    // logged, never fatal. M4·c — the `sid` lands in Meta so a login/logout event links to its session
+    // row (forensics). M4·c Increment 7 — `userAgent` lands in Meta (additive to the existing
+    // direct-write, not a new action or a second writer) so `/me`'s recent-logins read can honestly
+    // report "which device"; omitted (not empty-string) when blank, matching the never-fabricate
+    // posture elsewhere in Meta. `peerNode` (the cluster SSO vouch) is the analogous additive: the
+    // vouching peer's node id, when present, so a vouched login's audit row still names which node
+    // asserted the identity.
     private async Task RecordAuthAsync(string action, DiscordIdentity id, AuthTier tier, string summary,
-        string? sid, string? userAgent, CancellationToken ct)
+        string? sid, string? userAgent, CancellationToken ct, string? peerNode = null, string origin = AuditOrigin.Ui)
     {
         try
         {
@@ -346,9 +458,11 @@ public sealed class AuthController(
                 meta["sid"] = sid;
             if (!string.IsNullOrEmpty(userAgent))
                 meta["userAgent"] = userAgent;
+            if (!string.IsNullOrEmpty(peerNode))
+                meta["peerNode"] = peerNode;
             await audit.AppendAsync(new AuditWrite(
                 Ts: DateTimeOffset.UtcNow,
-                Origin: AuditOrigin.Ui,
+                Origin: origin,
                 Actor: new AuditActor(ActorKind.User, id.Username, ActorProvider.Discord),
                 Action: action,
                 Severity: AuditSeverity.Info,
@@ -373,7 +487,7 @@ public sealed class AuthController(
     {
         HttpOnly = true,
         Secure = Request.IsHttps,
-        SameSite = SameSiteMode.Lax,
+        SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax,
         Path = "/auth/discord",
         IsEssential = true,
         MaxAge = StateTtl,

@@ -134,6 +134,13 @@ public static class AuditAction
     public const string AuthSessionRevokeAll = "auth.session.revoke.all";
     public const string AuthSessionRevokeAdmin = "auth.session.revoke.admin";
 
+    // auth.cluster_session — the cluster SSO vouch (POST /auth/cluster-session): a peer node presents a
+    // valid cluster service token and asserts an already-authenticated user's identity; this node mints
+    // its OWN native session for that user. Same direct-write posture as auth.login (no kgsm event, no
+    // double-write) — the vouching peer's node id rides in meta (the closed origin vocabulary has no
+    // per-node value, so Origin stays "api" and the node id is the forensic detail).
+    public const string AuthClusterSession = "auth.cluster_session";
+
     // service.* — API-internal admin actions on a leaf service (the leaf-runtime-provisioning/config
     // feature). kgsm runs nothing and emits no event, so these are DIRECT writes (the auth.* case — no echo,
     // no double-write). connect/disconnect flip a leaf's runtime provisioning; config applies a config

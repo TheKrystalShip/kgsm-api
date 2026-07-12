@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.23.0) — cluster single sign-on (SSO, P1)
+- **`POST /auth/cluster-session`** — the SSO vouch endpoint (`PLAN-peers.md` P1). Cluster-token authed +
+  disable-list gated (the same fail-closed preamble as `/peers/inbox`): a peer node presents a valid cluster
+  service token and asserts an already-authenticated identity `{ discordId, username, displayName, tier }`;
+  this node mints its **own native session** (own `sid` in its own registry, own sliding refresh) and returns
+  `{ accessToken, refreshToken, sid, expiresAt }`. It never calls Discord — the vouch *is* the trust (§0 shared
+  guild + shared secret). An unparseable/empty tier floors to `viewer` (authenticated, never escalated, never
+  denied outright). `401 invalid_cluster_token` / `403 peer_disabled` / `400 bad_request`. The mint is audited
+  as `auth.cluster_session` (actor = the vouched user, `origin: api`, the vouching node id in `meta.peerNode`).
+- **Cluster-wide logout** — the self `POST /auth/session/revoke {all:true}` and the admin
+  `POST /auth/users/{userId}/sessions/revoke-all` now, after the local revoke, enqueue a durable
+  `session.revoke` (`{ scope: "user", discordId }`) to peers over the message bus (the `session.revoke` inbox
+  handler already existed). Durable to down nodes — a peer that is offline at logout time is revoked on its
+  return via outbox redelivery. Peers-only (the local effect already ran in-process); a single-`sid` self-revoke
+  stays node-local. Inert when `!ClusterEnabled`.
+- **Durable fan-out targets first-hand-`alive` peers only** (`RosterClusterTargetProvider`, the locked P1 rule):
+  a durable, identity-carrying message fans out only to peers with `MembershipState == alive` **and** a stamped
+  `LastSeen` (first-hand-authenticated) — a purely gossip-learned hearsay peer is *stored* `alive` with a null
+  `LastSeen` (it displays as `joining`) and is **excluded**, so a gossip-injected phantom URL can never receive a
+  secret-bearing message nor sit in the outbox retrying to a corpse. Ephemeral gossip is unaffected (it reads
+  `ListEnabledAsync` directly, not this provider).
+- **Self-validated** (§9 P1, +14 tests, **726/726 green**): a two-node in-process vouch (201 + a real
+  `SessionEntry` on the receiver + the returned token authenticates a follow-up call); vouch auth/validation
+  failures (401 missing/garbage/wrong-secret, 403 disabled peer, 400 missing id, tier floors to viewer);
+  cross-node logout-everywhere (local revoke + bus delivery revokes the peer's session); the durable→alive filter
+  (a hearsay/phantom peer receives **no** outbox row, plus focused `RosterClusterTargetProvider` unit facts); and
+  down-node redelivery (queued while down → delivered on return).
+
 ### Added (v0.22.0) — cluster membership gossip (convergence, P0.5)
 - **Masterless anti-entropy gossip** (`PLAN-peers.md §2·b`, P0.5) turns the manually-seeded mesh into
   "add one, join all" — no new service or dependency. `GossipWorker` (a `BackgroundService`, inert unless

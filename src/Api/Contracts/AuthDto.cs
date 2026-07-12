@@ -72,3 +72,18 @@ public sealed record SessionRecord(
 // be able to revoke another user's session by guessing/leaking a sid; that power is admin-only, see
 // POST /auth/sessions/{sid}/revoke). Neither set ⇒ revoke the calling session (logout-equivalent).
 public sealed record RevokeRequest(string? Sid, bool? All);
+
+// ── Cluster SSO vouch (PLAN-peers.md) — a peer node presents a valid cluster service token and
+// asserts an already-authenticated user's identity; this node mints its OWN native session for that
+// user, no Discord round-trip. ──────────────────────────────────────────────────────────────────
+
+// POST /auth/cluster-session — the vouch request body. `tier` is a single resolved tier string
+// (viewer/operator/admin), NOT a roles array — the vouching peer already resolved it via its own
+// guild-role lookup; an unparseable/unknown/empty value floors to viewer (AuthTiers.Parse's safe
+// default) rather than denying or escalating an ambiguous assertion.
+public sealed record ClusterSessionRequest(string DiscordId, string Username, string DisplayName, string Tier);
+
+// The minted session — the same access/refresh/sid/expiry shape the OAuth callback hands the SPA,
+// just reached via the vouch path instead of a Discord round-trip. `ExpiresAt` is the ACCESS token's
+// expiry (mirrors CallbackResult.AccessTokenExpiresAt).
+public sealed record ClusterSessionResult(string AccessToken, string RefreshToken, string Sid, DateTimeOffset ExpiresAt);

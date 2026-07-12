@@ -95,7 +95,7 @@ two controller endpoints), **no new service, broker, or dependency**.
 | G2 | Conflict resolution | **Incarnation numbers** (SWIM): each node owns a monotonic counter for itself; state is ordered by `(incarnation, state-precedence)`. Only a node can raise its own incarnation, so it **refutes** a false `suspect`/`dead` about itself — no node can kill another by gossip |
 | G3 | Hearsay is provisional | A node learned only by gossip is inserted `suspect`/`joining` and promoted to `alive` **only when this node directly authenticates it** (shared-secret handshake, first-hand). Neutralizes phantom-node injection without a master; honesty-clean — an unverified peer is never shown `alive` |
 | G4 | Transport split | Gossip rides a **separate ephemeral, best-effort** path (`POST /api/v1/peers/sync`, cluster-token authed, fire-and-forget, **no** outbox row) — never the durable outbox (which is 7-day-retained for guaranteed messages like `session.revoke`; durably retrying a stale ping to a corpse is exactly wrong). The durable bus takes its fan-out target list *from* the converged roster |
-| G5 | Failure detection | Derived from sync success; SWIM **suspicion + indirect probe** (`ping-req` via k other members) is a layered refinement against false-positive death under an asymmetric partition — added if flapping shows up, not required in the first cut |
+| G5 | Failure detection | A **last-evidence clock**: each node times its own evidence for each peer (no cross-node wall-clock). Evidence is **mutual** — our own successful probe OR an authenticated inbound sync FROM the peer — so a node we can't reach but that still gossips to us stays `alive` (an asymmetric partition resolves for the demonstrably-live node; no refute/re-suspect oscillation). No evidence for `ClusterSuspectMs` → `suspect`, another window silent → `dead`, reaped after `ClusterReapMs`. SWIM **indirect probe** (`ping-req` via k members) is a further refinement, deferred until flapping shows up |
 | G6 | Scale ceiling (honest) | Full-roster push-pull is O(n) bytes/sync (~20 KB at 100 nodes — fine into the low thousands). Past that, move to delta/Merkle anti-entropy. 100 is inside the simple version's comfort zone; build simple, note the seam |
 
 ### Single sign-on across the cluster
@@ -201,13 +201,19 @@ Later the SPA needs Node B (renders B's data / issues a B action):
 
 ## 4 · Peer health (latency)
 
-- Each node polls every **enabled** peer's `GET /peers/{id}/latency` on a **10s**
-  interval, stores `latencyMs` + `status`.
+- Each node polls every **enabled** peer's `GET /peers/{id}/latency` on the
+  `ClusterPollMs` interval (default 10s), stores `latencyMs` + `status`.
 - No response within timeout ⇒ `status: "unreachable"`. Disabled ⇒ no ping,
   `status: "disabled"`.
-- The Cluster page reads `GET /peers` (includes `latencyMs` + `status`). Per-leaf
-  health of each peer rides the SPA's existing per-node `capabilities` SSE — no new
-  SSE topic.
+- **Two axes, never conflated (§2·b, P0.5):** the poll feeds the first-hand `Status`
+  axis (reachable/unreachable/unknown) AND — on a successful probe of a peer that
+  authenticates (`/identity` advertises `cluster` + a matching `apiVersion`) — promotes
+  that peer to `alive` and stamps the last-evidence clock the gossip failure detector
+  reads. `Status` is this node's own probe; `MembershipState` is the gossip-converged
+  state; a latency/metrics row is never itself a status.
+- The Cluster page reads `GET /peers` (includes `latencyMs`, `status`, and
+  `membership`). Per-leaf health of each peer rides the SPA's existing per-node
+  `capabilities` SSE — no new SSE topic.
 - The poller doubles as the **message-bus liveness signal**: an
   `unreachable → reachable` flip triggers an immediate outbox flush toward that
   peer (see the bus spec).
@@ -245,7 +251,9 @@ The trust half already exists (the message-bus foundation built the
 current+previous rotation). P0 adds the **membership** half — a manually-seeded
 mesh that works fully before gossip lands:
 - `Peers` table (id, url — the advertised client URL, gossipUrl?, nickname, nodeId,
-  incarnation, status, latencyMs, lastSeen, apiVersion, enabled).
+  incarnation, status, membershipState, stateChangedAt, latencyMs, lastSeen,
+  apiVersion, enabled). `status` (first-hand probe) and `membershipState`
+  (gossip-converged, P0.5) are the two liveness axes, never conflated.
 - `cluster` capability advertised by the **capability model** (present when
   `ClusterEnabled`), **not** a `LeafCatalog` entry — it has no systemd unit, so it
   must not render a phantom Services-board card.
@@ -257,7 +265,9 @@ mesh that works fully before gossip lands:
 - The **disable-list gate**: replace `AllowAllClusterPeerGate` with a `Peers`-table
   gate that rejects only explicitly-disabled peers (`403 peer_disabled`); an
   unknown validly-tokened node is accepted (§2 #7).
-- Real outbox fan-out: a `ClusterTarget` provider reading enabled roster members.
+- Real outbox fan-out: a `ClusterTarget` provider reading enabled roster members
+  (the **durable** send set narrows to first-hand-`alive` peers once gossip can inject
+  hearsay into the roster — see P1).
 - Latency poller (10s), feeding bus liveness.
 - **Self-validated:** add a peer (reachable → stored; unreachable → `502`;
   non-cluster → `422`; version mismatch → `409`); mint+verify a service token;
@@ -297,19 +307,63 @@ service or dependency (§2·b).
   direct A→C add; a genuinely-silenced node → `suspect` → `dead` → reaped; a node refutes a
   false `dead` about itself via a higher incarnation; a phantom gossiped node never reaches
   first-hand `alive`; and gossip writes **zero** `cluster_outbox` rows.
+- **Follow-up owed — voluntary `left`:** the `Left` membership state exists and is
+  terminal, but nothing yet *produces* it — a graceful shutdown / `cluster` opt-out
+  currently goes silent and is detected as `suspect`→`dead` on the slow timer. A clean
+  departure should gossip one final self-`left` so peers reap it promptly (the honest
+  "I'm leaving" vs the inferred "you went silent"). Ties to open item #6. Small; fold
+  into P1 or land standalone.
 
-### P1 — Single sign-on · `planned`
-- `POST /auth/cluster-session` vouch endpoint (service-token authed → native
-  session mint).
-- SPA lazy vouch-on-401 + per-device session aggregation in Active Sessions.
-- Cluster-wide logout: `session.revoke` over the bus (durable to down nodes).
-- **Self-validated:** log into A, hit B without a B session → transparent vouch →
-  B session minted; logout-everywhere revokes A and B; a down node is revoked on
-  return (bus redelivery).
+### P1 — Single sign-on · `built` (backend); SPA half owed
+- **`POST /auth/cluster-session` vouch endpoint** — cluster-token authed +
+  disable-list gated (the `/peers/inbox` fail-closed preamble). A peer asserts an
+  already-authenticated identity `{ discordId, username, displayName, tier }`; this
+  node mints its **own** native session (own `sid`, own registry, own sliding refresh)
+  and returns `{ accessToken, refreshToken, sid, expiresAt }`. It never calls Discord —
+  the vouch *is* the trust (§0). An unparseable/empty tier floors to `viewer`
+  (authenticated, never escalated, never denied). Audited `auth.cluster_session`
+  (actor = the vouched user, `origin: api`, vouching node in `meta.peerNode`).
+- **Cluster-wide logout** — the self `POST /auth/session/revoke {all:true}` and the
+  admin `.../sessions/revoke-all` enqueue a durable `session.revoke`
+  (`{ scope: "user", discordId }`) to peers after the local revoke. Durable to down
+  nodes (outbox redelivery on return). Peers-only — the local effect already ran
+  in-process, so this node is never a target; the enqueue is **not** transactional
+  with the local revoke (the documented narrow crash window, accepted — a returning
+  node re-vouches). A single-`sid` self-revoke stays node-local (not cluster-wide).
+- **Durable fan-out targets first-hand-`alive` peers only (locked).** The two
+  transports split their target sets the same way §2·b G4 splits their retention:
+  ephemeral gossip (`/peers/sync`) reaches **any** enabled roster member, but a
+  **durable**, identity-carrying message (`session.revoke` names a `discordId`) fans
+  out **only** to peers this node has authenticated first-hand. First-hand-alive is
+  **two** conditions, not one: `MembershipState == alive` **AND** `LastSeen` set — a
+  purely gossip-learned peer is *stored* `alive` with a null `LastSeen` (it displays
+  as the derived `joining`), and only this node's own probe / an authenticated inbound
+  contact stamps `LastSeen`. That second condition is exactly what excludes an
+  unconfirmed hearsay/phantom URL from receiving a secret-bearing message (or sitting
+  in the outbox retrying to a corpse for the 7-day TTL). `RosterClusterTargetProvider`
+  applies the filter; ephemeral gossip is unaffected (it reads `ListEnabledAsync`
+  directly, not this provider).
+- **Owed (SPA, kgsm-web — not this backend milestone):** lazy vouch-on-`401` and the
+  per-device session aggregation in Active Sessions.
+- **Self-validated (726/726 tests, +14):** a two-node vouch (`201` + a real session
+  row on the receiver + the returned token authenticates a follow-up call); vouch
+  auth/validation failures (`401` missing/garbage/wrong-secret, `403` disabled peer,
+  `400` missing id, tier → viewer); cross-node logout-everywhere (local revoke + bus
+  delivery revokes the peer's session); the durable→alive filter (a hearsay/phantom
+  peer receives **no** outbox row, plus focused `RosterClusterTargetProvider` unit
+  facts for alive+LastSeen / alive+null / suspect / disabled); and down-node
+  redelivery (queued while down → delivered on return).
 
 ### P2 — Resource visibility · `planned`
-- `GET /peers/{id}/resources | /capabilities | /library` (reuse existing DTOs).
-- On-demand "find a node with capacity" fan-out (§2 #22–#24 honesty rules).
+Two distinct reads, kept separate (they must not collapse into one node-proxy):
+- **The SPA reads peer resources DIRECTLY** (browser → the peer's advertised client
+  URL, over its own native session) — per-node resources stay on the per-node pages
+  (§8), matching the keystone's client-side rollup (no `/fleet`, no node aggregating
+  peers for the browser).
+- **Server-side capacity fan-out** is the only node-proxied path: `GET
+  /peers/{id}/resources | /capabilities | /library` (service-token relay, reuse
+  existing DTOs), consumed by the on-demand "find a node with capacity" logic (§2
+  #22–#24 honesty rules) and the assistant — never by the SPA.
 - **Frontend gate:** Cluster page renders local node + peers; capacity honestly
   labels `unknown` where a blueprint declares no requirement.
 
@@ -320,6 +374,10 @@ service or dependency (§2·b).
 ### P4 — Federated assistant · `planned`
 - Optional `nodeId` on existing tools; API-side peer routing (service-token relay);
   `get_cluster_overview`.
+- **Two-axis honesty carries up:** the assistant's cached peer awareness (§5 A1) is
+  the converged roster, which holds non-`alive` hearsay — it may say a peer *exists*
+  but must not assert a non-`alive` peer's resources or liveness as fact; a fan-out
+  answer degrades to a partial (A8), never a fabricated peer state.
 
 ### P5 — Cross-node audit · `open`
 - Query a peer's audit log; an "all cluster events" view.
@@ -331,11 +389,16 @@ service or dependency (§2·b).
 ### `GET /api/v1/peers` (admin-gated)
 ```json
 { "peers": [ {
-  "id": "abc123", "url": "https://node-b:8097", "nickname": "Gaming Box",
-  "nodeId": "node-b", "status": "reachable", "latencyMs": 12,
-  "lastSeen": "2026-07-10T12:00:00Z", "apiVersion": "v1", "enabled": true
+  "id": "abc123", "url": "https://node-b:8097", "gossipUrl": "https://10.0.0.2:8097",
+  "nickname": "Gaming Box", "nodeId": "node-b", "status": "reachable",
+  "membership": "alive", "latencyMs": 12, "lastSeen": "2026-07-10T12:00:00Z",
+  "apiVersion": "v1", "enabled": true
 } ] }
 ```
+`url` is the advertised client URL (browser-reachable); `gossipUrl` the node-to-node
+address (null when equal). `status` = this node's first-hand probe; `membership` =
+the gossip-converged state (alive/suspect/dead/left, or the derived `joining` for
+hearsay this node has not yet authenticated first-hand).
 
 ### `POST /api/v1/peers` (admin-gated)
 ```json
@@ -354,12 +417,17 @@ service or dependency (§2·b).
   "capabilities": ["monitor","watchdog","cluster"] }
 ```
 
-### `POST /auth/cluster-session` (cluster-token authed)
+### `POST /auth/cluster-session` (cluster-token authed + disable-gated)
 ```json
-// body: the vouched identity asserted by the calling node
+// body: the vouched identity asserted by the calling node. `tier` is the origin's
+// already-resolved tier (viewer/operator/admin), NOT a Discord-role list: the origin
+// holds only its resolved tier in the session claim snapshot and peers never call
+// Discord, so the target trusts the asserted tier (§0 uniform role map makes it
+// consistent). An unparseable/empty tier floors to viewer.
 { "discordId": "1234", "username": "krystal", "displayName": "Krystal",
-  "roles": ["operator"] }
+  "tier": "operator" }
 → 201 { accessToken, refreshToken, sid, expiresAt }   // B's OWN native session
+→ 400 { error: { code: "bad_request" } }              // missing discordId
 → 401 { error: { code: "invalid_cluster_token" } }
 → 403 { error: { code: "peer_disabled" } }
 ```
@@ -452,25 +520,33 @@ fail-open/closed split, Ed25519 (dropped).
 
 Still open — to resolve before or during the relevant phase:
 
-1. **Clock skew.** Service-token `exp` and any timestamped envelope assume rough
-   NTP sync across nodes. Decide the tolerance and the honest error when a node's
-   clock is badly off (it must fail-closed, not silently accept).
+1. **Clock skew — narrowed to token `exp`.** Membership is skew-immune by
+   construction: convergence orders by **incarnation integers**, and the failure
+   detector times each node's evidence on its **own** clock (§2·b G5 — no cross-node
+   wall-clock compare). The only skew-sensitive surface left is the service-token
+   `exp` (and any timestamped bus envelope). Decide the tolerance and the honest
+   fail-closed error when a node's clock is badly off (it must reject, not silently
+   accept).
 2. **Topology: LAN vs WAN, and the two-URL split.** `GET /peers/identity` is
    reachable **before** any trust is established (you can't authenticate before you
    know the peer). If nodes span the public internet, that endpoint is an
    internet-exposed enumeration/DoS surface — decide LAN-only (VPN/overlay) vs WAN,
    and rate-limit `/identity` + `/inbox` + `/sync` accordingly. Ties into who opens
    the cross-node port (kgsm-firewall/watchdog own port-opening). **Concrete
-   sub-decision (§2 #13a):** resolve how a node learns its own **advertised client
-   URL** (browser-reachable), which may differ from its gossip URL — configured
-   explicitly, or derived — so the roster the SPA consumes is always
-   browser-reachable, not an internal address.
+   sub-decision (§2 #13a):** the two-URL split is **built as config knobs** —
+   `ClusterAdvertiseUrl` (the browser-reachable client URL the roster carries) and
+   `ClusterGossipUrl` (the node-to-node address). What remains open is
+   **auto-derivation** (so an operator need not set both by hand) and the **SPA CORS
+   preflight-warn** (§8) — so the roster the SPA consumes is always browser-reachable,
+   never an internal address.
 7. **Role-map drift honesty.** §0 makes a uniform `KGSM_API_AUTH_ROLE_*` map a
    cluster-formation precondition, so tier is consistent by construction. If an
    operator lets two nodes' maps drift, a user is legitimately admin on one and
-   viewer on another — not a bug, an honest per-node result. Decide whether to
-   surface a drift warning (a later gossiped-config check) or leave it to operator
-   discipline; do **not** silently reconcile.
+   viewer on another — not a bug, an honest per-node result. Now that gossip exists,
+   the concrete seam is cheap: piggyback a **role-map hash** on the `/peers/sync`
+   payload and **warn** on mismatch (a diagnostic surfaced on the Cluster page), never
+   reconcile. Decide whether to build that check or leave it to operator discipline;
+   do **not** silently reconcile either way.
 3. **TLS cert validation.** Over the shared-secret model, is TLS validated
    (proper certs / internal CA) or is it encryption-only with the service token as
    the sole identity layer? Pin one; if self-signed, document the accepted risk.
