@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.24.0) — cluster SPA-facing endpoints (G1 viewer roster, G2 vouch initiator)
+- **`GET /api/v1/peers/roster`** — the **viewer-gated** node list the browser reads to auto-populate its
+  registry ("add one, see all"). The admin `GET /peers` leaks management detail (gossip URL, `enabled`,
+  `apiVersion`) and is admin-only; this is the lean, tier-scoped projection any authenticated user gets:
+  `{ nodes: [{ nodeId, label, clientUrl, membership, status, latencyMs }] }`. Enabled peers only (disable is
+  an admin management state a viewer never sees or is handed a URL for); every membership state is otherwise
+  present and honestly labelled (`GossipState.Display` yields the derived `joining` for un-authenticated
+  hearsay). `clientUrl` is the **advertised** browser-reachable URL (`PeerEntity.Url`), never the node-to-node
+  gossip URL; `label` = `Nickname ?? NodeId`.
+- **`POST /auth/cluster-session/request`** — the **user-authed** initiator to the node-to-node vouch receiver
+  (`POST /auth/cluster-session`). The browser holds no cluster secret, so it cannot call the receiver directly;
+  it calls this on a node it **is** logged into (A), which reads the caller's asserted identity **from A's own
+  session claims** (`SessionClaims.ReadIdentity`/`ReadTier` — **never** the request body, which carries only
+  `nodeId`, so the tier can't be laundered), mints a cluster service token, relays to the target peer's receiver
+  (`GossipUrl ?? Url`), and returns B's `201 { accessToken, refreshToken, sid, expiresAt }` **verbatim**. Any tier
+  (viewer floor — SSO preserves the caller's tier). `400 bad_request` (missing nodeId) / `401 unauthorized` /
+  `404 unknown_node` / `403 peer_disabled` / `502 peer_unreachable` (fail-closed — a relay failure never
+  fabricates a session). This is the server-side half of the SPA's lazy vouch-on-`401`.
+- **Tests:** +11 (`ClusterSsoTests`, **737/737**) — the viewer roster shape/enabled-filter/`clientUrl`-not-gossip/
+  `joining`-derivation/`401`; the two-node vouch-initiator happy path (A→B, B's token authenticates on B), the
+  claim-sourced-tier security proof (viewer caller → viewer session on B, operator → operator), and the
+  `401`/`400`/`404`/`403`/`502` matrix.
+
 ### Added (v0.23.0) — cluster single sign-on (SSO, P1)
 - **`POST /auth/cluster-session`** — the SSO vouch endpoint (`PLAN-peers.md` P1). Cluster-token authed +
   disable-list gated (the same fail-closed preamble as `/peers/inbox`): a peer node presents a valid cluster

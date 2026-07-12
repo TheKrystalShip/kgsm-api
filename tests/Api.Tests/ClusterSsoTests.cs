@@ -508,7 +508,363 @@ public sealed class ClusterSsoTests
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
     }
 
+    // ── 6. GET /api/v1/peers/roster — the viewer-tier roster projection (G1) ──────────────────────────
+
+    [Fact]
+    public async Task Roster_EnabledPeer_ClientUrlIsUrlNotGossipUrl_LabelIsNicknameOrNodeId()
+    {
+        await using var factory = new AuthTestFactory();
+        PeersStore store = factory.Services.GetRequiredService<PeersStore>();
+        await store.UpsertAsync(new PeerEntity
+        {
+            Id = "peer_roster_nicknamed",
+            Url = "https://node-nicknamed.pub",
+            GossipUrl = "https://node-nicknamed.internal",
+            Nickname = "Nicknamed Box",
+            NodeId = "node-nicknamed",
+            Status = "reachable",
+            ApiVersion = "v1",
+            Enabled = true,
+        }, default);
+        await store.UpsertAsync(new PeerEntity
+        {
+            Id = "peer_roster_unnicknamed",
+            Url = "https://node-unnicknamed.pub",
+            NodeId = "node-unnicknamed",
+            Status = "reachable",
+            ApiVersion = "v1",
+            Enabled = true,
+        }, default);
+
+        using HttpClient client = factory.CreateClient();
+        HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(AuthTier.Viewer));
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        JsonElement nodes = (await Json(resp)).GetProperty("nodes");
+
+        JsonElement nicknamed = nodes.EnumerateArray().Single(n => n.GetProperty("nodeId").GetString() == "node-nicknamed");
+        // The advertised (browser-reachable) Url, never the internal GossipUrl.
+        Assert.Equal("https://node-nicknamed.pub", nicknamed.GetProperty("clientUrl").GetString());
+        Assert.Equal("Nicknamed Box", nicknamed.GetProperty("label").GetString());
+
+        JsonElement unnicknamed = nodes.EnumerateArray().Single(n => n.GetProperty("nodeId").GetString() == "node-unnicknamed");
+        Assert.Equal("node-unnicknamed", unnicknamed.GetProperty("label").GetString());
+    }
+
+    [Fact]
+    public async Task Roster_ExcludesDisabledPeer()
+    {
+        await using var factory = new AuthTestFactory();
+        PeersStore store = factory.Services.GetRequiredService<PeersStore>();
+        await store.UpsertAsync(new PeerEntity
+        {
+            Id = "peer_roster_enabled",
+            Url = "https://node-enabled.pub",
+            NodeId = "node-enabled",
+            Status = "reachable",
+            ApiVersion = "v1",
+            Enabled = true,
+        }, default);
+        await store.UpsertAsync(new PeerEntity
+        {
+            Id = "peer_roster_disabled",
+            Url = "https://node-disabled.pub",
+            NodeId = "node-disabled",
+            Status = "unknown",
+            ApiVersion = "v1",
+            Enabled = false,
+        }, default);
+
+        using HttpClient client = factory.CreateClient();
+        HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(AuthTier.Viewer));
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        JsonElement nodes = (await Json(resp)).GetProperty("nodes");
+        Assert.Contains(nodes.EnumerateArray(), n => n.GetProperty("nodeId").GetString() == "node-enabled");
+        Assert.DoesNotContain(nodes.EnumerateArray(), n => n.GetProperty("nodeId").GetString() == "node-disabled");
+    }
+
+    [Fact]
+    public async Task Roster_MembershipDerivation_HearsayIsJoining_FirstHandIsAlive()
+    {
+        await using var factory = new AuthTestFactory();
+        PeersStore store = factory.Services.GetRequiredService<PeersStore>();
+        // Gossip says alive, but this node has never reached it first-hand (LastSeen null) -> "joining".
+        await store.UpsertAsync(new PeerEntity
+        {
+            Id = "peer_roster_hearsay",
+            Url = "https://node-hearsay.pub",
+            NodeId = "node-hearsay",
+            Status = "unknown",
+            MembershipState = GossipState.Alive,
+            LastSeen = null,
+            ApiVersion = "v1",
+            Enabled = true,
+        }, default);
+        // Gossip-alive AND first-hand reached -> the converged state shows verbatim, "alive".
+        await store.UpsertAsync(new PeerEntity
+        {
+            Id = "peer_roster_firsthand",
+            Url = "https://node-firsthand.pub",
+            NodeId = "node-firsthand",
+            Status = "reachable",
+            MembershipState = GossipState.Alive,
+            LastSeen = DateTimeOffset.UtcNow,
+            ApiVersion = "v1",
+            Enabled = true,
+        }, default);
+
+        using HttpClient client = factory.CreateClient();
+        HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(AuthTier.Viewer));
+
+        JsonElement nodes = (await Json(resp)).GetProperty("nodes");
+        JsonElement hearsay = nodes.EnumerateArray().Single(n => n.GetProperty("nodeId").GetString() == "node-hearsay");
+        Assert.Equal("joining", hearsay.GetProperty("membership").GetString());
+        JsonElement firstHand = nodes.EnumerateArray().Single(n => n.GetProperty("nodeId").GetString() == "node-firsthand");
+        Assert.Equal("alive", firstHand.GetProperty("membership").GetString());
+    }
+
+    [Fact]
+    public async Task Roster_NoBearer_401()
+    {
+        await using var factory = new AuthTestFactory();
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage resp = await GetRosterAsync(client, bearer: null);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    // ── 7. POST /auth/cluster-session/request — the user-authed vouch initiator (G2) ─────────────────
+
+    [Fact]
+    public async Task VouchRequest_TwoNode_HappyPath_MintsSessionOnB_AndAuthenticatesThere()
+    {
+        const string secret = "sso-request-happy-secret";
+        string dbA = NewDbPath("sso-request-happy-a"), dbB = NewDbPath("sso-request-happy-b");
+        try
+        {
+            await using var factoryB = new ClusterNodeFactory("node-b", "host-b", secret, dbPath: dbB);
+            HttpMessageHandler handlerToB = factoryB.Server.CreateHandler();
+            await using var factoryA = new ClusterNodeFactory(
+                "node-a", "host-a", secret, dbPath: dbA, drainerHandlerFactory: () => handlerToB);
+
+            await SeedEnabledTargetAsync(factoryA, "peer_node_b_request_happy", "node-b");
+
+            using HttpClient clientA = factoryA.CreateClient();
+            JsonElement body = await Json(await PostVouchRequestAsync(
+                clientA, factoryA.AccessToken(AuthTier.Operator), "node-b"));
+
+            string accessTokenB = body.GetProperty("accessToken").GetString()!;
+            Assert.False(string.IsNullOrWhiteSpace(accessTokenB));
+            Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("refreshToken").GetString()));
+            Assert.False(string.IsNullOrWhiteSpace(body.GetProperty("sid").GetString()));
+
+            // The relayed token actually authenticates a follow-up call on B, as the SAME caller identity.
+            using HttpClient clientB = factoryB.CreateClient();
+            var sessionRequest = new HttpRequestMessage(HttpMethod.Get, "/auth/session");
+            sessionRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessTokenB);
+            HttpResponseMessage sessionResp = await clientB.SendAsync(sessionRequest);
+            Assert.Equal(HttpStatusCode.OK, sessionResp.StatusCode);
+            JsonElement sessionBody = await Json(sessionResp);
+            Assert.Equal($"discord:{FakeDiscordResolver.Identity.UserId}",
+                sessionBody.GetProperty("user").GetProperty("id").GetString());
+        }
+        finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
+    }
+
+    [Fact]
+    public async Task VouchRequest_TierComesFromCallerClaims_ViewerFloorsOperatorPasses()
+    {
+        const string secret = "sso-request-tier-secret";
+        string dbA = NewDbPath("sso-request-tier-a"), dbB = NewDbPath("sso-request-tier-b");
+        try
+        {
+            await using var factoryB = new ClusterNodeFactory("node-b", "host-b", secret, dbPath: dbB);
+            HttpMessageHandler handlerToB = factoryB.Server.CreateHandler();
+            await using var factoryA = new ClusterNodeFactory(
+                "node-a", "host-a", secret, dbPath: dbA, drainerHandlerFactory: () => handlerToB);
+
+            await SeedEnabledTargetAsync(factoryA, "peer_node_b_request_tier", "node-b");
+
+            using HttpClient clientA = factoryA.CreateClient();
+            using HttpClient clientB = factoryB.CreateClient();
+
+            // The request body never carries a tier — only nodeId. Each caller's tier must come from
+            // THEIR OWN validated session claims on A, not anything the body could assert.
+            JsonElement viewerBody = await Json(await PostVouchRequestAsync(
+                clientA, factoryA.AccessToken(AuthTier.Viewer), "node-b"));
+            string viewerAccessTokenB = viewerBody.GetProperty("accessToken").GetString()!;
+
+            JsonElement operatorBody = await Json(await PostVouchRequestAsync(
+                clientA, factoryA.AccessToken(AuthTier.Operator), "node-b"));
+            string operatorAccessTokenB = operatorBody.GetProperty("accessToken").GetString()!;
+
+            // An operator-gated action on B: a viewer-floored token must 403 (never escalated); an
+            // operator token must pass the gate (404 for "no such server", not 403 for "wrong tier") —
+            // same idiom as Vouch_UnparseableTier_FloorsToViewer_NeverEscalated above.
+            HttpResponseMessage viewerCmd = await SendCommandAsync(clientB, viewerAccessTokenB);
+            Assert.Equal(HttpStatusCode.Forbidden, viewerCmd.StatusCode);
+
+            HttpResponseMessage operatorCmd = await SendCommandAsync(clientB, operatorAccessTokenB);
+            Assert.Equal(HttpStatusCode.NotFound, operatorCmd.StatusCode);
+        }
+        finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
+    }
+
+    [Fact]
+    public async Task VouchRequest_NoBearer_401Unauthorized()
+    {
+        await using var factory = new AuthTestFactory();
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage resp = await PostVouchRequestAsync(client, bearer: null, "node-whatever");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        JsonElement error = (await Json(resp)).GetProperty("error");
+        Assert.Equal("unauthorized", error.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task VouchRequest_MissingNodeId_400BadRequest()
+    {
+        await using var factory = new AuthTestFactory();
+        using HttpClient client = factory.CreateClient();
+
+        HttpResponseMessage resp = await PostVouchRequestAsync(
+            client, factory.AccessToken(AuthTier.Viewer), nodeId: "");
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        JsonElement error = (await Json(resp)).GetProperty("error");
+        Assert.Equal("bad_request", error.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task VouchRequest_UnknownNode_404UnknownNode()
+    {
+        const string secret = "sso-request-unknown-secret";
+        string dbA = NewDbPath("sso-request-unknown-a");
+        try
+        {
+            await using var factoryA = new ClusterNodeFactory("node-a", "host-a", secret, dbPath: dbA);
+            using HttpClient client = factoryA.CreateClient();
+
+            HttpResponseMessage resp = await PostVouchRequestAsync(
+                client, factoryA.AccessToken(AuthTier.Viewer), "node-never-added");
+
+            Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+            JsonElement error = (await Json(resp)).GetProperty("error");
+            Assert.Equal("unknown_node", error.GetProperty("code").GetString());
+        }
+        finally { DeleteBestEffort(dbA); }
+    }
+
+    [Fact]
+    public async Task VouchRequest_DisabledTargetPeer_403PeerDisabled()
+    {
+        const string secret = "sso-request-disabled-secret";
+        string dbA = NewDbPath("sso-request-disabled-a");
+        try
+        {
+            await using var factoryA = new ClusterNodeFactory("node-a", "host-a", secret, dbPath: dbA);
+            PeersStore peersOnA = factoryA.Services.GetRequiredService<PeersStore>();
+            await peersOnA.UpsertAsync(new PeerEntity
+            {
+                Id = "peer_node_c_request_disabled",
+                Url = "http://node-c",
+                NodeId = "node-c",
+                Status = "unknown",
+                ApiVersion = "v1",
+                Enabled = false,
+            }, default);
+
+            using HttpClient client = factoryA.CreateClient();
+            HttpResponseMessage resp = await PostVouchRequestAsync(
+                client, factoryA.AccessToken(AuthTier.Operator), "node-c");
+
+            Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+            JsonElement error = (await Json(resp)).GetProperty("error");
+            Assert.Equal("peer_disabled", error.GetProperty("code").GetString());
+        }
+        finally { DeleteBestEffort(dbA); }
+    }
+
+    [Fact]
+    public async Task VouchRequest_TargetUnreachable_502PeerUnreachable()
+    {
+        const string secret = "sso-request-unreachable-secret";
+        string dbA = NewDbPath("sso-request-unreachable-a");
+        try
+        {
+            // Down from the start, never flipped back — stands in for "node is not reachable at all"
+            // (same TogglableDelegatingHandler idiom as the down-then-up outbox tests above).
+            var deadHandler = new TogglableDelegatingHandler(new HttpClientHandler()) { Down = true };
+            await using var factoryA = new ClusterNodeFactory(
+                "node-a", "host-a", secret, dbPath: dbA, drainerHandlerFactory: () => deadHandler);
+
+            await SeedEnabledTargetAsync(factoryA, "peer_node_dead_request", "node-dead");
+
+            using HttpClient client = factoryA.CreateClient();
+            HttpResponseMessage resp = await PostVouchRequestAsync(
+                client, factoryA.AccessToken(AuthTier.Operator), "node-dead");
+
+            Assert.Equal(HttpStatusCode.BadGateway, resp.StatusCode);
+            JsonElement error = (await Json(resp)).GetProperty("error");
+            Assert.Equal("peer_unreachable", error.GetProperty("code").GetString());
+        }
+        finally { DeleteBestEffort(dbA); }
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────────────────────────────
+
+    private static Task<HttpResponseMessage> GetRosterAsync(HttpClient client, string? bearer)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/roster");
+        if (!string.IsNullOrEmpty(bearer))
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        return client.SendAsync(request);
+    }
+
+    private static Task<HttpResponseMessage> PostVouchRequestAsync(HttpClient client, string? bearer, string? nodeId)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/auth/cluster-session/request")
+        {
+            Content = JsonContent.Create(new { nodeId }),
+        };
+        if (!string.IsNullOrEmpty(bearer))
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        return client.SendAsync(request);
+    }
+
+    /// <summary>An operator-gated action against a server id that doesn't exist — <c>404</c> proves the
+    /// bearer passed the tier gate (only "no such server" is left to complain about); <c>403</c> proves it
+    /// didn't. The same discriminator <see cref="Vouch_UnparseableTier_FloorsToViewer_NeverEscalated"/> uses.</summary>
+    private static Task<HttpResponseMessage> SendCommandAsync(HttpClient client, string bearer)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/servers/nope/commands")
+        {
+            Content = JsonContent.Create(new { verb = "start" }),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
+        return client.SendAsync(request);
+    }
+
+    /// <summary>Seed one enabled roster row on <paramref name="factory"/> pointing at
+    /// <paramref name="nodeId"/> — the minimal shape <c>RequestClusterSession</c>'s roster lookup needs
+    /// (no nickname/gossipUrl; those are exercised separately by the roster-projection tests above).</summary>
+    private static async Task SeedEnabledTargetAsync(ClusterNodeFactory factory, string rowId, string nodeId)
+    {
+        PeersStore store = factory.Services.GetRequiredService<PeersStore>();
+        await store.UpsertAsync(new PeerEntity
+        {
+            Id = rowId,
+            Url = $"http://{nodeId}",
+            NodeId = nodeId,
+            Status = "reachable",
+            ApiVersion = "v1",
+            Enabled = true,
+        }, default);
+    }
 
     private static async Task<JsonElement> Json(HttpResponseMessage resp) =>
         JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;

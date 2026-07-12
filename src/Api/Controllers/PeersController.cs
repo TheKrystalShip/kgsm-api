@@ -200,6 +200,20 @@ public sealed class PeersController(
         return new PeerListResponse(rows.Select(ToView).ToList());
     }
 
+    /// <summary><c>GET /api/v1/peers/roster</c> — the viewer-tier node list (<c>PLAN-peers.md §7</c>,
+    /// gap G1): the browser-facing projection of the cluster roster that powers "add one, see all" for
+    /// a non-admin user. Enabled peers only (<see cref="PeersStore.ListEnabledAsync"/>) — a disabled row
+    /// is an admin management state a viewer must not see or be handed a URL for; self is never a peer
+    /// row, so it never appears here either. Every <see cref="PeerEntity.MembershipState"/> is honestly
+    /// reported (including the derived "joining"), only the enabled filter applies.</summary>
+    [HttpGet("roster")]
+    [Authorize(Policy = AuthPolicy.Viewer)]
+    public async Task<ClusterNodesResponse> Roster(CancellationToken ct)
+    {
+        IReadOnlyList<PeerEntity> rows = await peers.ListEnabledAsync(ct).ConfigureAwait(false);
+        return new ClusterNodesResponse(rows.Select(ToNodeView).ToList());
+    }
+
     /// <summary><c>POST /api/v1/peers</c> — the admin "paste a URL" join-via-seed action. Maps every
     /// <see cref="PeerAddOutcome"/> to its frozen status code (<c>PLAN-peers.md §7</c>).</summary>
     [HttpPost]
@@ -310,6 +324,11 @@ public sealed class PeersController(
         new(p.Id, p.Url, p.Nickname, p.NodeId, p.Status,
             GossipState.Display(p.MembershipState, p.LastSeen),
             p.LatencyMs, p.LastSeen, p.ApiVersion, p.Enabled);
+
+    private static ClusterNodeView ToNodeView(PeerEntity p) =>
+        new(p.NodeId, p.Nickname ?? p.NodeId, p.Url,
+            GossipState.Display(p.MembershipState, p.LastSeen),
+            p.Status, p.LatencyMs);
 
     private ObjectResult TooLarge() =>
         Error(StatusCodes.Status413PayloadTooLarge, "payload_too_large",

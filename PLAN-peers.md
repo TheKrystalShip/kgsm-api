@@ -297,6 +297,11 @@ service or dependency (§2·b).
   to us stays `alive` (an asymmetric partition resolves for the demonstrably-live node, and
   the refute/re-suspect oscillation can't run away) — the honest first cut of the SWIM
   suspicion+indirect-probe refinement G5 defers.
+- **SPA-facing read (G1):** `GET /api/v1/peers/roster` — the **viewer-gated** projection of
+  the converged roster the browser reads to auto-populate its node registry (§7). The admin
+  `GET /peers` leaks management detail (gossip URL, `enabled`, `apiVersion`) and is admin-only;
+  this is the lean `{ nodeId, label, clientUrl, membership, status, latencyMs }` any
+  authenticated user gets, enabled peers only, every membership state honestly labelled.
 - **Frontend mirror:** the SPA populates its `nodes` registry from one connected
   node's converged roster — "add one, see all" for humans (§8). *(SPA-side, kgsm-web —
   not part of this backend milestone.)*
@@ -343,6 +348,15 @@ service or dependency (§2·b).
   in the outbox retrying to a corpse for the 7-day TTL). `RosterClusterTargetProvider`
   applies the filter; ephemeral gossip is unaffected (it reads `ListEnabledAsync`
   directly, not this provider).
+- **SPA-facing initiator (G2):** `POST /auth/cluster-session/request { nodeId }` — the
+  **user-authed** front to the node-to-node vouch receiver (§7). The browser holds no cluster
+  secret, so it cannot call `/auth/cluster-session` directly; it calls this on a node it **is**
+  logged into (A), which reads the caller's asserted identity **from its own session claims**
+  (`SessionClaims.ReadIdentity`/`ReadTier` — never the request body, so the tier can't be
+  laundered), mints a cluster service token, relays to the target peer's receiver
+  (`GossipUrl ?? Url`), and returns B's `201` verbatim. Any-tier (viewer floor — SSO preserves
+  tier); a relay failure is an honest `502 peer_unreachable` (fail-closed). This is the
+  server-side half of lazy vouch-on-`401`.
 - **Owed (SPA, kgsm-web — not this backend milestone):** lazy vouch-on-`401` and the
   per-device session aggregation in Active Sessions.
 - **Self-validated (726/726 tests, +14):** a two-node vouch (`201` + a real session
@@ -400,6 +414,32 @@ address (null when equal). `status` = this node's first-hand probe; `membership`
 the gossip-converged state (alive/suspect/dead/left, or the derived `joining` for
 hearsay this node has not yet authenticated first-hand).
 
+### `GET /api/v1/peers/roster` (viewer-gated — the SPA node list, G1)
+The **browser-facing** projection of the converged roster: the read that powers "add
+one, see all" for a non-admin. `GET /peers` is admin-gated and carries management
+detail (the gossip URL, the `enabled` flag, `apiVersion`) a viewer must not see; this
+is the lean, tier-scoped roster any authenticated user reads to auto-populate its node
+registry.
+```json
+{ "nodes": [ {
+  "nodeId": "node-b", "label": "Gaming Box",
+  "clientUrl": "https://node-b:8097", "membership": "alive",
+  "status": "reachable", "latencyMs": 12
+} ] }
+```
+- **Viewer-gated** (`AuthPolicy.Viewer` — the floor; any authenticated user, tier-scoped).
+- **Enabled peers only.** Disable is an admin management state — a viewer neither sees a
+  disabled node nor is handed a URL to reach it. Every **membership** state is otherwise
+  present (`alive`/`joining`/`suspect`/`dead`/`left`), honestly labelled, so the SPA renders
+  a hearsay/`joining` or `suspect` node provisionally and decides for itself whether to
+  auto-add it — the API never hides a state, only the management columns.
+- `clientUrl` = the **advertised** browser-reachable URL (`PeerEntity.Url`), **never** the
+  node-to-node gossip URL — the browser must be able to reach it directly (§2 #13a).
+- `label` = `Nickname ?? NodeId`; `membership` = the same `GossipState.Display` derivation
+  the admin `PeerView` uses (yields `joining` for un-authenticated hearsay).
+- **Self is not in the list** — a node is not its own peer; the SPA already holds the node it
+  connected to. No `enabled`, `gossipUrl`, or `apiVersion` leaks to the viewer tier.
+
 ### `POST /api/v1/peers` (admin-gated)
 ```json
 { "url": "https://node-b:8097", "nickname": "Gaming Box" }
@@ -432,6 +472,39 @@ hearsay this node has not yet authenticated first-hand).
 → 403 { error: { code: "peer_disabled" } }
 ```
 
+### `POST /auth/cluster-session/request` (user-authed — the SPA vouch initiator, G2)
+The receiver above is node-to-node (cluster-token authed) — the **browser cannot call it**
+(it holds no cluster secret). This is the **user-authed** initiator the SPA calls on a node
+it **is** logged into (A) to be vouched onto a node it is **not** (B): A relays to B's
+receiver on the caller's behalf and returns B's tokens. It is the server-side half of lazy
+vouch-on-`401`.
+```json
+// caller: a normal user session on THIS node (any tier — viewer floor). body:
+{ "nodeId": "node-b" }
+→ 201 { accessToken, refreshToken, sid, expiresAt }   // B's native session, relayed verbatim
+→ 400 { error: { code: "bad_request" } }              // missing nodeId
+→ 401 { error: { code: "unauthorized" } }             // no/!valid user session on this node
+→ 404 { error: { code: "unknown_node" } }             // nodeId not in this node's roster
+→ 403 { error: { code: "peer_disabled" } }            // the target peer is disabled here
+→ 502 { error: { code: "peer_unreachable" } }         // B unreachable or refused the vouch
+```
+- **User-authed, any tier** (`AuthPolicy.Viewer` floor) — SSO preserves the caller's tier
+  (the §0 uniform role map makes "operator on A" == "operator on B"); a viewer vouching a
+  viewer session is correct, never an escalation.
+- The caller's asserted identity is read **from their own validated session claims on this
+  node** (`SessionClaims.ReadIdentity`/`ReadTier`) — `discordId`, `username`, `displayName`,
+  and the resolved **`tier`** (as the wire string, §7 receiver). It is **never** taken from
+  the request body — the body carries only `nodeId`. This is what forecloses privilege
+  laundering: A asserts to B exactly the tier A itself resolved for this user, nothing the
+  caller can influence.
+- A looks the peer up by `nodeId` (`PeersStore.GetByNodeIdAsync`), mints a **cluster service
+  token** (`IClusterTokenService.Mint`), and `POST`s the receiver at the peer's node-to-node
+  address (`GossipUrl ?? Url`) reusing the cluster HTTP client. B's `201` body is relayed
+  back **verbatim**; any non-`201`/unreachable is an honest `502 peer_unreachable`
+  (fail-closed — this is auth, never fabricate a session on a relay failure).
+- A disabled target → `403 peer_disabled`; a `nodeId` not in the roster (including on a
+  non-cluster node, whose roster is empty) → `404 unknown_node`.
+
 ### `GET /api/v1/peers/self/resources` (cluster-token authed)
 ```json
 { "id": "node-b", "label": "Gaming Box", "status": "online",
@@ -449,6 +522,12 @@ The message-bus receive endpoint — one endpoint, typed envelope. Full contract
 ---
 
 ## 8 · SPA changes
+
+> **The SPA-side authority is `kgsm-web/docs/cluster-plan.md`** — the phased browser plan
+> (SPA-C0…C5, aligned to these phases), with the real file seams, the two SPA-facing API
+> dependencies it surfaces (a viewer-readable node list; a user-authed vouch *initiator* —
+> neither built yet), and the honest baseline (the SPA is single-host for auth today; SSO is
+> what unblocks N≥2). The bullets below are the API-side summary; follow that doc for the build.
 
 - Rename the `localStorage` connection registry `hosts → nodes` (same structure;
   provide a one-time in-place migration so existing connections survive the

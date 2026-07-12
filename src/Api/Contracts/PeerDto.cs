@@ -16,6 +16,17 @@ public sealed record PeerView(
 /// <summary>GET /peers — the envelope (a bare array would preclude adding pagination/metadata later).</summary>
 public sealed record PeerListResponse(IReadOnlyList<PeerView> Peers);
 
+/// <summary>GET /peers/roster — one enabled node, the viewer-tier projection of a roster row
+/// (<c>PLAN-peers.md §7</c>, gap G1). Deliberately leaner than <see cref="PeerView"/>: no
+/// <c>gossipUrl</c> (an internal address a browser has no business dialing), no <c>enabled</c>
+/// (a management state only an admin toggles), no <c>apiVersion</c> — a viewer gets just enough
+/// to know a node exists, how to reach it, and whether it's alive.</summary>
+public sealed record ClusterNodeView(
+    string NodeId, string Label, string ClientUrl, string Membership, string Status, int? LatencyMs);
+
+/// <summary>GET /peers/roster — the envelope.</summary>
+public sealed record ClusterNodesResponse(IReadOnlyList<ClusterNodeView> Nodes);
+
 /// <summary>POST /peers — the admin "paste a URL" action. <see cref="Nickname"/> is optional.</summary>
 public sealed record PeerAddRequest(string Url, string? Nickname);
 

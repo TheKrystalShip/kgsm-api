@@ -1,9 +1,13 @@
+using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Data;
+using TheKrystalShip.Api.Json;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
@@ -32,8 +36,22 @@ public sealed class AuthController(
     AuditService audit,
     IClusterTokenService clusterTokens,
     IClusterPeerGate peerGate,
+    PeersStore peers,
+    IHttpClientFactory httpClientFactory,
     ILogger<AuthController> logger) : ControllerBase
 {
+    // Outbound JSON for the vouch relay to a peer's ClusterSession receiver — camelCase like every
+    // other cluster HTTP call (mirrors PeersController/OutboxDrainer/GossipWorker's identical
+    // BuildJsonOptions pattern; built once, not per-request).
+    private static readonly JsonSerializerOptions VouchJsonOptions = BuildVouchJsonOptions();
+
+    private static JsonSerializerOptions BuildVouchJsonOptions()
+    {
+        var jsonOptions = new JsonSerializerOptions();
+        ApiJson.Configure(jsonOptions);
+        return jsonOptions;
+    }
+
     // The OAuth CSRF state cookie — set at /start, verified at /callback. This is the stateless
     // double-submit guard: the random nonce rides BOTH the cookie (HttpOnly, our origin) and the
     // authorize URL's `state` (which Discord echoes back), and the callback requires them equal. No
@@ -268,6 +286,107 @@ public sealed class AuthController(
 
         return StatusCode(StatusCodes.Status201Created,
             new ClusterSessionResult(access.Token, refresh.Token, sessionId, access.ExpiresAt));
+    }
+
+    /// <summary>
+    /// <c>POST /auth/cluster-session/request</c> — the user-authed vouch INITIATOR (<c>PLAN-peers.md</c>
+    /// §7, gap G2): the browser calls this on the node the caller is already logged into (this node),
+    /// never <see cref="ClusterSession"/> directly — the browser holds no cluster secret to authenticate
+    /// with there. This node reads the caller's identity and tier off THEIR OWN validated session claims
+    /// on THIS node — <b>never</b> from the request body, which carries only the target <c>nodeId</c> —
+    /// so a caller can never assert a different identity/tier than the one this node already
+    /// authenticated them as (forecloses privilege laundering). It then mints a fresh cluster service
+    /// token, relays the caller's claims to the target peer's <see cref="ClusterSession"/> receiver, and
+    /// hands back that peer's minted session verbatim — the SSO grant that carries a login on this node
+    /// onto another with no re-authentication and no cluster secret ever reaching the browser.
+    /// <list type="bullet">
+    /// <item><c>201</c> — the peer's minted session (<see cref="ClusterSessionResult"/>), relayed as-is.</item>
+    /// <item><c>400</c> <c>bad_request</c> — missing <c>nodeId</c>.</item>
+    /// <item><c>401</c> <c>unauthorized</c> — no valid session on this node.</item>
+    /// <item><c>404</c> <c>unknown_node</c> — <c>nodeId</c> isn't in this node's roster (a non-cluster
+    /// node's roster is always empty, so a disabled/unconfigured cluster also lands here).</item>
+    /// <item><c>403</c> <c>peer_disabled</c> — the target peer is disabled on this node.</item>
+    /// <item><c>502</c> <c>peer_unreachable</c> — the peer was unreachable, refused the vouch, or
+    /// returned an unparseable response.</item>
+    /// </list>
+    /// No audit row is written here — the RECEIVER (the target node) already audits
+    /// <c>auth.cluster_session</c> for the minted session; this initiator is a pass-through relay.
+    /// </summary>
+    [Authorize(Policy = AuthPolicy.Viewer)]
+    [HttpPost("/auth/cluster-session/request")]
+    public async Task<IActionResult> RequestClusterSession([FromBody] ClusterVouchRequest? body, CancellationToken ct)
+    {
+        if (User.Identity is not ClaimsIdentity ci || SessionClaims.ReadIdentity(ci) is not { } caller)
+            return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no valid session");
+
+        if (body is null || string.IsNullOrWhiteSpace(body.NodeId))
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "nodeId is required");
+
+        // A disabled/unconfigured cluster has an empty roster anyway (PeersStore never seeds rows
+        // without ClusterEnabled), so this is redundant with the lookup below — kept only so the
+        // "no cluster here at all" case reads as an explicit early-out rather than a roster miss.
+        if (!options.ClusterEnabled)
+            return Error(StatusCodes.Status404NotFound, "unknown_node", $"node '{body.NodeId}' is not a known peer");
+
+        PeerEntity? peer = await peers.GetByNodeIdAsync(body.NodeId, ct);
+        if (peer is null)
+            return Error(StatusCodes.Status404NotFound, "unknown_node", $"node '{body.NodeId}' is not a known peer");
+
+        if (!peer.Enabled)
+            return Error(StatusCodes.Status403Forbidden, "peer_disabled", $"node '{body.NodeId}' is disabled on this node");
+
+        MintedClusterToken token = clusterTokens.Mint();
+
+        // The node-to-node address (GossipUrl) when this peer has one, else its public Url — same
+        // preference GossipWorker/OutboxDrainer use to reach a peer's own HTTP surface.
+        string url = $"{(peer.GossipUrl ?? peer.Url).TrimEnd('/')}/auth/cluster-session";
+
+        // Built from the CALLER'S CLAIMS, never body — body carries only nodeId (see the XML doc above).
+        var reqBody = new ClusterSessionRequest(
+            caller.UserId, caller.Username, caller.Display, AuthTiers.ToWire(SessionClaims.ReadTier(ci)));
+
+        HttpClient http = httpClientFactory.CreateClient(OutboxDrainer.HttpClientName);
+        HttpResponseMessage response;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+            request.Content = JsonContent.Create(reqBody, options: VouchJsonOptions);
+            response = await http.SendAsync(request, ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            logger.LogWarning(ex, "cluster-session vouch to node '{NodeId}' failed", body.NodeId);
+            return Error(StatusCodes.Status502BadGateway, "peer_unreachable", $"node '{body.NodeId}' is unreachable");
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning("cluster-session vouch to node '{NodeId}' rejected: HTTP {Status}",
+                    body.NodeId, (int)response.StatusCode);
+                return Error(StatusCodes.Status502BadGateway, "peer_unreachable",
+                    $"node '{body.NodeId}' refused the vouch");
+            }
+
+            ClusterSessionResult? result;
+            try
+            {
+                result = await response.Content.ReadFromJsonAsync<ClusterSessionResult>(VouchJsonOptions, ct);
+            }
+            catch (JsonException ex)
+            {
+                logger.LogWarning(ex, "cluster-session vouch to node '{NodeId}' returned an unparseable body",
+                    body.NodeId);
+                result = null;
+            }
+            if (result is null)
+                return Error(StatusCodes.Status502BadGateway, "peer_unreachable",
+                    $"node '{body.NodeId}' returned an unparseable vouch response");
+
+            return StatusCode(StatusCodes.Status201Created, result);
+        }
     }
 
     /// <summary>302 the SPA with the OAuth outcome in the URL fragment. The target is the single

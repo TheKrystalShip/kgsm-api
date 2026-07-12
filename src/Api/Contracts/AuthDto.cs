@@ -87,3 +87,9 @@ public sealed record ClusterSessionRequest(string DiscordId, string Username, st
 // just reached via the vouch path instead of a Discord round-trip. `ExpiresAt` is the ACCESS token's
 // expiry (mirrors CallbackResult.AccessTokenExpiresAt).
 public sealed record ClusterSessionResult(string AccessToken, string RefreshToken, string Sid, DateTimeOffset ExpiresAt);
+
+// POST /auth/cluster-session/request — the user-authed vouch INITIATOR body (PLAN-peers.md §7, gap
+// G2): the browser calls this on the node it's already logged into, naming only the target node.
+// The caller's identity/tier ride the caller's own validated session claims on THIS node, never this
+// body — a request body cannot assert a different identity, foreclosing privilege laundering.
+public sealed record ClusterVouchRequest(string NodeId);
