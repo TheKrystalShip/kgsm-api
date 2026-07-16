@@ -368,7 +368,7 @@ service or dependency (§2·b).
   facts for alive+LastSeen / alive+null / suspect / disabled); and down-node
   redelivery (queued while down → delivered on return).
 
-### P2 — Resource visibility · `planned`
+### P2 — Resource visibility · `built`
 Two distinct reads, kept separate (they must not collapse into one node-proxy):
 - **The SPA reads peer resources DIRECTLY** (browser → the peer's advertised client
   URL, over its own native session) — per-node resources stay on the per-node pages
@@ -505,7 +505,12 @@ vouch-on-`401`.
 - A disabled target → `403 peer_disabled`; a `nodeId` not in the roster (including on a
   non-cluster node, whose roster is empty) → `404 unknown_node`.
 
-### `GET /api/v1/peers/self/resources` (cluster-token authed)
+### `GET /api/v1/peers/self/resources` (cluster-token authed + disable-gated)
+What this node exposes to a cluster peer's server-side fan-out. Cluster-token authed with the same
+fail-closed preamble as `/peers/inbox`, and — unlike `/peers/identity` (token-only, so a not-yet-joined
+node can still identify itself) — a resource read IS disable-gated: an explicitly-disabled peer gets
+`403 peer_disabled`. A lean projection of the §4·a host capacity strip; `cpuPct`/`mem`/`disks` are honest
+`null` when no metrics snapshot exists (never fabricated — the "metric-presence ≠ status" invariant).
 ```json
 { "id": "node-b", "label": "Gaming Box", "status": "online",
   "cpuPct": 37, "mem": { "used": 9.2, "total": 32 },
@@ -513,7 +518,14 @@ vouch-on-`401`.
 ```
 
 (`/peers/self/capabilities` and `/peers/self/library` reuse the existing
-capability and `LibraryEntry` shapes verbatim.)
+capability and `LibraryEntry` shapes verbatim, same auth + gate.)
+
+### `GET /api/v1/peers/{id}/{resources|capabilities|library}` (admin-gated — the relay)
+The **server-side node-proxy** (the one node-proxied path): mints a cluster service token and GETs peer
+`{id}`'s `self/*` surface (`GossipUrl ?? Url`), returning the peer's body **verbatim**. Consumed by the
+capacity fan-out / the assistant, **never the SPA** (§8). `{id}` is the roster-row id (as `/{id}/latency`).
+Honest degradation, never a 500: `404` unknown id, `403 peer_disabled`, `502 peer_unreachable` (down peer
+or non-2xx).
 
 ### `POST /api/v1/peers/inbox` (cluster-token authed)
 The message-bus receive endpoint — one endpoint, typed envelope. Full contract:

@@ -49,3 +49,12 @@ public sealed record PeerIdentityView(
 /// <see cref="LatencyMs"/>/<see cref="LastSeen"/> are honest <see langword="null"/> (not omitted — see
 /// <c>ApiJson</c>) until this peer's first successful probe.</summary>
 public sealed record PeerLatencyView(int? LatencyMs, string Status, DateTimeOffset? LastSeen);
+
+/// <summary>GET /peers/self/resources — this node's own capacity, projected for a cluster peer's server-side
+/// fan-out (<c>PLAN-peers.md §7</c>, P2). A lean projection of the Host §4·a capacity strip
+/// (<c>id</c>/<c>label</c>/<c>status</c> + <c>cpuPct</c>/<c>mem</c>/<c>disks</c>) — a capacity read needs "how
+/// loaded is this node," not the full diagnostics telemetry the <c>GET /hosts</c> detail carries. Capacity is
+/// honest <see langword="null"/> when no metrics snapshot exists (a warming/absent monitor), never fabricated
+/// — the same "metric-presence ≠ status" invariant the Host view honors.</summary>
+public sealed record ClusterResourcesView(
+    string Id, string Label, string Status, double? CpuPct, MemCapacity? Mem, IReadOnlyList<DiskCapacity>? Disks);

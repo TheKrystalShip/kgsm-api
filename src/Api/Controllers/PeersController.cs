@@ -10,6 +10,9 @@ using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 using TheKrystalShip.Api.Services.Leaves;
+using TheKrystalShip.Api.Services.Library;
+// Disambiguate from Microsoft.Extensions.Hosting.Host (pulled in by ImplicitUsings).
+using Host = TheKrystalShip.Api.Contracts.Host;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -44,6 +47,9 @@ public sealed class PeersController(
     ApiOptions options,
     HostIdentityProvider hostIdentity,
     LeafHealthMonitor leafHealth,
+    HostAggregator hostAggregator,
+    LibraryAggregator library,
+    ClusterPeerRelay relay,
     ILogger<PeersController> logger) : ControllerBase
 {
     /// <summary>Max envelope size (§3) — a request over this is rejected before its body is even
@@ -318,6 +324,115 @@ public sealed class PeersController(
         if (row is null)
             return NotFound();
         return Ok(new PeerLatencyView(row.LatencyMs, row.Status, row.LastSeen));
+    }
+
+    // ── P2: resource visibility ──────────────────────────────────────────────────────────────────────
+    // Two distinct reads, deliberately not collapsed into one node-proxy (PLAN-peers.md P2):
+    //   • self/*  — what THIS node exposes to a cluster peer (cluster-token authed + disable-gated), so a
+    //               peer's fan-out can read our capacity/capabilities/library.
+    //   • {id}/*  — the server-side node-proxy: relay to a peer's self/* via a minted service token. Consumed
+    //               by capacity-fan-out / the assistant, never the SPA (which reads a peer directly, §8).
+
+    /// <summary><c>GET /api/v1/peers/self/resources</c> — this node's own capacity for a cluster peer's
+    /// server-side fan-out (cluster-token authed + disable-gated). A lean projection of the §4·a Host capacity
+    /// strip; capacity is honest <see langword="null"/> when no metrics snapshot exists.</summary>
+    [HttpGet("self/resources")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SelfResources(CancellationToken ct)
+    {
+        (ClusterPrincipal? _, IActionResult? error) = await AuthenticateEnabledClusterCallerAsync().ConfigureAwait(false);
+        if (error is not null) return error;
+
+        Host host = await hostAggregator.GetHostAsync(ct).ConfigureAwait(false);
+        return Ok(new ClusterResourcesView(host.Id, host.Label, host.Status, host.CpuPct, host.Mem, host.Disks));
+    }
+
+    /// <summary><c>GET /api/v1/peers/self/capabilities</c> — this node's §4·b capability block, verbatim
+    /// (cluster-token authed + disable-gated).</summary>
+    [HttpGet("self/capabilities")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SelfCapabilities(CancellationToken ct)
+    {
+        (ClusterPrincipal? _, IActionResult? error) = await AuthenticateEnabledClusterCallerAsync().ConfigureAwait(false);
+        if (error is not null) return error;
+
+        Host host = await hostAggregator.GetHostAsync(ct).ConfigureAwait(false);
+        return Ok(host.Capabilities);
+    }
+
+    /// <summary><c>GET /api/v1/peers/self/library</c> — this node's installable-game catalog, verbatim
+    /// (cluster-token authed + disable-gated). Cover/hero URLs point at this node's own art endpoints.</summary>
+    [HttpGet("self/library")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SelfLibrary(CancellationToken ct)
+    {
+        (ClusterPrincipal? _, IActionResult? error) = await AuthenticateEnabledClusterCallerAsync().ConfigureAwait(false);
+        if (error is not null) return error;
+
+        string baseUrl = !string.IsNullOrWhiteSpace(options.PublicBaseUrl)
+            ? options.PublicBaseUrl
+            : $"{Request.Scheme}://{Request.Host}";
+        IReadOnlyList<LibraryEntry> entries = await library.GetLibraryAsync(null, baseUrl, ct).ConfigureAwait(false);
+        return Ok(entries);
+    }
+
+    /// <summary><c>GET /api/v1/peers/{id}/resources</c> — server-side relay to peer <paramref name="id"/>'s
+    /// own capacity (admin-gated; §8 keeps this off the SPA). <c>404</c> unknown peer, <c>403</c> disabled,
+    /// <c>502</c> unreachable.</summary>
+    [HttpGet("{id}/resources")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public Task<IActionResult> PeerResources(string id, CancellationToken ct) => RelayToPeerAsync(id, "resources", ct);
+
+    /// <summary><c>GET /api/v1/peers/{id}/capabilities</c> — server-side relay to peer
+    /// <paramref name="id"/>'s capability block (admin-gated).</summary>
+    [HttpGet("{id}/capabilities")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public Task<IActionResult> PeerCapabilities(string id, CancellationToken ct) => RelayToPeerAsync(id, "capabilities", ct);
+
+    /// <summary><c>GET /api/v1/peers/{id}/library</c> — server-side relay to peer <paramref name="id"/>'s
+    /// installable-game catalog (admin-gated).</summary>
+    [HttpGet("{id}/library")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public Task<IActionResult> PeerLibrary(string id, CancellationToken ct) => RelayToPeerAsync(id, "library", ct);
+
+    /// <summary>Relay a GET to a peer's <c>self/{leaf}</c> surface and map the result to the frozen envelope.
+    /// A down peer degrades to <c>502 peer_unreachable</c>, never a 500 (the P2 honesty rule).</summary>
+    private async Task<IActionResult> RelayToPeerAsync(string id, string leaf, CancellationToken ct)
+    {
+        ClusterRelayResult result = await relay.RelayGetAsync(id, leaf, ct).ConfigureAwait(false);
+        return result.Status switch
+        {
+            ClusterRelayStatus.UnknownNode => NotFound(),
+            ClusterRelayStatus.Disabled => Error(StatusCodes.Status403Forbidden, "peer_disabled",
+                $"peer '{id}' is disabled on this node"),
+            ClusterRelayStatus.Unreachable => Error(StatusCodes.Status502BadGateway, "peer_unreachable",
+                $"peer '{id}' is unreachable"),
+            // Pass the peer's body + content type through verbatim (reuse the peer's existing DTOs).
+            _ => Content(result.Payload ?? "null", result.ContentType ?? "application/json"),
+        };
+    }
+
+    /// <summary>Fail-closed cluster-token auth + the disable-list gate — the same preamble
+    /// <see cref="Inbox"/>/<see cref="Sync"/> run, factored out for the P2 <c>self/*</c> reads. Returns the
+    /// authenticated <see cref="ClusterPrincipal"/> on success, else an error result to return as-is. Unlike
+    /// <see cref="GetIdentity"/> (token-only, so a not-yet-joined node can still identify itself), a resource
+    /// read IS gated: an explicitly-disabled peer gets <c>403 peer_disabled</c>.</summary>
+    private async Task<(ClusterPrincipal? principal, IActionResult? error)> AuthenticateEnabledClusterCallerAsync()
+    {
+        string? token = ExtractBearerToken(Request);
+        if (token is null)
+            return (null, Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token", "missing bearer token"));
+
+        ClusterPrincipal? principal = await clusterTokens.ValidateAsync(token).ConfigureAwait(false);
+        if (principal is null)
+            return (null, Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token",
+                "invalid, expired, or unsigned cluster service token"));
+
+        if (!await peerGate.IsEnabledAsync(principal.NodeId).ConfigureAwait(false))
+            return (null, Error(StatusCodes.Status403Forbidden, "peer_disabled",
+                $"node '{principal.NodeId}' is not an enabled peer of this cluster"));
+
+        return (principal, null);
     }
 
     private static PeerView ToView(PeerEntity p) =>

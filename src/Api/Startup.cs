@@ -407,6 +407,11 @@ public class Startup(IConfiguration configuration)
         services.AddHttpClient(GossipWorker.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
         services.AddHostedService<GossipWorker>();
 
+        // Cluster resource visibility (PLAN-peers.md P2). The server-side node-proxy that fans a resource read
+        // out to a peer's self/* surface — reuses the OutboxDrainer named HttpClient (mint-authed, 10s bound),
+        // so no new client. The self/* exposing endpoints live on PeersController (no extra service).
+        services.AddSingleton<ClusterPeerRelay>();
+
         // M4·a — auth (Discord per-host, Model A). Stateless JWT bearer (the M4 decision): no session
         // table, no user row — keeps M5 as the first EF migration. The Discord seam (IDiscordIdentityResolver)
         // keeps everything that talks to discord.com behind one interface, so the whole 401/403/tier matrix

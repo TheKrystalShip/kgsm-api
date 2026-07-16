@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.25.0) — cluster resource visibility (P2)
+- **`GET /api/v1/peers/self/{resources|capabilities|library}`** — what a node exposes to a cluster peer
+  (**cluster-token authed + disable-gated**, the same fail-closed preamble as `/peers/inbox`; unlike
+  `/peers/identity` a resource read IS gated, so an explicitly-disabled peer gets `403 peer_disabled`).
+  `self/resources` is a lean projection of the §4·a host capacity strip
+  (`{ id, label, status, cpuPct, mem, disks }`) — capacity is honest `null` when no metrics snapshot exists,
+  never a fabricated figure; `self/capabilities` returns the §4·b capability block verbatim;
+  `self/library` returns the installable-game catalog verbatim (empty when the engine is unprovisioned).
+- **`GET /api/v1/peers/{id}/{resources|capabilities|library}`** — the **server-side node-proxy** relay
+  (**admin-gated**): mints a cluster service token and fans the read out to the peer's `self/*` surface,
+  returning the peer's body verbatim (reuse the existing DTOs). This is the one node-proxied path — consumed
+  by the on-demand "find a node with capacity" logic and (later) the assistant, **never by the SPA** (which
+  reads a peer's resources directly over its own native session; §8). A down peer degrades to
+  `502 peer_unreachable`, an unknown id to `404`, a disabled peer to `403 peer_disabled` — never a 500.
+- New `ClusterPeerRelay` service (reuses the `OutboxDrainer` named `HttpClient` — mint-authed, 10s-bounded —
+  so every node-to-node call shares one client) + `ClusterResourcesView` DTO. Self-validated by
+  `ClusterResourceRelayTests` (9 facts: self/* auth + honest-null capacity, relay 404/403/502/viewer-gate,
+  and a two-node happy path routing A's relay into B's real pipeline). 746/746 tests.
+
 ### Added (v0.24.0) — cluster SPA-facing endpoints (G1 viewer roster, G2 vouch initiator)
 - **`GET /api/v1/peers/roster`** — the **viewer-gated** node list the browser reads to auto-populate its
   registry ("add one, see all"). The admin `GET /peers` leaks management detail (gossip URL, `enabled`,
