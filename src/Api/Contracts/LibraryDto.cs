@@ -13,8 +13,7 @@ namespace TheKrystalShip.Api.Contracts;
 /// <list type="bullet">
 ///   <item><description><c>name</c> is the curated blueprint metadata display name when
 ///     present, else the blueprint <c>id</c> — the honest fallback, never a guessed display name
-///     (blueprint metadata curation is deferred upstream, so every blueprint's metadata is null
-///     today and <c>name == id</c>).</description></item>
+///     (a blueprint that declares no <c>display_name</c> falls back to <c>name == id</c>).</description></item>
 ///   <item><description><c>cover</c>/<c>hero</c> are <strong>absolute, directly-renderable image URLs</strong>
 ///     (or null) pointing at this API's own <c>GET /library/{id}/cover</c> / <c>/hero</c> endpoints. They are
 ///     resolved server-side and self-hosted on disk. <c>cover</c> is the Steam library capsule (the 2:3
@@ -25,9 +24,10 @@ namespace TheKrystalShip.Api.Contracts;
 ///   <item><description><c>steamAppId</c>/<c>clientSteamAppId</c> are <c>null</c> for a non-Steam
 ///     blueprint (honest unknown over the <c>Server</c> DTO's <c>"0"</c> sentinel — a deliberate,
 ///     frozen choice for this new surface).</description></item>
-///   <item><description><c>specs</c> keys are always present but every value is nullable and
-///     <c>null</c> today (metadata uncurated upstream) — a <c>null</c> spec is "unknown", never a
-///     fabricated 0.</description></item>
+///   <item><description><c>specs</c> keys are always present but every value is nullable — a
+///     <c>null</c> spec is "unknown/unbounded" for a field that blueprint doesn't declare, never a
+///     fabricated 0. Coverage is per-blueprint (RAM is widely curated; <c>baseDiskMb</c> is
+///     sparser).</description></item>
 /// </list>
 /// Keys are always present with explicit values (honest unknown over omission) so the SPA binds a
 /// stable shape regardless of how sparse a given blueprint is.
@@ -42,7 +42,8 @@ namespace TheKrystalShip.Api.Contracts;
 /// <param name="Ports">The blueprint's declared default ports, structured (parsed at the kgsm-lib
 /// chokepoint from the legacy UFW spec string — the API never re-parses an opaque port string).
 /// Empty when the blueprint declares none.</param>
-/// <param name="Specs">Advisory game specs from blueprint metadata (all <c>null</c> today).</param>
+/// <param name="Specs">Advisory game specs from blueprint metadata; each field <c>null</c> where that
+/// blueprint declares no value (unknown/unbounded), never fabricated.</param>
 /// <param name="Cover">Absolute, directly-renderable cover-art URL — the Steam library capsule (2:3 portrait)
 /// when the game is on Steam, else RAWG <c>background_image</c>; self-hosted at <c>GET /library/{id}/cover</c>,
 /// or <c>null</c> when none is cached (no source / unresolved).</param>
@@ -85,8 +86,10 @@ public sealed record LibraryPort(int Start, int End, string Proto);
 /// Advisory, vendor-declared game specs (<c>architecture.html §3·h "specs"</c>) — mapped 1:1 from
 /// kgsm-lib's <c>BlueprintMetadata</c>. Every field is nullable: <c>null</c> means
 /// <em>unknown/unbounded</em>, never a substitute for a real <c>0</c> (the never-fabricate-a-metric
-/// invariant). All <c>null</c> today across every blueprint (metadata curation is deferred upstream);
-/// the keys are present so the shape is stable as curation lands.
+/// invariant). Coverage is per-blueprint — RAM (<c>MinRamMb</c>/<c>RecommendedRamMb</c>) is widely curated,
+/// <c>BaseDiskMb</c> is sparser — and the keys are always present so the shape is stable regardless.
+/// There is no CPU field: a single number can't honestly represent CPU capability, so it is deliberately
+/// not a spec (capacity/placement reasons over RAM + disk only).
 /// </summary>
 /// <param name="MaxPlayers">Maximum players, or <c>null</c> if unbounded/configurable/unknown.</param>
 /// <param name="MinRamMb">Advisory minimum RAM (MB), or <c>null</c>.</param>
