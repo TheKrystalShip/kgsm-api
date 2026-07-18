@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (v0.26.1) — dev tooling (mint-dev-token + smoke) on a live host
+- **`scripts/mint-dev-token.py` mints a usable session now.** It adds the `sid`/`jti` claims and inserts
+  the matching `sessions` row the M4·c registry requires (a token with no live session row is rejected
+  401), so a minted dev bearer authenticates against the real auth-ON API — not just an
+  `KGSM_API_AUTH_DISABLED` host. New `--db` (defaults to `KGSM_API_DB` / env file /
+  `/var/lib/kgsm-api/kgsm-api.db`) and `--no-session` (token-only) flags; the row carries a
+  recognisable User-Agent so these dev sessions show in Active Sessions and are GC'd on expiry.
+- **`scripts/smoke.sh` is green against a live engine.** The audit + console checks asserted a
+  pristine-host emptiness that a live kgsm legitimately violates (real lifecycle events land audit rows;
+  a running native instance has console scrollback) — they now assert the *contract* (the page envelope /
+  the frozen `{lines:[…]}` shape + never-500), host-quiescence-independent. The M7 relay instance now
+  uses its own fresh DB: the DB-backed `LeafRegistry` persists each leaf's provisioned flag and a
+  persisted row overrides the config seed, so reusing the shared DB carried an earlier assistant-less
+  instance's `assistant.provisioned=false` forward and the stub assistant never polled operational.
+
 ### Changed (v0.26.0) — metrics history is proxied to kgsm-monitor
 - **kgsm-monitor is the single source of truth for metrics history.** The API no longer persists
   metrics: `GET /servers/{id}/metrics/history` and `GET /hosts/{id}/metrics/history` keep their routes,

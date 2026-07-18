@@ -109,6 +109,7 @@ cleanup() {
   for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
   for p in "${PIDS[@]:-}"; do wait "$p" 2>/dev/null; done
   rm -f "$STUB_SOCK" "$STUB_ASSIST_PY" 2>/dev/null
+  rm -f "${M7_DB:-}" "${M7_DB:-}"-wal "${M7_DB:-}"-shm 2>/dev/null
 }
 trap cleanup EXIT
 
@@ -155,8 +156,17 @@ sys.exit(0 if d['capabilities']['metrics']['status']!='unknown' else 1)
 # start_api_assistant URL SECRET — launch the API (auth still disabled) pointed at a stub assistant +
 # the relay secret, so the M7 relay path can actually execute. Same monitor/watchdog/kgsm wiring as
 # start_api (the absent defaults); only the assistant is added.
+#
+# ⚠ Uses a DEDICATED, FRESH DB (not the shared $DB). The DB-backed LeafRegistry persists each leaf's
+# provisioned flag and a PERSISTED row OVERRIDES the config seed on the next boot (leaf-runtime-config —
+# so a live connect/disconnect survives a restart). Every prior api instance in this run booted with NO
+# assistant configured, persisting assistant.provisioned=false into $DB; reusing $DB here would carry
+# that false forward and the assistant would never poll healthy no matter the config. A clean DB lets
+# this instance provision the assistant from its config seed.
+M7_DB="${DB%.db}-m7.db"
 start_api_assistant() {
-  KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" KGSM_API_HOST_ID="$HOST_ID" \
+  rm -f "$M7_DB" "$M7_DB"-wal "$M7_DB"-shm
+  KGSM_API_URLS="$BASE" KGSM_API_DB="$M7_DB" KGSM_API_HOST_ID="$HOST_ID" \
   KGSM_API_MONITOR_SOCKET="$MON_SOCK" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" \
   KGSM_API_KGSM_PATH="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
   KGSM_API_ASSISTANT_URL="$1" KGSM_API_ASSISTANT_RELAY_SECRET="$2" \
@@ -170,7 +180,10 @@ start_api_assistant() {
 # /health and flipped the §4·b assistant capability to 'operational' (so the relay's capability gate
 # admits the call instead of 503-ing on a cold/down read).
 wait_assistant_operational() {
-  for _ in $(seq 1 60); do
+  # ~30s: the LeafHealthMonitor polls each provisioned leaf's /health every ~2s, so the assistant
+  # capability flips operational within a few polls of the stub being reachable — but this is the 4th
+  # API boot in the run, and on a loaded host the first poll + flip can take longer than a tight window.
+  for _ in $(seq 1 150); do
     if curl -fsS "${BASE}/api/v1/hosts/${HOST_ID}" -o /tmp/kgsm-api-smoke.body 2>/dev/null && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
@@ -903,19 +916,21 @@ sys.exit(0 if any(t>u for t in tick_t) else 4)                         # ticks r
   echo "  (note: 202/job lifecycle + SSE job.patch + verify are code-path-only in smoke — live-validated on a trusted host)"
 
   # --- M5 audit: the read surface (the append path is xUnit + a trusted-host live-validate) ---
-  echo "==> M5 audit checks — GET /audit (the keyset read contract; empty here — no events fire in smoke)"
+  echo "==> M5 audit checks — GET /audit (the keyset read contract + page envelope)"
 
-  # 29. GET /audit -> 200 + the { data, nextCursor } page shape. Empty + nextCursor:null on a fresh DB
-  #     (no kgsm lifecycle events fire in smoke, auth is disabled so no login) — proves the endpoint, the
-  #     page envelope, and that EnsureCreated landed the audit table (a missing table would 500 here).
+  # 29. GET /audit -> 200 + the { data, nextCursor } page shape. The contract is the ENVELOPE + that
+  #     EnsureCreated landed the audit table (a missing table would 500 here), NOT emptiness: this smoke
+  #     runs against the LIVE kgsm engine, so real lifecycle events (a running instance, player join/leave)
+  #     legitimately land audit rows during the run. Assert `data` is a list and `nextCursor` is present
+  #     (null when the page isn't full) — host-quiescence-independent.
   req GET /api/v1/audit
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
-sys.exit(0 if (isinstance(d.get('data'),list) and len(d['data'])==0 and d.get('nextCursor') is None) else 1)
+sys.exit(0 if (isinstance(d.get('data'),list) and 'nextCursor' in d) else 1)
 " 2>/dev/null; then
-    ok "/audit 200 + { data:[], nextCursor:null } (empty page; table created via EnsureCreated)"
-  else bad "M5 /audit empty page (code=$CODE body=$BODY)"; fi
+    ok "/audit 200 + { data:[…], nextCursor } page envelope (table created via EnsureCreated; rows may be present on a live engine)"
+  else bad "M5 /audit page envelope (code=$CODE body=$BODY)"; fi
 
   # 30. The filters + limit are accepted (still empty here) — proves the keyset query parameters bind and
   #     the page shape holds with filters applied (1:1 to the indexed columns).
@@ -1065,28 +1080,30 @@ sys.exit(0 if (isinstance(d.get('data'),list) and len(d['data'])==0) else 1)
   echo "   live-validate, needing kgsm-watchdog up + a forced crash, like M3's mutation happy path)"
 
   # --- #8 console scrollback: GET /servers/{id}/console?tail=N (the REST hydrate half) --------
-  echo "==> #8 console checks — GET /servers/{id}/console?tail=N (scrollback REST; watchdog ABSENT here)"
+  echo "==> #8 console checks — GET /servers/{id}/console?tail=N (scrollback REST; frozen shape + never-500)"
 
-  # 36·c. No watchdog is provisioned in smoke (KGSM_API_WATCHDOG_SOCKET unset) → no console source → the
-  #       endpoint degrades to { lines: [] } (degrade gracefully, NEVER a 500). Proves the frozen shape +
-  #       the absent-watchdog degrade. ?tail= is accepted (clamped 0..5000); the value is inert with no source.
+  # 36·c. The contract is the frozen shape + degrade-gracefully (NEVER a 500), NOT emptiness: scrollback
+  #       reads the watchdog's LogFile (IWatchdogClient.GetConsoleTailAsync), which degrades an unknown /
+  #       non-native / unreachable-watchdog case to { lines: [] } rather than throwing. On a live host with
+  #       a running native instance the tail is legitimately POPULATED; on a bare host it's []. Assert
+  #       `lines` is a list either way. ?tail= is accepted (clamped 0..5000).
   req GET "/api/v1/servers/${FIRST_ID}/console?tail=50"
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
-sys.exit(0 if (isinstance(d.get('lines'),list) and len(d['lines'])==0) else 1)
+sys.exit(0 if isinstance(d.get('lines'),list) else 1)
 " 2>/dev/null; then
-    ok "/servers/{id}/console?tail=50 200 + { lines: [] } (watchdog absent → honest empty; never a 500)"
-  else bad "#8 console scrollback degrade (code=$CODE body=$BODY)"; fi
+    ok "/servers/{id}/console?tail=50 200 + { lines: [...] } (honest tail-or-empty; never a 500)"
+  else bad "#8 console scrollback shape (code=$CODE body=$BODY)"; fi
 
-  # 36·d. The default (no ?tail=) is the same honest empty here — proves the param is optional + the shape holds.
+  # 36·d. The default (no ?tail=) holds the same shape — proves the param is optional + the envelope holds.
   req GET "/api/v1/servers/${FIRST_ID}/console"
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
-sys.exit(0 if (isinstance(d.get('lines'),list) and len(d['lines'])==0) else 1)
+sys.exit(0 if isinstance(d.get('lines'),list) else 1)
 " 2>/dev/null; then
-    ok "/servers/{id}/console (no ?tail=, default 200) 200 + { lines: [] }"
+    ok "/servers/{id}/console (no ?tail=, default 200) 200 + { lines: [...] }"
   else bad "#8 console scrollback default (code=$CODE body=$BODY)"; fi
 
   echo "  (note: the live SSE follow on servers/{id}/console — opening a shared watchdog tail-bridge per native"
