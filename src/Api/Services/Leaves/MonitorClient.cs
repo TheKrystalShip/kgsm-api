@@ -5,11 +5,27 @@ using TheKrystalShip.KGSM.Monitor.Contracts;
 namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>
+/// The read seam for the monitor's metrics-history endpoint. The monitor is the single source of
+/// truth for metrics history; the API relays its <c>GET /metrics/history</c> JSON verbatim, so this
+/// returns the raw response body (never a re-serialized DTO). An interface so the history-proxy
+/// controller can be tested against a fake monitor response in-process.
+/// </summary>
+public interface IMonitorHistoryClient
+{
+    /// <summary>Fetch the monitor's history JSON for an entity+range, verbatim. Returns <c>null</c>
+    /// when the monitor is unprovisioned, unreachable, slow, or answers non-2xx (honest degrade —
+    /// the caller then serves an empty response, never a fabricated curve).</summary>
+    Task<string?> GetHistoryJsonAsync(string kind, string id, string? range, CancellationToken ct);
+}
+
+/// <summary>
 /// The kgsm-monitor leaf client: scrapes <c>GET /metrics</c> over the monitor's unix-domain
 /// socket and serves a <strong>cached-latest</strong> <see cref="Snapshot"/>. The HTTP-over-unix
 /// transport reuses the same <see cref="SocketsHttpHandler.ConnectCallback"/> pattern as
 /// kgsm-lib's watchdog client; the snapshot is deserialized with the monitor's own shared
-/// <see cref="MonitorJsonContext"/>, so producer and consumer share one build-time contract.
+/// <see cref="MonitorJsonContext"/>, so producer and consumer share one build-time contract. It is
+/// also the read seam for the monitor's metrics-history endpoint (<see cref="IMonitorHistoryClient"/>),
+/// which the API relays verbatim.
 /// </summary>
 /// <remarks>
 /// Honesty: a failed, timed-out, or not-yet-ready (503) scrape yields <c>null</c> — the caller
@@ -17,7 +33,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// stale last-good data (that "last values hold" behavior belongs to the M2 stream); the cache
 /// only conflates rapid requests within a short TTL.
 /// </remarks>
-public sealed class MonitorClient : IDisposable
+public sealed class MonitorClient : IMonitorHistoryClient, IDisposable
 {
     // The monitor self-ticks (~1s) and serves its latest in-memory frame, so a short api-side
     // cache bounds socket round-trips without adding meaningful staleness.
@@ -137,6 +153,36 @@ public sealed class MonitorClient : IDisposable
         {
             _logger.LogDebug(ex, "monitor /health probe failed");
             return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> GetHistoryJsonAsync(string kind, string id, string? range, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Monitor))
+            return null; // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            string url =
+                $"/metrics/history?kind={Uri.EscapeDataString(kind)}&id={Uri.EscapeDataString(id)}&range={Uri.EscapeDataString(range ?? "1h")}";
+            using HttpResponseMessage resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("monitor /metrics/history returned {Status}", (int)resp.StatusCode);
+                return null;
+            }
+            return await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("monitor /metrics/history timed out after {Timeout}", ScrapeTimeout);
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "monitor /metrics/history failed");
+            return null;
         }
     }
 

@@ -1,101 +1,58 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
-using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Auth;
-using TheKrystalShip.Api.Services.Metrics;
+using TheKrystalShip.Api.Services.Leaves;
 
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// Historical metrics endpoints (M9 Increment 3). Tier selection is automatic by range:
-/// range &le; raw retention → raw (sample table, ~15s step); range &gt; raw retention → rollup
-/// (rollup table, 5min step). Gaps are absent points. Unknown id → 404; history disabled or
-/// monitor never seen → empty series (200, never a fabricated curve).
+/// Historical metrics endpoints — a <b>verbatim proxy</b> to kgsm-monitor, the single source of truth
+/// for metrics history. The API keeps the routes, the viewer gate, and the entity existence checks
+/// (unknown id → 404), then relays the monitor's <c>GET /metrics/history</c> JSON body unchanged (tier
+/// selection, series shaping, and retention all live in the monitor). Monitor absent/unreachable →
+/// an honest empty response (200, never a fabricated curve), the same graceful-degrade the SPA already
+/// handles.
 /// </summary>
 [ApiController]
 [Route("api/v1")]
 [Authorize(Policy = AuthPolicy.Viewer)]
 public sealed class MetricsHistoryController(
-    MetricsHistoryStore store,
+    IMonitorHistoryClient monitor,
     ServerAggregator serverAggregator,
     ApiOptions options) : ControllerBase
 {
     [HttpGet("servers/{id}/metrics/history")]
-    public async Task<ActionResult<MetricsHistoryResponse>> GetServerHistory(
+    public async Task<IActionResult> GetServerHistory(
         string id, [FromQuery] string? range, CancellationToken ct)
     {
-        if (!options.MetricsHistoryEnabled)
-            return Ok(EmptyResponse(id, "server", range ?? MetricsRange.OneHour));
-
         // null baseUrl: existence check only — skip the cover/hero art join (decorative, not needed here).
         Server? server = await serverAggregator.GetServerDetailAsync(id, null, ct);
         if (server is null)
             return NotFound();
 
-        return Ok(await BuildResponseAsync("server", id, range, ct));
+        return await ProxyAsync("server", id, range, ct);
     }
 
     [HttpGet("hosts/{id}/metrics/history")]
-    public async Task<ActionResult<MetricsHistoryResponse>> GetHostHistory(
+    public async Task<IActionResult> GetHostHistory(
         string id, [FromQuery] string? range, CancellationToken ct)
     {
-        if (!options.MetricsHistoryEnabled)
-            return Ok(EmptyResponse(id, "host", range ?? MetricsRange.OneHour));
-
         if (id != options.HostId)
             return NotFound();
 
-        return Ok(await BuildResponseAsync("host", id, range, ct));
+        return await ProxyAsync("host", id, range, ct);
     }
 
-    private async Task<MetricsHistoryResponse> BuildResponseAsync(
-        string entityKind, string entityId, string? rangeStr, CancellationToken ct)
+    private async Task<IActionResult> ProxyAsync(string kind, string id, string? range, CancellationToken ct)
     {
-        rangeStr ??= MetricsRange.OneHour;
-        TimeSpan? duration = MetricsRange.Parse(rangeStr);
-        if (duration is null)
-            duration = TimeSpan.FromHours(1);
+        string? json = await monitor.GetHistoryJsonAsync(kind, id, range, ct);
+        if (json is null)
+            return Ok(EmptyResponse(id, kind, range ?? MetricsRange.OneHour));
 
-        long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        long fromMs = nowMs - (long)duration.Value.TotalMilliseconds;
-
-        bool useRaw = duration.Value.TotalHours <= options.MetricsRawRetentionHours;
-
-        if (useRaw)
-        {
-            List<MetricSample> samples = await store.ReadRawAsync(entityKind, entityId, null, fromMs, nowMs, ct);
-            var series = new Dictionary<string, List<MetricsHistoryPoint>>();
-            foreach (MetricSample s in samples)
-            {
-                if (!series.TryGetValue(s.Metric, out List<MetricsHistoryPoint>? list))
-                {
-                    list = [];
-                    series[s.Metric] = list;
-                }
-                list.Add(new MetricsHistoryPoint(DateTimeOffset.FromUnixTimeMilliseconds(s.Ts), s.Value));
-            }
-            return new MetricsHistoryResponse(entityId, entityKind, rangeStr,
-                options.MetricsPersistMs / 1000, "raw", series);
-        }
-        else
-        {
-            List<MetricRollup> rollups = await store.ReadRollupAsync(entityKind, entityId, null, fromMs, nowMs, ct);
-            var series = new Dictionary<string, List<MetricsHistoryPoint>>();
-            foreach (MetricRollup r in rollups)
-            {
-                if (!series.TryGetValue(r.Metric, out List<MetricsHistoryPoint>? list))
-                {
-                    list = [];
-                    series[r.Metric] = list;
-                }
-                list.Add(new MetricsHistoryPoint(
-                    DateTimeOffset.FromUnixTimeMilliseconds(r.BucketTs), r.Avg, r.Min, r.Max, r.N));
-            }
-            return new MetricsHistoryResponse(entityId, entityKind, rangeStr,
-                options.MetricsRollupStepMin * 60, "rollup", series);
-        }
+        // Relay the monitor's body unchanged (it already carries the SPA's exact shape).
+        return Content(json, "application/json");
     }
 
     private static MetricsHistoryResponse EmptyResponse(string entityId, string kind, string range) =>

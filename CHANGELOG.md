@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (v0.26.0) — metrics history is proxied to kgsm-monitor
+- **kgsm-monitor is the single source of truth for metrics history.** The API no longer persists
+  metrics: `GET /servers/{id}/metrics/history` and `GET /hosts/{id}/metrics/history` keep their routes,
+  viewer gate, and existence checks (unknown id → 404), then **relay the monitor's `GET /metrics/history`
+  body verbatim**. Monitor absent/unreachable → an honest empty response (200), the same graceful
+  degrade the SPA already handles. The live path (`MonitorClient.GetLatestAsync` → `MetricsPump`) and
+  the `Snapshot` contract are unchanged.
+- Removed the API-side persistence subsystem: `MetricsSampler`, `MetricsMaintenanceService`,
+  `MetricsHistoryStore`, `MetricsDbContext` (+ `metrics.db`), and the `KGSM_API_METRICS_HISTORY_*` /
+  `KGSM_API_METRICS_PERSIST_MS` / retention config keys. `MonitorClient` gains `IMonitorHistoryClient`
+  (the history read seam the proxy controller uses). Existing `metrics.db` history is discarded on
+  cutover — the monitor's windows refill on its own cadence.
+
 ### Added (v0.25.0) — cluster resource visibility (P2)
 - **`GET /api/v1/peers/self/{resources|capabilities|library}`** — what a node exposes to a cluster peer
   (**cluster-token authed + disable-gated**, the same fail-closed preamble as `/peers/inbox`; unlike

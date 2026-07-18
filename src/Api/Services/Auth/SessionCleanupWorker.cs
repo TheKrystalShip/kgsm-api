@@ -5,8 +5,8 @@ namespace TheKrystalShip.Api.Services.Auth;
 /// on a timer, deletes every row whose <see cref="Data.SessionEntry.Expires"/> has passed — BOTH
 /// revoked and non-revoked (expired is dead regardless of revocation; see
 /// <see cref="SessionStore.DeleteExpiredAsync"/>) — so the table doesn't grow forever across a long
-/// run. Mirrors <see cref="Metrics.MetricsMaintenanceService"/> exactly: a startup catch-up pass (a
-/// host that was down for a while shouldn't wait a full interval to start shedding rows), then a
+/// run. A startup catch-up pass (a host that was down for a while shouldn't wait a full interval to
+/// start shedding rows), then a
 /// <see cref="PeriodicTimer"/> loop with a per-tick <c>try/catch</c> that swallows non-cancellation
 /// exceptions (one bad tick must never kill the worker — the next tick tries again).
 /// </summary>

@@ -1,17 +1,20 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using TheKrystalShip.Api.Data;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using TheKrystalShip.Api.Services.Auth;
-using TheKrystalShip.Api.Services.Metrics;
+using TheKrystalShip.Api.Services.Leaves;
 
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// M9 Increment 3 tests: the <c>GET /servers/{id}/metrics/history</c> and
-/// <c>GET /hosts/{id}/metrics/history</c> read endpoints. Exercises tier selection, gap rendering,
-/// the 404/empty-degrade branches, and the viewer auth gate.
+/// The <c>GET /servers/{id}/metrics/history</c> and <c>GET /hosts/{id}/metrics/history</c> endpoints,
+/// now a <b>verbatim proxy</b> to kgsm-monitor. Exercises the viewer auth gate, the 404 existence
+/// checks, the monitor-absent empty-degrade (the base factory leaves the monitor unprovisioned), and
+/// the verbatim relay of a monitor response (via a fake <see cref="IMonitorHistoryClient"/>).
 /// </summary>
 public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>
 {
@@ -23,11 +26,15 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         return c;
     }
 
-    private MetricsHistoryStore Store =>
-        factory.Services.GetRequiredService<MetricsHistoryStore>();
-
     private static async Task<JsonElement> Json(HttpResponseMessage r) =>
         JsonDocument.Parse(await r.Content.ReadAsStringAsync()).RootElement;
+
+    // A fake monitor history client that answers with a fixed body (the verbatim-relay seam).
+    private sealed class FakeMonitorHistory(string? json) : IMonitorHistoryClient
+    {
+        public Task<string?> GetHistoryJsonAsync(string kind, string id, string? range, CancellationToken ct) =>
+            Task.FromResult(json);
+    }
 
     // --- Auth gate ---
 
@@ -47,7 +54,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
     }
 
-    // --- Unknown id → 404 ---
+    // --- Unknown id → 404 (existence checks survive the proxy rewrite) ---
 
     [Fact]
     public async Task ServerHistory_UnknownId_404()
@@ -63,10 +70,10 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
-    // --- Host with correct id (empty series, no monitor) ---
+    // --- Monitor absent (unprovisioned) → honest empty 200, correct shape ---
 
     [Fact]
-    public async Task HostHistory_CorrectId_200_EmptySeriesShape()
+    public async Task HostHistory_MonitorAbsent_200_EmptySeriesShape()
     {
         HttpResponseMessage r = await Viewer()
             .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/metrics/history?range=1h");
@@ -76,98 +83,54 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         Assert.Equal(AuthTestFactory.HostId, body.GetProperty("entityId").GetString());
         Assert.Equal("host", body.GetProperty("kind").GetString());
         Assert.Equal("1h", body.GetProperty("range").GetString());
-        Assert.Equal(JsonValueKind.Object, body.GetProperty("series").ValueKind);
+        JsonElement series = body.GetProperty("series");
+        Assert.Equal(JsonValueKind.Object, series.ValueKind);
+        Assert.Empty(series.EnumerateObject()); // no fabricated curve when the monitor is absent
     }
 
-    // --- Tier selection (via seeded rows) ---
+    // --- Verbatim relay of the monitor's body ---
 
     [Fact]
-    public async Task HostHistory_ShortRange_ReturnsRawTier()
+    public async Task HostHistory_RelaysMonitorBodyVerbatim()
     {
-        await SeedHostSamples();
+        string monitorBody =
+            "{\"entityId\":\"" + AuthTestFactory.HostId + "\",\"kind\":\"host\",\"range\":\"1h\"," +
+            "\"step\":15,\"tier\":\"raw\",\"series\":{\"memUsedKb\":[" +
+            "{\"ts\":\"2026-07-18T00:00:00+00:00\",\"value\":8000000,\"min\":null,\"max\":null,\"n\":null}]}}";
 
-        HttpResponseMessage r = await Viewer()
-            .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/metrics/history?range=1h");
+        using WebApplicationFactoryWithFake fakeFactory = new(monitorBody);
+        HttpClient client = fakeFactory.Factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", AuthTestFactory.MintTokenWithRow(fakeFactory.Factory.Services, AuthTier.Viewer, access: true));
+
+        HttpResponseMessage r = await client.GetAsync(
+            $"/api/v1/hosts/{AuthTestFactory.HostId}/metrics/history?range=1h");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
         JsonElement body = await Json(r);
         Assert.Equal("raw", body.GetProperty("tier").GetString());
+        Assert.Equal(15, body.GetProperty("step").GetInt32());
+        JsonElement mem = body.GetProperty("series").GetProperty("memUsedKb");
+        Assert.Equal(1, mem.GetArrayLength());
+        Assert.Equal(8000000, mem[0].GetProperty("value").GetInt64());
     }
 
-    [Fact]
-    public async Task HostHistory_LongRange_ReturnsRollupTier()
+    // Wraps a derived factory whose IMonitorHistoryClient is the fake; disposes both together.
+    private sealed class WebApplicationFactoryWithFake : IDisposable
     {
-        HttpResponseMessage r = await Viewer()
-            .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/metrics/history?range=7d");
-        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        public WebApplicationFactory<Program> Factory { get; }
 
-        JsonElement body = await Json(r);
-        Assert.Equal("rollup", body.GetProperty("tier").GetString());
-    }
-
-    // --- Response shape with seeded data ---
-
-    [Fact]
-    public async Task HostHistory_SeededData_CorrectShape()
-    {
-        long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        long recentTs = nowMs - 30_000; // 30s ago — unique ts to avoid collision with other tests
-
-        await Store.WriteSamplesAsync([
-            new MetricSample { EntityKind = "host", EntityId = AuthTestFactory.HostId, Metric = "memUsedKb", Ts = recentTs, Value = 8000000 },
-        ]);
-
-        HttpResponseMessage r = await Viewer()
-            .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/metrics/history?range=1h");
-        JsonElement body = await Json(r);
-
-        JsonElement series = body.GetProperty("series");
-        Assert.True(series.TryGetProperty("memUsedKb", out JsonElement memSeries));
-        Assert.True(memSeries.GetArrayLength() >= 1);
-
-        // Verify a point has the expected shape: ts + value
-        JsonElement point = memSeries[memSeries.GetArrayLength() - 1];
-        Assert.True(point.TryGetProperty("value", out _));
-        Assert.True(point.TryGetProperty("ts", out _));
-    }
-
-    // --- Rollup data shape (min/max/n present) ---
-
-    [Fact]
-    public async Task HostHistory_RollupData_HasMinMaxN()
-    {
-        long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        long recentBucket = nowMs - 86_400_000 * 2; // 2 days ago (within 30d rollup window)
-
-        await Store.WriteRollupsAsync([
-            new MetricRollup
-            {
-                EntityKind = "host", EntityId = AuthTestFactory.HostId,
-                Metric = "cpuTotalPct", BucketTs = recentBucket,
-                Avg = 45.0, Min = 10.0, Max = 90.0, N = 20
-            },
-        ]);
-
-        HttpResponseMessage r = await Viewer()
-            .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/metrics/history?range=7d");
-        JsonElement body = await Json(r);
-        JsonElement series = body.GetProperty("series");
-
-        if (series.TryGetProperty("cpuTotalPct", out JsonElement cpuSeries) && cpuSeries.GetArrayLength() > 0)
+        public WebApplicationFactoryWithFake(string monitorBody)
         {
-            JsonElement point = cpuSeries[0];
-            Assert.Equal(45.0, point.GetProperty("value").GetDouble());
-            Assert.Equal(10.0, point.GetProperty("min").GetDouble());
-            Assert.Equal(90.0, point.GetProperty("max").GetDouble());
-            Assert.Equal(20, point.GetProperty("n").GetInt32());
+            var baseFactory = new AuthTestFactory();
+            Factory = baseFactory.WithWebHostBuilder(builder =>
+                builder.ConfigureTestServices(services =>
+                {
+                    services.RemoveAll<IMonitorHistoryClient>();
+                    services.AddSingleton<IMonitorHistoryClient>(new FakeMonitorHistory(monitorBody));
+                }));
         }
-    }
 
-    private async Task SeedHostSamples()
-    {
-        long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        await Store.WriteSamplesAsync([
-            new MetricSample { EntityKind = "host", EntityId = AuthTestFactory.HostId, Metric = "cpuTotalPct", Ts = nowMs - 30_000, Value = 33.0 },
-        ]);
+        public void Dispose() => Factory.Dispose();
     }
 }

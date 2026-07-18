@@ -18,7 +18,6 @@ using TheKrystalShip.Api.Services.Files;
 using TheKrystalShip.Api.Services.Integrations;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
-using TheKrystalShip.Api.Services.Metrics;
 using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Extensions;
 
@@ -88,13 +87,10 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<LeafRegistry>();
         services.AddHostedService(sp => sp.GetRequiredService<LeafRegistry>());
 
-        // M9 — metrics history (a SEPARATE metrics.db, D4). The MetricsDbContext is registered
-        // alongside AppDbContext; its own EnsureCreated creates the sample+rollup tables. WAL +
-        // auto_vacuum configured at creation time by MetricsHistoryStore.
-        services.AddDbContext<MetricsDbContext>(options =>
-            options.UseSqlite($"Data Source={apiOptions.MetricsHistoryDb}"));
-
         services.AddSingleton<MonitorClient>();
+        // The metrics-history read seam: the same MonitorClient singleton, exposed for the history
+        // proxy controller (the monitor owns history now; the API relays GET /metrics/history verbatim).
+        services.AddSingleton<IMonitorHistoryClient>(sp => sp.GetRequiredService<MonitorClient>());
         services.AddSingleton<AssistantClient>();
         // Host identity: the static, runtime-derived card (OS/runtime/build/start-time), read once + cached;
         // and the editable overrides store (region/label) — its own EnsureCreated + CREATE TABLE IF NOT EXISTS
@@ -255,16 +251,6 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<JobRegistry>();
         services.AddSingleton<CommandRunner>();
 
-        // M9 — metrics history (the durable tiered store behind KGSM_API_METRICS_HISTORY_DISABLED).
-        // The store is always registered (the read endpoint needs it even to return empty); the sampler
-        // and maintenance worker only start when history is enabled AND the monitor is provisioned.
-        services.AddSingleton<MetricsHistoryStore>();
-        if (apiOptions.MetricsHistoryEnabled && apiOptions.MetricsProvisioned)
-        {
-            services.AddHostedService<MetricsSampler>();
-            services.AddHostedService<MetricsMaintenanceService>();
-        }
-
         // M5 — audit log (append-only, downstream of the stateless engine). AuditService is the single
         // writer (own DI scope per write, serialized); the consumer subscribes to kgsm events via
         // kgsm-lib's IEventService and turns server.*/backup.* into audit rows (the engine owns those,
@@ -294,8 +280,7 @@ public class Startup(IConfiguration configuration)
 
         // M4·c Increment 8 — the session GC worker: deletes expired rows (revoked or not) on a timer
         // (KGSM_API_SESSIONS_GC_MS, default 10min) so the sessions table stays permanently bounded.
-        // Startup catch-up pass + PeriodicTimer, mirrors MetricsMaintenanceService. Inert (no timer at
-        // all) when SessionsEnabled is false.
+        // A startup catch-up pass + PeriodicTimer. Inert (no timer at all) when SessionsEnabled is false.
         services.AddHostedService<SessionCleanupWorker>();
 
         // Player-presence live roster (player-presence-contract.md §5) — an in-memory projection driven

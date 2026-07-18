@@ -220,8 +220,8 @@ public sealed class ApiOptions
     /// resource tick out to the <c>*/metrics</c> topics (<c>KGSM_API_METRICS_POLL_MS</c>, default 1000 =
     /// 1s, floor 250). This is the live performance feed (≈ the monitor's own self-tick), <b>not</b> the
     /// instance/blueprint poll — relaxing it makes the SPA's performance charts choppy, so it stays at 1s
-    /// by default. Gated on subscribers. Distinct from <see cref="MetricsPersistMs"/> (the durable-history
-    /// sampler cadence).
+    /// by default. Gated on subscribers. This is the live feed only; durable metrics history is owned by
+    /// kgsm-monitor (the API relays its <c>/metrics/history</c>).
     /// </summary>
     public required int MetricsPollMs { get; init; }
 
@@ -235,32 +235,8 @@ public sealed class ApiOptions
     /// </summary>
     public required int ServicesPollMs { get; init; }
 
-    // --- Metrics history (M9) — durable tiered metrics store (metrics.db) -------------------------
-
-    /// <summary>Master switch for the metrics history store (<c>KGSM_API_METRICS_HISTORY_ENABLED</c>,
-    /// default true). When false the sampler is inert and the read endpoint returns empty series.</summary>
-    public bool MetricsHistoryEnabled { get; init; } = true;
-
-    /// <summary>Path to the dedicated metrics SQLite file (<c>KGSM_API_METRICS_HISTORY_DB</c>, default
-    /// <c>metrics.db</c> beside the audit DB). Separate from the audit DB (D4).</summary>
-    public required string MetricsHistoryDb { get; init; }
-
-    /// <summary>Tier-1 persist cadence in ms (<c>KGSM_API_METRICS_PERSIST_MS</c>, default 15000, floor
-    /// 5000). Decoupled from the 1 Hz live stream.</summary>
-    public required int MetricsPersistMs { get; init; }
-
-    /// <summary>Tier-1 raw retention in hours (<c>KGSM_API_METRICS_RAW_RETENTION_HOURS</c>, default 24).</summary>
-    public required int MetricsRawRetentionHours { get; init; }
-
-    /// <summary>Tier-2 rollup bucket width in minutes (<c>KGSM_API_METRICS_ROLLUP_STEP_MIN</c>, default 5).</summary>
-    public required int MetricsRollupStepMin { get; init; }
-
-    /// <summary>Tier-2 rollup retention in days (<c>KGSM_API_METRICS_ROLLUP_RETENTION_DAYS</c>, default 30).</summary>
-    public required int MetricsRollupRetentionDays { get; init; }
-
-    /// <summary>How often the maintenance job rolls up + prunes, in ms
-    /// (<c>KGSM_API_METRICS_MAINT_MS</c>, default 60000).</summary>
-    public required int MetricsMaintenanceMs { get; init; }
+    // Metrics history is owned by kgsm-monitor now (the API relays GET /metrics/history verbatim);
+    // no history persistence config lives here.
 
     // --- Metric-threshold alerts (the alerts `metrics`/`host-monitor` source, increment 1 of 2 — see
     //     metrics-threshold-alerts-plan.md). Policy storage is appsettings/env ONLY this increment: a
@@ -391,7 +367,7 @@ public sealed class ApiOptions
     public bool ClusterEnabled => !string.IsNullOrWhiteSpace(ClusterSecret);
 
     // --- Cluster message bus, Phase 3 (the outbox drainer + GC — docs/cluster-message-bus-plan.md
-    //     §6/§7). Not `required`: like MetricsHistoryEnabled/Policy above, these carry a sane default
+    //     §6/§7). Not `required`: like the alert `Policy` above, these carry a sane default
     //     so the many existing test-built ApiOptions literals don't need updating for an opt-in feature
     //     that is inert whenever ClusterEnabled is false. -----------------------------------------------
 
@@ -664,18 +640,6 @@ public sealed class ApiOptions
             // Instance in-memory cache TTL (background refresh interval). Floor 10s.
             InstanceCacheTtlSeconds = Math.Max(10, IntOr(configuration["KGSM_API_INSTANCE_CACHE_TTL_SECONDS"], 60)),
 
-            // Metrics history (M9). The dedicated DB beside the audit DB; persist cadence floored at 5s;
-            // retention/step clamped sane.
-            MetricsHistoryEnabled = !Flag(configuration["KGSM_API_METRICS_HISTORY_DISABLED"]),
-            MetricsHistoryDb = BlankFallback(
-                configuration["KGSM_API_METRICS_HISTORY_DB"],
-                DefaultMetricsDb(configuration["KGSM_API_DB"])),
-            MetricsPersistMs = Math.Max(5000, IntOr(configuration["KGSM_API_METRICS_PERSIST_MS"], 15000)),
-            MetricsRawRetentionHours = Math.Max(1, IntOr(configuration["KGSM_API_METRICS_RAW_RETENTION_HOURS"], 24)),
-            MetricsRollupStepMin = Math.Max(1, IntOr(configuration["KGSM_API_METRICS_ROLLUP_STEP_MIN"], 5)),
-            MetricsRollupRetentionDays = Math.Max(1, IntOr(configuration["KGSM_API_METRICS_ROLLUP_RETENTION_DAYS"], 30)),
-            MetricsMaintenanceMs = Math.Max(10000, IntOr(configuration["KGSM_API_METRICS_MAINT_MS"], 60000)),
-
             // Metric-threshold alerts (increment 1 — appsettings/env only). The kill-switch is independent
             // of each rule's own enabled flag; the policy itself wholesale-overrides the baked-in Default
             // only when MetricsThresholds:Rules is present and non-empty (see LoadThresholdPolicy).
@@ -739,8 +703,8 @@ public sealed class ApiOptions
             RoleOperatorIds = Csv(configuration["KGSM_API_AUTH_ROLE_OPERATOR"]),
             RoleViewerIds = Csv(configuration["KGSM_API_AUTH_ROLE_VIEWER"]),
 
-            // Sessions (M4·c). Mirrors the MetricsHistory kill-switch polarity: SessionsEnabled is the
-            // default-ON twin of `!KGSM_API_SESSIONS_DISABLED`. The cache TTL bounds the revocation lag
+            // Sessions (M4·c). SessionsEnabled is the default-ON twin of `!KGSM_API_SESSIONS_DISABLED`
+            // (a disable-flag with inverted polarity). The cache TTL bounds the revocation lag
             // (D2); the GC cadence bounds the table; the refresh-absolute-days mirrors the JWT refresh
             // TTL (the two must stay in lockstep — see the property's doc).
             SessionsEnabled = !Flag(configuration["KGSM_API_SESSIONS_DISABLED"]),
@@ -748,13 +712,6 @@ public sealed class ApiOptions
             SessionsGcMs = Math.Max(60000, IntOr(configuration["KGSM_API_SESSIONS_GC_MS"], 600000)),
             SessionsRefreshAbsoluteDays = Math.Max(1, IntOr(configuration["KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS"], 30)),
         };
-    }
-
-    // The default metrics DB path: metrics.db beside the audit DB (same StateDirectory reasoning).
-    private static string DefaultMetricsDb(string? dbPath)
-    {
-        string? dir = string.IsNullOrWhiteSpace(dbPath) ? null : Path.GetDirectoryName(dbPath.Trim());
-        return string.IsNullOrEmpty(dir) ? "metrics.db" : Path.Combine(dir, "metrics.db");
     }
 
     // The default RAWG image cache dir: a covers/ subdir beside the SQLite DB (so it inherits the

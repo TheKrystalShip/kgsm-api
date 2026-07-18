@@ -51,7 +51,6 @@ PORT="${SMOKE_PORT:-8099}"
 BASE="http://127.0.0.1:${PORT}"
 DLL="${REPO_ROOT}/src/Api/bin/Release/net10.0/kgsm-api.dll"
 DB="${SMOKE_DB:-/tmp/kgsm-api-smoke.db}"; rm -f "$DB"
-METRICS_DB="${SMOKE_METRICS_DB:-/tmp/kgsm-api-smoke-metrics.db}"; rm -f "$METRICS_DB"
 
 # M1·a leaf wiring (deterministic defaults: no monitor, no watchdog, no assistant).
 HOST_ID="${SMOKE_HOST_ID:-smoke-host}"
@@ -115,8 +114,7 @@ trap cleanup EXIT
 
 # start_api MONITOR_SOCKET — launch the API with the given monitor socket; wait for /health.
 start_api() {
-  KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" KGSM_API_METRICS_HISTORY_DB="$METRICS_DB" \
-  KGSM_API_METRICS_PERSIST_MS="${SMOKE_METRICS_PERSIST_MS:-5000}" \
+  KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" \
   KGSM_API_HOST_ID="$HOST_ID" KGSM_API_MONITOR_SOCKET="$1" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" \
   KGSM_API_KGSM_PATH="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
     dotnet "$DLL" >/tmp/kgsm-api-smoke.log 2>&1 &
@@ -130,7 +128,7 @@ stop_api() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
 # unconfigured (ephemeral signing key). Used by the M4·a no-token sweep.
 start_api_auth() {
   env -u KGSM_API_AUTH_DISABLED \
-    KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" KGSM_API_METRICS_HISTORY_DB="$METRICS_DB" \
+    KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" \
     KGSM_API_HOST_ID="$HOST_ID" \
     KGSM_API_MONITOR_SOCKET="$MON_SOCK" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" KGSM_API_KGSM_PATH="$KGSM_PATH" \
     KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
@@ -558,6 +556,7 @@ else
   STUB_PY="/tmp/kgsm-api-smoke-stub.py"
   cat > "$STUB_PY" <<'PYEOF'
 import socket, os, json, sys
+from urllib.parse import urlparse, parse_qs
 sock_path = sys.argv[1]
 sid = os.environ.get('SNAP_ID', 'x')
 snap = {
@@ -583,8 +582,23 @@ snap = {
                "ioReadBps": int(os.environ['SNAP_IOREAD']), "ioWriteBps": None, "pids": int(os.environ['SNAP_PIDS']),
                "diskBytes": int(os.environ['SNAP_DISK'])}],
 }
-body = json.dumps(snap).encode()
-resp = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: " + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body
+snap_body = json.dumps(snap).encode()
+
+def http(body):
+    return (b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+            + str(len(body)).encode() + b"\r\nConnection: close\r\n\r\n" + body)
+
+# The monitor is the single source of truth for metrics history: /metrics/history returns a
+# non-empty series shaped exactly as the SPA expects (the API relays this body verbatim). kind/id
+# are echoed from the query so the proxy's host/server branches both prove out.
+def history_body(qs):
+    kind = qs.get('kind', ['server'])[0]
+    eid = qs.get('id', [''])[0]
+    rng = qs.get('range', ['1h'])[0]
+    metric = 'cpuTotalPct' if kind == 'host' else 'cpuPctCore'
+    series = {metric: [{"ts": "2026-07-18T00:00:00+00:00", "value": 12.5, "min": None, "max": None, "n": None}]}
+    return json.dumps({"entityId": eid, "kind": kind, "range": rng, "step": 15, "tier": "raw", "series": series}).encode()
+
 try: os.unlink(sock_path)
 except FileNotFoundError: pass
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -593,7 +607,12 @@ while True:
     try: conn, _ = s.accept()
     except OSError: break
     try:
-        conn.recv(65536); conn.sendall(resp)
+        data = conn.recv(65536)
+        try: path = data.split(b' ', 2)[1].decode()
+        except Exception: path = '/'
+        parsed = urlparse(path)
+        body = history_body(parse_qs(parsed.query)) if parsed.path == '/metrics/history' else snap_body
+        conn.sendall(http(body))
     except OSError: pass
     finally: conn.close()
 PYEOF
@@ -961,26 +980,21 @@ sys.exit(0 if 'network' not in json.load(open('/tmp/kgsm-api-smoke.body')) else 
   echo "   network.ports.open audit + the servers/{id}/network verify patch — is a trusted-host live-validate,"
   echo "   needing the kgsm-firewall daemon + kgsm-group socket access, like M3's mutation happy path)"
 
-  # --- M9 metrics history: the durable tiered store + read endpoint --------
-  echo "==> M9 metrics history checks — GET /{servers,hosts}/{id}/metrics/history + durability"
+  # --- Metrics history: the verbatim proxy to kgsm-monitor (the single source of truth) --------
+  echo "==> metrics history checks — GET /{servers,hosts}/{id}/metrics/history (proxy to the monitor)"
 
-  # Server history unknown id → 404
+  # Server history unknown id → 404 (the existence check survives the proxy rewrite)
   req GET /api/v1/servers/nonexistent/metrics/history
   if [[ "$CODE" == 404 ]]; then ok "server history unknown id → 404"
-  else bad "M9 server history 404 (code=$CODE)"; fi
+  else bad "server history 404 (code=$CODE)"; fi
 
   # Host history unknown id → 404
   req GET /api/v1/hosts/nonexistent/metrics/history
   if [[ "$CODE" == 404 ]]; then ok "host history unknown id → 404"
-  else bad "M9 host history 404 (code=$CODE)"; fi
+  else bad "host history 404 (code=$CODE)"; fi
 
-  # Durability: the sampler is running with the stub monitor (KGSM_API_METRICS_PERSIST_MS=5000).
-  # Wait > one persist interval, then assert rows landed. The stub monitor serves a host snapshot
-  # + a per-server row keyed to 'factorio' → both host AND server history should be non-empty.
-  echo "  waiting ~8s for ≥1 metrics persist interval (sampler → metrics.db)…"
-  sleep 8
-
-  # Host history: the sampler should have persisted host metrics.
+  # Host history: the API relays the stub monitor's /metrics/history body verbatim → non-empty series,
+  # kind=host echoed. No API-side persistence, no wait — the monitor owns history; the API is a proxy.
   req GET "/api/v1/hosts/$HOST_ID/metrics/history?range=1h"
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
@@ -989,12 +1003,10 @@ series=d.get('series',{})
 has_data=any(len(v)>0 for v in series.values())
 sys.exit(0 if d.get('kind')=='host' and d.get('tier') in ('raw','rollup') and has_data else 1)
 " 2>/dev/null; then
-    ok "host history 200 + NON-EMPTY series (sampler → metrics.db durable write proven)"
-  else bad "M9 host history durability (code=$CODE body=$(cat /tmp/kgsm-api-smoke.body 2>/dev/null | head -c 300))"; fi
+    ok "host history 200 + NON-EMPTY series (relayed verbatim from the monitor)"
+  else bad "host history proxy (code=$CODE body=$(cat /tmp/kgsm-api-smoke.body 2>/dev/null | head -c 300))"; fi
 
-  # Server history: the sampler should have persisted per-server metrics for the joined instance. Key it to
-  # $FIRST_ID (the roster's first instance, which the stub monitor + sampler are keyed to) — NOT a hardcoded
-  # 'factorio', which 404s on any host whose first instance isn't literally named "factorio".
+  # Server history: same proxy path, keyed to $FIRST_ID (the roster's first instance).
   req GET "/api/v1/servers/${FIRST_ID}/metrics/history?range=1h"
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
@@ -1003,12 +1015,13 @@ series=d.get('series',{})
 has_data=any(len(v)>0 for v in series.values())
 sys.exit(0 if d.get('kind')=='server' and d.get('tier') in ('raw','rollup') and has_data else 1)
 " 2>/dev/null; then
-    ok "server history 200 + NON-EMPTY series (per-server sampler → metrics.db durable write proven)"
-  else bad "M9 server history durability (code=$CODE body=$(cat /tmp/kgsm-api-smoke.body 2>/dev/null | head -c 300))"; fi
+    ok "server history 200 + NON-EMPTY series (relayed verbatim from the monitor)"
+  else bad "server history proxy (code=$CODE body=$(cat /tmp/kgsm-api-smoke.body 2>/dev/null | head -c 300))"; fi
 
-  # Durability across restart: stop the API, start it again (same metrics.db), assert data persists
+  # Statelessness: the API holds no history of its own. Restart it (same stub monitor) and re-query —
+  # the series is still present, proving the API relays fresh from the monitor rather than persisting.
   stop_api
-  start_api "$STUB_SOCK" || { echo "API restart failed (Phase B M9 restart); log:"; tail -20 /tmp/kgsm-api-smoke.log; exit 2; }
+  start_api "$STUB_SOCK" || { echo "API restart failed (metrics-history proxy restart); log:"; tail -20 /tmp/kgsm-api-smoke.log; exit 2; }
   wait_caps_warm
 
   req GET "/api/v1/hosts/$HOST_ID/metrics/history?range=1h"
@@ -1019,8 +1032,8 @@ series=d.get('series',{})
 has_data=any(len(v)>0 for v in series.values())
 sys.exit(0 if has_data else 1)
 " 2>/dev/null; then
-    ok "host history survives API restart (D1 durability — metrics.db is the system of record)"
-  else bad "M9 durability after restart (code=$CODE body=$(cat /tmp/kgsm-api-smoke.body 2>/dev/null | head -c 300))"; fi
+    ok "host history still served after API restart (the proxy is stateless — the monitor owns history)"
+  else bad "metrics-history proxy after restart (code=$CODE body=$(cat /tmp/kgsm-api-smoke.body 2>/dev/null | head -c 300))"; fi
 
   # --- M6·a alerts: the condition-mirror read surface (watchdog ABSENT here → empty feed) ------
   echo "==> M6·a alerts checks — GET /alerts (the condition-mirror read; empty here — no watchdog in smoke)"
