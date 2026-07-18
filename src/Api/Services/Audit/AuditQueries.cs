@@ -199,7 +199,13 @@ public static class AuditQueries
             page = null;
         }
 
-        if (page is null) return (new List<AuditRecord>(), true, false);
+        // page.Events null is defensive, not merely hypothetical: MonitorEventPage's positional-record
+        // properties have no JSON-required enforcement, so a 200 response that parses as valid JSON but
+        // doesn't carry an "events" array (a misrouted proxy, an old/mismatched monitor build, a stub
+        // that doesn't implement /events and 200s some other shape for any unrecognized path) leaves
+        // Events null rather than throwing at deserialize time — treated the same as monitor-down: an
+        // honest degrade, never a 500 from an unguarded null dereference below.
+        if (page is null || page.Events is null) return (new List<AuditRecord>(), true, false);
 
         var records = new List<AuditRecord>(page.Events.Count);
         foreach (MonitorEventItem item in page.Events)

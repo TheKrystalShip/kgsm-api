@@ -83,6 +83,27 @@ public sealed class AuditMergeTests : IDisposable
         Assert.Equal("evt_local1", page.Data[0].Id);
     }
 
+    // --- A 200 response that parses but carries no "events" array degrades honestly, never a 500 ------
+    // Regression: a monitor page's Events can be null (no [JsonRequired]/`required` enforcement on the
+    // positional record) whenever a 200 body doesn't match the EventHistoryResponse shape — caught by
+    // running the full smoke suite against a stub monitor that 200s an unrelated JSON body (its own
+    // Snapshot shape) for any path it doesn't specifically implement, including /events. An unguarded
+    // `foreach (var item in page.Events)` threw a NullReferenceException that surfaced as a bare 500.
+    [Fact]
+    public async Task PageMergedAsync_MonitorPageWithNullEvents_DegradesHonestly_NeverThrows()
+    {
+        await SeedLocalAsync(AuditAction.FileWrite, DateTimeOffset.UtcNow, "evt_local2");
+        var fake = new FakeMonitorEventsClient(_ => new MonitorEventPage(0, null, null, null!));
+
+        AuditPage page = await AuditQueries.PageMergedAsync(
+            _db, fake, HostId, cursor: null, limit: 50,
+            severity: null, serverId: null, actor: null, since: null, category: null, CancellationToken.None);
+
+        Assert.True(page.EngineHistoryDegraded);
+        Assert.Single(page.Data);
+        Assert.Equal("evt_local2", page.Data[0].Id);
+    }
+
     // --- Healthy monitor: local + monitor rows interleave in one ts-DESC feed -------------------------
     [Fact]
     public async Task PageMergedAsync_InterleavesBothSourcesByTsDescending()

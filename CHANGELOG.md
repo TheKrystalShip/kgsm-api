@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (v0.27.1) — GET /audit no longer 500s when the monitor's /events response is malformed
+- The merged audit read now treats a monitor `GET /events` page whose `events` array is missing (a 200
+  response that parses as JSON but doesn't match the expected shape — an old/mismatched monitor build, a
+  misrouted proxy, or a stub that 200s an unrelated body for a path it doesn't implement) the same as
+  monitor-down: `engineHistoryDegraded:true` + local-only rows, never a `500`. Caught by
+  `scripts/smoke.sh`'s Phase B (the embedded stub monitor doesn't implement `/events` and 200s its
+  `/metrics` snapshot body for any unrecognized path); full suite now **89/89** (was 86/89).
+
 ### Changed (v0.27.0) — kgsm engine event history is sourced from kgsm-monitor, merged at read time
 - **`GET /audit` merges two disjoint sources on every read**: the local table (auth/session/leaf-
   provisioning/leaf-config/file-edit/console-audit — everything only the API itself can generate) and
