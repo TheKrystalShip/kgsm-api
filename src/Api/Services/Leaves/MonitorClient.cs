@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Sockets;
 using System.Text.Json;
 using TheKrystalShip.KGSM.Monitor.Contracts;
@@ -19,6 +20,52 @@ public interface IMonitorHistoryClient
 }
 
 /// <summary>
+/// The read seam for the monitor's <c>GET /events</c> endpoint (kgsm-monitor Phase B,
+/// event-history-plan.md) — the monitor is the single source of truth for kgsm ENGINE event history.
+/// Unlike <see cref="IMonitorHistoryClient"/> (a verbatim string proxy) this returns a parsed page: the
+/// merge reader (<see cref="Audit.AuditQueries"/>) needs structured access to shape each raw event via
+/// <see cref="Audit.MonitorEventShaping"/>, not just a passthrough body.
+/// </summary>
+public interface IMonitorEventsClient
+{
+    /// <summary>
+    /// <c>GET /events?instance=&amp;type=&amp;since=&amp;until=&amp;before_ts=&amp;before_id=&amp;limit=</c>,
+    /// ts-DESC, composite <c>(before_ts, before_id)</c> keyset cursor (matches the monitor's own wire
+    /// contract exactly — see <c>kgsm-monitor/src/Monitor/History/EventHistoryStore.cs</c>). Returns
+    /// <see langword="null"/> when the monitor is unprovisioned, unreachable, slow, or answers non-2xx —
+    /// the honest "engine history degraded" signal the merge reader turns into
+    /// <c>AuditPage.EngineHistoryDegraded</c>, never a silently empty/fabricated page.
+    /// </summary>
+    Task<MonitorEventPage?> GetEventsAsync(
+        string? instance, string? type, long? sinceMs, long? untilMs,
+        long? beforeTs, string? beforeId, int limit, CancellationToken ct);
+}
+
+/// <summary>
+/// A local mirror of kgsm-monitor's <c>GET /events</c> response shape — daemon-local DTOs on the
+/// monitor's side (NOT part of the shared <c>TheKrystalShip.KGSM.Monitor.Contracts</c> package, exactly
+/// like its metrics-history counterpart), so kgsm-api defines its own copy to deserialize the wire JSON
+/// (camelCase, reflection-based STJ — fine under this project's JIT runtime). Field-for-field match with
+/// <c>EventHistoryResponse</c>/<c>EventHistoryItem</c> in the monitor repo.
+/// </summary>
+public sealed record MonitorEventPage(
+    int Count,
+    string? NextCursorTs,
+    string? NextCursorId,
+    List<MonitorEventItem> Events);
+
+/// <summary>One raw engine event row as kgsm-monitor persisted it — neutral, undomained (see
+/// <see cref="Audit.MonitorEventShaping"/> for the read-time shaping into an <c>AuditRecord</c>).</summary>
+public sealed record MonitorEventItem(
+    string Id,
+    DateTimeOffset Ts,
+    string Type,
+    string? Instance,
+    string? Actor,
+    string? Origin,
+    JsonElement? Data);
+
+/// <summary>
 /// The kgsm-monitor leaf client: scrapes <c>GET /metrics</c> over the monitor's unix-domain
 /// socket and serves a <strong>cached-latest</strong> <see cref="Snapshot"/>. The HTTP-over-unix
 /// transport reuses the same <see cref="SocketsHttpHandler.ConnectCallback"/> pattern as
@@ -33,8 +80,13 @@ public interface IMonitorHistoryClient
 /// stale last-good data (that "last values hold" behavior belongs to the M2 stream); the cache
 /// only conflates rapid requests within a short TTL.
 /// </remarks>
-public sealed class MonitorClient : IMonitorHistoryClient, IDisposable
+public sealed class MonitorClient : IMonitorHistoryClient, IMonitorEventsClient, IDisposable
 {
+    // camelCase, reflection-based — the monitor's daemon-local history JSON context serializes
+    // camelCase (MonitorHistoryJsonContext); kgsm-api is JIT so a reflection-based deserialize here is
+    // fine (unlike kgsm-lib, this project is deliberately not AOT — see the api CLAUDE.md stack decision).
+    private static readonly JsonSerializerOptions MonitorEventJsonOptions = new(JsonSerializerDefaults.Web);
+
     // The monitor self-ticks (~1s) and serves its latest in-memory frame, so a short api-side
     // cache bounds socket round-trips without adding meaningful staleness.
     private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(1);
@@ -182,6 +234,49 @@ public sealed class MonitorClient : IMonitorHistoryClient, IDisposable
         catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
         {
             _logger.LogDebug(ex, "monitor /metrics/history failed");
+            return null;
+        }
+    }
+
+    /// <inheritdoc cref="IMonitorEventsClient.GetEventsAsync"/>
+    public async Task<MonitorEventPage?> GetEventsAsync(
+        string? instance, string? type, long? sinceMs, long? untilMs,
+        long? beforeTs, string? beforeId, int limit, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Monitor))
+            return null; // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            var qs = new List<string>(7);
+            if (!string.IsNullOrEmpty(instance)) qs.Add($"instance={Uri.EscapeDataString(instance)}");
+            if (!string.IsNullOrEmpty(type)) qs.Add($"type={Uri.EscapeDataString(type)}");
+            if (sinceMs is { } sv) qs.Add($"since={sv.ToString(CultureInfo.InvariantCulture)}");
+            if (untilMs is { } uv) qs.Add($"until={uv.ToString(CultureInfo.InvariantCulture)}");
+            if (beforeTs is { } bt) qs.Add($"before_ts={bt.ToString(CultureInfo.InvariantCulture)}");
+            if (!string.IsNullOrEmpty(beforeId)) qs.Add($"before_id={Uri.EscapeDataString(beforeId)}");
+            qs.Add($"limit={limit.ToString(CultureInfo.InvariantCulture)}");
+            string url = "/events?" + string.Join('&', qs);
+
+            using HttpResponseMessage resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("monitor /events returned {Status}", (int)resp.StatusCode);
+                return null;
+            }
+
+            await using Stream stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            return await JsonSerializer.DeserializeAsync<MonitorEventPage>(stream, MonitorEventJsonOptions, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("monitor /events timed out after {Timeout}", ScrapeTimeout);
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException or JsonException)
+        {
+            _logger.LogDebug(ex, "monitor /events failed");
             return null;
         }
     }

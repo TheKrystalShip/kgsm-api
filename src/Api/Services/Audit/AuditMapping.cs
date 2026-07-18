@@ -449,6 +449,19 @@ public static class AuditMapping
             e.Action, e.Severity, target, e.ServerId, e.HostId, e.Summary, meta);
     }
 
+    /// <summary>
+    /// Map an <see cref="AuditWrite"/> + an externally-supplied id directly to the wire record — no EF
+    /// round-trip. Two callers need this: <see cref="AuditService.PublishLive"/> (a kgsm engine event,
+    /// post Phase-C, is announced on the <c>audit</c> WS topic but never persisted locally — the id is
+    /// the deterministic <c>AuditId.ForEvent</c> value via <see cref="EngineEventIdTracker"/>) and
+    /// <see cref="MonitorEventShaping"/> (shaping a monitor-persisted raw event at <c>GET /audit</c> read
+    /// time — the id is the monitor's own stored id for that event). Both must reuse the SAME id the
+    /// monitor computed/stored for the identical envelope, so a live push and a later paginated read of
+    /// the same fact carry one identity.
+    /// </summary>
+    public static AuditRecord ToRecordDirect(AuditWrite w, string id) =>
+        new(id, w.Ts, w.Origin, w.Actor, w.Action, w.Severity, w.Target, w.ServerId, w.HostId, w.Summary, w.Meta);
+
     /// <summary>Map an <see cref="AuditWrite"/> + its assigned public id to the EF row (serializing
     /// <c>meta</c> to a JSON blob).</summary>
     public static AuditEntry ToEntity(AuditWrite w, string id) => new()

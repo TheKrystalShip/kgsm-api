@@ -70,22 +70,44 @@ public sealed class AuditService(
         finally { _writeGate.Release(); }
 
         AuditRecord record = AuditMapping.ToRecord(entity);
+        Publish(record, persisted: true);
+        return record;
+    }
 
+    /// <summary>
+    /// Announce an already-shaped <paramref name="record"/> on the <c>audit</c> WS topic + the
+    /// notification bus, WITHOUT persisting it. The kgsm engine's own history now lives in
+    /// kgsm-monitor (event-history-plan.md Phase C) — <c>GET /audit</c> merges it in at read time via
+    /// <see cref="MonitorEventShaping"/>, so <see cref="KgsmAuditConsumer"/> no longer writes these rows
+    /// to the local table. Live consumption (realtime SSE + Discord/Slack notifications) stays exactly
+    /// as it was: this is the same tail <see cref="AppendAsync"/> runs after a successful write, just
+    /// without the write. <paramref name="record"/> must already carry its final id — the deterministic
+    /// <c>AuditId.ForEvent</c> value (via <see cref="EngineEventIdTracker"/>), matching what the monitor
+    /// independently computed for the SAME envelope — so a client reconciling this live push against a
+    /// later paginated <c>GET /audit</c> page (which shapes the monitor's persisted copy of the same
+    /// event) sees one identity, not two.
+    /// </summary>
+    public void PublishLive(AuditRecord record) => Publish(record, persisted: false);
+
+    private void Publish(AuditRecord record, bool persisted)
+    {
         // Coalesce key = the unique event id, NOT a static "audit" key: audit appends are distinct,
         // immutable facts that must never supersede one another in a slow client's outbound queue
         // (a static key would silently drop all but the latest). A truly stalled client is still torn
         // down by the send timeout and re-hydrates via GET /audit on reconnect (§3·j).
-        hub.Publish(StreamProtocol.AuditTopic, StreamProtocol.AuditEntityKey(id),
+        hub.Publish(StreamProtocol.AuditTopic, StreamProtocol.AuditEntityKey(record.Id),
             new StreamMessage(StreamProtocol.AuditTopic, StreamProtocol.AuditAppend, record));
 
         // Increment B (M8·c): tap the ALWAYS-ON audit path so notifications fire on every kgsm lifecycle
-        // event regardless of WS subscribers (the StreamHub pumps are subscriber-gated; this append is
+        // event regardless of WS subscribers (the StreamHub pumps are subscriber-gated; this publish is
         // not). The bus keeps only catalog-mapped actions and the delivery worker routes them; a
         // non-notifiable action (auth.*, network.*, …) is dropped there. Never throws / never blocks.
+        // Runs identically whether or not the row was persisted — a Discord crash notification must
+        // still fire for an engine event the API no longer stores locally.
         notifications.Publish(record);
 
-        logger.LogDebug("audit append {Id} {Action} actor={Actor} origin={Origin}",
-            id, write.Action, write.Actor.Name, write.Origin ?? "(none)");
-        return record;
+        logger.LogDebug("audit {Verb} {Id} {Action} actor={Actor} origin={Origin}",
+            persisted ? "append" : "publish(live-only)", record.Id, record.Action, record.Actor.Name,
+            record.Origin ?? "(none)");
     }
 }

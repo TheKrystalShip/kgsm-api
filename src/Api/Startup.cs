@@ -91,6 +91,9 @@ public class Startup(IConfiguration configuration)
         // The metrics-history read seam: the same MonitorClient singleton, exposed for the history
         // proxy controller (the monitor owns history now; the API relays GET /metrics/history verbatim).
         services.AddSingleton<IMonitorHistoryClient>(sp => sp.GetRequiredService<MonitorClient>());
+        // The engine-event-history read seam (event-history-plan.md Phase C): the merged GET /audit
+        // reader shapes the monitor's raw GET /events rows via MonitorEventShaping. Same singleton.
+        services.AddSingleton<IMonitorEventsClient>(sp => sp.GetRequiredService<MonitorClient>());
         services.AddSingleton<AssistantClient>();
         // Host identity: the static, runtime-derived card (OS/runtime/build/start-time), read once + cached;
         // and the editable overrides store (region/label) — its own EnsureCreated + CREATE TABLE IF NOT EXISTS

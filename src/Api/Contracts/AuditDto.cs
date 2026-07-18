@@ -45,10 +45,24 @@ public sealed record AuditRecord(
 
 /// <summary>
 /// A keyset page of audit records (architecture.html §6 cursor pagination): <c>{ data, nextCursor }</c>,
-/// newest first. <see cref="NextCursor"/> is the <c>rowid</c> of the last (oldest) row returned — pass it
-/// back as <c>?cursor=</c> for the next page — or <see langword="null"/> when there are no older rows.
+/// newest first. <see cref="NextCursor"/> is an opaque cursor string — pass it back as <c>?cursor=</c>
+/// for the next page — or <see langword="null"/> when there are no older rows. As of
+/// event-history-plan.md Phase C the page is a ts-DESC merge of the API's own local rows (auth/session/
+/// leaf/files/console-audit — never engine-sourced) and kgsm-monitor's engine event history (shaped at
+/// read time); <see cref="NextCursor"/>'s internal encoding changed accordingly (a composite
+/// <c>(ts, id)</c> keyset spanning both sources, was a bare local <c>rowid</c>) but stays opaque to the
+/// client — kgsm-web only ever stores and echoes it back, never parses it.
 /// </summary>
-public sealed record AuditPage(IReadOnlyList<AuditRecord> Data, string? NextCursor);
+/// <param name="EngineHistoryDegraded">
+/// <see langword="true"/> when kgsm-monitor was unreachable for this page, so it contains ONLY the
+/// API's own local rows — an honest partial, never a silent drop of the engine history. Additive field
+/// (architecture.html invariant #4); absent/false on a healthy read, so an unmodified older client
+/// simply never notices it.
+/// </param>
+public sealed record AuditPage(
+    IReadOnlyList<AuditRecord> Data,
+    string? NextCursor,
+    bool EngineHistoryDegraded = false);
 
 /// <summary>
 /// The closed, server-defined action vocabulary (architecture.html §3·d). Clients and the model can't

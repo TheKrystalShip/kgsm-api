@@ -58,18 +58,23 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     }
 
     // --- Newest-first + record shape ---------------------------------------------------------------
+    // NB these generic pagination/filter/ordering tests deliberately seed API-only actions (never
+    // server.*/backup.*/etc — see AuditQueries.EngineSourcedActions), because post Phase-C those engine
+    // actions are excluded from the LOCAL query by design (their history now lives in kgsm-monitor,
+    // folded in at read time — see AuditMergeTests for that half). The mechanics under test here — local
+    // keyset pagination, filters, ordering — are equally exercised by any non-excluded action.
     [Fact]
     public async Task GetAudit_NewestFirst_HonestShape()
     {
         string sid = $"order-{Guid.NewGuid():N}";
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServerStart, sid));
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServerStop, sid));
+        await Audit.AppendAsync(ServerWrite(AuditAction.FileWrite, sid));
+        await Audit.AppendAsync(ServerWrite(AuditAction.NetworkPortsOpen, sid));
 
         JsonElement body = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}"));
         JsonElement[] rows = body.GetProperty("data").EnumerateArray().ToArray();
         Assert.Equal(2, rows.Length);
-        Assert.Equal(AuditAction.ServerStop, rows[0].GetProperty("action").GetString());  // newest first
-        Assert.Equal(AuditAction.ServerStart, rows[1].GetProperty("action").GetString());
+        Assert.Equal(AuditAction.NetworkPortsOpen, rows[0].GetProperty("action").GetString());  // newest first
+        Assert.Equal(AuditAction.FileWrite, rows[1].GetProperty("action").GetString());
 
         JsonElement newest = rows[0];
         Assert.StartsWith("evt_", newest.GetProperty("id").GetString());
@@ -87,7 +92,7 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     {
         string sid = $"page-{Guid.NewGuid():N}";
         for (int i = 0; i < 3; i++)
-            await Audit.AppendAsync(ServerWrite(AuditAction.ServerRestart, sid));
+            await Audit.AppendAsync(ServerWrite(AuditAction.FileWrite, sid));
 
         // Page 1: limit 2 of 3 -> full page + a cursor.
         JsonElement p1 = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&limit=2"));
@@ -107,12 +112,12 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     {
         string sid = $"filter-{Guid.NewGuid():N}";
         string actor = $"actor-{Guid.NewGuid():N}";
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServerStart, sid, actor, AuditSeverity.Info));
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServerUninstall, sid, actor, AuditSeverity.Warn));
+        await Audit.AppendAsync(ServerWrite(AuditAction.FileWrite, sid, actor, AuditSeverity.Info));
+        await Audit.AppendAsync(ServerWrite(AuditAction.NetworkPortsOpen, sid, actor, AuditSeverity.Warn));
 
         JsonElement warn = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn"));
         Assert.Equal(1, warn.GetProperty("data").GetArrayLength());
-        Assert.Equal(AuditAction.ServerUninstall, warn.GetProperty("data")[0].GetProperty("action").GetString());
+        Assert.Equal(AuditAction.NetworkPortsOpen, warn.GetProperty("data")[0].GetProperty("action").GetString());
 
         JsonElement byActor = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}"));
         Assert.Equal(2, byActor.GetProperty("data").GetArrayLength()); // both rows share the unique actor
@@ -123,17 +128,17 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     public async Task GetAudit_MultiSeverity_OrsTheSet()
     {
         string sid = $"sev-{Guid.NewGuid():N}";
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServerStart, sid, severity: AuditSeverity.Info));
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServerStop, sid, severity: AuditSeverity.Warn));
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServerCrash, sid, severity: AuditSeverity.Danger));
+        await Audit.AppendAsync(ServerWrite(AuditAction.FileWrite, sid, severity: AuditSeverity.Info));
+        await Audit.AppendAsync(ServerWrite(AuditAction.NetworkPortsOpen, sid, severity: AuditSeverity.Warn));
+        await Audit.AppendAsync(ServerWrite(AuditAction.ServiceConnect, sid, severity: AuditSeverity.Danger));
 
         // "attention" pushes down as warn,danger → the two, never the info row.
         JsonElement att = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn,danger"));
         string?[] actions = att.GetProperty("data").EnumerateArray().Select(x => x.GetProperty("action").GetString()).ToArray();
         Assert.Equal(2, actions.Length);
-        Assert.Contains(AuditAction.ServerStop, actions);
-        Assert.Contains(AuditAction.ServerCrash, actions);
-        Assert.DoesNotContain(AuditAction.ServerStart, actions); // info excluded
+        Assert.Contains(AuditAction.NetworkPortsOpen, actions);
+        Assert.Contains(AuditAction.ServiceConnect, actions);
+        Assert.DoesNotContain(AuditAction.FileWrite, actions); // info excluded
 
         // a stray/whitespace entry in the set is dropped, not matched as a blank severity.
         JsonElement spaced = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn,%20,danger"));
@@ -149,35 +154,38 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         // a backdated row + a fresh one (ServerWrite stamps UtcNow)
         await Audit.AppendAsync(new AuditWrite(old, AuditOrigin.Ui,
             new AuditActor(ActorKind.User, "haru", ActorProvider.Discord),
-            AuditAction.ServerStart, AuditSeverity.Info,
+            AuditAction.FileWrite, AuditSeverity.Info,
             new AuditTarget(AuditTargetKind.Server, sid, sid), sid, AuthTestFactory.HostId, "old", null));
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServerStop, sid));
+        await Audit.AppendAsync(ServerWrite(AuditAction.NetworkPortsOpen, sid));
 
         string since = DateTimeOffset.UtcNow.AddDays(-1).ToString("o");
         JsonElement body = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&since={Uri.EscapeDataString(since)}"));
         Assert.Equal(1, body.GetProperty("data").GetArrayLength());
-        Assert.Equal(AuditAction.ServerStop, body.GetProperty("data")[0].GetProperty("action").GetString());
+        Assert.Equal(AuditAction.NetworkPortsOpen, body.GetProperty("data")[0].GetProperty("action").GetString());
 
         // a garbage since is ignored (no filter), never a silently empty page.
         JsonElement all = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&since=not-a-date"));
         Assert.Equal(2, all.GetProperty("data").GetArrayLength());
     }
 
-    // --- category: the action-group prefix (server.* / backup.* …) ---------------------------------
+    // --- category: the action-group prefix (service.* / network.* …) -------------------------------
+    // Uses two non-excluded (API-only-local) actions — server.*/backup.* are engine-sourced and excluded
+    // from the local query post Phase-C (AuditQueries.EngineSourcedActions); the category PREFIX-MATCH
+    // mechanic under test is identical for any two distinct dotted prefixes.
     [Fact]
     public async Task GetAudit_Category_PrefixMatches()
     {
         string actor = $"cat-{Guid.NewGuid():N}";
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServerStart, $"s-{Guid.NewGuid():N}", actor));
-        await Audit.AppendAsync(ServerWrite(AuditAction.BackupCreate, $"b-{Guid.NewGuid():N}", actor));
+        await Audit.AppendAsync(ServerWrite(AuditAction.ServiceConnect, $"s-{Guid.NewGuid():N}", actor));
+        await Audit.AppendAsync(ServerWrite(AuditAction.NetworkPortsOpen, $"n-{Guid.NewGuid():N}", actor));
 
-        JsonElement backups = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}&category=backup"));
-        Assert.Equal(1, backups.GetProperty("data").GetArrayLength());
-        Assert.Equal(AuditAction.BackupCreate, backups.GetProperty("data")[0].GetProperty("action").GetString());
+        JsonElement network = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}&category=network"));
+        Assert.Equal(1, network.GetProperty("data").GetArrayLength());
+        Assert.Equal(AuditAction.NetworkPortsOpen, network.GetProperty("data")[0].GetProperty("action").GetString());
 
-        JsonElement servers = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}&category=server"));
-        Assert.Equal(1, servers.GetProperty("data").GetArrayLength());
-        Assert.Equal(AuditAction.ServerStart, servers.GetProperty("data")[0].GetProperty("action").GetString());
+        JsonElement service = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}&category=service"));
+        Assert.Equal(1, service.GetProperty("data").GetArrayLength());
+        Assert.Equal(AuditAction.ServiceConnect, service.GetProperty("data")[0].GetProperty("action").GetString());
     }
 
     // --- The API-internal write path, end-to-end (no kgsm event): a real login -> auth.login row ---

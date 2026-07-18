@@ -12,20 +12,24 @@ namespace TheKrystalShip.Api.Services.Audit;
 
 /// <summary>
 /// Subscribes to the kgsm event stream (via kgsm-lib's <see cref="IEventService"/> — the C#↔engine
-/// chokepoint, never a raw socket) and turns each lifecycle event into one append-only audit row (M5).
-/// This is the <b>single writer for <c>server.*</c>/<c>backup.*</c></b>: kgsm owns those actions, so the
-/// API records the engine's <em>echo</em> rather than double-writing when it issues a command — the
-/// resulting event already carries the provenance the command path stamped (<c>Actor</c>/<c>Origin</c>).
+/// chokepoint, never a raw socket) and turns each lifecycle event into a live <c>audit</c> WS push +
+/// (for start/restart) the alert↔audit recovery bridge. As of event-history-plan.md Phase C this
+/// consumer no longer <b>persists</b> engine-sourced rows: kgsm-monitor is the single source of truth
+/// for engine history (it persists the raw envelope neutrally; <c>GET /audit</c> merges it in at read
+/// time, shaped via <see cref="AuditMapping"/>/<see cref="MonitorEventShaping"/>). This consumer stays
+/// the live-consumption path — realtime SSE and outbound notifications fire exactly as before
+/// (<see cref="AuditService.PublishLive"/>) — it simply no longer writes those rows to the local table.
 /// Watchdog-driven (autonomous <c>system</c>) and direct-CLI actions flow through the very same path.
 /// </summary>
 /// <remarks>
-/// <para><b>Listener lifetime &amp; the honest boundary.</b> The engine is stateless and does not
-/// backfill — events emitted while this consumer is not listening are <em>never</em> audited. That is
-/// inherent to a downstream-consumer design (CLAUDE.md invariant #5), not a bug. kgsm only delivers to a
-/// socket file that already exists, so the API must be up and bound first.</para>
+/// <para><b>Live-only, not a backfill.</b> A client subscribed to the <c>audit</c> WS topic sees an
+/// engine event the instant it arrives; a client paging <c>GET /audit</c> sees it once kgsm-monitor has
+/// persisted and served it back through the merge. Nothing here writes to <c>AppDbContext.Audit</c> for
+/// an engine-sourced action any more — API-only actions (auth/session/leaf/files/console-audit) still
+/// do, via a direct <see cref="AuditService.AppendAsync"/> elsewhere (unaffected by this change).</para>
 /// <para><b>Degrades gracefully.</b> If the engine is unprovisioned, or <see cref="IEventService"/> is
 /// absent, or binding the event socket fails, the consumer logs and does nothing further — <c>GET
-/// /audit</c> and the API-internal (auth) writes still work; only the engine-sourced rows are missing.
+/// /audit</c> and the API-internal (auth) writes still work; only the live engine push is missing.
 /// Startup never fails on the event socket.</para>
 /// </remarks>
 public sealed class KgsmAuditConsumer(
@@ -40,6 +44,12 @@ public sealed class KgsmAuditConsumer(
     JobRegistry jobRegistry,
     ILogger<KgsmAuditConsumer> logger) : IHostedService
 {
+    // Captures the deterministic AuditId.ForEvent id for each engine envelope (via a RegisterRawHandler
+    // hook — see EngineEventIdTracker remarks) so the typed handlers below, which only ever receive the
+    // typed EventDataBase, can still tag their published-but-not-persisted rows with the SAME id
+    // kgsm-monitor independently computed for the identical event.
+    private readonly EngineEventIdTracker idTracker = new();
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         // Always ensure the audit table exists — even with no engine, GET /audit and auth writes need it.
@@ -83,6 +93,13 @@ public sealed class KgsmAuditConsumer(
 
     private void RegisterHandlers(IEventService events)
     {
+        // Captures AuditId.ForEvent for the envelope about to be typed-dispatched — see
+        // EngineEventIdTracker + TakePendingEventId. Registered first so it is armed before any typed
+        // handler below can run (RegisterRawHandler fires before typed dispatch for every event anyway,
+        // but registration order here has no bearing on that — kgsm-lib always runs ALL raw handlers
+        // before typed dispatch, regardless of relative registration order).
+        events.RegisterRawHandler(idTracker.OnRawEvent);
+
         // server.* — the closed lifecycle subset kgsm emits today. Each maps 1:1 to a dotted action.
         // server.start / server.restart additionally feed the alert↔audit bridge (M6·a): AFTER the row is
         // written we hand its evt_ id to the AlertEngine (only when IsRecoveryAction), so a crash that
@@ -177,12 +194,14 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceCrashedData>(d =>
         {
             instanceCache.UpdateStatus(d.InstanceName, false);
-            return audit.AppendAsync(AuditMapping.FromCrashEvent(d, options.HostId));
+            PublishLive(AuditMapping.FromCrashEvent(d, options.HostId));
+            return Task.CompletedTask;
         });
         events.RegisterHandler<InstanceFailedData>(d =>
         {
             instanceCache.UpdateStatus(d.InstanceName, false);
-            return audit.AppendAsync(AuditMapping.FromFailedEvent(d, options.HostId));
+            PublishLive(AuditMapping.FromFailedEvent(d, options.HostId));
+            return Task.CompletedTask;
         });
 
         // network.ports.open / .close — the CLI-path firewall echoes (kgsm bash emits these on a
@@ -191,18 +210,30 @@ public sealed class KgsmAuditConsumer(
         // `network.ports.open` directly at M6·b (kgsm runs nothing → no echo, the auth.* case); there is
         // no api close command (§3·g is open-only), so `network.ports.close` is cleanly CLI-echo-only.
         events.RegisterHandler<InstancePortsOpenedData>(d =>
-            audit.AppendAsync(AuditMapping.FromPortsOpenedEvent(d, options.HostId)));
+        {
+            PublishLive(AuditMapping.FromPortsOpenedEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
         events.RegisterHandler<InstancePortsClosedData>(d =>
-            audit.AppendAsync(AuditMapping.FromPortsClosedEvent(d, options.HostId)));
+        {
+            PublishLive(AuditMapping.FromPortsClosedEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
 
         // network.upnp.open / .close — the watchdog's ROUTER-forward echoes (kgsm-lib 1.21.0). Distinct
         // from the firewall ports.* above: the watchdog opens/closes UPnP mappings on the IGD via upnpc
         // on bring-up/stop and emits these (system/system) only on a confirmed upnpc-exit-0 transition.
         // Watchdog-echo-only (no api-issued UPnP command). Pure mapper, socket-free. Engine-owned → no double-write.
         events.RegisterHandler<InstanceUpnpOpenedData>(d =>
-            audit.AppendAsync(AuditMapping.FromUpnpOpenedEvent(d, options.HostId)));
+        {
+            PublishLive(AuditMapping.FromUpnpOpenedEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
         events.RegisterHandler<InstanceUpnpClosedData>(d =>
-            audit.AppendAsync(AuditMapping.FromUpnpClosedEvent(d, options.HostId)));
+        {
+            PublishLive(AuditMapping.FromUpnpClosedEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
 
         // player.join / player.leave — presence echoes (kgsm-lib 1.19.0, extended 1.29.0 with
         // addr/sessionKey/reason). For our container images the watchdog forwards these from the in-image
@@ -218,7 +249,8 @@ public sealed class KgsmAuditConsumer(
                 d.Timestamp ?? DateTimeOffset.UtcNow);
             history.Join(d.InstanceName, d.SessionKey, d.PlayerId, d.PlayerName, d.PlayerAddr,
                 d.Timestamp ?? DateTimeOffset.UtcNow);
-            return audit.AppendAsync(AuditMapping.FromPlayerJoinedEvent(d, options.HostId));
+            PublishLive(AuditMapping.FromPlayerJoinedEvent(d, options.HostId));
+            return Task.CompletedTask;
         });
         events.RegisterHandler<InstancePlayerLeftData>(d =>
         {
@@ -226,22 +258,29 @@ public sealed class KgsmAuditConsumer(
                 d.Timestamp ?? DateTimeOffset.UtcNow);
             history.Leave(d.InstanceName, d.SessionKey, d.PlayerId, d.PlayerName, d.PlayerAddr,
                 d.Timestamp ?? DateTimeOffset.UtcNow);
-            return audit.AppendAsync(AuditMapping.FromPlayerLeftEvent(d, options.HostId));
+            PublishLive(AuditMapping.FromPlayerLeftEvent(d, options.HostId));
+            return Task.CompletedTask;
         });
 
         // config.set — instance config edits (kgsm-lib 1.22.0). The PATCH /servers/{id}/config path stamps
-        // actor+origin onto SetInstanceConfigValue, so this echo carries provenance; engine-owned → no
-        // double-write (plain AppendAsync, NOT WriteServerAndBridge — a config edit is not a recovery action).
-        // KEY ONLY in meta (the event never carries the value — secret hygiene). Pure mapper, socket-free.
+        // actor+origin onto SetInstanceConfigValue, so this echo carries provenance; engine-owned → live
+        // publish only (NOT WriteServerAndBridge — a config edit is not a recovery action). KEY ONLY in
+        // meta (the event never carries the value — secret hygiene). Pure mapper, socket-free.
         events.RegisterHandler<InstanceConfigChangedData>(d =>
-            audit.AppendAsync(AuditMapping.FromConfigChangedEvent(d, options.HostId)));
+        {
+            PublishLive(AuditMapping.FromConfigChangedEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
 
         // console.input — an arbitrary console command sent to a running native instance (kgsm-lib 1.24.0).
         // The POST /servers/{id}/console path stamps actor+origin onto SendInput, so this echo carries
-        // provenance; engine-owned → no double-write (plain AppendAsync — not a recovery action). Unlike
-        // config.set, the FULL command text rides in meta (recording what was run — see AuditAction.ConsoleInput).
+        // provenance; engine-owned → live publish only (not a recovery action). Unlike config.set, the
+        // FULL command text rides in meta (recording what was run — see AuditAction.ConsoleInput).
         events.RegisterHandler<InstanceInputSentData>(d =>
-            audit.AppendAsync(AuditMapping.FromInputSentEvent(d, options.HostId)));
+        {
+            PublishLive(AuditMapping.FromInputSentEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
 
         // install phase progression — surface sub-phases via job.patch so connected clients can show
         // granular progress on phantom cards. No audit row: these are transient UI signals, not domain
@@ -268,19 +307,35 @@ public sealed class KgsmAuditConsumer(
 
     private Task WriteServer(
         EventDataBase data, string action, string severity, string verb,
-        IReadOnlyDictionary<string, string>? meta = null) =>
-        audit.AppendAsync(AuditMapping.FromServerEvent(data, action, severity, verb, options.HostId, meta));
-
-    // Write a server.start/server.restart row, then — only if it is a RECOVERY action — hand its id to
-    // the alert engine: a crash that clears because THIS recovery brought the server back links to it
-    // (resolution.actionId — M6·a). A stop is not a recovery (it never reaches here, separate handler).
-    private async Task WriteServerAndBridge(EventDataBase data, string action, string verb)
+        IReadOnlyDictionary<string, string>? meta = null)
     {
-        AuditRecord row = await audit
-            .AppendAsync(AuditMapping.FromServerEvent(data, action, AuditSeverity.Info, verb, options.HostId))
-            .ConfigureAwait(false);
+        PublishLive(AuditMapping.FromServerEvent(data, action, severity, verb, options.HostId, meta));
+        return Task.CompletedTask;
+    }
+
+    // Publish a server.start/server.restart row live, then — only if it is a RECOVERY action — hand its
+    // id to the alert engine: a crash that clears because THIS recovery brought the server back links to
+    // it (resolution.actionId — M6·a). A stop is not a recovery (it never reaches here, separate handler).
+    // The bridge only needs an id that is INTERNALLY consistent with what GET /audit will later show for
+    // the same event (the deterministic AuditId.ForEvent, captured via idTracker) — it does not need a
+    // DB round-trip, since AuditWrite.Ts already equals the value a persisted row's Ts would have been.
+    private Task WriteServerAndBridge(EventDataBase data, string action, string verb)
+    {
+        AuditRecord row = PublishLive(
+            AuditMapping.FromServerEvent(data, action, AuditSeverity.Info, verb, options.HostId));
         if (IsRecoveryAction(data, action) && !string.IsNullOrEmpty(data.InstanceName))
             alerts.NoteRecoveryAction(data.InstanceName, row.Id, row.Ts);
+        return Task.CompletedTask;
+    }
+
+    // Shape + publish (never persist) one engine-sourced audit row: tags it with the deterministic id
+    // captured by idTracker's raw handler for this exact event, then fans it out via
+    // AuditService.PublishLive (audit WS topic + notifications — see that method's remarks).
+    private AuditRecord PublishLive(AuditWrite write)
+    {
+        AuditRecord record = AuditMapping.ToRecordDirect(write, idTracker.TakePendingId(logger));
+        audit.PublishLive(record);
+        return record;
     }
 
     // Whether a start/restart row is a RECOVERY action eligible to become a resolved crash's

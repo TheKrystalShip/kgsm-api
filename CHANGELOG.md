@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (v0.27.0) — kgsm engine event history is sourced from kgsm-monitor, merged at read time
+- **`GET /audit` merges two disjoint sources on every read**: the local table (auth/session/leaf-
+  provisioning/leaf-config/file-edit/console-audit — everything only the API itself can generate) and
+  kgsm-monitor's `GET /events` (the kgsm engine's own history, persisted there raw and neutral,
+  shaped into the wire `AuditRecord` at read time by reusing the same `AuditMapping` `From*Event`
+  mappers the write path used to call directly). `AuditQueries.EngineSourcedActions` is the closed set
+  of dotted actions excluded from the local query because they are, post-cutover, exclusively engine-
+  sourced (`server.*`, `backup.*`, `network.ports.close`, `network.upnp.*`, `player.*`, `config.set`,
+  `console.input`); `network.ports.open` is deliberately kept in the local read because it is
+  dual-sourced — the api-issued `open_ports` command still writes it directly (unaffected by this
+  change) alongside kgsm's own CLI-echo, now shaped from the monitor.
+- **`KgsmAuditConsumer` no longer persists any engine-sourced row.** It still subscribes to the kgsm
+  event stream and still drives the `AlertEngine` crash-recovery bridge and the live `audit` WS topic
+  (`audit.append`) + outbound notifications — via the new `AuditService.PublishLive`, which announces
+  an already-shaped row without writing it — so a live crash still raises its alert and a client
+  watching the audit feed still sees the event the instant it happens. The recovery-bridge id and the
+  live-push id are now the same deterministic `AuditId.ForEvent` value kgsm-monitor independently
+  computes for the identical envelope (`EngineEventIdTracker`, fed by a new
+  `IEventService.RegisterRawHandler` hook that fires before typed dispatch), so a client can reconcile
+  a live-pushed row against the same fact later returned by a paginated `GET /audit` read.
+- **The merged page's cursor is a composite `(ts, id)` keyset**, spanning both sources — replaces the
+  old bare local-`rowid` cursor, which cannot address a monitor-sourced row. The cursor string stays
+  opaque to the client (unchanged contract; kgsm-web only stores and echoes it back).
+- **`AuditPage` gains `engineHistoryDegraded`** (additive, defaults `false`): kgsm-monitor unreachable
+  → the page serves local-only rows with this set `true`, an honest partial rather than a silent drop
+  or a `500`. Every filter (`serverId`, `severity`, `actor`, `since`, `category`) is pushed to both
+  sources before the merge.
+- **No gap-filling migration.** Engine events that occurred before kgsm-monitor began persisting them
+  (the kgsm-monitor Phase-B cutover) are not reachable through the merge — the local table's
+  pre-cutover engine rows age in place, excluded by `EngineSourcedActions`, never deleted. This matches
+  the metrics-history migration's precedent (old history discarded, not migrated).
+- kgsm-lib bumped **1.35.0 → 1.36.0** (`AuditId.ForEvent` + `IEventService.RegisterRawHandler`).
+- API-only writers (`AuthController`, `SessionController`, leaf provisioning/config, `ServerFilesController`,
+  the `open_ports` command's direct audit write) are unchanged — still write to the local table exactly
+  as before.
+
 ### Fixed (v0.26.1) — dev tooling (mint-dev-token + smoke) on a live host
 - **`scripts/mint-dev-token.py` mints a usable session now.** It adds the `sid`/`jti` claims and inserts
   the matching `sessions` row the M4·c registry requires (a token with no live session row is rejected
