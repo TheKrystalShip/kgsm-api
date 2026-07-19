@@ -449,6 +449,9 @@ public sealed class ServerSettingsTests
         public IAsyncEnumerable<string> FollowConsoleAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<string>> GetConsoleTailAsync(string instanceName, int lines, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>?> GetAllPlayersAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogUpnpList?> GetUpnpAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogUpnpActionResult> OpenUpnpAsync(string instanceName, IReadOnlyList<PortMapping>? ports = null, string origin = "control", CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogUpnpActionResult> CloseUpnpAsync(string instanceName, string origin = "control", CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
         public void Dispose() { }
     }

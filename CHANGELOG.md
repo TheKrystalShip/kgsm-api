@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (v0.27.2) — adopt kgsm-lib 1.37.0 (watchdog UPnP control surface)
+- Bumped the `TheKrystalShip.KGSM.Lib` reference 1.36.0 → 1.37.0, which adds the watchdog's on-demand
+  UPnP client methods (`IWatchdogClient.GetUpnpAsync`/`OpenUpnpAsync`/`CloseUpnpAsync`). The API does not
+  consume these yet (a later increment wires UPnP into the `network` surface); this bump keeps the
+  ecosystem coherent on one lib version and updates the three hand-rolled `IWatchdogClient` test fakes to
+  implement the new members. No API behavior change; full suite green (753).
+
 ### Fixed (v0.27.1) — GET /audit no longer 500s when the monitor's /events response is malformed
 - The merged audit read now treats a monitor `GET /events` page whose `events` array is missing (a 200
   response that parses as JSON but doesn't match the expected shape — an old/mismatched monitor build, a
