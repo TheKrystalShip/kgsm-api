@@ -19,11 +19,13 @@ namespace TheKrystalShip.Api.Controllers;
 /// minefield). <strong>BOTH read and write are operator-gated, not viewer</strong> (file contents routinely
 /// hold secrets — rcon passwords, tokens, webhook URLs — so even listing/reading is operator+).
 /// <para>
-/// The engine is reached only for the jail root (<c>IInstanceService.GetInstanceInfo(id).WorkingDir</c> via
-/// the chokepoint); the content I/O is host filesystem, done by the kgsm-api-owned
-/// <see cref="IInstanceFileService"/> (NOT kgsm's domain). A save is a mutation with no kgsm event, so the
-/// API writes the <c>file.write</c> audit row itself (the <c>auth.*</c> direct-write pattern, no
-/// double-write) — recording <c>path</c>/<c>sizeBytes</c>/<c>sha256</c> but NEVER the content.
+/// The controller does its own engine-provisioned/unknown-id pre-check (<c>IInstanceService.GetInstanceInfo</c>
+/// via the chokepoint); the actual jailed list/read/write is kgsm-lib's <c>IInstanceFiles</c> — the single
+/// filesystem authority shared with the assistant (<c>instance-filesystem-authority-plan.md</c>) — reached
+/// through the kgsm-api-owned <see cref="IInstanceFileService"/> wrapper (status mapping + presentation
+/// hints only, no I/O of its own). A save is a mutation with no kgsm event, so the API writes the
+/// <c>file.write</c> audit row itself (the <c>auth.*</c> direct-write pattern, no double-write) — recording
+/// <c>path</c>/<c>sizeBytes</c>/<c>sha256</c> but NEVER the content.
 /// </para>
 /// </summary>
 [ApiController]
@@ -31,7 +33,6 @@ namespace TheKrystalShip.Api.Controllers;
 [Authorize(Policy = AuthPolicy.Operator)] // read AND write are operator+ (contents hold secrets)
 public sealed class ServerFilesController(
     ServerAggregator aggregator,
-    IInstanceFileService files,
     AuditService audit,
     ApiOptions options) : ControllerBase
 {
@@ -51,11 +52,13 @@ public sealed class ServerFilesController(
         Jail jail = await TryResolveJail(id, ct).ConfigureAwait(false);
         if (jail.Error is not null) return jail.Error;
 
-        ListResult result = files.ListDirectory(jail.WorkingDir, path, options.FilesMaxEntries);
+        ListResult result = jail.Files!.ListDirectory(id, path, options.FilesMaxEntries);
         return result.Status switch
         {
             FileOp.Ok => Ok(new DirListingDto(result.Path, result.Truncated, result.Entries.Select(ToDto).ToArray())),
             FileOp.NotADirectory => Error(StatusCodes.Status400BadRequest, "bad_request", "not a directory"),
+            FileOp.Unavailable => Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the instance working directory is unavailable"),
             // OutOfJail folds into 404 — never reveal that a path resolved outside the host jail.
             _ => NotFound(),
         };
@@ -76,12 +79,14 @@ public sealed class ServerFilesController(
         Jail jail = await TryResolveJail(id, ct).ConfigureAwait(false);
         if (jail.Error is not null) return jail.Error;
 
-        ReadResult result = files.ReadFile(jail.WorkingDir, path, options.FilesMaxEditBytes);
+        ReadResult result = jail.Files!.ReadFile(id, path, options.FilesMaxEditBytes);
         return result.Status switch
         {
             FileOp.Ok => Ok(new FileContentDto(result.Path, "utf-8", result.Content!, result.SizeBytes, result.Mtime, result.Etag!)),
             FileOp.Binary => Error(StatusCodes.Status409Conflict, "file_binary", "this file is binary and can't be opened in the editor"),
             FileOp.TooLarge => Error(StatusCodes.Status409Conflict, "file_too_large", "this file is too large to open in the editor"),
+            FileOp.Unavailable => Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the instance working directory is unavailable"),
             _ => NotFound(), // NotFound / NotAFile / OutOfJail
         };
     }
@@ -113,7 +118,7 @@ public sealed class ServerFilesController(
         Jail jail = await TryResolveJail(id, ct).ConfigureAwait(false);
         if (jail.Error is not null) return jail.Error;
 
-        WriteResult result = files.SaveFile(jail.WorkingDir, path, content, body.Etag, options.FilesMaxEditBytes);
+        WriteResult result = jail.Files!.SaveFile(id, path, content, body.Etag, options.FilesMaxEditBytes);
 
         switch (result.Status)
         {
@@ -129,6 +134,9 @@ public sealed class ServerFilesController(
                 return Error(StatusCodes.Status409Conflict, "file_too_large", "the new content exceeds the edit-size limit");
             case FileOp.NotAFile:
                 return Error(StatusCodes.Status409Conflict, "conflict", "the target is not a regular file");
+            case FileOp.Unavailable:
+                return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                    "the instance working directory is unavailable");
             default:
                 return NotFound(); // NotFound (no create in v1) / OutOfJail
         }
@@ -161,28 +169,36 @@ public sealed class ServerFilesController(
 
     // ---- shared instance/jail resolution (mirrors ServerConfigController) ------------------------
 
-    private readonly record struct Jail(string WorkingDir, IActionResult? Error);
+    private readonly record struct Jail(IInstanceFileService? Files, IActionResult? Error);
 
-    /// <summary>Resolve the instance's working dir (the jail root) or the matching error result: 503 if the
-    /// engine is unprovisioned, 404 if the id is unknown, 503 if the engine reports no working dir.</summary>
+    /// <summary>Resolve the instance (and the file service, kgsm-lib-backed and gated the same way) or
+    /// the matching error result: 503 if the engine is unprovisioned, 404 if the id is unknown, 503 if
+    /// the engine reports no working dir. The actual jail root lookup + I/O now happens inside kgsm-lib's
+    /// <c>IInstanceFiles</c> (by instance name, not a pre-resolved path) — this pre-check exists purely to
+    /// preserve the existing degrade/404 behaviour before making that call.</summary>
     private async Task<Jail> TryResolveJail(string id, CancellationToken ct)
     {
         if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
-            return new Jail("", Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+            return new Jail(null, Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
                 "the kgsm engine is not provisioned on this host"));
 
         if (!await ExistsAsync(id, ct).ConfigureAwait(false))
-            return new Jail("", NotFound());
+            return new Jail(null, NotFound());
 
         Instance? instance = instances.GetInstanceInfo(id);
         if (instance is null)
-            return new Jail("", NotFound());
+            return new Jail(null, NotFound());
 
         if (string.IsNullOrWhiteSpace(instance.WorkingDir))
-            return new Jail("", Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+            return new Jail(null, Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
                 "the instance working directory is unavailable"));
 
-        return new Jail(instance.WorkingDir, null);
+        // Registered in lockstep with IInstanceService (both gated on KgsmProvisioned — Startup.cs), so
+        // this is guaranteed non-null once the check above passed; resolved lazily (not constructor-
+        // injected) for the same reason IInstanceService is: an unprovisioned engine must degrade to the
+        // 503 above, not a DI construction failure.
+        var files = (IInstanceFileService?)HttpContext.RequestServices.GetService(typeof(IInstanceFileService));
+        return new Jail(files, null);
     }
 
     private async Task<bool> ExistsAsync(string id, CancellationToken ct)

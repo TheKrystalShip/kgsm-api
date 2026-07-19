@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TheKrystalShip.Api.Services.Auth;
@@ -220,6 +221,22 @@ public sealed class FileBrowserApiTests
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             base.ConfigureWebHost(builder);
+            // The base factory leaves KGSM_API_KGSM_PATH blank (engine unprovisioned, by design for the
+            // rest of the suite) — but the file browser now delegates to kgsm-lib's IInstanceFiles,
+            // which Startup only registers when the engine IS provisioned. A non-blank placeholder here
+            // is never actually shelled: IInstanceService is swapped for the in-memory fake below, so
+            // kgsm-lib's real InstanceService (and this path) are never touched.
+            builder.ConfigureAppConfiguration((_, config) =>
+            {
+                config.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["KGSM_API_KGSM_PATH"] = "/usr/bin/kgsm",
+                    // A per-factory temp path (never actually bound against — the socket-bind failure
+                    // path is caught/logged, not thrown — but this avoids any attempt against the real
+                    // /run default, which the test process may not have permission to touch).
+                    ["KGSM_API_KGSM_SOCKET"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-files-{Guid.NewGuid():N}.sock"),
+                });
+            });
             builder.ConfigureTestServices(services =>
             {
                 services.RemoveAll<IInstanceService>();

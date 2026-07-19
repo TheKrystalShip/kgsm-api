@@ -117,7 +117,18 @@ public class Startup(IConfiguration configuration)
         // non-existent socket never blocks startup. The ServerAggregator resolves IInstanceService
         // per-request and degrades to an empty list (logged once) if the engine is unconfigured.
         if (apiOptions.KgsmProvisioned)
+        {
             services.AddKgsmServices(apiOptions.KgsmPath, apiOptions.KgsmSocketPath);
+
+            // File browser (Tier 3 #12) — the jailed content I/O for GET/PUT /servers/{id}/files. No
+            // capability axis of its own (engine-base, like config/backups): it's a thin status-mapping
+            // wrapper around kgsm-lib's IInstanceFiles (registered by AddKgsmServices above), so it is
+            // gated the SAME as the engine itself and registered transient (its dependency is). The
+            // controller resolves it lazily from RequestServices — mirroring the IInstanceService
+            // null-check pattern below — so an unprovisioned engine degrades to the existing 503, not a
+            // DI construction failure.
+            services.AddTransient<IInstanceFileService, InstanceFileService>();
+        }
 
         // M6·b — ports. The firewall authority (kgsm-firewall) is OPT-IN like the assistant: its kgsm-lib
         // client is registered ONLY when its socket is configured (blank => firewall "absent"). It is
@@ -300,11 +311,6 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<PlayerHistoryService>();
 
         services.AddHostedService<KgsmAuditConsumer>();
-
-        // File browser (Tier 3 #12) — the jailed content I/O for GET/PUT /servers/{id}/files. No leaf, no
-        // capability axis (engine-base, like config/backups): the jail root comes from kgsm-lib
-        // (Instance.WorkingDir) and the read/write is host filesystem. Pure/stateless → singleton.
-        services.AddSingleton<IInstanceFileService, InstanceFileService>();
 
         // Host logs — the GET /hosts/{id}/logs journald aggregator. No leaf, no capability axis (host-OS
         // introspection, like the file browser): it shells journalctl directly and is pure/stateless → singleton.
