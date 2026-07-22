@@ -65,13 +65,13 @@ public sealed class CommandRunner(
     /// blueprint default). No audit row is written here — kgsm's <c>instance_installed</c> echo carries the
     /// stamped provenance (the lifecycle case).
     /// </summary>
-    public void StartInstall(Job job, string blueprint, int? port = null, string? actor = null, string? origin = null)
+    public void StartInstall(Job job, string blueprint, int? port = null, string? actor = null, string? origin = null, bool? autostart = null)
     {
         // Stamp the blueprint onto the job and broadcast immediately so all connected
         // clients can create a phantom card without waiting for the `running` publish.
         Job withBlueprint = registry.Update(job with { Blueprint = blueprint });
         Publish(withBlueprint);
-        _ = Task.Run(() => ExecuteAsync(withBlueprint, actor, origin, blueprint, backupName: null, installPort: port));
+        _ = Task.Run(() => ExecuteAsync(withBlueprint, actor, origin, blueprint, backupName: null, installPort: port, installAutostart: autostart));
     }
 
     /// <summary>
@@ -99,7 +99,7 @@ public sealed class CommandRunner(
     public void StartBackupRestore(Job job, string backupName, string? actor = null, string? origin = null) =>
         _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName));
 
-    private async Task ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null)
+    private async Task ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null, bool? installAutostart = null)
     {
         bool ok = false;
         string? error = null;
@@ -115,7 +115,7 @@ public sealed class CommandRunner(
             (ok, error) = job.Verb switch
             {
                 CommandVerb.OpenPorts => await RunOpenPortsAsync(scope, job, actor, origin).ConfigureAwait(false),
-                CommandVerb.Install => RunInstall(scope, job, blueprint!, installPort, actor, origin),
+                CommandVerb.Install => RunInstall(scope, job, blueprint!, installPort, actor, origin, installAutostart),
                 CommandVerb.Uninstall => RunUninstall(scope, job, actor, origin),
                 // update / backup_* live on IInstanceService, NOT ILifecycleService — they get their own
                 // cases so they never fall through to RunLifecycle (whose inner switch would fail them as an
@@ -205,16 +205,17 @@ public sealed class CommandRunner(
     // KgsmAuditConsumer writes the server.install echo with the stamped provenance (the lifecycle case, NOT
     // the open_ports direct write).
     private (bool ok, string? error) RunInstall(
-        IServiceScope scope, Job job, string blueprint, int? port, string? actor, string? origin)
+        IServiceScope scope, Job job, string blueprint, int? port, string? actor, string? origin, bool? autostart = null)
     {
         var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
         if (instances is null)
             return (false, "engine not provisioned");
 
         // port (the install form's Game Port) overrides the blueprint's primary port when supplied; null
-        // keeps the blueprint default. installDir/version stay null — kgsm uses its host-config default dir
-        // and the latest version (the SPA disables version selection; install dir is host-config, shown read-only).
-        KgsmResult result = instances.Install(blueprint, installDir: null, version: null, name: job.ServerId, actor: actor, origin: origin, port: port);
+        // keeps the blueprint default. autostart requests a one-shot start after install completes.
+        // installDir/version stay null — kgsm uses its host-config default dir and the latest version
+        // (the SPA disables version selection; install dir is host-config, shown read-only).
+        KgsmResult result = instances.Install(blueprint, installDir: null, version: null, name: job.ServerId, actor: actor, origin: origin, port: port, start: autostart);
         return result.IsSuccess ? (true, null) : (false, Detail(result));
     }
 

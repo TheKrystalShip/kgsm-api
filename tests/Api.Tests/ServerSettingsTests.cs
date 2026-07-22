@@ -368,7 +368,7 @@ public sealed class ServerSettingsTests
         public KgsmResult GetInfo(string instanceName) => throw new NotImplementedException();
         public bool IsActive(string instanceName) => throw new NotImplementedException();
         public KgsmResult GenerateId(string blueprintName, string? customName = null) => throw new NotImplementedException();
-        public KgsmResult Install(string blueprintName, string? installDir = null, string? version = null, string? name = null, string? actor = null, string? origin = null, int? port = null) => throw new NotImplementedException();
+        public KgsmResult Install(string blueprintName, string? installDir = null, string? version = null, string? name = null, string? actor = null, string? origin = null, int? port = null, bool? start = null) => throw new NotImplementedException();
         public KgsmResult Uninstall(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult Start(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult Stop(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();

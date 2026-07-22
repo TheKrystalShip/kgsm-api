@@ -192,7 +192,7 @@ public sealed class ServersController(
                 $"an install is already in flight for '{assignedId}'");
 
         string? actor = AuditPrincipal.ActorString(User);
-        runner.StartInstall(job, blueprint, port, actor, origin);
+        runner.StartInstall(job, blueprint, port, actor, origin, autostart: body?.Autostart);
         return StatusCode(StatusCodes.Status202Accepted, new CommandAccepted(job));
     }
 

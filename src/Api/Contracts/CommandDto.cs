@@ -29,10 +29,13 @@ public sealed record CommandRequest(string? Verb, string? Origin = null);
 ///     the resulting <c>instance_installed</c> event — and its <c>server.install</c> audit row — records it.
 ///     <see cref="Port"/> — the install form's Game Port; validated 1-65535 and passed to kgsm as
 ///     <c>install --port</c>, overriding the blueprint's primary game port for the new instance (null keeps
-///     the blueprint default).</description></item>
-///   <item><description><b>Reserved — accepted &amp; ignored (additive-only, §3·h):</b> everything else.
-///     Sending them keeps the schema forward-compatible so the backend can grow into a field with no
-///     client change and no version bump; until then they are <em>inert</em> (never silently half-applied).</description></item>
+///     the blueprint default). <see cref="Autostart"/> — when <c>true</c>, starts the server
+///     immediately after install completes (one-shot start, not watchdog boot-autostart); defaults to
+///     <c>false</c> when absent.</description></item>
+///   <item><description><b>Reserved — accepted &amp; ignored (additive-only, §3·h):</b> everything else not
+///     listed above. Sending them keeps the schema forward-compatible so the backend can grow into a
+///     field with no client change and no version bump; until then they are <em>inert</em> (never silently
+///     half-applied).</description></item>
 /// </list>
 /// Install is async: the endpoint returns a <see cref="Job"/> (not a server). When it completes the new
 /// server appears on <c>/servers</c> with a backend-assigned id and a <c>server.install</c> audit entry.
@@ -41,15 +44,15 @@ public sealed record InstallRequest(
     string? Blueprint,
     string? Name = null,
     string? Origin = null,
+    int? Port = null,
+    bool? Autostart = null,
     // ---- reserved: accepted & stored, not yet acted on (§3·h additive-only) ----
     string? HostId = null,
     string? Version = null,
-    int? Port = null,
     int? QueryPort = null,
     int? Slots = null,
     string? Dir = null,
-    string? Password = null,
-    bool? Autostart = null);
+    string? Password = null);
 
 /// <summary>
 /// The closed lifecycle verb set the API admits in M3 (+ <c>update</c> + <c>open_ports</c>). Server-defined —

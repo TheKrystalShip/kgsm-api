@@ -269,7 +269,7 @@ public sealed class InstallUninstallTests
         // Accepts the Game Port override (the runner forwards it via Install(port:)); the gate tests assert
         // the 202 synchronously, the out-of-range rejection is asserted on the controller before this runs.
         public KgsmResult Install(string blueprintName, string? installDir = null, string? version = null,
-            string? name = null, string? actor = null, string? origin = null, int? port = null) => new(0);
+            string? name = null, string? actor = null, string? origin = null, int? port = null, bool? start = null) => new(0);
 
         public KgsmResult Uninstall(string instanceName, string? actor = null, string? origin = null) => new(0);
 
