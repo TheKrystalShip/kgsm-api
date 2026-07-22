@@ -86,15 +86,24 @@ public sealed class LeafRegistry : IHostedService
 
             foreach (string leaf in ProvisionableLeaf.All)
             {
+                bool configProvisioned = SeedFromConfig(leaf);
                 if (byId.TryGetValue(leaf, out LeafRegistryEntity? row))
                 {
-                    // A persisted flip overrides the config seed (this is what survives a restart).
+                    // Config seed changed (e.g. env var was added/removed) since the row was last
+                    // persisted — update the row so the config change takes effect on restart, while
+                    // an explicit runtime flip (SetProvisionedAsync) still survives a restart as long
+                    // as the config seed hasn't changed. If the seed changed, the new seed wins.
+                    if (row.Provisioned != configProvisioned)
+                    {
+                        row.Provisioned = configProvisioned;
+                        row.UpdatedAt = DateTimeOffset.UtcNow;
+                    }
                     _state[leaf] = new LeafProvisioningState(row.Provisioned, row.Endpoint);
                 }
                 else
                 {
-                    // No row yet → persist the config seed so the registry is the source of truth from now on.
-                    LeafProvisioningState seed = _state[leaf];
+                    LeafProvisioningState seed = new(configProvisioned, Endpoint: null);
+                    _state[leaf] = seed;
                     db.LeafRegistryEntries.Add(new LeafRegistryEntity
                     {
                         LeafId = leaf,
