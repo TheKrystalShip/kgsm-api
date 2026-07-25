@@ -24,3 +24,16 @@ public sealed record AssistantTurnRequest(
     // its OWN history, never read or poison another caller's. Sanitised ([A-Za-z0-9_-], capped) before
     // forwarding; null/blank ⇒ the bare per-user conversation (the prior single-context behaviour).
     string? ConversationId = null);
+
+/// <summary>
+/// The assistant confirm-relay request body (<c>POST /api/v1/assistant/confirm</c>) — forwarded verbatim
+/// to the assistant's own <c>/confirm</c>. Confirms a staged action the assistant proposed in a turn (the
+/// operator-gated resume). <see cref="Token"/> is the host-minted, single-use confirmation token from the
+/// <c>command.proposed</c> frame (opaque to the API); <see cref="EditedContent"/> carries an edited body
+/// where the confirmation kind allows one (the blueprint-review card's Monaco YAML) — null for a plain
+/// confirm. The API forwards these unchanged; the assistant owns validation, authority (its own bot
+/// lookup), and the whole finalize pipeline.
+/// </summary>
+public sealed record AssistantConfirmRequest(
+    string? Token,
+    string? EditedContent = null);

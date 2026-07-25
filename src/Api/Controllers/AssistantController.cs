@@ -144,6 +144,27 @@ public sealed class AssistantController(
     }
 
     /// <summary>
+    /// <c>POST /api/v1/assistant/confirm</c> — body <c>{ token, editedContent? }</c>. Finalizes a staged
+    /// action the assistant proposed in a turn (today: the blueprint-review Save — the human's edited YAML
+    /// rides <c>editedContent</c>). <b>Operator</b>-gated (this EXECUTES a mutation — install/verify —
+    /// unlike the viewer-gated turn/reads); the assistant additionally re-derives authority from the bot,
+    /// so authority is checked on both sides. Near-verbatim relay: the API forwards the token + body
+    /// unchanged and relays the assistant's <c>ConfirmResponse</c> JSON verbatim (it shapes nothing — the
+    /// finalize outcome, the rich card, and any re-edit token are all the assistant's schema). Same degrade
+    /// gate as the turn (absent → 404, down → 503, upstream reject → 502). The relay tolerates a
+    /// minutes-long finalize (<c>AssistantClient.ConfirmTimeout</c>).
+    /// </summary>
+    [HttpPost("confirm")]
+    [Authorize(Policy = AuthPolicy.Operator)]
+    public Task<IActionResult> Confirm([FromBody] AssistantConfirmRequest? body, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(body?.Token))
+            return Task.FromResult<IActionResult>(Error(StatusCodes.Status400BadRequest, "bad_request", "token is required"));
+
+        return RelayAsync((ident, ct2) => assistant.ConfirmAsync(ident.UserId, ident.Display, body, ct2), RelayedJson, ct);
+    }
+
+    /// <summary>
     /// <c>GET /api/v1/assistant/conversations</c> — the verified caller's own past chats (the reverse
     /// path), <b>viewer</b>-gated. Relays the assistant's conversation-summary JSON verbatim so a fresh
     /// browser/device can show history that lives server-side, not only in the client. Same degrade gate

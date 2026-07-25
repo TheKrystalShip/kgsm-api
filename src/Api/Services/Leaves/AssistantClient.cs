@@ -1,6 +1,8 @@
 using System.Net.Http.Json;
 using System.Net.Sockets;
 
+using TheKrystalShip.Api.Contracts;
+
 namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>
@@ -29,6 +31,17 @@ public sealed class AssistantClient : HttpClient
     // set their own budget. Aligned with the other leaf probes (HostAggregator.ProbeTimeout).
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
 
+    // Per-call budget for the short request/response relays (conversation reads, delete, compact) —
+    // preserves the pre-infinite-Timeout ceiling now that the class Timeout is unbounded (below).
+    private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(120);
+
+    // The blueprint FINALIZE (confirm) budget. Finalize is the assistant's heaviest op — re-validate
+    // the edited YAML, test-install (a SteamCMD download), boot + verify (its own multi-minute window),
+    // and a bounded self-repair loop — routinely minutes, far past the 100s default HttpClient.Timeout.
+    // Bound it generously here so the relay never severs a legitimately-running finalize; the assistant
+    // owns the real internal ceilings.
+    private static readonly TimeSpan ConfirmTimeout = TimeSpan.FromMinutes(25);
+
     private readonly ILogger<AssistantClient> _logger;
     private readonly LeafRegistry _registry;
     private readonly string _relaySecret;
@@ -40,6 +53,12 @@ public sealed class AssistantClient : HttpClient
         _logger = logger;
         _registry = registry;
         _relaySecret = options.AssistantRelaySecret;
+
+        // Unbounded class Timeout — every call sets its OWN budget via a linked token (probe 2s, reads
+        // 120s, confirm 25min), and the SSE turn is body-length-unbounded by design. The 100s default
+        // would otherwise cap a minutes-long finalize (see ConfirmTimeout) and any future slow call —
+        // exactly the class-wide ceiling the type remarks warn against.
+        Timeout = System.Threading.Timeout.InfiniteTimeSpan;
 
         // Set the base address from the configured URL whenever one is present (independent of the runtime
         // provisioning flag) so a connect/disconnect arms/disarms the client live without a restart. Without
@@ -165,9 +184,44 @@ public sealed class AssistantClient : HttpClient
         string relayUserId, string relayDisplayName, string chatId, CancellationToken ct) =>
         RelaySendAsync(HttpMethod.Post, $"/conversations/{Uri.EscapeDataString(chatId)}/compact", relayUserId, relayDisplayName, ct);
 
-    // Shared relay-on-the-user's-behalf (GET read / DELETE soft-delete): forwards the secret + forwarded
-    // identity (these endpoints need no can-act/auto-act decision), reads the small body fully. Left to the
-    // default Timeout — these are short request/response calls, not the long SSE stream.
+    /// <summary>
+    /// Finalizes a staged confirmation on the verified end-user's behalf (the blueprint-review Save, and
+    /// any future confirm): <c>POST /confirm</c> with the trusted-relay identity + the forwarded body
+    /// (<c>{ token, editedContent }</c>). The assistant validates the single-use token, re-derives action
+    /// authority from the bot (NOT a relay header — so the API operator-gates this itself), runs the whole
+    /// finalize pipeline, and answers a <c>ConfirmResponse</c> JSON the caller relays verbatim. Bounded by
+    /// <see cref="ConfirmTimeout"/> (minutes) so a legitimately-long finalize is never severed. Returns
+    /// <see langword="null"/> when the assistant isn't provisioned; the caller <strong>owns disposal</strong>.
+    /// </summary>
+    public async Task<HttpResponseMessage?> ConfirmAsync(
+        string relayUserId, string relayDisplayName, AssistantConfirmRequest body, CancellationToken ct)
+    {
+        if (!IsProvisioned)
+            return null;
+
+        // Forward the exact field names the assistant's ConfirmRequest expects (lowercase-first), same
+        // explicit style as the turn relay — never rely on the upstream's case-insensitive binding.
+        var request = new HttpRequestMessage(HttpMethod.Post, "/confirm")
+        {
+            Content = JsonContent.Create(new { token = body.Token, editedContent = body.EditedContent }),
+        };
+        request.Headers.Accept.ParseAdd("application/json");
+        if (!string.IsNullOrEmpty(_relaySecret))
+            request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
+        request.Headers.TryAddWithoutValidation("X-Relay-User", HeaderSafe(relayUserId));
+        string displayName = HeaderSafe(relayDisplayName);
+        if (!string.IsNullOrEmpty(displayName))
+            request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
+
+        using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timed.CancelAfter(ConfirmTimeout);
+        return await SendAsync(request, timed.Token).ConfigureAwait(false);
+    }
+
+    // Shared relay-on-the-user's-behalf (GET read / DELETE soft-delete / compact): forwards the secret +
+    // forwarded identity (these endpoints need no can-act/auto-act decision), reads the small body fully.
+    // Self-bounded to ReadTimeout via a linked token — these are short request/response calls, not the long
+    // SSE stream or the minutes-long confirm (the class Timeout is now unbounded, so each call budgets itself).
     private async Task<HttpResponseMessage?> RelaySendAsync(
         HttpMethod method, string path, string relayUserId, string relayDisplayName, CancellationToken ct)
     {
@@ -183,7 +237,9 @@ public sealed class AssistantClient : HttpClient
         if (!string.IsNullOrEmpty(displayName))
             request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
 
-        return await SendAsync(request, ct).ConfigureAwait(false);
+        using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timed.CancelAfter(ReadTimeout);
+        return await SendAsync(request, timed.Token).ConfigureAwait(false);
     }
 
     // Drop control chars (incl. CR/LF) so a user-controlled value can never split a header.

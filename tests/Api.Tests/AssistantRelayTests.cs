@@ -62,6 +62,49 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
 
+    // --- POST /confirm — the OPERATOR-gated finalize relay (it executes a mutation, unlike the turn). ---
+
+    private static HttpRequestMessage Confirm(string json) =>
+        new(HttpMethod.Post, "/api/v1/assistant/confirm")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+
+    [Fact]
+    public async Task Confirm_NoToken_401()
+    {
+        HttpResponseMessage resp = await Client().SendAsync(Confirm("""{"token":"t"}"""));
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        Assert.Contains("\"code\":\"unauthorized\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Confirm_ViewerTier_403()
+    {
+        // The load-bearing new gate: confirm EXECUTES a mutation, so it is operator-gated — a viewer
+        // (who may chat + propose via the turn) is forbidden here, 403 before any capability/upstream check.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).SendAsync(Confirm("""{"token":"t"}"""));
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Confirm_Operator_MissingToken_400()
+    {
+        // Token validation precedes the capability gate — a blank token is a 400 envelope, like the turn's prompt.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator)).SendAsync(Confirm("""{"token":"   "}"""));
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Confirm_Operator_AssistantAbsent_404()
+    {
+        // Operator clears authz; the unprovisioned assistant degrades to an honest 404, never a 500.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator)).SendAsync(Confirm("""{"token":"t"}"""));
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
+
     // --- POST /conversations/{id}/compact — same relay gates as the reads/delete (viewer, degrade). ---
 
     private static HttpRequestMessage Compact(string id) =>

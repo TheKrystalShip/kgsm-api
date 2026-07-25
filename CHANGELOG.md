@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.28.0) — assistant confirm relay (`POST /api/v1/assistant/confirm`)
+- Relays the assistant leaf's `/confirm` finalize near-verbatim, so the SPA can complete a staged
+  action the assistant proposed in a turn — today the **blueprint-review Save** (the human's edited
+  YAML rides `editedContent`; the response carries the finalize outcome, the rich card, and any
+  re-edit token, all the assistant's schema — the API shapes nothing, per the locked M7 fork-(a)
+  relay posture).
+- **Operator-gated**, unlike the viewer-gated turn/reads: confirm EXECUTES a mutation
+  (test-install + verify), so a viewer who may chat and *propose* is forbidden here (403 before any
+  capability/upstream check). The assistant additionally re-derives action authority from the bot,
+  so authority is enforced on both sides. Same degrade gate as the turn (absent → 404, down → 503,
+  upstream reject → 502); a blank token is a `400` envelope before the capability check.
+- The relay forwards the verified caller's Discord identity + the shared relay secret (never a
+  client-supplied identity) and tolerates a **minutes-long finalize**: `AssistantClient`'s class
+  `HttpClient.Timeout` is now unbounded, with each call setting its own budget via a linked token
+  (liveness probe 2s, conversation reads 120s, confirm 25min) — the 100s default would otherwise
+  sever a legitimately-running finalize (SteamCMD download + boot + verify + repair). The SSE turn
+  is body-length-unbounded as before.
+
 ### Changed (v0.27.3) — adopt kgsm-lib 1.41.0 (watchdog deregistration)
 - Bumped the `TheKrystalShip.KGSM.Lib` reference 1.39.0 → 1.41.0, which adds
   `IWatchdogClient.ForgetAsync` — the typed path to the watchdog's `DELETE /instance/{name}`
