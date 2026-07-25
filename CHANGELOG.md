@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (v0.27.3) — adopt kgsm-lib 1.41.0 (watchdog deregistration)
+- Bumped the `TheKrystalShip.KGSM.Lib` reference 1.39.0 → 1.41.0, which adds
+  `IWatchdogClient.ForgetAsync` — the typed path to the watchdog's `DELETE /instance/{name}`
+  deregistration verb. The API does not call it directly: `DELETE /servers/{id}` already routes through
+  kgsm-lib `Uninstall` → `kgsm uninstall`, which now deregisters the instance itself. The bump keeps the
+  ecosystem on one lib version and updates the three hand-rolled `IWatchdogClient` test fakes
+  (`ConsoleBridgeTests`, `ConsoleControllerTests`, `ServerSettingsTests`) with the new member.
+- **Effect on `/alerts`:** uninstalling a server now clears its crash alerts. The condition-mirror always
+  retracted an alert whose instance had vanished from the watchdog's instance list, but nothing ever
+  removed an uninstalled instance from that list — so a crashed-then-deleted server left a `firing`
+  record no operator could resolve, since neither the server nor any action on it existed any more. With
+  the engine deregistering on uninstall, the existing retract path fires on the next poll. No API code
+  change was needed.
+
 ### Changed (v0.27.2) — adopt kgsm-lib 1.37.0 (watchdog UPnP control surface)
 - Bumped the `TheKrystalShip.KGSM.Lib` reference 1.36.0 → 1.37.0, which adds the watchdog's on-demand
   UPnP client methods (`IWatchdogClient.GetUpnpAsync`/`OpenUpnpAsync`/`CloseUpnpAsync`). The API does not
