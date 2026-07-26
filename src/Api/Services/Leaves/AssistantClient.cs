@@ -35,13 +35,6 @@ public sealed class AssistantClient : HttpClient
     // preserves the pre-infinite-Timeout ceiling now that the class Timeout is unbounded (below).
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(120);
 
-    // The blueprint FINALIZE (confirm) budget. Finalize is the assistant's heaviest op — re-validate
-    // the edited YAML, test-install (a SteamCMD download), boot + verify (its own multi-minute window),
-    // and a bounded self-repair loop — routinely minutes, far past the 100s default HttpClient.Timeout.
-    // Bound it generously here so the relay never severs a legitimately-running finalize; the assistant
-    // owns the real internal ceilings.
-    private static readonly TimeSpan ConfirmTimeout = TimeSpan.FromMinutes(25);
-
     private readonly ILogger<AssistantClient> _logger;
     private readonly LeafRegistry _registry;
     private readonly string _relaySecret;
@@ -54,10 +47,10 @@ public sealed class AssistantClient : HttpClient
         _registry = registry;
         _relaySecret = options.AssistantRelaySecret;
 
-        // Unbounded class Timeout — every call sets its OWN budget via a linked token (probe 2s, reads
-        // 120s, confirm 25min), and the SSE turn is body-length-unbounded by design. The 100s default
-        // would otherwise cap a minutes-long finalize (see ConfirmTimeout) and any future slow call —
-        // exactly the class-wide ceiling the type remarks warn against.
+        // Unbounded class Timeout — the short relays set their OWN budget via a linked token (probe 2s,
+        // reads 120s), while the SSE turn and the streamed blueprint finalize are body-length-unbounded by
+        // design (ResponseHeadersRead + heartbeats). The 100s default would otherwise cap a minutes-long
+        // finalize and any future slow call — exactly the class-wide ceiling the type remarks warn against.
         Timeout = System.Threading.Timeout.InfiniteTimeSpan;
 
         // Set the base address from the configured URL whenever one is present (independent of the runtime
@@ -189,10 +182,17 @@ public sealed class AssistantClient : HttpClient
     /// any future confirm): <c>POST /confirm</c> with the trusted-relay identity + the forwarded body
     /// (<c>{ token, editedContent }</c>). The assistant validates the single-use token, re-derives action
     /// authority from the forwarded <c>X-Relay-Can-Act</c> (this endpoint is operator-gated, so the header
-    /// is unconditionally the verified tier), runs the whole finalize pipeline, and answers a
-    /// <c>ConfirmResponse</c> JSON the caller relays verbatim. Bounded by
-    /// <see cref="ConfirmTimeout"/> (minutes) so a legitimately-long finalize is never severed. Returns
-    /// <see langword="null"/> when the assistant isn't provisioned; the caller <strong>owns disposal</strong>.
+    /// is unconditionally the verified tier), and runs the whole finalize pipeline.
+    /// <para>
+    /// A blueprint finalize is <em>minutes</em> of test-install → verify → repair, so — like the turn — the
+    /// caller asks for it <c>text/event-stream</c> and the assistant STREAMS it: <c>progress</c> steps +
+    /// keep-alive heartbeats keep the socket warm through the long silent stretches, then a terminal
+    /// <c>result</c> frame carries the <c>ConfirmResponse</c>. <c>ResponseHeadersRead</c> (as the turn does)
+    /// hands the stream back the instant the headers land, so the long body isn't bound by
+    /// <see cref="HttpClient.Timeout"/>; the finalize is internally bounded by the engine's own command
+    /// timeouts, and a client disconnect tears the chain down. Returns <see langword="null"/> when the
+    /// assistant isn't provisioned; the caller <strong>owns disposal</strong> (and streams the body).
+    /// </para>
     /// </summary>
     public async Task<HttpResponseMessage?> ConfirmAsync(
         string relayUserId, string relayDisplayName, AssistantConfirmRequest body, CancellationToken ct)
@@ -206,7 +206,9 @@ public sealed class AssistantClient : HttpClient
         {
             Content = JsonContent.Create(new { token = body.Token, editedContent = body.EditedContent }),
         };
-        request.Headers.Accept.ParseAdd("application/json");
+        // Opt into the streamed finalize (progress + heartbeats + terminal `result`). The assistant falls
+        // back to a buffered ConfirmResponse for any caller that doesn't ask for the stream.
+        request.Headers.Accept.ParseAdd("text/event-stream");
         if (!string.IsNullOrEmpty(_relaySecret))
             request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
         request.Headers.TryAddWithoutValidation("X-Relay-User", HeaderSafe(relayUserId));
@@ -220,9 +222,10 @@ public sealed class AssistantClient : HttpClient
         // it a Discord-less relay host has no authority source and denies the finalize.
         request.Headers.TryAddWithoutValidation("X-Relay-Can-Act", "true");
 
-        using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timed.CancelAfter(ConfirmTimeout);
-        return await SendAsync(request, timed.Token).ConfigureAwait(false);
+        // ResponseHeadersRead: return the stream as soon as the headers land so the minutes-long finalize
+        // body isn't HttpClient.Timeout-bound (the class Timeout is Infinite; see the ctor). The heartbeats
+        // keep the socket alive, so no separate read-timeout is needed.
+        return await SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
     }
 
     // Shared relay-on-the-user's-behalf (GET read / DELETE soft-delete / compact): forwards the secret +

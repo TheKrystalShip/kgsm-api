@@ -148,20 +148,90 @@ public sealed class AssistantController(
     /// action the assistant proposed in a turn (today: the blueprint-review Save — the human's edited YAML
     /// rides <c>editedContent</c>). <b>Operator</b>-gated (this EXECUTES a mutation — install/verify —
     /// unlike the viewer-gated turn/reads); the assistant additionally re-derives authority from the bot,
-    /// so authority is checked on both sides. Near-verbatim relay: the API forwards the token + body
-    /// unchanged and relays the assistant's <c>ConfirmResponse</c> JSON verbatim (it shapes nothing — the
-    /// finalize outcome, the rich card, and any re-edit token are all the assistant's schema). Same degrade
-    /// gate as the turn (absent → 404, down → 503, upstream reject → 502). The relay tolerates a
-    /// minutes-long finalize (<c>AssistantClient.ConfirmTimeout</c>).
+    /// so authority is checked on both sides.
+    /// <para>
+    /// A blueprint finalize is minutes of test-install → verify → repair, so — exactly like the turn — this
+    /// is an <c>text/event-stream</c> relay: the assistant streams <c>progress</c> steps + keep-alive
+    /// heartbeats through the long silent stretches and a terminal <c>result</c> frame carrying the
+    /// <c>ConfirmResponse</c> (rich card + any re-edit token — all the assistant's schema, relayed verbatim).
+    /// Buffered into one response, that multi-minute silence would let an idle-connection reaper on a remote
+    /// path drop the socket, leaving the chat card spinning with no result. Same degrade gate as the turn
+    /// (absent → 404, down → 503, upstream reject → 502) decided BEFORE the SSE commits; after that any
+    /// failure ends the stream. A client disconnect tears the whole chain down.
+    /// </para>
     /// </summary>
     [HttpPost("confirm")]
     [Authorize(Policy = AuthPolicy.Operator)]
-    public Task<IActionResult> Confirm([FromBody] AssistantConfirmRequest? body, CancellationToken ct)
+    public async Task<IActionResult> Confirm([FromBody] AssistantConfirmRequest? body, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(body?.Token))
-            return Task.FromResult<IActionResult>(Error(StatusCodes.Status400BadRequest, "bad_request", "token is required"));
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "token is required");
 
-        return RelayAsync((ident, ct2) => assistant.ConfirmAsync(ident.UserId, ident.Display, body, ct2), RelayedJson, ct);
+        Capability cap = health.Current.Assistant;
+        if (!cap.Provisioned)
+            return Error(StatusCodes.Status404NotFound, "not_found", "no assistant on this host");
+        if (cap.Status != CapabilityStatus.Operational)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable", "the assistant is currently unavailable");
+
+        ClaimsIdentity? ci = User.Identity as ClaimsIdentity;
+        DiscordIdentity? identity = ci is not null ? SessionClaims.ReadIdentity(ci) : null;
+        if (identity is null)
+            return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no verified identity");
+
+        HttpResponseMessage? upstream;
+        try
+        {
+            upstream = await assistant.ConfirmAsync(identity.UserId, identity.Display, body, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return new EmptyResult(); // caller went away before the stream opened
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "assistant confirm relay: upstream connect failed");
+            return Error(StatusCodes.Status502BadGateway, "bad_gateway", "the assistant could not be reached");
+        }
+
+        if (upstream is null) // not provisioned (race with the capability gate) — same honest 404
+            return Error(StatusCodes.Status404NotFound, "not_found", "no assistant on this host");
+
+        using (upstream)
+        {
+            if (!upstream.IsSuccessStatusCode)
+            {
+                logger.LogWarning("assistant confirm relay: upstream returned {Status}", (int)upstream.StatusCode);
+                return Error(StatusCodes.Status502BadGateway, "bad_gateway", "the assistant rejected the relay");
+            }
+
+            // Commit the SSE response and relay the finalize frames verbatim. Buffering off so each progress
+            // frame + heartbeat reaches the client promptly; upstream disposed on the way out (or on
+            // disconnect) → the assistant tears the finalize down. After this the status is committed.
+            Response.StatusCode = StatusCodes.Status200OK;
+            Response.ContentType = "text/event-stream";
+            Response.Headers.CacheControl = "no-cache";
+            Response.Headers["X-Accel-Buffering"] = "no";
+            HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+
+            try
+            {
+                await using Stream stream = await upstream.Content.ReadAsStreamAsync(ct);
+                await stream.CopyToAsync(Response.Body, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Client disconnected mid-stream; disposing `upstream` tears down the finalize. Nothing to write.
+            }
+            catch (Exception ex)
+            {
+                // The response is already committed (200 + partial frames), so the status can't change — the
+                // assistant surfaces its own failures as the in-band `error`/`result` event; a transport drop
+                // just ends the stream. Log and finish.
+                logger.LogWarning(ex, "assistant confirm relay: stream copy ended abnormally");
+            }
+        }
+
+        return new EmptyResult();
     }
 
     /// <summary>

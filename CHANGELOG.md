@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (v0.30.0) — the assistant confirm relay now STREAMS the finalize
+- **`POST /api/v1/assistant/confirm` is now a `text/event-stream` relay**, exactly like the turn relay,
+  instead of a buffered JSON relay. A blueprint finalize is minutes of test-install → verify → repair with
+  long silent stretches; buffered into one response that multi-minute silence let an idle-connection reaper
+  on a remote path drop the socket, leaving the SPA's "verifying" card spinning with no result. `ConfirmAsync`
+  now requests `Accept: text/event-stream` + uses `ResponseHeadersRead` (so the long body isn't
+  `HttpClient.Timeout`-bound — the upstream sends keep-alive heartbeats to hold the socket), and the
+  controller commits the SSE response after the same degrade gate as the turn (absent → 404, down → 503,
+  reject → 502) and copies the assistant's `progress`/heartbeat/`result` frames through verbatim. Removed the
+  now-unused 25-minute `ConfirmTimeout` (the stream self-paces via heartbeats).
+
 ### Added (v0.29.0)
 - **The assistant turn relay now forwards an open blueprint draft's content (`draftYaml`).**
   `AssistantTurnRequest` gains an optional `draftYaml`, forwarded verbatim in the turn body to the
