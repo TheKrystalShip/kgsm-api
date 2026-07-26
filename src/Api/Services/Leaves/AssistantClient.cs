@@ -188,8 +188,9 @@ public sealed class AssistantClient : HttpClient
     /// Finalizes a staged confirmation on the verified end-user's behalf (the blueprint-review Save, and
     /// any future confirm): <c>POST /confirm</c> with the trusted-relay identity + the forwarded body
     /// (<c>{ token, editedContent }</c>). The assistant validates the single-use token, re-derives action
-    /// authority from the bot (NOT a relay header — so the API operator-gates this itself), runs the whole
-    /// finalize pipeline, and answers a <c>ConfirmResponse</c> JSON the caller relays verbatim. Bounded by
+    /// authority from the forwarded <c>X-Relay-Can-Act</c> (this endpoint is operator-gated, so the header
+    /// is unconditionally the verified tier), runs the whole finalize pipeline, and answers a
+    /// <c>ConfirmResponse</c> JSON the caller relays verbatim. Bounded by
     /// <see cref="ConfirmTimeout"/> (minutes) so a legitimately-long finalize is never severed. Returns
     /// <see langword="null"/> when the assistant isn't provisioned; the caller <strong>owns disposal</strong>.
     /// </summary>
@@ -212,6 +213,12 @@ public sealed class AssistantClient : HttpClient
         string displayName = HeaderSafe(relayDisplayName);
         if (!string.IsNullOrEmpty(displayName))
             request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
+        // The confirm EXECUTES a mutation (blueprint finalize install/verify), so the assistant re-derives
+        // action authority the same way it did when it PROPOSED — from X-Relay-Can-Act. This endpoint is
+        // already [Authorize(Operator)], so any caller reaching here is action-authorized: forward the
+        // verified tier decision as the header (the turn relay does the same for the propose side). Without
+        // it a Discord-less relay host has no authority source and denies the finalize.
+        request.Headers.TryAddWithoutValidation("X-Relay-Can-Act", "true");
 
         using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timed.CancelAfter(ConfirmTimeout);

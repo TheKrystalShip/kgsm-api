@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (v0.28.1)
+- **The assistant confirm relay now forwards `X-Relay-Can-Act`.** `/assistant/confirm` is
+  `[Authorize(Operator)]`, so any caller reaching it is action-authorized — but `AssistantClient.ConfirmAsync`
+  forwarded only the relay identity, not the authority header. On a host whose assistant leaf has no Discord
+  OAuth configured, the assistant had no way to re-derive action authority for the finalize and denied the
+  blueprint-review Save ("You don't have permission to add a blueprint to the catalog"), even though the same
+  user's propose (turn) was authorized (the turn relay does forward the header). The confirm relay now
+  forwards `X-Relay-Can-Act: true` (unconditional — the operator gate already guaranteed it). Pairs with the
+  kgsm-llm fix that makes `/confirm` honor the header the same way `/turn` does.
+
 ### Added (v0.28.0) — assistant confirm relay (`POST /api/v1/assistant/confirm`)
 - Relays the assistant leaf's `/confirm` finalize near-verbatim, so the SPA can complete a staged
   action the assistant proposed in a turn — today the **blueprint-review Save** (the human's edited
