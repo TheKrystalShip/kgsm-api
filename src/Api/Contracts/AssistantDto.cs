@@ -23,7 +23,12 @@ public sealed record AssistantTurnRequest(
     // server-derived Discord id, never client-supplied — so a client-chosen id can only ever partition
     // its OWN history, never read or poison another caller's. Sanitised ([A-Za-z0-9_-], capped) before
     // forwarding; null/blank ⇒ the bare per-user conversation (the prior single-context behaviour).
-    string? ConversationId = null);
+    string? ConversationId = null,
+    // The CURRENT content of a blueprint draft the user is reviewing in the chat editor, when this turn
+    // carries one (the SPA sends what's in the Monaco card, edits included). Forwarded verbatim in the turn
+    // body so the assistant can offer revise_blueprint and let the model change the draft from chat. Not
+    // identity-bearing; re-validated by the assistant when a revision is saved. Null on an ordinary turn.
+    string? DraftYaml = null);
 
 /// <summary>
 /// The assistant confirm-relay request body (<c>POST /api/v1/assistant/confirm</c>) — forwarded verbatim

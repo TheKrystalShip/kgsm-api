@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.29.0)
+- **The assistant turn relay now forwards an open blueprint draft's content (`draftYaml`).**
+  `AssistantTurnRequest` gains an optional `draftYaml`, forwarded verbatim in the turn body to the
+  assistant's `/turn`, so the SPA can send the draft the user is reviewing and the assistant can revise it
+  from chat (its new `revise_blueprint` tool). Not identity-bearing; null on an ordinary turn.
+
 ### Fixed (v0.28.1)
 - **The assistant confirm relay now forwards `X-Relay-Can-Act`.** `/assistant/confirm` is
   `[Authorize(Operator)]`, so any caller reaching it is action-authorized — but `AssistantClient.ConfirmAsync`

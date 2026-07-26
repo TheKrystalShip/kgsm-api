@@ -85,7 +85,7 @@ public sealed class AssistantController(
         // context window; the user-id prefix stays server-authoritative, so this can never cross users.
         string? conversationId = SanitizeConversationId(body.ConversationId);
 
-        var turnBody = new { prompt = body!.Prompt, think = body.Think, tools = body.Tools };
+        var turnBody = new { prompt = body!.Prompt, think = body.Think, tools = body.Tools, draftYaml = body.DraftYaml };
 
         HttpResponseMessage? upstream;
         try
