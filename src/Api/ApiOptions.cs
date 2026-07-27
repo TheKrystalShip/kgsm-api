@@ -282,6 +282,16 @@ public sealed class ApiOptions
     /// </summary>
     public required long FilesMaxEditBytes { get; init; }
 
+    /// <summary>
+    /// Max blueprint-file size (bytes) the library editor will open or save
+    /// (<c>KGSM_API_BLUEPRINT_MAX_EDIT_BYTES</c>, default 256 KiB). Separate from
+    /// <see cref="FilesMaxEditBytes"/> because the two surfaces edit different things: an instance's
+    /// working directory holds arbitrary game files, while a blueprint is a short hand-written YAML
+    /// (~25 lines native, ~70 container). A ceiling three orders of magnitude above the largest real
+    /// blueprint is generous and still refuses anything that plainly isn't one.
+    /// </summary>
+    public required long BlueprintMaxEditBytes { get; init; }
+
     // --- Host logs (the GET /hosts/{id}/logs journald aggregation surface) ------------------------
 
     /// <summary>
@@ -650,6 +660,7 @@ public sealed class ApiOptions
             // editor against megabyte blobs. Clamped sane: at least 1 entry, at least 1 KiB.
             FilesMaxEntries = Math.Max(1, IntOr(configuration["KGSM_API_FILES_MAX_ENTRIES"], 200)),
             FilesMaxEditBytes = Math.Max(1024, LongOr(configuration["KGSM_API_FILES_MAX_EDIT_BYTES"], 2 * 1024 * 1024)),
+            BlueprintMaxEditBytes = Math.Max(1024, LongOr(configuration["KGSM_API_BLUEPRINT_MAX_EDIT_BYTES"], 256 * 1024)),
 
             // Host logs (GET /hosts/{id}/logs). The unit map defaults to the host's leaf services; override
             // KGSM_API_LOG_SOURCES on a host whose units are named differently. journalctl resolves via PATH.

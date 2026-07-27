@@ -134,6 +134,16 @@ public static class AuditAction
     // the path/size/sha256 ONLY, NEVER the content (configs hold rcon passwords/tokens/webhook URLs).
     public const string FileWrite = "file.write";
 
+    // blueprint.* — a game's blueprint file was written or reverted. ENGINE-OWNED echo, unlike file.write
+    // above: kgsm emits blueprint_created/_updated/_removed for these, so the row arrives through the event
+    // path and the API never direct-writes one. The distinction matters because a write to a SHIPPED
+    // blueprint is impossible — it always lands as a user-directory override — so blueprint.write records
+    // "this host's copy of <game> was edited" and blueprint.revert records that copy being dropped in favor
+    // of the shipped one again. meta carries name/tier/runtime/overridesSystem, NEVER the file content or a
+    // diff (a blueprint can carry credentials in its launch arguments — same rule as file.write).
+    public const string BlueprintWrite = "blueprint.write";
+    public const string BlueprintRevert = "blueprint.revert";
+
     // auth.* — API-internal (no kgsm event → written directly, no double-write risk).
     public const string AuthLogin = "auth.login";
     public const string AuthLogout = "auth.logout";
@@ -198,6 +208,10 @@ public static class AuditTargetKind
     // (the leaf-runtime-provisioning/config feature). Beyond the doc's server/host set; the frontend accepts
     // unknown target kinds forward-compat.
     public const string Leaf = "leaf";
+    // A game blueprint (the target of the blueprint.* actions). Its id is the blueprint name, which is NOT
+    // a server id — a blueprint is the template installed servers are created from, so these rows carry no
+    // serverId and must never be read as being about an instance.
+    public const string Blueprint = "blueprint";
 }
 
 /// <summary>

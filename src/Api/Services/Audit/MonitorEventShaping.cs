@@ -80,6 +80,14 @@ public static class MonitorEventShaping
             "instance_player_left" => Map<InstancePlayerLeftData>(item, d => AuditMapping.FromPlayerLeftEvent(d, hostId)),
             "instance_config_changed" => Map<InstanceConfigChangedData>(item, d => AuditMapping.FromConfigChangedEvent(d, hostId)),
             "instance_input_sent" => Map<InstanceInputSentData>(item, d => AuditMapping.FromInputSentEvent(d, hostId)),
+            // The blueprint events are the first whose subject is NOT an instance, so they go through
+            // MapBlueprint rather than Map — see that helper for why the two cannot share one.
+            "blueprint_created" => MapBlueprint<BlueprintCreatedData>(item,
+                d => AuditMapping.FromBlueprintCreatedEvent(d, hostId)),
+            "blueprint_updated" => MapBlueprint<BlueprintUpdatedData>(item,
+                d => AuditMapping.FromBlueprintUpdatedEvent(d, hostId)),
+            "blueprint_removed" => MapBlueprint<BlueprintRemovedData>(item,
+                d => AuditMapping.FromBlueprintRemovedEvent(d, hostId)),
             _ => null,
         };
 
@@ -110,6 +118,32 @@ public static class MonitorEventShaping
         typed.Origin = item.Origin;
         if (string.IsNullOrEmpty(typed.InstanceName) && !string.IsNullOrEmpty(item.Instance))
             typed.InstanceName = item.Instance; // defensive — Data already carries it in practice
+
+        return build(typed);
+    }
+
+    // The blueprint-subject counterpart of Map. It cannot share that helper: Map is generic over
+    // EventDataBase (whose defining field is InstanceName) while these derive from the sibling
+    // BlueprintEventDataBase, and the two meet only at the subject-neutral root. The instance-name
+    // backfill is likewise absent by design — an envelope's `instance` field is empty for a blueprint
+    // event, and copying it anywhere here would invent a server relationship that does not exist.
+    private static AuditWrite? MapBlueprint<T>(MonitorEventItem item, Func<T, AuditWrite> build)
+        where T : BlueprintEventDataBase, new()
+    {
+        T typed;
+        if (item.Data is { ValueKind: JsonValueKind.Object } data)
+        {
+            try { typed = data.Deserialize<T>(JsonOptions) ?? new T(); }
+            catch (JsonException) { return null; }
+        }
+        else
+        {
+            typed = new T();
+        }
+
+        typed.Timestamp = item.Ts;
+        typed.Actor = item.Actor;
+        typed.Origin = item.Origin;
 
         return build(typed);
     }

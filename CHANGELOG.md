@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added (v0.31.0) — the library blueprint editor
+- **`GET/PUT/DELETE /api/v1/library/{id}/file`** — read, save, and revert a game's raw `.bp.yaml`.
+  Byte-level text, never a typed round-trip: a container blueprint or one carrying comments could not
+  survive being parsed and re-rendered. **Reads are operator+, writes are admin** — the catalog listing is
+  viewer-gated, but the file is the engine's operational definition of how a server is launched; an
+  operator gets the file with `readOnly: true` rather than a hidden 403 on submit.
+- **The override lifecycle is surfaced, not hidden.** A write always lands in kgsm's user blueprints
+  directory, so saving an edit to a shipped blueprint creates an override that shadows it permanently —
+  `createdOverride` reports the save that started the shadowing, `overridesSystem`/`canRevert` report the
+  state, and `DELETE` undoes it. Reverting a blueprint with no shipped original is refused with
+  `409 no_original`: that would destroy the only copy rather than restore anything. The API enforces this
+  independently of any client hiding the button.
+- **The engine's validation errors reach the client verbatim.** A rejected save is `400 blueprint_invalid`
+  with the engine validator's own messages listed in the error envelope's `details.errors` — neither
+  reworded nor re-implemented here. Nothing is written: kgsm-lib validates on a temp file the engine's
+  `*.bp.yaml` glob cannot see, so an invalid draft never occupies the real filename.
+- **`blueprint.write` / `blueprint.revert` audit actions + the `blueprint` target kind.** Engine-owned
+  **echo**, not a direct write (unlike `file.write`, which exists precisely because instance file saves have
+  no kgsm event): the PUT/DELETE path threads actor+origin into kgsm-lib's write, kgsm emits
+  `blueprint_created`/`_updated`/`_removed`, and the row arrives through the event path with the real admin
+  on it. These are the first events whose subject is not an instance — the row targets the blueprint and its
+  `serverId` is **null**, since a blueprint is the template servers are installed from, not a server.
+  `meta` carries name/tier/runtime/override state, never the file content or a diff.
+- **`KGSM_API_BLUEPRINT_MAX_EDIT_BYTES`** (default 256 KiB) — its own ceiling separate from
+  `KGSM_API_FILES_MAX_EDIT_BYTES`, because a blueprint is a short hand-written YAML rather than an
+  arbitrary game file.
+
+### Changed (v0.31.0)
+- **kgsm-lib 1.41.0 → 1.44.0** for the blueprint file surface (`IBlueprintFiles.ReadRaw`/`WriteRaw`,
+  `IBlueprintService.FindAll`/`Validate`, the blueprint event types). Any local `IBlueprintService`
+  implementation must add `FindAll`/`Validate`.
+- **The blueprint catalog cache is busted by the kgsm event, not by the PUT.** `BlueprintCache.TryRefresh`
+  is composed into the audit consumer's blueprint handlers, so an **assistant**-originated blueprint write
+  invalidates it too — a post-PUT bust would only ever catch the web editor. It is composed into those
+  handlers rather than registered separately because kgsm-lib's `EventService` keeps one handler per event
+  type: a second registration would silently replace the audit write instead of adding to it.
+
 ### Changed (v0.30.0) — the assistant confirm relay now STREAMS the finalize
 - **`POST /api/v1/assistant/confirm` is now a `text/event-stream` relay**, exactly like the turn relay,
   instead of a buffered JSON relay. A blueprint finalize is minutes of test-install → verify → repair with

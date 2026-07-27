@@ -296,6 +296,97 @@ public static class AuditMapping
             Meta: string.IsNullOrEmpty(command) ? null : new Dictionary<string, string> { ["command"] = command });
     }
 
+    /// <summary>
+    /// Map a kgsm <c>blueprint_created</c> event to a <c>blueprint.write</c> row — a blueprint file that
+    /// did not exist in the user directory before. Provenance rides off the envelope (the PUT
+    /// <c>/library/{id}/file</c> path threads actor+origin into the emit, so the echo carries the real
+    /// admin rather than the service account) — engine-owned, no double-write.
+    /// </summary>
+    public static AuditWrite FromBlueprintCreatedEvent(BlueprintCreatedData d, string hostId) =>
+        BlueprintWrite(d, hostId, d.Tier, AuditAction.BlueprintWrite, AuditSeverity.Success,
+            // "overrode X" vs "created X" are materially different facts to a reader: the first means this
+            // host has stopped tracking the shipped definition of a game it already had, the second means a
+            // game was added. An unknown override state claims neither.
+            d.OverridesSystem switch
+            {
+                true => $"overrode blueprint {DisplayBlueprint(d)}",
+                _ => $"created blueprint {DisplayBlueprint(d)}",
+            },
+            ("overridesSystem", Tri(d.OverridesSystem)), ("runtime", d.Runtime));
+
+    /// <summary>
+    /// Map a kgsm <c>blueprint_updated</c> event to a <c>blueprint.write</c> row — the same action as
+    /// <see cref="FromBlueprintCreatedEvent"/> at <see cref="AuditSeverity.Info"/>, since "the blueprint
+    /// file changed" is one fact; whether the file already existed is carried by the summary, not by a
+    /// second action nobody would filter on separately.
+    /// </summary>
+    public static AuditWrite FromBlueprintUpdatedEvent(BlueprintUpdatedData d, string hostId) =>
+        BlueprintWrite(d, hostId, d.Tier, AuditAction.BlueprintWrite, AuditSeverity.Info,
+            $"edited blueprint {DisplayBlueprint(d)}",
+            ("overridesSystem", Tri(d.OverridesSystem)), ("runtime", d.Runtime));
+
+    /// <summary>
+    /// Map a kgsm <c>blueprint_removed</c> event to a <c>blueprint.revert</c> row. Warn, not info: the
+    /// user-directory file is gone. <c>revertedToSystem</c> says whether a shipped blueprint took over
+    /// (the library editor's revert, which only ever runs when one exists) or the blueprint left this host
+    /// entirely — a distinction the summary makes rather than leaving a reader to assume the safer one.
+    /// </summary>
+    public static AuditWrite FromBlueprintRemovedEvent(BlueprintRemovedData d, string hostId) =>
+        BlueprintWrite(d, hostId, d.Tier, AuditAction.BlueprintRevert, AuditSeverity.Warn,
+            d.RevertedToSystem switch
+            {
+                true => $"reverted blueprint {DisplayBlueprint(d)} to the shipped version",
+                false => $"removed blueprint {DisplayBlueprint(d)}",
+                null => $"removed the local copy of blueprint {DisplayBlueprint(d)}",
+            },
+            ("revertedToSystem", Tri(d.RevertedToSystem)));
+
+    // The three blueprint rows differ only in action/severity/summary/meta. TARGET is the blueprint, and
+    // ServerId is deliberately NULL: a blueprint is the template servers are installed from, not a server,
+    // and filling in serverId would make `GET /audit?serverId=` return an edit that never touched that
+    // instance. Content is never recorded — name/tier/runtime/override state only, the file.write rule.
+    private static AuditWrite BlueprintWrite(
+        BlueprintEventDataBase d, string hostId, BlueprintTier tier, string action, string severity,
+        string summary, params (string Key, string? Value)[] extra)
+    {
+        string name = string.IsNullOrEmpty(d.BlueprintName) ? "" : d.BlueprintName;
+        var meta = new Dictionary<string, string>
+        {
+            ["tier"] = tier == BlueprintTier.User ? "user" : "system",
+        };
+        if (!string.IsNullOrEmpty(name)) meta["name"] = name;
+        // A blank/absent value is OMITTED, never stored as "" — an unknown runtime or override state is
+        // an absent key, which reads as unknown rather than as an empty answer.
+        foreach ((string key, string? value) in extra)
+            if (!string.IsNullOrEmpty(value)) meta[key] = value;
+
+        return new AuditWrite(
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
+            Action: action,
+            Severity: severity,
+            Target: new AuditTarget(AuditTargetKind.Blueprint, name, name),
+            ServerId: null,
+            HostId: hostId,
+            Summary: summary,
+            Meta: meta);
+    }
+
+    // A tri-state flag as meta: "true"/"false", or OMITTED when the emitter could not determine it. Never
+    // collapsed to "false" — "we don't know whether this shadows a shipped blueprint" is not "it doesn't".
+    private static string? Tri(bool? value) => value switch
+    {
+        true => "true",
+        false => "false",
+        null => null,
+    };
+
+    // Summary-line fallback for a blueprint, mirroring Display(instance) — ids/targets keep the raw,
+    // possibly-empty value; only the human-facing sentence gets a placeholder.
+    private static string DisplayBlueprint(BlueprintEventDataBase d) =>
+        string.IsNullOrEmpty(d.BlueprintName) ? "blueprint" : d.BlueprintName;
+
     // Join/left differ only in action + summary verb — build the row once. The summary names the player
     // by display name, falling back to the stable id, then a generic label (never fabricates an identity;
     // at-least-one-non-null is the emitting side's guarantee, this is defensive).

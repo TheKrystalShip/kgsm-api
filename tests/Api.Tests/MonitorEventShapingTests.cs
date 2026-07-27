@@ -146,3 +146,100 @@ public sealed class MonitorEventShapingTests
         Assert.Equal("mc", shaped.ServerId); // filled from item.Instance since Data carried none
     }
 }
+
+/// <summary>
+/// The blueprint events' read-time shaping — the first engine events whose subject is a blueprint rather
+/// than an instance. They take a different path through <see cref="MonitorEventShaping"/> than every other
+/// type (their data derives from the sibling <c>BlueprintEventDataBase</c>, not <c>EventDataBase</c>), so
+/// the two properties worth pinning are that they shape at all, and that they never acquire a server.
+/// </summary>
+public sealed class BlueprintEventShapingTests
+{
+    private const string HostId = "h1";
+    private static readonly DateTimeOffset Ts = new(2026, 7, 27, 12, 0, 0, TimeSpan.Zero);
+
+    private static JsonElement Data(object o) => JsonSerializer.SerializeToElement(o);
+
+    [Fact]
+    public void Created_ShapesToABlueprintWriteRow_TargetingTheBlueprint()
+    {
+        var item = new MonitorEventItem(
+            Id: "evt_bp1", Ts: Ts, Type: "blueprint_created", Instance: null,
+            Actor: "discord:haru", Origin: "ui",
+            Data: Data(new { BlueprintName = "factorio", Tier = "user", OverridesSystem = true, Runtime = "native" }));
+
+        AuditRecord? shaped = MonitorEventShaping.Shape(item, HostId);
+
+        Assert.NotNull(shaped);
+        Assert.Equal(AuditAction.BlueprintWrite, shaped!.Action);
+        Assert.Equal(AuditTargetKind.Blueprint, shaped.Target!.Kind);
+        Assert.Equal("factorio", shaped.Target.Id);
+        // A blueprint is the TEMPLATE servers are installed from, not a server — so a serverId here would
+        // make `GET /audit?serverId=factorio` return an edit that never touched any instance.
+        Assert.Null(shaped.ServerId);
+        Assert.Equal("haru", shaped.Actor.Name);   // the real admin, not the service account
+        Assert.Equal("ui", shaped.Origin);
+        Assert.Equal("user", shaped.Meta!["tier"]);
+        Assert.Equal("true", shaped.Meta["overridesSystem"]);
+        Assert.Equal("native", shaped.Meta["runtime"]);
+        Assert.Contains("overrode", shaped.Summary); // shadowing a shipped blueprint, not merely creating one
+    }
+
+    [Fact]
+    public void Updated_IsTheSameActionAtInfo()
+    {
+        var item = new MonitorEventItem(
+            Id: "evt_bp2", Ts: Ts, Type: "blueprint_updated", Instance: null, Actor: "discord:haru", Origin: "ui",
+            Data: Data(new { BlueprintName = "palworld", Tier = "user", OverridesSystem = false, Runtime = "native" }));
+
+        AuditRecord? shaped = MonitorEventShaping.Shape(item, HostId);
+
+        Assert.Equal(AuditAction.BlueprintWrite, shaped!.Action);
+        Assert.Equal(AuditSeverity.Info, shaped.Severity);
+        Assert.Equal("false", shaped.Meta!["overridesSystem"]);
+    }
+
+    [Fact]
+    public void Removed_IsARevertWhenTheShippedBlueprintTookOver()
+    {
+        var item = new MonitorEventItem(
+            Id: "evt_bp3", Ts: Ts, Type: "blueprint_removed", Instance: null, Actor: "discord:haru", Origin: "ui",
+            Data: Data(new { BlueprintName = "palworld", Tier = "user", RevertedToSystem = true }));
+
+        AuditRecord? shaped = MonitorEventShaping.Shape(item, HostId);
+
+        Assert.Equal(AuditAction.BlueprintRevert, shaped!.Action);
+        Assert.Equal(AuditSeverity.Warn, shaped.Severity);
+        Assert.Contains("reverted", shaped.Summary);
+        Assert.Equal("true", shaped.Meta!["revertedToSystem"]);
+    }
+
+    [Fact]
+    public void Removed_WithNoShippedOriginal_SaysRemovedNotReverted()
+    {
+        var item = new MonitorEventItem(
+            Id: "evt_bp4", Ts: Ts, Type: "blueprint_removed", Instance: null, Actor: "discord:haru", Origin: "ui",
+            Data: Data(new { BlueprintName = "teamfortress2", Tier = "user", RevertedToSystem = false }));
+
+        AuditRecord? shaped = MonitorEventShaping.Shape(item, HostId);
+
+        // The blueprint left this host entirely — a materially different fact from falling back to shipped.
+        Assert.Contains("removed", shaped!.Summary);
+        Assert.DoesNotContain("reverted", shaped.Summary);
+    }
+
+    [Fact]
+    public void UnknownOverrideState_IsOmittedFromMeta_NeverCollapsedToFalse()
+    {
+        // The emitter could not determine whether this shadows a shipped blueprint. "Unknown" is not "no",
+        // so the key is absent rather than answered.
+        var item = new MonitorEventItem(
+            Id: "evt_bp5", Ts: Ts, Type: "blueprint_updated", Instance: null, Actor: "discord:haru", Origin: "ui",
+            Data: Data(new { BlueprintName = "factorio", Tier = "user" }));
+
+        AuditRecord? shaped = MonitorEventShaping.Shape(item, HostId);
+
+        Assert.False(shaped!.Meta!.ContainsKey("overridesSystem"));
+        Assert.False(shaped.Meta.ContainsKey("runtime"));
+    }
+}

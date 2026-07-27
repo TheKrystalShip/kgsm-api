@@ -324,7 +324,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
         RawgApiKey = "test-key", RawgCacheDir = cacheDir, PublicBaseUrl = "",
         SteamCdnBaseUrl = "https://steamcdn.test/apps", // inert here: the worker uses the injected ISteamCoverClient fake
         LibraryRefreshIntervalDays = 7, LibraryRefreshHour = 6,
-        FilesMaxEntries = 200, FilesMaxEditBytes = 2 * 1024 * 1024,
+        FilesMaxEntries = 200, FilesMaxEditBytes = 2 * 1024 * 1024, BlueprintMaxEditBytes = 256 * 1024,
         LeafOverridesDir = "/tmp/kgsm-api-test-overrides", LeafApplyCanaryMs = 15000,
         DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000,
 
@@ -394,5 +394,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
         public List<string> ListCustom() => throw new NotImplementedException();
         public Blueprint? GetInfo(string blueprintName) => throw new NotImplementedException();
         public string? FindPath(string blueprintName) => throw new NotImplementedException();
+        public BlueprintCandidates? FindAll(string blueprintName) => throw new NotImplementedException();
+        public BlueprintValidation? Validate(string blueprintNameOrPath) => throw new NotImplementedException();
     }
 }

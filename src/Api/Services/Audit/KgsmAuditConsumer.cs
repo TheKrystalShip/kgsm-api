@@ -39,6 +39,7 @@ public sealed class KgsmAuditConsumer(
     PlayerRosterService roster,
     PlayerHistoryService history,
     InstanceCache instanceCache,
+    Services.Library.BlueprintCache blueprintCache,
     ApiOptions options,
     StreamHub hub,
     JobRegistry jobRegistry,
@@ -279,6 +280,38 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceInputSentData>(d =>
         {
             PublishLive(AuditMapping.FromInputSentEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
+
+        // blueprint.write / blueprint.revert — a game's blueprint FILE changed (kgsm-lib 1.43.0). These are
+        // the first events whose subject is not an instance: they carry BlueprintName, not InstanceName, so
+        // the row's target is the blueprint and its serverId is null. The PUT/DELETE /library/{id}/file path
+        // threads actor+origin into the emit, so the echo carries the real admin — engine-owned, no
+        // double-write (unlike file.write, which the api direct-writes precisely because kgsm emits nothing
+        // for an instance file save).
+        //
+        // Each handler ALSO busts the blueprint catalog cache, composed in here rather than registered as a
+        // second RegisterHandler<BlueprintUpdatedData> — kgsm-lib's EventService keeps ONE handler per event
+        // type (a plain dictionary indexer), so a second registration would silently REPLACE this audit
+        // write instead of adding to it (the same trap documented on the start/stop roster resets above).
+        // Busting from the event rather than from the controller is what makes an ASSISTANT-originated
+        // blueprint write invalidate the cache too — a post-PUT bust would only ever catch the web editor.
+        events.RegisterHandler<BlueprintCreatedData>(d =>
+        {
+            blueprintCache.TryRefresh();
+            PublishLive(AuditMapping.FromBlueprintCreatedEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<BlueprintUpdatedData>(d =>
+        {
+            blueprintCache.TryRefresh();
+            PublishLive(AuditMapping.FromBlueprintUpdatedEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<BlueprintRemovedData>(d =>
+        {
+            blueprintCache.TryRefresh();
+            PublishLive(AuditMapping.FromBlueprintRemovedEvent(d, options.HostId));
             return Task.CompletedTask;
         });
 

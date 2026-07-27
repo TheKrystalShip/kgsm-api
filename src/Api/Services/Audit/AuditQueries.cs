@@ -73,6 +73,11 @@ public static class AuditQueries
         AuditAction.PlayerLeave,
         AuditAction.ConfigSet,
         AuditAction.ConsoleInput,
+        // blueprint.* is cleanly echo-only: the library editor's PUT/DELETE thread actor+origin into
+        // kgsm-lib's write, which emits the kgsm event — the api never direct-writes one, so unlike
+        // network.ports.open there is no second source to preserve here.
+        AuditAction.BlueprintWrite,
+        AuditAction.BlueprintRevert,
     };
 
     /// <summary>Clamp a client-supplied limit to <c>[1, <see cref="MaxLimit"/>]</c>, defaulting when unset.</summary>

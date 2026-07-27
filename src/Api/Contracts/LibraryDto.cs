@@ -100,3 +100,82 @@ public sealed record LibrarySpecs(
     int? MinRamMb,
     int? RecommendedRamMb,
     int? BaseDiskMb);
+
+/// <summary>
+/// A blueprint's raw file, as the library editor loads it — <c>GET /library/{id}/file</c>. Byte-level
+/// text, never a typed round-trip: kgsm-lib's typed blueprint path handles native blueprints only and
+/// drops every comment, so a container blueprint or a commented one could not survive being parsed and
+/// re-rendered. What is read is exactly what is on disk.
+/// </summary>
+/// <param name="Name">The blueprint id (the <c>{id}</c> route segment), echoed back.</param>
+/// <param name="Content">The file's exact text.</param>
+/// <param name="Encoding">Always <c>utf-8</c> — a file whose bytes are not valid UTF-8 is refused rather
+/// than transcoded (the same rule as the instance file browser).</param>
+/// <param name="SizeBytes">The file's size on disk.</param>
+/// <param name="Mtime">The file's last-modified time.</param>
+/// <param name="Etag">An <c>sha256:&lt;hex&gt;</c> content identity, echoed back on save for optimistic
+/// concurrency (a mismatch is a <c>412</c>).</param>
+/// <param name="Tier">Which blueprints directory this file came from — <c>system</c> (shipped with the
+/// engine) or <c>user</c> (kgsm's writable directory).</param>
+/// <param name="OverridesSystem">A user file is shadowing a shipped one of the same name. Engine-sourced
+/// from the blueprint's candidate paths, never inferred.</param>
+/// <param name="CanRevert">Whether <c>DELETE /library/{id}/file</c> would restore a shipped original —
+/// equal to <paramref name="OverridesSystem"/>, surfaced separately so a client never has to derive the
+/// rule that reverting a blueprint with no original would destroy the only copy. The API refuses that
+/// case independently (<c>409 no_original</c>) whether or not a client checks this.</param>
+/// <param name="ReadOnly">Whether THIS caller may save. Writes are admin-only while reads are operator+,
+/// so an operator gets the file with <c>readOnly: true</c> — the editor opens, the buttons do not.</param>
+/// <param name="Runtime">The blueprint's runtime (<c>native</c>/<c>container</c>) as the engine reports it
+/// in the catalog, or <c>null</c> when this blueprint isn't in the cached catalog (a brand-new one, or a
+/// malformed file the engine won't enumerate — which is precisely a file worth opening to repair). Never
+/// parsed out of <paramref name="Content"/> by this API.</param>
+/// <param name="HostId">The host whose disk this file lives on. The catalog is a merged multi-host view
+/// but a blueprint file is one host's, so an edit is never ambiguous about where it landed.</param>
+public sealed record BlueprintFileDto(
+    string Name,
+    string Content,
+    string Encoding,
+    long SizeBytes,
+    DateTimeOffset Mtime,
+    string Etag,
+    string Tier,
+    bool OverridesSystem,
+    bool CanRevert,
+    bool ReadOnly,
+    string? Runtime,
+    string HostId);
+
+/// <summary>Body of <c>PUT /library/{id}/file</c>.</summary>
+/// <param name="Content">The exact file text to write. Required.</param>
+/// <param name="Etag">The etag from the read this edit was based on. When set and no longer current, the
+/// save is refused with <c>412</c> rather than clobbering someone else's change.</param>
+/// <param name="Origin">The surface driving the write (<c>ui</c>|<c>assistant</c>|<c>discord</c>|<c>api</c>,
+/// default <c>api</c>). Stamped onto the kgsm event so the audit row records where the edit came from.</param>
+public sealed record SaveBlueprintRequest(string? Content, string? Etag, string? Origin);
+
+/// <summary>Result of <c>PUT /library/{id}/file</c>.</summary>
+/// <param name="Etag">The saved content's new identity — carry it into the next save.</param>
+/// <param name="Tier">Always <c>user</c>: a write goes to kgsm's writable directory, always. The shipped
+/// directory is the engine deploy's rsync target and is structurally unreachable from this surface.</param>
+/// <param name="OverridesSystem">Whether the saved file is now shadowing a shipped blueprint.</param>
+/// <param name="CreatedOverride">Whether THIS save is what started that shadowing. The client uses it to
+/// explain, once, that the shipped blueprint is now overridden and will not receive upstream updates.</param>
+public sealed record SaveBlueprintResultDto(
+    string Etag,
+    long SizeBytes,
+    DateTimeOffset Mtime,
+    string Tier,
+    bool OverridesSystem,
+    bool CreatedOverride);
+
+/// <summary>Result of <c>DELETE /library/{id}/file</c> — the user-dir override is gone and the shipped
+/// blueprint serves again.</summary>
+/// <param name="RevertedTo">The tier now serving this blueprint; always <c>system</c>, since a revert is
+/// only permitted when a shipped original exists.</param>
+/// <param name="Etag">Identity of the now-effective shipped file, or <c>null</c> if it could not be
+/// re-read — the revert still happened, so this is honestly empty rather than stale.</param>
+public sealed record RevertBlueprintResultDto(
+    string RevertedTo,
+    string? Etag,
+    long SizeBytes,
+    DateTimeOffset Mtime);

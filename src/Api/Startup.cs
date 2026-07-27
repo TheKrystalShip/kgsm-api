@@ -128,6 +128,12 @@ public class Startup(IConfiguration configuration)
             // null-check pattern below — so an unprovisioned engine degrades to the existing 503, not a
             // DI construction failure.
             services.AddTransient<IInstanceFileService, InstanceFileService>();
+
+            // The library blueprint editor (GET/PUT/DELETE /library/{id}/file). Same posture as the file
+            // browser above: a thin status-mapping wrapper over kgsm-lib's IBlueprintFiles +
+            // IBlueprintService (both transient, so this is too), gated on the engine, resolved lazily
+            // from RequestServices so an unprovisioned engine degrades to 503 rather than failing DI.
+            services.AddTransient<IBlueprintFileService, BlueprintFileService>();
         }
 
         // M6·b — ports. The firewall authority (kgsm-firewall) is OPT-IN like the assistant: its kgsm-lib
