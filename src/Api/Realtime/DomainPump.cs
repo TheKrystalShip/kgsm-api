@@ -28,6 +28,7 @@ namespace TheKrystalShip.Api.Realtime;
 public sealed class DomainPump(
     StreamHub hub,
     InstanceCache cache,
+    UpdateCheckCache updateChecks,
     MonitorClient monitor,
     ApiOptions options,
     ILogger<DomainPump> logger)
@@ -80,7 +81,7 @@ public sealed class DomainPump(
                     // Build the current server list from cache data.
                     var byId = new Dictionary<string, Server>(StringComparer.Ordinal);
                     foreach ((string id, var instance) in roster)
-                        byId[id] = ServerAggregator.BuildServer(id, instance, statuses, metricsById, options.HostId, cache.IsStarting);
+                        byId[id] = ServerAggregator.BuildServer(id, instance, statuses, updateChecks.Readings, metricsById, options.HostId, cache.IsStarting);
 
                     if (!primed)
                     {
@@ -123,7 +124,13 @@ public sealed class DomainPump(
     }
 
     // Ignores the metrics block on purpose — see the class remarks (status/roster, not the metric firehose).
+    // The update fields (UpdateAvailable/LatestVersion/UpdateCheckedAt) ride along: a flip is low-frequency
+    // (the slow probe ticks at KGSM_API_UPDATE_CHECK_POLL_MS, ~10min per instance), so carrying it here never
+    // turns the `servers` topic into a firehose — it is the status/roster cadence, not the metric one.
     private static bool CoreChanged(Server a, Server b) =>
         a.Status != b.Status || a.Version != b.Version || a.Name != b.Name
-        || a.Blueprint != b.Blueprint || a.Runtime != b.Runtime;
+        || a.Blueprint != b.Blueprint || a.Runtime != b.Runtime
+        || a.UpdateAvailable != b.UpdateAvailable
+        || a.LatestVersion != b.LatestVersion
+        || a.UpdateCheckedAt != b.UpdateCheckedAt;
 }

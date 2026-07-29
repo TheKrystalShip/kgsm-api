@@ -40,6 +40,7 @@ public sealed class KgsmAuditConsumer(
     PlayerHistoryService history,
     InstanceCache instanceCache,
     Services.Library.BlueprintCache blueprintCache,
+    Aggregation.UpdateCheckCache updateCheckCache,
     ApiOptions options,
     StreamHub hub,
     JobRegistry jobRegistry,
@@ -169,9 +170,16 @@ public sealed class KgsmAuditConsumer(
         // server.update — sourced from the version-changed event (it carries the meaningful old→new
         // detail). A plain instance_updated with no version change produces no row (nothing material
         // changed) — an honest boundary, documented in PLAN §8.
+        // The handler also immediately voids the stale "update available" reading for this instance
+        // (via UpdateCheckCache.MarkUpdated) so the next server.patch carries the cleared state —
+        // this is the authoritative fallback for CLI-driven updates; the API-command path does the
+        // same synchronously in CommandRunner.RunUpdate (the fast-path guarantee).
         events.RegisterHandler<InstanceVersionUpdatedData>(d =>
-            WriteServer(d, AuditAction.ServerUpdate, AuditSeverity.Info, "updated",
-                Meta(("oldVersion", d.OldVersion), ("newVersion", d.NewVersion))));
+        {
+            updateCheckCache.MarkUpdated(d.InstanceName);
+            return WriteServer(d, AuditAction.ServerUpdate, AuditSeverity.Info, "updated",
+                Meta(("oldVersion", d.OldVersion), ("newVersion", d.NewVersion)));
+        });
 
         // server.install — carries the blueprint it was installed from.
         events.RegisterHandler<InstanceInstalledData>(d =>

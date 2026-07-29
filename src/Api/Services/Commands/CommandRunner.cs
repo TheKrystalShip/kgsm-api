@@ -40,6 +40,7 @@ public sealed class CommandRunner(
     JobRegistry registry,
     AuditService audit,
     ApiOptions options,
+    Aggregation.UpdateCheckCache updateCheckCache,
     Leaves.LeafRegistry leafRegistry,
     ILogger<CommandRunner> logger)
 {
@@ -255,7 +256,17 @@ public sealed class CommandRunner(
             return (false, "engine not provisioned");
 
         KgsmResult result = instances.Update(job.ServerId, actor, origin);
-        return result.IsSuccess ? (true, null) : (false, Detail(result));
+        if (result.IsSuccess)
+        {
+            // Immediately void the stale "update available" reading for this instance so the
+            // verify server.patch (built right after this returns) carries the cleared state.
+            // The kgsm event echo (instance_version_updated) does the same via KgsmAuditConsumer
+            // for CLI-driven updates outside this API; this is the synchronous fast-path for the
+            // API-command path — the audit consumer's call is the authoritative fallback.
+            updateCheckCache.MarkUpdated(job.ServerId);
+            return (true, null);
+        }
+        return (false, Detail(result));
     }
 
     // backup_create (Tier-1 ops) — snapshot the instance. Echo-path discipline: kgsm emits

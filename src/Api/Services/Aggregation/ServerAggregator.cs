@@ -28,6 +28,7 @@ public sealed class ServerAggregator
     private readonly NetworkAggregator _network;
     private readonly RawgStore _rawg;
     private readonly InstanceCache _cache;
+    private readonly UpdateCheckCache _updateChecks;
     private readonly ILogger<ServerAggregator> _logger;
 
     public ServerAggregator(
@@ -36,6 +37,7 @@ public sealed class ServerAggregator
         NetworkAggregator network,
         RawgStore rawg,
         InstanceCache cache,
+        UpdateCheckCache updateChecks,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
@@ -43,6 +45,7 @@ public sealed class ServerAggregator
         _network = network;
         _rawg = rawg;
         _cache = cache;
+        _updateChecks = updateChecks;
         _logger = logger;
     }
 
@@ -63,7 +66,7 @@ public sealed class ServerAggregator
         Task<Snap.Snapshot?> snapshotTask = _monitor.GetLatestAsync(ct);
         await snapshotTask.ConfigureAwait(false);
 
-        IReadOnlyList<Server> servers = Join(_cache.Roster, _cache.Statuses, snapshotTask.Result);
+        IReadOnlyList<Server> servers = Join(_cache.Roster, _cache.Statuses, _updateChecks.Readings, snapshotTask.Result);
         return new ServersRead(true, servers);
     }
 
@@ -102,7 +105,7 @@ public sealed class ServerAggregator
         await snapshotTask.ConfigureAwait(false);
 
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshotTask.Result);
-        Server server = BuildServer(id, instance, _cache.Statuses, metricsById, _options.HostId, _cache.IsStarting);
+        Server server = BuildServer(id, instance, _cache.Statuses, _updateChecks.Readings, metricsById, _options.HostId, _cache.IsStarting);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -150,13 +153,14 @@ public sealed class ServerAggregator
     private IReadOnlyList<Server> Join(
         IReadOnlyDictionary<string, Instance> roster,
         IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> statuses,
+        IReadOnlyDictionary<string, UpdateReading> updateReadings,
         Snap.Snapshot? snapshot)
     {
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshot);
 
         var servers = new List<Server>(roster.Count);
         foreach ((string id, Instance instance) in roster)
-            servers.Add(BuildServer(id, instance, statuses, metricsById, _options.HostId, _cache.IsStarting));
+            servers.Add(BuildServer(id, instance, statuses, updateReadings, metricsById, _options.HostId, _cache.IsStarting));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -184,6 +188,7 @@ public sealed class ServerAggregator
         string id,
         Instance instance,
         IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> statuses,
+        IReadOnlyDictionary<string, UpdateReading> updateReadings,
         IReadOnlyDictionary<string, Snap.ServerMetrics> metricsById,
         string hostId,
         Func<string, bool> isStarting)
@@ -191,6 +196,8 @@ public sealed class ServerAggregator
         string status = ServerStatus.Unknown;
         string? version = null;
         bool? updateAvailable = null;
+        string? latestVersion = null;
+        DateTimeOffset? updateCheckedAt = null;
         DateTimeOffset? startedAt = null;
         if (statuses.TryGetValue(id, out Reading<InstanceRuntimeStatus>? reading)
             && reading is { IsMeasured: true, Value: { } runtimeStatus })
@@ -202,11 +209,16 @@ public sealed class ServerAggregator
                 ? null
                 : runtimeStatus.Version.Current;
 
-            // Honest update flag: kgsm-lib reports UpdatesAvailable null unless it actually ran the
-            // (networked) check (Version.Checked). The roster status is read fast (no per-poll network
-            // probe), so this is null in practice today — never a fabricated "false" for an unchecked
-            // instance. See Server.UpdateAvailable for the cost rationale.
-            updateAvailable = runtimeStatus.Version.UpdatesAvailable;
+            // The fast-mode status reading's Version.UpdatesAvailable is always null (kgsm skips the networked
+            // probe in --fast); the dedicated UpdateCheckCache runs the slow read on its own cadence and is the
+            // authority for all three update fields. A missing cache entry is honest-null (the probe hasn't
+            // reached this instance yet, or the engine is unprovisioned) — never a fabricated false.
+            UpdateReading updateReading = updateReadings.TryGetValue(id, out UpdateReading? ur)
+                ? ur
+                : UpdateReading.Unknown;
+            updateAvailable = updateReading.UpdatesAvailable;
+            latestVersion = updateReading.LatestVersion;
+            updateCheckedAt = updateReading.CheckedAt;
 
             // Process start time → an honest start timestamp (the SPA derives uptime from it). Only a
             // UTC-kind value is defensible: kgsm emits start_time as a non-ISO local string the lib can't
@@ -235,6 +247,8 @@ public sealed class ServerAggregator
             IsSteamAccountRequired: instance.IsSteamAccountRequired,
             Metrics: metrics,
             UpdateAvailable: updateAvailable,
+            LatestVersion: latestVersion,
+            UpdateCheckedAt: updateCheckedAt,
             StartedAt: startedAt);
     }
 

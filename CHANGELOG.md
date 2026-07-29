@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed (v0.32.1) — stale "update available" state persists after a successful update
+- **`UpdateCheckCache.MarkUpdated(instanceId)` immediately voids the stale "update available" reading
+  for a specific instance.** Called in `CommandRunner.RunUpdate` on success (synchronous fast-path so the
+  verify `server.patch` carries the cleared state) and in `KgsmAuditConsumer` on the kgsm
+  `instance_version_updated` event (covers CLI-driven updates outside the API). Before this fix, the
+  cached reading persisted for up to 10 minutes after a successful update — the verify `server.patch`
+  built by `CommandRunner` carried `updateAvailable:true`, and the SPA immediately re-resurrected the
+  "Update available" chip and KPI. The fix is purely cache-internal (no new audit row, no new SSE event);
+  the next 10-min slow poll re-probes honestly.
+
+### Added (v0.32.0) — the update-check pipeline
+- **A dedicated always-on `UpdateCheckCache` IHostedService runs the slow (networked) fleet-wide kgsm
+  update check on its own relaxed cadence** (`KGSM_API_UPDATE_CHECK_POLL_MS`, 10-min default, 1-min floor)
+  and populates three `Server` DTO fields the SPA's update surfaces already consumed as null:
+  `updateAvailable` (bool?, the flag that lights the "Update" chip), `latestVersion` (string?, the target
+  version the chip shows as "→ `<version>`"), and `updateCheckedAt` (DateTimeOffset?, "checked N min ago"
+  freshness). The fast-mode 60s `InstanceCache` refresh deliberately skips the per-instance network probe;
+  this cache runs `GetAllStatuses(fast:false)` — the one kgsm-lib lever that hits SteamCMD / per-game
+  upstream version APIs. No upstream kgsm or kgsm-lib change.
+- **Honest-first, never fabricated.** The cache starts all-null (today's behavior) until the first
+  successful check completes after a 5s startup delay (a slow probe can take minutes — startup is never
+  blocked). A failed/empty read keeps the prior snapshot; a per-instance soft failure (Checked=false, an
+  Unavailable reading) keeps the last known reading for that id; an instance the probe never reached stays
+  null — never a fabricated `false` ("no update") for an unchecked instance. A `KGSM_API_UPDATE_CHECK_DISABLED`
+  kill-switch inerts the probe for a deterministic test harness / offline host.
+- **`server.patch` now carries update flips.** `DomainPump.CoreChanged` includes the three new fields so a
+  flip streams to subscribed SPA clients — low-frequency (a flip per ~10min per instance), so the
+  `servers` topic stays a status/roster cadence, never a metric firehose.
+
 ### Added (v0.31.0) — the library blueprint editor
 - **`GET/PUT/DELETE /api/v1/library/{id}/file`** — read, save, and revert a game's raw `.bp.yaml`.
   Byte-level text, never a typed round-trip: a container blueprint or one carrying comments could not

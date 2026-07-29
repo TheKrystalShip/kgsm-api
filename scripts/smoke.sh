@@ -118,6 +118,7 @@ start_api() {
   KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" \
   KGSM_API_HOST_ID="$HOST_ID" KGSM_API_MONITOR_SOCKET="$1" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" \
   KGSM_API_KGSM_PATH="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
+  KGSM_API_UPDATE_CHECK_DISABLED=1 \
     dotnet "$DLL" >/tmp/kgsm-api-smoke.log 2>&1 &
   SRV=$!; PIDS+=("$SRV")
   for _ in $(seq 1 80); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
@@ -385,7 +386,7 @@ if [[ "$CODE" == 200 ]] && EXP="$HOST_ID" python3 -c "
 import json,os,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 if not (isinstance(d,list) and len(d)>=1): sys.exit(2)   # empty roster -> can't prove a real read
-keys={'id','name','blueprint','status','version','runtime','hostId','steamAppId','clientSteamAppId','isSteamAccountRequired','metrics','updateAvailable','startedAt'}
+keys={'id','name','blueprint','status','version','runtime','hostId','steamAppId','clientSteamAppId','isSteamAccountRequired','metrics','updateAvailable','latestVersion','updateCheckedAt','startedAt'}
 for s in d:
     if set(s)!=keys: sys.exit(3)
     if s['status'] not in ('running','stopped','unknown'): sys.exit(4)

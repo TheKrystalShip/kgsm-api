@@ -69,13 +69,23 @@ public sealed record Server(
     // or has no sample for this instance (e.g. a stopped server has no cgroup/process tree). Null
     // here is the honest "not measurable now" — never a fabricated zero.
     ServerMetricsDto? Metrics,
-    // Whether a newer version is available, from the instance status reading's VersionInfo.UpdatesAvailable.
-    // This is a NETWORKED check kgsm skips in --fast mode, and the api reads the roster status fast
-    // (a fleet-wide network probe per poll would be far too expensive) — so updateAvailable is honestly
-    // null today on BOTH the list and the detail view (kgsm-lib reports UpdatesAvailable null when
-    // Version.Checked is false). It is wired so a future dedicated, throttled update-check surface can
-    // populate it; it is NEVER a fabricated false ("no update") for an unchecked instance.
+    // Whether a newer version is available, from the slow (networked) update-check cache's reading of
+    // VersionInfo.UpdatesAvailable. The fast-mode instance cache refresh deliberately skips the per-instance
+    // version probe (a fleet-wide network hit per poll would be far too expensive); the dedicated, throttled
+    // UpdateCheckCache runs the slow read on its own relaxed cadence and populates this. Null until the first
+    // successful check completes (an instance the probe hasn't reached yet), never a fabricated false ("no
+    // update") for an unchecked instance; the backend 409s an update-on-running synchronously, so the SPA
+    // pairs this with status to gate its Update chip.
     bool? UpdateAvailable = null,
+    // The target version an update would land at (VersionInfo.Latest) when UpdateAvailable is true, and null
+    // otherwise (unchecked, or no update). Sourced from the same slow update-check reading as UpdateAvailable;
+    // honest-null when the probe hasn't run for this instance. The SPA renders this beside the Update chip
+    // (the "→ <version>" affordance) — a truthy string here is what "lights up" the Update surface.
+    string? LatestVersion = null,
+    // When the update-check probe last ran for this instance (UTC). Honest-null until the first successful
+    // check (cold cache, or a per-instance failure with no prior reading) — never a fabricated timestamp.
+    // Sourced from the same slow reading. Lets the SPA surface "checked N min ago" so freshness is visible.
+    DateTimeOffset? UpdateCheckedAt = null,
     // When the running process started (from the instance status reading's process.start_time), or null
     // when stopped/unknown. ⚠ Null in practice today: the referenced kgsm-lib (1.21.0) maps start_time to
     // a System.Text.Json DateTime?, but kgsm emits it as a non-ISO local-time string which STJ cannot parse

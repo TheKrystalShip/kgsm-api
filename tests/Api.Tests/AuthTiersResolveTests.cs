@@ -28,7 +28,7 @@ public sealed class AuthTiersResolveTests
         LibraryRefreshIntervalDays = 7, LibraryRefreshHour = 6,
         FilesMaxEntries = 200, FilesMaxEditBytes = 2 * 1024 * 1024, BlueprintMaxEditBytes = 256 * 1024,
         LeafOverridesDir = "/tmp/kgsm-api-test-overrides", LeafApplyCanaryMs = 15000,
-        DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000,
+        DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000, UpdateCheckPollMs = 600000,
         AuthDisabled = false, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
         DiscordRedirectUri = "", DiscordBotToken = "", DiscordGuildId = "", AuthFrontendUrl = "",
         RoleAdminIds = [AdminRole], RoleOperatorIds = [OpsRole], RoleViewerIds = [],
