@@ -1,3 +1,4 @@
+using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
@@ -274,6 +275,41 @@ public sealed class UpdateCheckCache : IHostedService, IDisposable
 
         _readings = next;
         _logger.LogDebug("update-check cache refreshed: {Count} instance(s).", next.Count);
+
+        // Emit audit events for newly-detected updates (state transition: false/null → true).
+        // Fire-and-forget: emit failure is logged and swallowed, never crashes the refresh.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var audit = _services.GetService(typeof(AuditService)) as AuditService;
+                if (audit is null) return;
+
+                var instanceCache = _services.GetService(typeof(InstanceCache)) as InstanceCache;
+                string hostId = _services.GetRequiredService<ApiOptions>().HostId;
+
+                foreach (string id in next.Keys)
+                {
+                    if (next.TryGetValue(id, out UpdateReading? nr) && nr.UpdatesAvailable == true
+                        && (!prior.TryGetValue(id, out UpdateReading? pr) || pr.UpdatesAvailable != true))
+                    {
+                        // State transition: update just became available. Pull the current version
+                        // from the instance cache (the fast-mode status reading) so the audit trail
+                        // records the exact "from → to" version pair at detection time.
+                        string? currentVersion = instanceCache?.Statuses.TryGetValue(id, out var s) == true
+                            ? s.Value?.Version.Current
+                            : null;
+
+                        var write = AuditMapping.FromUpdateAvailable(id, currentVersion, nr.LatestVersion, hostId);
+                        await audit.AppendAsync(write).ConfigureAwait(false);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "update-check cache: failed to emit update-available audit events.");
+            }
+        });
     }
 
     public void Dispose()

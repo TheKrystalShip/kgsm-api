@@ -56,6 +56,7 @@ public static class NotificationCatalog
         new("offline", "Server offline", "A server stopped (server.stop)."),
         new("crash", "Server crash", "The watchdog detected a server exited unexpectedly (server.crash)."),
         new("update", "Game updated", "A new game build was applied (server.update)."),
+        new("update_available", "Update available", "A new game version is available to install (server.update_available)."),
         new("installed", "Game installed", "A new server was installed (server.install)."),
         new("backup", "Backup created", "A server backup completed (backup.create)."),
     ];
@@ -83,6 +84,7 @@ public static class NotificationCatalog
         AuditAction.ServerStop => "offline",
         AuditAction.ServerCrash => "crash",
         AuditAction.ServerUpdate => "update",
+        AuditAction.ServerUpdateAvailable => "update_available",
         AuditAction.ServerInstall => "installed",
         AuditAction.BackupCreate => "backup",
         _ => null,

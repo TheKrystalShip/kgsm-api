@@ -34,6 +34,7 @@ public sealed class NotificationMappingTests
     [InlineData(AuditAction.ServerStop, "offline")]
     [InlineData(AuditAction.ServerCrash, "crash")]
     [InlineData(AuditAction.ServerUpdate, "update")]
+    [InlineData(AuditAction.ServerUpdateAvailable, "update_available")]
     [InlineData(AuditAction.ServerInstall, "installed")]
     [InlineData(AuditAction.BackupCreate, "backup")]
     public void CatalogIdForAction_MapsNotifiableActions(string action, string expected) =>
@@ -55,7 +56,8 @@ public sealed class NotificationMappingTests
         string[] notifiable =
         [
             AuditAction.ServerStart, AuditAction.ServerRestart, AuditAction.ServerStop,
-            AuditAction.ServerCrash, AuditAction.ServerUpdate, AuditAction.ServerInstall, AuditAction.BackupCreate,
+            AuditAction.ServerCrash, AuditAction.ServerUpdate, AuditAction.ServerUpdateAvailable,
+            AuditAction.ServerInstall, AuditAction.BackupCreate,
         ];
         foreach (string action in notifiable)
             Assert.True(NotificationCatalog.IsKnown(NotificationCatalog.CatalogIdForAction(action)!));

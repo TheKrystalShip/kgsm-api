@@ -76,6 +76,7 @@ public static class AuditAction
     public const string ServerStop = "server.stop";
     public const string ServerRestart = "server.restart";
     public const string ServerUpdate = "server.update";
+    public const string ServerUpdateAvailable = "server.update_available";
     public const string ServerInstall = "server.install";
     public const string ServerUninstall = "server.uninstall";
     // server.crash — the resident supervisor's autonomous crash signals (kgsm-watchdog, kgsm-lib

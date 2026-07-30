@@ -602,4 +602,43 @@ public sealed class AuditMappingTests
         Assert.Equal("sent a console command to valheim", w.Summary);
         Assert.Null(w.Meta);
     }
+
+    // --- FromUpdateAvailable: API-internal "update available" detection -----------------------------------
+
+    [Fact]
+    public void FromUpdateAvailable_WithVersions_CarryMeta()
+    {
+        AuditWrite w = AuditMapping.FromUpdateAvailable("factorio-01", "1.0.0", "1.1.0", hostId: "primary");
+
+        Assert.Equal(AuditAction.ServerUpdateAvailable, w.Action);
+        Assert.Equal(AuditSeverity.Info, w.Severity);
+        Assert.Equal(AuditOrigin.System, w.Origin);
+        Assert.Equal(ActorKind.System, w.Actor.Kind);
+        Assert.Equal("api", w.Actor.Name);
+        Assert.Equal(ActorProvider.System, w.Actor.Provider);
+        Assert.Equal("factorio-01", w.ServerId);
+        Assert.Equal(AuditTargetKind.Server, w.Target!.Kind);
+        Assert.Equal("factorio-01", w.Target.Id);
+        Assert.Equal("update available for factorio-01", w.Summary);
+        Assert.Equal("1.0.0", w.Meta!["currentVersion"]);
+        Assert.Equal("1.1.0", w.Meta!["latestVersion"]);
+    }
+
+    [Fact]
+    public void FromUpdateAvailable_NullVersions_OmitsEmptyMeta()
+    {
+        AuditWrite w = AuditMapping.FromUpdateAvailable("factorio-01", null, null, hostId: "primary");
+
+        Assert.Equal(AuditAction.ServerUpdateAvailable, w.Action);
+        Assert.Null(w.Meta);  // both versions null → meta omitted, never stored as ""
+    }
+
+    [Fact]
+    public void FromUpdateAvailable_EmptyInstanceName_FallsBackToDisplay()
+    {
+        AuditWrite w = AuditMapping.FromUpdateAvailable("", "1.0.0", "1.1.0", hostId: "primary");
+
+        Assert.Equal("update available for instance", w.Summary);  // Display() fallback
+        Assert.Equal("", w.ServerId);  // empty string, same as FromServerEvent
+    }
 }

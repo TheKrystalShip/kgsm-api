@@ -172,6 +172,40 @@ public static class AuditMapping
         UpnpWrite(d, hostId, AuditAction.NetworkUpnpClose, "removed", d.Ports);
 
     /// <summary>
+    /// Map an API-internal "update available" detection (from <see cref="Aggregation.UpdateCheckCache"/>) to
+    /// a <c>server.update_available</c> row at <see cref="AuditSeverity.Info"/>. This is a direct write
+    /// (the <c>auth.*</c> case) — the update check is API-owned, not a kgsm engine event, so there is no
+    /// echo and no double-write. Provenance is <c>system:api</c> (an autonomous API-scheduled probe).
+    /// <c>meta</c> carries the current version (from the instance cache) and the latest available version
+    /// (from the slow probe) so the audit trail records the exact "from → to" version pair at detection time.
+    /// </summary>
+    public static AuditWrite FromUpdateAvailable(
+        string instanceName, string? currentVersion, string? latestVersion, string hostId)
+    {
+        string instance = string.IsNullOrEmpty(instanceName) ? "" : instanceName;
+        IReadOnlyDictionary<string, string>? meta = null;
+        if (!string.IsNullOrEmpty(currentVersion) || !string.IsNullOrEmpty(latestVersion))
+        {
+            var m = new Dictionary<string, string>();
+            if (!string.IsNullOrEmpty(currentVersion)) m["currentVersion"] = currentVersion;
+            if (!string.IsNullOrEmpty(latestVersion)) m["latestVersion"] = latestVersion;
+            meta = m;
+        }
+
+        return new AuditWrite(
+            Ts: DateTimeOffset.UtcNow,
+            Origin: AuditOrigin.System,
+            Actor: new AuditActor(ActorKind.System, "api", ActorProvider.System),
+            Action: AuditAction.ServerUpdateAvailable,
+            Severity: AuditSeverity.Info,
+            Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
+            ServerId: instance,
+            HostId: hostId,
+            Summary: $"update available for {Display(instance)}",
+            Meta: meta);
+    }
+
+    /// <summary>
     /// Build the <see cref="AuditWrite"/> for the API-issued <c>open_ports</c> command (M6·b) — a
     /// <strong>direct</strong> write, the <c>auth.*</c> case: the api opens the ports through kgsm-lib's
     /// <c>IFirewallService</c>, which runs no kgsm command and emits no event, so there is no echo to read
