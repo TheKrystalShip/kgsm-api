@@ -324,6 +324,7 @@ public sealed class InstanceCacheStartingTests
         public KgsmResult CheckUpdate(string instanceName) => throw new NotImplementedException();
         public KgsmResult Update(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult GetBackups(string instanceName) => throw new NotImplementedException();
+        public List<InstanceBackup> GetBackupsDetailed(string instanceName) => throw new NotImplementedException();
         public KgsmResult CreateBackup(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult RestoreBackup(string instanceName, string backupName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult PruneBackups(string instanceName, int keepN, string? actor = null, string? origin = null) => throw new NotImplementedException();

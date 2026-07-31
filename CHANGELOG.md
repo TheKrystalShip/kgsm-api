@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — backups report what they are
+- **`GET /api/v1/servers/{id}/backups` carries each backup's detail** — `createdAt`, `version`,
+  `sizeBytes`, `fileCount`, `compressed`, `consistency`, `sources` and `sha256`, alongside the
+  `name` (the engine's opaque backup id, and the value a restore takes). The values come from
+  each backup's own manifest via kgsm-lib `GetBackupsDetailed` (kgsm `instances backups --json`),
+  so every one is measured; a field the manifest does not carry stays `null` rather than
+  defaulted. `sha256` is null for an uncompressed backup — a directory tree has no single digest.
+  The id-only listing still runs first because it is what distinguishes an engine failure (`503`)
+  from an empty store (`200` + `[]`), and a backup the engine lists but has no manifest for is
+  still reported, carrying its id alone.
+- **kgsm-lib `1.46.0` → `1.47.0`** for `IInstanceService.GetBackupsDetailed` + `InstanceBackup`.
+
 ### Added — creating a blueprint from the Control Panel
 - **`GET /api/v1/library/scaffold`** (Operator+) — the engine's `blueprint.tp` skeleton, for seeding a
   new blueprint's editor buffer. Operator+ rather than Admin because an operator reaching the create

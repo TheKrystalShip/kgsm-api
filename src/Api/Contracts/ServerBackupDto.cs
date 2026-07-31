@@ -1,13 +1,36 @@
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// One backup snapshot of an instance (Tier-1 ops — an element of <c>GET /servers/{id}/backups</c>). kgsm's
-/// <c>instances backups</c> lists backups by <strong>name only</strong> (one per line), so <see cref="Name"/>
-/// is the only honest field. Size / timestamp / type are NOT reported by the engine today — they are omitted
-/// rather than fabricated (the never-invent-a-value invariant). The SPA's adapter renders what is present and
-/// degrades the rest.
+/// One backup of an instance (Tier-1 ops — an element of <c>GET /servers/{id}/backups</c>).
 /// </summary>
-public sealed record ServerBackup(string Name);
+/// <remarks>
+/// <see cref="Name"/> is the backup's opaque engine id and the value a restore takes; nothing parses it.
+/// Every other field comes from the backup's own manifest, so each one is measured rather than derived.
+/// A field the manifest does not carry stays <c>null</c> — never defaulted, never fabricated (the
+/// never-invent-a-value invariant), and the SPA renders what is present and omits the rest.
+/// <see cref="Sha256"/> is null for an uncompressed backup: it is a directory tree rather than a single
+/// artifact, so there is no one digest to report.
+/// </remarks>
+/// <param name="Name">The backup's opaque id — pass it to restore.</param>
+/// <param name="CreatedAt">When the backup was taken (UTC).</param>
+/// <param name="Version">The game-server version the backup captured.</param>
+/// <param name="SizeBytes">Size of the backup's payload on disk.</param>
+/// <param name="FileCount">Number of files captured.</param>
+/// <param name="Compressed">Whether the payload is an archive rather than a directory tree.</param>
+/// <param name="Consistency">How consistent the capture is — <c>cold</c> means the instance was stopped
+/// for its duration, the only mode the engine takes today.</param>
+/// <param name="Sources">Which of the instance's directories the backup holds (<c>install</c>, <c>saves</c>).</param>
+/// <param name="Sha256">Digest of the archive, verified before a restore; null when not applicable.</param>
+public sealed record ServerBackup(
+    string Name,
+    DateTimeOffset? CreatedAt = null,
+    string? Version = null,
+    long? SizeBytes = null,
+    long? FileCount = null,
+    bool? Compressed = null,
+    string? Consistency = null,
+    IReadOnlyList<string>? Sources = null,
+    string? Sha256 = null);
 
 /// <summary>The <c>GET /servers/{id}/backups</c> body: this instance's snapshots (newest-first as the engine
 /// lists them) plus the owning <c>serverId</c>.</summary>
@@ -15,7 +38,7 @@ public sealed record ServerBackupList(string ServerId, IReadOnlyList<ServerBacku
 
 /// <summary>
 /// The request body for <c>POST /servers/{id}/backups/restore</c> (Tier-1 ops). <see cref="Backup"/> is the
-/// snapshot name to restore (required — one of the names from the list). <see cref="Origin"/> is the driving
+/// backup id to restore (required — one of the ids from the list). <see cref="Origin"/> is the driving
 /// surface stamped onto the engine call (like <see cref="CommandRequest.Origin"/>); absent ⇒ <c>api</c>.
 /// Restore is async — the endpoint returns a <see cref="Job"/> and progress arrives on the <c>jobs</c> topic.
 /// </summary>

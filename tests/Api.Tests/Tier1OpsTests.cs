@@ -220,7 +220,7 @@ public sealed class Tier1OpsTests
     // ===== backups: GET /servers/{id}/backups ======================================================
 
     [Fact]
-    public async Task BackupsList_Known_200_NamesOnly()
+    public async Task BackupsList_Known_200_CarriesManifestDetail()
     {
         HttpResponseMessage resp = await Client(_engine, AuthTier.Viewer).GetAsync($"/api/v1/servers/{Server}/backups");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -230,10 +230,26 @@ public sealed class Tier1OpsTests
         Assert.Equal(Server, root.GetProperty("serverId").GetString());
         JsonElement backups = root.GetProperty("backups");
         Assert.Equal(2, backups.GetArrayLength());
-        Assert.Equal("factorio-1-2026-06-21.bak", backups[0].GetProperty("name").GetString());
-        // Names only — no fabricated size/when/type (the engine doesn't report them).
-        Assert.False(backups[0].TryGetProperty("size", out _));
-        Assert.False(backups[0].TryGetProperty("when", out _));
+
+        // Newest first, and every field is the one the manifest recorded.
+        JsonElement newest = backups[0];
+        Assert.Equal("factorio-01-20260621T100000Z-aaaaaa", newest.GetProperty("name").GetString());
+        Assert.Equal("2.0.28", newest.GetProperty("version").GetString());
+        Assert.Equal(2411724800, newest.GetProperty("sizeBytes").GetInt64());
+        Assert.Equal(18422, newest.GetProperty("fileCount").GetInt64());
+        Assert.True(newest.GetProperty("compressed").GetBoolean());
+        Assert.Equal("cold", newest.GetProperty("consistency").GetString());
+        Assert.Equal(new DateTimeOffset(2026, 6, 21, 10, 0, 0, TimeSpan.Zero),
+            newest.GetProperty("createdAt").GetDateTimeOffset());
+        Assert.Equal(["install", "saves"],
+            newest.GetProperty("sources").EnumerateArray().Select(e => e.GetString()).ToArray());
+
+        // A backup the engine lists but has no manifest for still appears, carrying its id alone.
+        // Its absent detail is null — never a fabricated size or timestamp.
+        JsonElement undetailed = backups[1];
+        Assert.Equal("factorio-01-20260620T100000Z-bbbbbb", undetailed.GetProperty("name").GetString());
+        Assert.Equal(JsonValueKind.Null, undetailed.GetProperty("sizeBytes").ValueKind);
+        Assert.Equal(JsonValueKind.Null, undetailed.GetProperty("createdAt").ValueKind);
     }
 
     [Fact]
@@ -297,7 +313,7 @@ public sealed class Tier1OpsTests
     public async Task BackupRestore_Valid_202_RestoreJob()
     {
         HttpResponseMessage resp = await PostJson(_engine, AuthTier.Operator,
-            $"/api/v1/servers/{Server}/backups/restore", "{\"backup\":\"factorio-1-2026-06-21.bak\"}");
+            $"/api/v1/servers/{Server}/backups/restore", "{\"backup\":\"factorio-01-20260621T100000Z-aaaaaa\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
         JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
@@ -429,8 +445,29 @@ public sealed class Tier1OpsTests
             return new KgsmResult(0);
         }
 
+        // Newest first, as the engine lists. The second id deliberately has NO manifest below, to
+        // prove such a backup is still reported (id alone) rather than dropped from the listing.
         public KgsmResult GetBackups(string instanceName) =>
-            new(0, "factorio-1-2026-06-21.bak\nfactorio-1-2026-06-20.bak\n");
+            new(0, "factorio-01-20260621T100000Z-aaaaaa\nfactorio-01-20260620T100000Z-bbbbbb\n");
+
+        public List<InstanceBackup> GetBackupsDetailed(string instanceName) =>
+        [
+            new InstanceBackup
+            {
+                Id = "factorio-01-20260621T100000Z-aaaaaa",
+                Instance = "factorio-01",
+                Blueprint = "factorio",
+                Version = "2.0.28",
+                CreatedAt = new DateTimeOffset(2026, 6, 21, 10, 0, 0, TimeSpan.Zero),
+                Compressed = true,
+                Consistency = "cold",
+                Sources = ["install", "saves"],
+                SizeBytes = 2411724800,
+                FileCount = 18422,
+                Sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                SchemaVersion = 1,
+            },
+        ];
 
         public KgsmResult CreateBackup(string instanceName, string? actor = null, string? origin = null) => new(0);
 

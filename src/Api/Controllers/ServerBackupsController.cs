@@ -30,8 +30,9 @@ public sealed class ServerBackupsController(
     CommandRunner runner) : ControllerBase
 {
     /// <summary>
-    /// List this instance's backups (<c>{ serverId, backups: [{ name }] }</c>). kgsm reports names only, so
-    /// name is the sole field (size/when/type are omitted, not fabricated). Newest-first as the engine lists.
+    /// List this instance's backups (<c>{ serverId, backups: [...] }</c>), newest first as the engine lists.
+    /// Each entry carries what that backup's manifest records — creation time, captured version, size, file
+    /// count, sources and digest — with anything the manifest lacks left null rather than defaulted.
     /// <list type="bullet">
     /// <item><c>404</c> — unknown server id.</item>
     /// <item><c>503</c> — the kgsm engine is not provisioned on this host.</item>
@@ -48,6 +49,8 @@ public sealed class ServerBackupsController(
         if (!await ExistsAsync(id, ct).ConfigureAwait(false))
             return NotFound();
 
+        // The id-only listing runs first because it distinguishes an engine failure from an empty store;
+        // the detailed read collapses both to an empty list, so it cannot carry that signal on its own.
         KgsmResult result = instances.GetBackups(id);
         if (!result.IsSuccess)
             return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
@@ -55,11 +58,31 @@ public sealed class ServerBackupsController(
                     ? $"could not list backups (exit {result.ExitCode})"
                     : result.Stderr.Trim());
 
-        // kgsm prints one backup name per line; blank lines dropped. An empty stdout = no snapshots (a
+        // kgsm prints one backup id per line; blank lines dropped. An empty stdout = no backups (a
         // legitimate empty list, never an error).
-        IReadOnlyList<ServerBackup> backups = (result.Stdout ?? "")
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(name => new ServerBackup(name))
+        string[] ids = (result.Stdout ?? "")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        // Join each id to its manifest. An id with no manifest still appears, carrying its id alone —
+        // the backup exists, we just have no detail for it, which is not the same as it not existing.
+        Dictionary<string, InstanceBackup> detail = instances.GetBackupsDetailed(id)
+            .Where(b => !string.IsNullOrWhiteSpace(b.Id))
+            .GroupBy(b => b.Id, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        IReadOnlyList<ServerBackup> backups = ids
+            .Select(backupId => detail.TryGetValue(backupId, out InstanceBackup? m)
+                ? new ServerBackup(
+                    backupId,
+                    m.CreatedAt,
+                    m.Version,
+                    m.SizeBytes,
+                    m.FileCount,
+                    m.Compressed,
+                    m.Consistency,
+                    m.Sources.Count == 0 ? null : m.Sources,
+                    m.Sha256)
+                : new ServerBackup(backupId))
             .ToArray();
 
         return Ok(new ServerBackupList(id, backups));
