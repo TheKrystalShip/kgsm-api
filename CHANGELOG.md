@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — headless deploys (`setup.sh` once, `deploy.sh` forever after)
+- **`deploy/setup.sh` provisions the host once** (asks for sudo; idempotent, re-runnable): chowns
+  `/opt/kgsm-api` to the deploying user, seeds the env file, puts the real unit in
+  `/etc/kgsm-api/systemd/` with `/etc/systemd/system/kgsm-api.service` symlinked to it, installs a
+  polkit grant scoped to this project's units, enables the unit, and wires the leaf-config feature
+  (`deploy/setup-leaf-config.sh`). It ends by **verifying** the grant with the same unprivileged
+  `systemctl` calls `deploy.sh` makes.
+- **`deploy/deploy.sh` runs with no `sudo` and no prompts.** It opens with a `require_setup`
+  assertion that fails **before building** with "run `deploy/setup.sh`" when the host is not
+  provisioned.
+- **Fixed: the health check no longer false-fails on a non-default bind.** The post-deploy probe
+  resolves its URL from the configured `KGSM_API_URLS` (preferring plain HTTP, mapping `0.0.0.0` →
+  `127.0.0.1`) instead of hardcoding `:8080` — this host binds loopback `:8097`.
+- `deploy/deploy-common.sh` carries the project block plus the shared helpers, sourced by both entry
+  points so they cannot drift. Canonical template and contract:
+  `tks/scripts/deploy-template/README.md`.
+
 ### Fixed (v0.32.1) — stale "update available" state persists after a successful update
 - **`UpdateCheckCache.MarkUpdated(instanceId)` immediately voids the stale "update available" reading
   for a specific instance.** Called in `CommandRunner.RunUpdate` on success (synchronous fast-path so the

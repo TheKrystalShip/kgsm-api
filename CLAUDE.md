@@ -126,28 +126,36 @@ dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --self-contained -p:Pu
 
 ### Deploying / redeploying the live service
 
-**To (re)deploy the API to its systemd service, run `./deploy/deploy.sh` — do NOT run the
-individual publish/`systemctl` steps by hand.** It is the one-go path: publishes as the
-invoking (service-owning) user, then `sudo`s **only** the systemd steps — stops the unit,
-`rsync`s the binary tree into `/opt/kgsm-api`, refreshes the unit only if it changed,
-`enable --now`, and verifies with a real `HTTP 200` from `/health` (it does not claim
-success on the launch exit code alone). Idempotent; the env file (`/etc/kgsm-api/kgsm-api.env`)
-and DB (`/var/lib/kgsm-api`) live outside `/opt` and are never touched.
+Two scripts, the ecosystem-wide pattern (`../scripts/deploy-template/README.md`):
 
-**It also wires the runtime leaf-config feature** (the Services panel) as a final idempotent step:
-`deploy.sh` calls `deploy/setup-leaf-config.sh`, which installs a per-leaf systemd drop-in (layering an
-API-owned override env file in `/var/lib/kgsm-api/leaf-overrides/`) and a **scoped polkit rule** letting
-the service user `systemctl restart` **only** the four config-target leaves (monitor/watchdog/assistant/
-firewall — kept in lockstep with `src/Api/Services/Leaves/LeafCatalog.cs`). Restart is the *only*
-privileged op; the API renders override files unprivileged. It works under `NoNewPrivileges=true`
-(restart is a polkit-authorized D-Bus call to PID 1, not an in-process escalation). Full reference +
-verify/undo: `deploy/leaf-config/README.md`. So a single `./deploy/deploy.sh` on a fresh checkout does
-**all** setup — no manual polkit side-quest.
+```bash
+./deploy/setup.sh    # ONCE per host — asks for sudo; provisions and verifies the headless grant
+./deploy/deploy.sh   # every deploy — NO sudo, NO prompts
+```
 
-**It needs `sudo` for the systemd steps, and the prompt is non-interactive under Claude
-Code — so ASK THE USER for their sudo/root password before running it** (e.g. run it with
-`SUDO='sudo -A'` + a `SUDO_ASKPASS` helper, or have the user run the script themselves).
-Never hard-code the password into the script or the repo.
+**To (re)deploy the API, run `./deploy/deploy.sh` — do NOT run the individual publish/`systemctl`
+steps by hand.** It publishes as the invoking (service-owning) user, bundles the SPA, refreshes the
+unit only if it changed, stops the unit, `rsync`s the binary tree into `/opt/kgsm-api`, starts it,
+and verifies with a real `HTTP 200` from `/health` (it does not claim success on the launch exit
+code alone). The health URL is **resolved from the configured `KGSM_API_URLS`**, not hardcoded — on
+this host that is loopback `:8097`, while the unit's built-in default is `:8080`. Idempotent; the env
+file (`/etc/kgsm-api/kgsm-api.env`) and DB (`/var/lib/kgsm-api`) live outside `/opt` and are never
+touched.
+
+`setup.sh` owns everything privileged: it chowns `/opt/kgsm-api` to you, seeds the env file, puts the
+real unit in `/etc/kgsm-api/systemd/` with `/etc/systemd/system/kgsm-api.service` symlinked to it,
+installs the scoped deploy polkit grant, enables the unit, and verifies the grant works
+unprivileged. **It also wires the runtime leaf-config feature** (the Services panel) via
+`deploy/setup-leaf-config.sh`: a per-leaf systemd drop-in (layering an API-owned override env file in
+`/var/lib/kgsm-api/leaf-overrides/`) plus a **scoped polkit rule** letting the service user
+`systemctl restart` **only** the four config-target leaves (monitor/watchdog/assistant/firewall —
+kept in lockstep with `src/Api/Services/Leaves/LeafCatalog.cs`). Restart is the *only* privileged op
+there; the API renders override files unprivileged. It works under `NoNewPrivileges=true` (restart is
+a polkit-authorized D-Bus call to PID 1, not an in-process escalation). Full reference + verify/undo:
+`deploy/leaf-config/README.md`.
+
+Note the two polkit rules are separate on purpose: `48-kgsm-api-deploy.rules` lets **you** deploy,
+`49-kgsm-api-leaf-restart.rules` lets **the running service** restart leaves.
 
 `scripts/smoke.sh` is the **stand-in for the frontend** until the SPA can reach a host —
 it asserts every M0/M1/M2/M3 contract (and the M4·a no-token sweep) — **31/31**. The M0–M3 checks
