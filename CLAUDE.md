@@ -126,12 +126,20 @@ dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --self-contained -p:Pu
 
 ### Deploying / redeploying the live service
 
-Two scripts, the ecosystem-wide pattern (`../scripts/deploy-template/README.md`):
+Two scripts in `deploy/` — the same pattern every `kgsm-*` repo uses, vendored here so a
+standalone clone deploys with nothing else checked out:
 
 ```bash
 ./deploy/setup.sh    # ONCE per host — asks for sudo; provisions and verifies the headless grant
 ./deploy/deploy.sh   # every deploy — NO sudo, NO prompts
 ```
+
+**`deploy.sh` needs no privilege at all.** `setup.sh` chowns the install prefix to you (so
+installing is a plain file write) and puts the real unit in a **user-owned** directory that
+`/etc/systemd/system/` symlinks to (so a unit change is also a plain file write); the only
+privileged operations left are the `systemctl` verbs, which go through a polkit rule scoped to
+this project's units. If some *other* operation seems to need root, stop and ask — don't
+reintroduce `sudo` into `deploy.sh`.
 
 **To (re)deploy the API, run `./deploy/deploy.sh` — do NOT run the individual publish/`systemctl`
 steps by hand.** It publishes as the invoking (service-owning) user, bundles the SPA, refreshes the
@@ -140,7 +148,9 @@ and verifies with a real `HTTP 200` from `/health` (it does not claim success on
 code alone). The health URL is **resolved from the configured `KGSM_API_URLS`**, not hardcoded — on
 this host that is loopback `:8097`, while the unit's built-in default is `:8080`. Idempotent; the env
 file (`/etc/kgsm-api/kgsm-api.env`) and DB (`/var/lib/kgsm-api`) live outside `/opt` and are never
-touched.
+touched. It opens with a `require_setup` assertion that fails **before building** — with *"run
+`deploy/setup.sh`"* — when the host is not provisioned. `deploy/deploy-common.sh` holds the paths,
+unit names and helpers both scripts share, so the two can never disagree.
 
 `setup.sh` owns everything privileged: it chowns `/opt/kgsm-api` to you, seeds the env file, puts the
 real unit in `/etc/kgsm-api/systemd/` with `/etc/systemd/system/kgsm-api.service` symlinked to it,

@@ -37,7 +37,7 @@ src/Api/
 ├── Json/ · Infrastructure/        # JSON conventions + error envelope
 tests/Api.Tests/                   # xUnit + WebApplicationFactory (faked seams)
 scripts/smoke.sh                   # the HTTP/WS contract suite (the "mock frontend")
-deploy/deploy.sh                   # build + (re)deploy the systemd service
+deploy/setup.sh · deploy.sh        # provision the host once · (re)deploy the systemd service
 ```
 
 ## Commands
@@ -47,7 +47,8 @@ dotnet build kgsm-api.slnx                  # build (Debug)
 dotnet run --project src/Api/Api.csproj     # run locally (binds KGSM_API_URLS, default :8080)
 dotnet test kgsm-api.slnx                    # xUnit suite (401/403/tier matrix, contracts, behavior)
 scripts/smoke.sh                             # build Release + run the HTTP/WS contract checks
-./deploy/deploy.sh                           # build + (re)deploy the live systemd service (needs sudo)
+./deploy/setup.sh                            # ONCE per host — asks for sudo; provisions the headless grant
+./deploy/deploy.sh                           # build + (re)deploy the live systemd service (no sudo, no prompts)
 ```
 
 Runtime config lives in `src/Api/appsettings.json` (the documented schema + defaults for every
@@ -90,9 +91,10 @@ card** row in `PLAN.md §6`.
 
 The Services panel lets an admin edit a leaf's configuration at runtime; the API delivers it as an
 **override** (never editing the leaf's own deployed config) and applies it by restarting the leaf. That
-needs a tiny bit of one-time privileged wiring — and **`./deploy/deploy.sh` does it for you**, by
-calling `deploy/setup-leaf-config.sh` on every deploy. So a fresh checkout reaches a fully-working state
-from the single `./deploy/deploy.sh` command; the wiring step is idempotent (a re-run is a no-op).
+needs a tiny bit of one-time privileged wiring — and **`./deploy/setup.sh` does it for you**, by
+calling `deploy/setup-leaf-config.sh` as part of provisioning the host. So a fresh checkout reaches a
+fully-working state from `setup.sh` then `deploy.sh`; the wiring step is idempotent (a re-run is a
+no-op), which is why it lives in the script that already holds sudo rather than in every deploy.
 
 What that wiring is:
 
