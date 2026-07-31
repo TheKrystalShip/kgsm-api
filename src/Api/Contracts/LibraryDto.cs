@@ -168,6 +168,23 @@ public sealed record SaveBlueprintResultDto(
     bool OverridesSystem,
     bool CreatedOverride);
 
+/// <summary>Result of <c>GET /library/scaffold</c> — the engine's blueprint skeleton, for seeding a new
+/// blueprint's editor buffer.</summary>
+/// <param name="Content">The engine's <c>blueprint.tp</c> template verbatim, instructional header included
+/// (that header is the authoring help a manual writer reads while filling the file in). Engine-sourced, so
+/// the manual and assistant creation paths start from one skeleton; this API never composes a substitute.</param>
+public sealed record BlueprintScaffoldDto(string Content);
+
+/// <summary>Body of <c>POST /library</c> — create a new blueprint.</summary>
+/// <param name="Name">The new blueprint's name, a lowercase slug. Refused with <c>409 name_taken</c> when a
+/// blueprint of that name already resolves in either directory: an existing blueprint is edited through
+/// <c>PUT /library/{id}/file</c>, not re-created.</param>
+/// <param name="Content">The exact file text to write. Required, and engine-validated before anything is
+/// committed.</param>
+/// <param name="Origin">The surface driving the write (<c>ui</c>|<c>assistant</c>|<c>discord</c>|<c>api</c>,
+/// default <c>api</c>). Stamped onto the kgsm event so the audit row records where the creation came from.</param>
+public sealed record CreateBlueprintRequest(string? Name, string? Content, string? Origin);
+
 /// <summary>Result of <c>DELETE /library/{id}/file</c> — the user-dir override is gone and the shipped
 /// blueprint serves again.</summary>
 /// <param name="RevertedTo">The tier now serving this blueprint; always <c>system</c>, since a revert is

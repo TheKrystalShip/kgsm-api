@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — creating a blueprint from the Control Panel
+- **`GET /api/v1/library/scaffold`** (Operator+) — the engine's `blueprint.tp` skeleton, for seeding a
+  new blueprint's editor buffer. Operator+ rather than Admin because an operator reaching the create
+  page loads the buffer read-only alongside the assistant hand-off. `503` when the engine reports no
+  templates directory: there is no API-composed fallback skeleton.
+- **`POST /api/v1/library`** (Admin) — create a blueprint from editor text, body
+  `{ name, content, origin? }`, returning the existing `SaveBlueprintResultDto`. The file lands in
+  kgsm's user blueprints directory and the ENGINE validates it before anything is committed
+  (`400 blueprint_invalid` carries its errors verbatim). A name that already resolves in either
+  directory is `409 name_taken` — including a shipped-only one, since creating it here would silently
+  make an override out of what the caller believes is a new game. Audit arrives as the echo of the
+  `blueprint_created` kgsm emits, with the caller's actor + origin stamped on it.
+- **kgsm-lib 1.46.0** for `IBlueprintService.GetScaffold()`.
+- **`KgsmSeamResolutionTests`** — resolves the engine-gated seam services out of the composed kgsm-lib
+  container, so a kgsm-lib constructor change fails the build instead of the first request.
+
 ### Changed — headless deploys (`setup.sh` once, `deploy.sh` forever after)
 - **`deploy/setup.sh` provisions the host once** (asks for sudo; idempotent, re-runnable): chowns
   `/opt/kgsm-api` to the deploying user, seeds the env file, puts the real unit in

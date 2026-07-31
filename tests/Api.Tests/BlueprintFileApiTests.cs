@@ -329,6 +329,135 @@ public sealed class BlueprintFileApiTests
         Assert.False(string.IsNullOrEmpty(_engine.Blueprints.LastRemoveActor));
     }
 
+    // ===== scaffold ===============================================================================
+
+    [Fact]
+    public async Task Scaffold_Viewer_403_OperatorPlus()
+    {
+        HttpResponseMessage r = await Client(_engine, AuthTier.Viewer).GetAsync("/api/v1/library/scaffold");
+        Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Scaffold_Operator_200_ReturnsTheEngineTemplateVerbatim()
+    {
+        // Operator+ so an operator reaching the create page can load the buffer even though the POST
+        // below is admin-only.
+        HttpResponseMessage r = await Client(_engine, AuthTier.Operator).GetAsync("/api/v1/library/scaffold");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+
+        Assert.Equal(_engine.Blueprints.Scaffold, (await Json(r)).GetProperty("content").GetString());
+    }
+
+    [Fact]
+    public async Task Scaffold_EngineReportsNoTemplate_503_NotAFabricatedSkeleton()
+    {
+        _engine.Blueprints.Scaffold = null;
+        try
+        {
+            HttpResponseMessage r = await Client(_engine, AuthTier.Operator).GetAsync("/api/v1/library/scaffold");
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
+        }
+        finally
+        {
+            _engine.Blueprints.Reset();
+        }
+    }
+
+    // ===== create =================================================================================
+
+    [Fact]
+    public async Task Create_Operator_403_CreationIsAdminOnly()
+    {
+        HttpResponseMessage r = await Post(_engine, AuthTier.Operator, CreateBody("necesse", "name: necesse\n"));
+        Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Create_Admin_200_WritesToTheUserDirShadowingNothing()
+    {
+        const string name = "necesse";
+        HttpResponseMessage r = await Post(_engine, AuthTier.Admin, CreateBody(name, "name: necesse\n"));
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+
+        JsonElement body = await Json(r);
+        Assert.Equal("user", body.GetProperty("tier").GetString());
+        // A new blueprint shadows nothing — the name was free in both directories.
+        Assert.False(body.GetProperty("overridesSystem").GetBoolean());
+        Assert.False(body.GetProperty("createdOverride").GetBoolean());
+        Assert.Equal("name: necesse\n", _engine.Blueprints.User[name]);
+    }
+
+    [Fact]
+    public async Task Create_ThreadsTheActorAndOriginIntoTheEngineWrite()
+    {
+        await Post(_engine, AuthTier.Admin, CreateBody("necesse", "name: necesse\n", origin: "ui"));
+
+        Assert.Equal("ui", _engine.Blueprints.LastWriteOrigin);
+        Assert.False(string.IsNullOrEmpty(_engine.Blueprints.LastWriteActor));
+    }
+
+    [Fact]
+    public async Task Create_NameOfAUserBlueprint_409_NameTaken()
+    {
+        HttpResponseMessage r = await Post(_engine, AuthTier.Admin, CreateBody(UserOnly, "name: whatever\n"));
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Equal("name_taken", (await Json(r)).GetProperty("error").GetProperty("code").GetString());
+
+        // Refused BEFORE the write — the existing blueprint is untouched.
+        Assert.Equal("name: teamfortress2\n", _engine.Blueprints.User[UserOnly]);
+    }
+
+    [Fact]
+    public async Task Create_NameOfAShippedBlueprint_409_NameTaken()
+    {
+        // A shipped-only name is taken too: creating it here would silently make an override out of what
+        // the caller believes is a brand-new game.
+        HttpResponseMessage r = await Post(_engine, AuthTier.Admin, CreateBody(Shipped, "name: factorio\n"));
+        Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
+        Assert.Equal("name_taken", (await Json(r)).GetProperty("error").GetProperty("code").GetString());
+        Assert.False(_engine.Blueprints.User.ContainsKey(Shipped));
+    }
+
+    [Fact]
+    public async Task Create_EngineRejectsTheContent_400_WithItsOwnErrorsVerbatim()
+    {
+        _engine.Blueprints.RejectWith = ["missing required field: runtime", "unknown key: lauch_args"];
+
+        HttpResponseMessage r = await Post(_engine, AuthTier.Admin, CreateBody("necesse", "junk\n"));
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+
+        JsonElement error = (await Json(r)).GetProperty("error");
+        Assert.Equal("blueprint_invalid", error.GetProperty("code").GetString());
+        string[] errors = [.. error.GetProperty("details").GetProperty("errors")
+            .EnumerateArray().Select(e => e.GetString()!)];
+        Assert.Equal(_engine.Blueprints.RejectWith, errors);
+        Assert.False(_engine.Blueprints.User.ContainsKey("necesse"));
+    }
+
+    [Fact]
+    public async Task Create_MissingName_400()
+    {
+        HttpResponseMessage r = await Post(_engine, AuthTier.Admin,
+            JsonSerializer.Serialize(new { content = "name: x\n" }));
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Create_MissingContent_400()
+    {
+        HttpResponseMessage r = await Post(_engine, AuthTier.Admin,
+            JsonSerializer.Serialize(new { name = "necesse" }));
+        Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task Create_EngineUnprovisioned_503()
+    {
+        HttpResponseMessage r = await Post(_noEngine, AuthTier.Admin, CreateBody("necesse", "name: necesse\n"));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
+    }
+
     // ===== helpers ================================================================================
 
     private async Task<JsonElement> ReadOk(AuthTier tier, string id)
@@ -343,6 +472,9 @@ public sealed class BlueprintFileApiTests
 
     private static string Body(string content) => JsonSerializer.Serialize(new { content });
 
+    private static string CreateBody(string name, string content, string? origin = null) =>
+        JsonSerializer.Serialize(new { name, content, origin });
+
     private static HttpClient Client(AuthTestFactory factory, AuthTier? tier)
     {
         HttpClient c = factory.CreateClient();
@@ -350,6 +482,10 @@ public sealed class BlueprintFileApiTests
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(t));
         return c;
     }
+
+    private static Task<HttpResponseMessage> Post(AuthTestFactory f, AuthTier? tier, string json) =>
+        Client(f, tier).PostAsync("/api/v1/library",
+            new StringContent(json, Encoding.UTF8, "application/json"));
 
     private static Task<HttpResponseMessage> Put(AuthTestFactory f, AuthTier? tier, string id, string json) =>
         Client(f, tier).PutAsync($"/api/v1/library/{id}/file",
@@ -415,6 +551,7 @@ public sealed class BlueprintFileApiTests
             User[Overridden] = "name: palworld\n# my override\n";
             User[UserOnly] = "name: teamfortress2\n";
             RejectWith = null;
+            Scaffold = "# KGSM Blueprint Template\nname: ''\nruntime: native\n";
             LastWriteActor = LastWriteOrigin = LastRemoveActor = LastRemoveOrigin = null;
         }
 
@@ -470,7 +607,13 @@ public sealed class BlueprintFileApiTests
             return FileOpResult.Ok();
         }
 
-        // ---- IBlueprintService (only the two the editor uses) ----
+        // ---- IBlueprintService (only the three the editor uses) ----
+
+        /// <summary>The engine's skeleton, or <see langword="null"/> to model an engine that reported no
+        /// templates directory.</summary>
+        public string? Scaffold { get; set; } = "# KGSM Blueprint Template\nname: ''\nruntime: native\n";
+
+        public string? GetScaffold() => Scaffold;
 
         public BlueprintCandidates? FindAll(string blueprintName)
         {

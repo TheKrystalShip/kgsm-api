@@ -90,6 +90,84 @@ public sealed class LibraryController(
     // echoed row attributed to the real admin rather than the service account.
 
     /// <summary>
+    /// <c>GET /library/scaffold</c> — the engine's blueprint skeleton (<c>blueprint.tp</c>), for seeding a
+    /// new blueprint's editor buffer. <strong>Operator+</strong>: an operator cannot <c>POST</c> a blueprint
+    /// but does reach the create page, where the buffer loads read-only alongside the assistant hand-off.
+    /// <list type="bullet">
+    /// <item><c>200</c> — the template (<see cref="BlueprintScaffoldDto"/>).</item>
+    /// <item><c>503</c> — the kgsm engine is not provisioned, or reported no templates directory / an
+    ///   unreadable template. There is no API-composed fallback skeleton.</item>
+    /// </list>
+    /// </summary>
+    [HttpGet("scaffold")]
+    [Authorize(Policy = AuthPolicy.Operator)]
+    public IActionResult Scaffold()
+    {
+        if (Resolve() is not { } files) return EngineUnavailable();
+
+        BlueprintScaffoldResult r = files.Scaffold();
+        return r.Status == BlueprintFileOp.Ok
+            ? Ok(new BlueprintScaffoldDto(r.Content!))
+            : EngineUnavailable();
+    }
+
+    /// <summary>
+    /// <c>POST /library</c> — create a new blueprint from editor text. <strong>Admin only</strong>, matching
+    /// the save path: authoring a blueprint defines how a game server is installed and launched. The file
+    /// lands in kgsm's USER blueprints directory and the ENGINE validates it before anything is committed;
+    /// the audit trail arrives as the echo of the <c>blueprint_created</c> kgsm emits.
+    /// <list type="bullet">
+    /// <item><c>200</c> — created (<see cref="SaveBlueprintResultDto"/>).</item>
+    /// <item><c>400</c> — missing <c>name</c>/<c>content</c> or bad origin (<c>bad_request</c>), or the
+    ///   engine rejected the content (<c>blueprint_invalid</c>, with its own <c>errors[]</c> in the details).</item>
+    /// <item><c>404</c> — the name is not a safe slug.</item>
+    /// <item><c>409</c> — <c>name_taken</c> (a blueprint of that name already resolves — edit it via
+    ///   <c>PUT /library/{id}/file</c> instead), or <c>file_too_large</c>.</item>
+    /// <item><c>503</c> — the kgsm engine is not provisioned, or returned no validation verdict at all.</item>
+    /// </list>
+    /// </summary>
+    [HttpPost]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public IActionResult CreateBlueprint([FromBody] CreateBlueprintRequest? body)
+    {
+        if (body?.Name is not { Length: > 0 } name)
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "name is required");
+
+        if (body.Content is not string content)
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "content is required");
+
+        if (!TryResolveOrigin(body.Origin, out string origin))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "unknown origin; expected one of: ui, assistant, discord, api");
+
+        if (Resolve() is not { } files) return EngineUnavailable();
+
+        BlueprintSaveResult r = files.Create(
+            name, content, options.BlueprintMaxEditBytes,
+            actor: AuditPrincipal.ActorString(User), origin: origin);
+
+        switch (r.Status)
+        {
+            case BlueprintFileOp.Ok:
+                return Ok(new SaveBlueprintResultDto(
+                    r.Etag!, r.SizeBytes, r.Mtime, BlueprintTierName.User, r.OverridesSystem, r.CreatedOverride));
+            case BlueprintFileOp.NameTaken:
+                return Error(StatusCodes.Status409Conflict, "name_taken",
+                    "a blueprint with this name already exists — edit it instead, or pick another name");
+            case BlueprintFileOp.Invalid:
+                return StatusCode(StatusCodes.Status400BadRequest, new ErrorEnvelope(new ErrorBody(
+                    "blueprint_invalid", "the engine rejected this blueprint", ErrorDetails(r.Errors))));
+            case BlueprintFileOp.TooLarge:
+                return Error(StatusCodes.Status409Conflict, "file_too_large",
+                    "the content exceeds the edit-size limit");
+            case BlueprintFileOp.Unavailable:
+                return EngineUnavailable();
+            default:
+                return NotFound(); // OutOfJail (unsafe name) / IoError
+        }
+    }
+
+    /// <summary>
     /// <c>GET /library/{id}/file</c> — a blueprint's raw <c>.bp.yaml</c> text plus an sha256 etag, read
     /// from whichever blueprints directory the engine resolves it in. <strong>Operator+</strong>.
     /// <list type="bullet">

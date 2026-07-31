@@ -34,6 +34,9 @@ public enum BlueprintFileOp
     /// <summary>Revert: this blueprint has no shipped original to fall back to, so deleting the user file
     /// would destroy the only copy rather than restore anything. Refused.</summary>
     NoOriginal,
+    /// <summary>Create: a blueprint of that name already resolves in either directory. Refused rather than
+    /// silently overwriting — editing an existing blueprint is the save path, not the create path.</summary>
+    NameTaken,
     /// <summary>A filesystem failure.</summary>
     IoError,
 }
@@ -68,6 +71,10 @@ public sealed record BlueprintReadResult(
 public sealed record BlueprintSaveResult(
     BlueprintFileOp Status, long SizeBytes, DateTimeOffset Mtime, string? Etag,
     bool OverridesSystem, bool CreatedOverride, IReadOnlyList<string> Errors);
+
+/// <summary>Result of a scaffold read. <paramref name="Content"/> is populated only on
+/// <see cref="BlueprintFileOp.Ok"/>.</summary>
+public sealed record BlueprintScaffoldResult(BlueprintFileOp Status, string? Content);
 
 /// <summary>Result of a revert (deleting the user-dir override).</summary>
 /// <param name="RevertedTo">The tier now serving this blueprint — always
@@ -107,6 +114,17 @@ public interface IBlueprintFileService
     /// the audit echo attributes the edit to the real caller.</summary>
     BlueprintSaveResult Save(
         string name, string content, string? ifEtag, long maxBytes, string? actor, string? origin);
+
+    /// <summary>The engine's blueprint skeleton, for seeding a new blueprint's buffer. Read-only; nothing
+    /// is written and no event is emitted.</summary>
+    BlueprintScaffoldResult Scaffold();
+
+    /// <summary>Create a new blueprint in the USER blueprints directory. Refused with
+    /// <see cref="BlueprintFileOp.NameTaken"/> when the name already resolves in either directory —
+    /// changing an existing blueprint is <see cref="Save"/>, and letting create overwrite would turn a
+    /// typo'd name into a silent clobber of somebody else's blueprint. The engine validates the content
+    /// before anything is committed, exactly as on <see cref="Save"/>.</summary>
+    BlueprintSaveResult Create(string name, string content, long maxBytes, string? actor, string? origin);
 
     /// <summary>Delete the user-dir override so the shipped blueprint serves again. Refused with
     /// <see cref="BlueprintFileOp.NoOriginal"/> when there is no shipped original — deleting then would
@@ -164,6 +182,45 @@ public sealed class BlueprintFileService(IBlueprintFiles files, IBlueprintServic
             OverridesSystem: hasOriginal,
             CreatedOverride: hasOriginal && !hadUserFile,
             Errors: []);
+    }
+
+    public BlueprintScaffoldResult Scaffold()
+    {
+        string? content = blueprints.GetScaffold();
+        return content is null
+            ? new BlueprintScaffoldResult(BlueprintFileOp.Unavailable, null)
+            : new BlueprintScaffoldResult(BlueprintFileOp.Ok, content);
+    }
+
+    public BlueprintSaveResult Create(string name, string content, long maxBytes, string? actor, string? origin)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return SaveFail(BlueprintFileOp.NotFound);
+
+        // The engine's candidate list is the authority on whether the name is free — it answers for BOTH
+        // directories, so a name that only exists as a shipped blueprint is taken too (creating it here
+        // would silently make an override out of what the caller believes is a new game).
+        if (blueprints.FindAll(name) is { } existing && (existing.User?.Exists == true || existing.HasSystemOriginal))
+            return SaveFail(BlueprintFileOp.NameTaken);
+
+        // No separate Validate pass: WriteRaw validates the content as a temp file before it ever occupies
+        // the real name, and reports the engine's own errors on InvalidDraft. Validating twice would ask
+        // the engine the same question and widen the window between the check and the write.
+        var opts = new BlueprintWriteOptions
+        {
+            MaxBytes = maxBytes,
+            Actor = actor,
+            Origin = origin,
+        };
+        FileOpResult<FileStat> r = files.WriteRaw(name, content, opts);
+        if (r.Outcome != FileOpOutcome.Ok)
+            return SaveFail(MapOutcome(r.Outcome), r.Errors);
+
+        FileStat s = r.Value!;
+        // A created blueprint shadows nothing — the name was free in both directories a moment ago, which
+        // is what the NameTaken check above established.
+        return new BlueprintSaveResult(
+            BlueprintFileOp.Ok, s.SizeBytes, s.Mtime, s.Etag,
+            OverridesSystem: false, CreatedOverride: false, Errors: []);
     }
 
     public BlueprintRevertResult Revert(string name, string? actor, string? origin)

@@ -223,6 +223,8 @@ public sealed class AuditConsumerBlueprintCacheBustTests : IClassFixture<AuditCo
         public string? FindPath(string name) => throw new NotImplementedException();
         public BlueprintCandidates? FindAll(string name) => throw new NotImplementedException();
         public BlueprintValidation? Validate(string path) => throw new NotImplementedException();
+
+        public string? GetScaffold() => throw new NotImplementedException();
     }
 }
 

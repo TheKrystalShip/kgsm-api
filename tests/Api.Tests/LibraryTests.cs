@@ -349,6 +349,8 @@ public sealed class LibraryAggregatorTests
         public string? FindPath(string blueprintName) => throw new NotImplementedException();
         public BlueprintCandidates? FindAll(string blueprintName) => throw new NotImplementedException();
         public BlueprintValidation? Validate(string blueprintNameOrPath) => throw new NotImplementedException();
+
+        public string? GetScaffold() => throw new NotImplementedException();
     }
 }
 
