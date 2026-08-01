@@ -168,6 +168,88 @@ public sealed class LeafProvisioningTests
         finally { try { File.Delete(db); } catch { /* best effort */ } }
     }
 
+    // ---- a runtime disconnect also survives, and a real config change still wins -------------------
+    [Fact]
+    public async Task Disconnect_PersistsAcrossRestart()
+    {
+        string db = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-disc-{Guid.NewGuid():N}.db");
+        const string socket = "/run/kgsm-monitor/metrics.sock";
+        try
+        {
+            using (var first = new LeafTestFactory(db, socket))
+            {
+                HttpClient admin = Client(first, AuthTier.Admin);
+                Assert.True(await ServiceProvisioned(admin, MonitorUnitless)); // config seeds it provisioned
+                await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/disconnect", null);
+                Assert.False(await ServiceProvisioned(admin, MonitorUnitless));
+            }
+
+            // Same config, so nothing about the host moved — the operator's disconnect stands.
+            using var second = new LeafTestFactory(db, socket);
+            Assert.False(await ServiceProvisioned(Client(second, AuthTier.Admin), MonitorUnitless));
+        }
+        finally { try { File.Delete(db); } catch { /* best effort */ } }
+    }
+
+    /// <summary>
+    /// The case the stored flag alone cannot answer: nobody flipped anything, but the host's configuration
+    /// dropped the monitor's endpoint. The seed genuinely moved, so it wins — reporting the leaf as still
+    /// connected would claim a capability this host no longer has.
+    /// </summary>
+    [Fact]
+    public async Task ConfigSeedChange_WinsOverTheStoredFlag()
+    {
+        string db = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-seed-{Guid.NewGuid():N}.db");
+        try
+        {
+            using (var configured = new LeafTestFactory(db, "/run/kgsm-monitor/metrics.sock"))
+                Assert.True(await ServiceProvisioned(Client(configured, AuthTier.Admin), MonitorUnitless));
+
+            // The endpoint is gone from config now — and no runtime flip ever recorded a contrary intent.
+            using var deconfigured = new LeafTestFactory(db);
+            HttpClient admin = Client(deconfigured, AuthTier.Admin);
+            Assert.False(await ServiceProvisioned(admin, MonitorUnitless));
+            Assert.False(await MetricsProvisioned(admin));
+        }
+        finally { try { File.Delete(db); } catch { /* best effort */ } }
+    }
+
+    /// <summary>
+    /// A host deployed before the seed was recorded already has the table, so neither EnsureCreated nor the
+    /// CREATE TABLE IF NOT EXISTS adds the column — the registry has to ALTER it in. The stored flag must
+    /// survive that: an existing row's seed is unknown, which is not a licence to overwrite the row.
+    /// </summary>
+    [Fact]
+    public async Task DeployedDbWithoutTheSeedColumn_IsMigratedInPlace()
+    {
+        string db = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-legacy-{Guid.NewGuid():N}.db");
+        try
+        {
+            // A fully-populated deployed DB (every other table present), rewound to the older leaf_registry
+            // shape: the column gone, and a row that says connected with no seed recorded.
+            using (var deployed = new LeafTestFactory(db))
+                deployed.CreateClient();
+
+            using (var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={db}"))
+            {
+                await conn.OpenAsync();
+                using Microsoft.Data.Sqlite.SqliteCommand cmd = conn.CreateCommand();
+                cmd.CommandText =
+                    """
+                    ALTER TABLE leaf_registry DROP COLUMN "ConfigSeed";
+                    UPDATE leaf_registry SET "Provisioned" = 1 WHERE "LeafId" = 'monitor';
+                    """;
+                await cmd.ExecuteNonQueryAsync();
+            }
+
+            // Config does not provide the monitor, but the deployed row says connected and carries no seed to
+            // contradict it — so it stands, and the column is now there for the next start to compare against.
+            using var factory = new LeafTestFactory(db);
+            Assert.True(await ServiceProvisioned(Client(factory, AuthTier.Admin), MonitorUnitless));
+        }
+        finally { try { File.Delete(db); } catch { /* best effort */ } }
+    }
+
     // ---- helpers ----------------------------------------------------------------------------------
     private static HttpClient Client(LeafTestFactory factory, AuthTier? tier)
     {

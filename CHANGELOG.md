@@ -45,6 +45,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   descriptor — this API adds none of its own.
 - New field types on the wire: `path`, `csv`, `duration`.
 
+### Fixed — connecting a leaf at runtime survives a restart
+- **A runtime connect/disconnect from the Services panel now persists across an API restart.** The
+  registry reconciled the stored flag against the *current* config seed at startup, which cannot tell
+  "the operator flipped this" apart from "the host's configuration moved" — so connecting a leaf whose
+  endpoint config never mentioned it was silently reverted on the next restart, and the capability
+  block reported the leaf absent again. Each row now records the seed it was written against and the
+  comparison is seed-to-seed: the stored flag stands unless the configuration itself actually changed,
+  in which case the new seed still wins (a leaf dropped from config must not keep claiming a capability
+  this host no longer has). A row written before the seed was recorded keeps its flag — an unknown seed
+  is not a licence to overwrite it — and the column is added in place on a deployed DB.
+
 ### Changed — backups report what they are
 - **`GET /api/v1/servers/{id}/backups` carries each backup's detail** — `createdAt`, `version`,
   `sizeBytes`, `fileCount`, `compressed`, `consistency`, `sources` and `sha256`, alongside the

@@ -17,6 +17,7 @@ namespace TheKrystalShip.Api.Tests;
 public class LeafTestFactory : AuthTestFactory
 {
     private readonly string _dbPath;
+    private readonly string _monitorSocket;
     public string OverridesDir { get; }
 
     public LeafTestFactory() : this(NewDbPath()) { }
@@ -27,9 +28,12 @@ public class LeafTestFactory : AuthTestFactory
     public string DescriptorDir { get; }
     public string DropInDir { get; }
 
-    public LeafTestFactory(string dbPath)
+    /// <param name="monitorSocket">Non-blank to model a host whose config DOES provide the monitor — the
+    /// only way to move a leaf's config seed between two factories sharing one DB.</param>
+    public LeafTestFactory(string dbPath, string monitorSocket = "")
     {
         _dbPath = dbPath;
+        _monitorSocket = monitorSocket;
         string id = Guid.NewGuid().ToString("N");
         OverridesDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-ovr-{id}");
         DescriptorDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-desc-{id}");
@@ -67,7 +71,7 @@ public class LeafTestFactory : AuthTestFactory
             {
                 ["KGSM_API_DB"] = _dbPath,
                 // All four leaves start NOT provisioned (blank) → connect flips absent→provisioned.
-                ["KGSM_API_MONITOR_SOCKET"] = "",
+                ["KGSM_API_MONITOR_SOCKET"] = _monitorSocket,
                 ["KGSM_API_WATCHDOG_SOCKET"] = "",
                 ["KGSM_API_ASSISTANT_URL"] = "",
                 ["KGSM_API_FIREWALL_SOCKET"] = "",

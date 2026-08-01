@@ -25,6 +25,12 @@ public sealed class LeafRegistryEntity
     /// <summary>Whether the leaf is connected on this host (the runtime-flippable capability flag).</summary>
     public bool Provisioned { get; set; }
 
+    /// <summary>The config-derived seed as it stood when this row was last written — the memory that lets
+    /// <see cref="Services.Leaves.LeafRegistry"/> tell "the operator flipped this at runtime" apart from
+    /// "the host's configuration changed underneath it". Null on a row written before this was recorded:
+    /// the seed is then simply unknown, and the persisted flag stands rather than being guessed at.</summary>
+    public bool? ConfigSeed { get; set; }
+
     /// <summary>An optional per-leaf endpoint override (socket path / URL). <strong>Forward-compat</strong>:
     /// stored but NOT yet wired into the leaf clients' transport in Phase 1 (the endpoint comes from the
     /// configured-or-default <see cref="ApiOptions"/> value). Null ⇒ use the config/default endpoint.</summary>

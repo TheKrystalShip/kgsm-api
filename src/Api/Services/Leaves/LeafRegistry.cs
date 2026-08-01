@@ -20,8 +20,10 @@ public sealed record LeafProvisioningState(bool Provisioned, string? Endpoint);
 /// <para><b>Synchronous, always-correct reads.</b> <see cref="IsProvisioned"/> is on hot paths (every metrics
 /// scrape), so it never touches the DB: the in-memory cache is seeded from config in the constructor (so it
 /// is correct from the very first read, identical to the pre-feature behaviour), then reconciled with the
-/// persisted rows by <see cref="StartAsync"/> (a persisted flip overrides the config seed → "survives a
-/// restart"). A connect/disconnect updates the cache immediately and persists.</para>
+/// persisted rows by <see cref="StartAsync"/>: the persisted flag stands — so a runtime flip survives a
+/// restart — unless the host's configuration itself moved since that row was written, which is why each row
+/// also records the seed it was written against. A connect/disconnect updates the cache immediately and
+/// persists.</para>
 /// <para><b>Survives an existing DB without a wipe</b> (the <see cref="Aggregation.HostSettingsStore"/>
 /// pattern): EnsureCreated for a fresh DB + an idempotent <c>CREATE TABLE IF NOT EXISTS</c> for a deployed
 /// one, the shared audit log untouched.</para>
@@ -89,14 +91,20 @@ public sealed class LeafRegistry : IHostedService
                 bool configProvisioned = SeedFromConfig(leaf);
                 if (byId.TryGetValue(leaf, out LeafRegistryEntity? row))
                 {
-                    // Config seed changed (e.g. env var was added/removed) since the row was last
-                    // persisted — update the row so the config change takes effect on restart, while
-                    // an explicit runtime flip (SetProvisionedAsync) still survives a restart as long
-                    // as the config seed hasn't changed. If the seed changed, the new seed wins.
-                    if (row.Provisioned != configProvisioned)
-                    {
+                    // Two different questions, and only the recorded seed can tell them apart: an explicit
+                    // runtime flip survives a restart, while a genuine change to the host's configuration
+                    // (an endpoint added or removed) takes effect on the next start. Comparing the stored
+                    // flag against the current seed cannot distinguish them — a runtime connect on a leaf
+                    // config never mentioned looks exactly like a seed that changed, and gets wiped. So
+                    // compare seed to seed; the flag is only ever overwritten when the seed actually moved.
+                    bool seedChanged = row.ConfigSeed is bool was && was != configProvisioned;
+                    if (seedChanged)
                         row.Provisioned = configProvisioned;
+                    if (seedChanged || row.ConfigSeed is null)
+                    {
+                        row.ConfigSeed = configProvisioned;
                         row.UpdatedAt = DateTimeOffset.UtcNow;
+                        db.LeafRegistryEntries.Update(row); // read AsNoTracking above
                     }
                     _state[leaf] = new LeafProvisioningState(row.Provisioned, row.Endpoint);
                 }
@@ -108,6 +116,7 @@ public sealed class LeafRegistry : IHostedService
                     {
                         LeafId = leaf,
                         Provisioned = seed.Provisioned,
+                        ConfigSeed = configProvisioned,
                         Endpoint = seed.Endpoint,
                         UpdatedAt = DateTimeOffset.UtcNow,
                     });
@@ -143,6 +152,8 @@ public sealed class LeafRegistry : IHostedService
                 db.LeafRegistryEntries.Add(row);
             }
             row.Provisioned = provisioned;
+            // Stamp the seed this flip was made against, so the next start compares like with like.
+            row.ConfigSeed = SeedFromConfig(leafId);
             row.Endpoint = endpoint;
             row.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
@@ -171,9 +182,31 @@ public sealed class LeafRegistry : IHostedService
             CREATE TABLE IF NOT EXISTS leaf_registry (
                 "LeafId" TEXT NOT NULL CONSTRAINT "PK_leaf_registry" PRIMARY KEY,
                 "Provisioned" INTEGER NOT NULL,
+                "ConfigSeed" INTEGER NULL,
                 "Endpoint" TEXT NULL,
                 "UpdatedAt" INTEGER NOT NULL
             );
             """, ct).ConfigureAwait(false);
+
+        // A host deployed before ConfigSeed existed has the table already, so neither statement above adds
+        // the column. SQLite has no ADD COLUMN IF NOT EXISTS, so ask first. Nullable and unstamped: an
+        // existing row's seed is genuinely unknown, and the first start records it rather than inventing it.
+        if (!await ColumnExistsAsync(db, "leaf_registry", nameof(LeafRegistryEntity.ConfigSeed), ct).ConfigureAwait(false))
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE leaf_registry ADD COLUMN "ConfigSeed" INTEGER NULL;""", ct).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task<bool> ColumnExistsAsync(AppDbContext db, string table, string column, CancellationToken ct)
+    {
+        System.Data.Common.DbConnection conn = db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync(ct).ConfigureAwait(false);
+
+        using System.Data.Common.DbCommand cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}';";
+        object? count = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return Convert.ToInt64(count) > 0;
     }
 }
