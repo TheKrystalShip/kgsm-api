@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the leaf config surface comes from the leaves
+- **Each leaf declares its own configurable surface** in a descriptor its `deploy.sh` installs into
+  `/var/lib/kgsm/leaves/` (`KGSM_API_LEAF_DESCRIPTOR_DIR`). `LeafDescriptorStore` **scans that
+  directory** — this API holds no list of leaves, so a leaf that joins the ecosystem later becomes
+  configurable and appears on the Services board with no rebuild here. A malformed or
+  unknown-`schemaVersion` descriptor is skipped with a logged reason (once per file revision), never
+  fatal and never partially applied: one leaf shipping a bad file must not cost every other leaf its
+  config surface. `LeafConfigManifest` is now the **fallback** for a leaf that has not shipped a
+  descriptor, not the authority — the wire carries `fromDescriptor` so the panel can tell which it is
+  showing. Format: `../leaf-config-descriptor.md`.
+- **Effective values carry provenance.** Each field reports `effective` and `source` resolved
+  override → floor → default. The floor is read from the sources the descriptor declares:
+  `systemd-unit` (its `Environment=` assignments, `EnvironmentFile=` targets and drop-ins, with **this
+  API's own override layer excluded** — that layer is the override tier, and folding it in would make
+  every overridden key look hand-configured), `env-file`, and `appsettings` flattened to
+  `Section__Key`. A source that cannot be read yields `source: "unknown"` with a null value; it is
+  never downgraded to the default, because "I could not read it" and "it sets nothing" are different
+  facts and only the second licenses falling through. A **secret never echoes its value from any
+  tier** — including the floor, where the real one lives — while still reporting whether it is set.
+- **`GET .../config` also carries** `groups`, per-field `risk`/`unit`/`min`/`max`/`pairedApiKey`/
+  `dependsOn`, `applyMode`, and `editable` + `editableReason`.
+- **Readable and editable are separate questions.** A descriptor makes a leaf's config visible;
+  editing also needs its override drop-in to exist on this host (`KGSM_API_LEAF_DROPIN_DIR`), because
+  without it a write renders a file nothing reads and then fails at the restart. Such a leaf is served
+  read-only with the reason, and a `PUT` is a **409** — the request is well-formed, the host is not
+  wired.
+- **`applied_unreachable`** — a new apply outcome. A `wiring`-risk change passes the liveness canary
+  (the leaf restarts perfectly) while severing this API's link to it. After such a change the broker
+  compares any `pairedApiKey` against this API's own resolved setting and polls reachability for the
+  canary window, then reports honestly, naming both sides. It **does not auto-revert**: the change was
+  asked for, and a silent revert would misreport what is running. Reset stays available and needs
+  nothing from the leaf.
+- **Descriptor-declared bounds are enforced before any restart.** A leaf that silently discards an
+  out-of-range value (kgsm-monitor keeps its default below `KGSM_MONITOR_INTERVAL_MS=100`) would
+  otherwise leave the panel reporting a change that never happened. The rule comes from the leaf's own
+  descriptor — this API adds none of its own.
+- New field types on the wire: `path`, `csv`, `duration`.
+
 ### Changed — backups report what they are
 - **`GET /api/v1/servers/{id}/backups` carries each backup's detail** — `createdAt`, `version`,
   `sizeBytes`, `fileCount`, `compressed`, `consistency`, `sources` and `sha256`, alongside the

@@ -22,6 +22,7 @@ public sealed class ServicesProvisioningController(
     LeafHealthMonitor health,
     ServicesAggregator services,
     LeafConfigService config,
+    LeafConfigCatalog catalog,
     AuditService audit,
     ApiOptions options) : ControllerBase
 {
@@ -71,15 +72,22 @@ public sealed class ServicesProvisioningController(
     [HttpPut("{leaf}/config")]
     public async Task<IActionResult> PutConfig(string id, string leaf, [FromBody] LeafConfigUpdate? body, CancellationToken ct)
     {
-        if (!IsThisHost(id) || !LeafConfigManifest.IsConfigTarget(leaf))
+        if (!IsThisHost(id) || !catalog.IsConfigTarget(leaf))
             return NotFound();
 
         body ??= new LeafConfigUpdate(null, null);
         string? actor = AuditPrincipal.ActorString(User);
         LeafConfigApplyResponse resp = await config.ApplyAsync(leaf, body, actor, AuditOrigin.Api, ct);
         if (resp.ErrorMessage is not null)
-            return StatusCode(StatusCodes.Status400BadRequest,
-                new ErrorEnvelope(new ErrorBody("bad_request", resp.ErrorMessage)));
+        {
+            // 409 when the request is fine but this host cannot deliver it (no override drop-in for the
+            // leaf); 400 when the body itself is wrong.
+            return resp.IsConflict
+                ? StatusCode(StatusCodes.Status409Conflict,
+                    new ErrorEnvelope(new ErrorBody("conflict", resp.ErrorMessage)))
+                : StatusCode(StatusCodes.Status400BadRequest,
+                    new ErrorEnvelope(new ErrorBody("bad_request", resp.ErrorMessage)));
+        }
         return Ok(resp.Result);
     }
 

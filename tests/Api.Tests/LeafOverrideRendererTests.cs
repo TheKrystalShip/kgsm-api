@@ -19,9 +19,17 @@ public sealed class LeafOverrideRendererTests : IDisposable
     public LeafOverrideRendererTests()
     {
         ApiOptions opts = ApiOptions.FromConfiguration(new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["KGSM_API_LEAF_OVERRIDES_DIR"] = _dir })
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["KGSM_API_LEAF_OVERRIDES_DIR"] = _dir,
+                // No descriptors installed → the catalog falls back to the built-in manifest, which is
+                // exactly the mapping these tests pin.
+                ["KGSM_API_LEAF_DESCRIPTOR_DIR"] = Path.Combine(_dir, "no-descriptors"),
+            })
             .Build());
-        _renderer = new LeafOverrideRenderer(opts, NullLogger<LeafOverrideRenderer>.Instance);
+        var catalog = new LeafConfigCatalog(
+            new LeafDescriptorStore(opts, NullLogger<LeafDescriptorStore>.Instance), opts);
+        _renderer = new LeafOverrideRenderer(opts, catalog, NullLogger<LeafOverrideRenderer>.Instance);
     }
 
     [Fact]

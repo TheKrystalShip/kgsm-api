@@ -33,6 +33,12 @@ render an override file nothing reads and then fail to restart, so the two must 
 
 `api` and `bot` are **not** config targets (the API does not configure itself; the bot is out of scope).
 
+**The drop-in is what makes a leaf editable.** kgsm-api treats the presence of
+`50-kgsm-api-override.conf` for a leaf's unit as the checkable fact that this host can deliver a config
+change to it. A leaf with a descriptor but no drop-in is shown read-only, with that reason and a pointer
+back to this script, and a `PUT` against it is refused with `409` rather than writing an override nothing
+would read. So wiring a new config-target leaf is exactly: add it here and to the polkit template.
+
 ## The privilege model — why this is small and safe
 
 - **The only ongoing privileged operation is `restart`.** The API writes the override env files

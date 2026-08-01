@@ -21,11 +21,41 @@ public class LeafTestFactory : AuthTestFactory
 
     public LeafTestFactory() : this(NewDbPath()) { }
 
+    /// <summary>Per-factory descriptor + drop-in dirs. Both default to real host paths
+    /// (<c>/var/lib/kgsm/leaves</c>, <c>/etc/systemd/system</c>), so leaving them alone would make these
+    /// tests read whatever this machine happens to have deployed. Isolate them.</summary>
+    public string DescriptorDir { get; }
+    public string DropInDir { get; }
+
     public LeafTestFactory(string dbPath)
     {
         _dbPath = dbPath;
-        OverridesDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-ovr-{Guid.NewGuid():N}");
+        string id = Guid.NewGuid().ToString("N");
+        OverridesDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-ovr-{id}");
+        DescriptorDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-desc-{id}");
+        DropInDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-dropin-{id}");
+
+        // The config-target leaves are "wired" by default here — the apply path refuses a leaf with no
+        // override drop-in, and these tests are about the broker, not about host provisioning.
+        foreach (LeafDescriptor leaf in LeafCatalog.Default)
+        {
+            Directory.CreateDirectory(Path.Combine(DropInDir, leaf.Unit + ".d"));
+            File.WriteAllText(
+                Path.Combine(DropInDir, leaf.Unit + ".d", LeafConfigCatalog.OverrideDropInName),
+                "# test fixture\n");
+        }
     }
+
+    /// <summary>Install a descriptor for a leaf, as that leaf's own deploy would.</summary>
+    public void InstallDescriptor(string leafId, string json)
+    {
+        Directory.CreateDirectory(DescriptorDir);
+        File.WriteAllText(Path.Combine(DescriptorDir, leafId + ".json"), json);
+    }
+
+    /// <summary>Remove a leaf's override drop-in, modelling a host that never ran setup-leaf-config.sh.</summary>
+    public void UnwireDropIn(string unit) =>
+        File.Delete(Path.Combine(DropInDir, unit + ".d", LeafConfigCatalog.OverrideDropInName));
 
     private static string NewDbPath() => Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-{Guid.NewGuid():N}.db");
 
@@ -42,6 +72,8 @@ public class LeafTestFactory : AuthTestFactory
                 ["KGSM_API_ASSISTANT_URL"] = "",
                 ["KGSM_API_FIREWALL_SOCKET"] = "",
                 ["KGSM_API_LEAF_OVERRIDES_DIR"] = OverridesDir,
+                ["KGSM_API_LEAF_DESCRIPTOR_DIR"] = DescriptorDir,
+                ["KGSM_API_LEAF_DROPIN_DIR"] = DropInDir,
                 // Keep the canary short so a rollback test doesn't wait 15s.
                 ["KGSM_API_LEAF_APPLY_CANARY_MS"] = "2000",
             }));
@@ -65,6 +97,8 @@ public sealed class LeafConfigTestFactory : LeafTestFactory
             services.AddSingleton<IUnitController, FakeUnitController>();
             services.RemoveAll<ILeafProbe>();
             services.AddSingleton<ILeafProbe, FakeLeafProbe>();
+            services.RemoveAll<ILeafReachability>();
+            services.AddSingleton<ILeafReachability, FakeLeafReachability>();
         });
     }
 
@@ -96,5 +130,23 @@ public sealed class FakeLeafProbe(LeafOverrideStore store) : ILeafProbe
     {
         IReadOnlyList<LeafOverrideRow> rows = await store.GetAsync(leafId, ct);
         return !rows.Any(r => r.Value == UnhealthyValue);
+    }
+}
+
+/// <summary>
+/// Switch-on-input reachability: the leaf is unreachable iff a stored override value is the sentinel. Models
+/// the wiring break the liveness canary cannot see — the unit is perfectly healthy, this API just cannot
+/// find it. Returns null (no signal) for the sentinel that models a leaf the API has no probe for.
+/// </summary>
+public sealed class FakeLeafReachability(LeafOverrideStore store) : ILeafReachability
+{
+    public const string UnreachableValue = "__make-unreachable__";
+    public const string NoSignalValue = "__no-reachability-signal__";
+
+    public async Task<bool?> IsReachableAsync(string leafId, CancellationToken ct)
+    {
+        IReadOnlyList<LeafOverrideRow> rows = await store.GetAsync(leafId, ct);
+        if (rows.Any(r => r.Value == NoSignalValue)) return null;
+        return !rows.Any(r => r.Value == UnreachableValue);
     }
 }

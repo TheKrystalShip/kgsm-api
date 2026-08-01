@@ -362,6 +362,41 @@ public sealed class ApiOptions
     /// </summary>
     public required int LeafApplyCanaryMs { get; init; }
 
+    /// <summary>
+    /// Directory the leaf config descriptors are read from (<c>KGSM_API_LEAF_DESCRIPTOR_DIR</c>, default
+    /// <c>/var/lib/kgsm/leaves</c>). Each leaf's own <c>deploy.sh</c> installs <c>&lt;leaf&gt;.json</c> here
+    /// declaring its full configurable surface; this API only ever <strong>scans and reads</strong> it, so a
+    /// leaf that joins the ecosystem later becomes configurable with no rebuild here. Format:
+    /// <c>tks/leaf-config-descriptor.md</c>.
+    /// </summary>
+    public required string LeafDescriptorDir { get; init; }
+
+    /// <summary>
+    /// Where systemd unit drop-ins live (<c>KGSM_API_LEAF_DROPIN_DIR</c>, default
+    /// <c>/etc/systemd/system</c>). Read for two things: to tell whether a leaf is wired for config delivery
+    /// at all (its <c>50-kgsm-api-override.conf</c> exists), and to resolve a leaf's floor values from the
+    /// unit fragments that set them. Never written — the drop-ins are installed by
+    /// <c>deploy/setup-leaf-config.sh</c>.
+    /// </summary>
+    public required string LeafDropInDir { get; init; }
+
+    /// <summary>
+    /// This API's own currently-resolved value for one of its settings, by environment-variable name — the
+    /// other half of a descriptor field's <c>pairedApiKey</c>. Returns null when the name is not one this API
+    /// resolves and the environment does not carry it, which means "cannot compare", not "they disagree".
+    /// </summary>
+    /// <remarks>
+    /// Deliberately reads the <em>resolved</em> value rather than the raw environment for the settings it
+    /// knows: an unset variable still has an effective value here (the coded default), and comparing against
+    /// the raw environment would report a spurious disagreement whenever a host relies on defaults.
+    /// </remarks>
+    public string? ResolvedByEnvName(string envName) => envName switch
+    {
+        "KGSM_API_HOST_ID" => HostId,
+        "KGSM_API_MONITOR_SOCKET" => MonitorSocketPath,
+        _ => Environment.GetEnvironmentVariable(envName),
+    };
+
     // --- Cluster message bus (docs/cluster-message-bus-plan.md, PLAN-peers.md §3) — the shared
     //     secret + node identity behind the cluster service token (node-to-node auth). Opt-in like
     //     the assistant/firewall: a blank secret means this host is not part of a cluster and the
@@ -704,6 +739,8 @@ public sealed class ApiOptions
             // before the leaf has even restarted.
             LeafOverridesDir = BlankFallback(configuration["KGSM_API_LEAF_OVERRIDES_DIR"], "/var/lib/kgsm-api/leaf-overrides"),
             LeafApplyCanaryMs = Math.Max(2000, IntOr(configuration["KGSM_API_LEAF_APPLY_CANARY_MS"], 15000)),
+            LeafDescriptorDir = BlankFallback(configuration["KGSM_API_LEAF_DESCRIPTOR_DIR"], "/var/lib/kgsm/leaves"),
+            LeafDropInDir = BlankFallback(configuration["KGSM_API_LEAF_DROPIN_DIR"], "/etc/systemd/system"),
 
             // Cluster message bus foundation. Blank secret => ClusterEnabled false => the cluster
             // service token seam stays dormant (PLAN-peers.md §2 #3/#9). NodeId defaults to the

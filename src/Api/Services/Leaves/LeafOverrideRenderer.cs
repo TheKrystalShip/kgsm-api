@@ -15,7 +15,10 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// never reads a half-written file. The dir is created <c>0700</c> if missing. A value's CR/LF are stripped
 /// so an override can never inject a second env line. <b>Never logs a value</b> (secret hygiene).
 /// </remarks>
-public sealed class LeafOverrideRenderer(ApiOptions options, ILogger<LeafOverrideRenderer> logger)
+public sealed class LeafOverrideRenderer(
+    ApiOptions options,
+    LeafConfigCatalog catalog,
+    ILogger<LeafOverrideRenderer> logger)
 {
     private const UnixFileMode FileMode0600 = UnixFileMode.UserRead | UnixFileMode.UserWrite;
     private const UnixFileMode DirMode0700 = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
@@ -51,8 +54,10 @@ public sealed class LeafOverrideRenderer(ApiOptions options, ILogger<LeafOverrid
         sb.Append("# Rendered by kgsm-api — do not edit (managed via the Services config panel).\n");
         foreach (LeafOverrideRow row in rows)
         {
-            LeafConfigFieldDef? field = LeafConfigManifest.Field(leafId, row.Key);
-            if (field is null) continue; // not a manifest key → never write it
+            LeafConfigFieldDef? field = catalog.Field(leafId, row.Key);
+            // Not a key this leaf currently declares → never write it. This is what makes a removed
+            // descriptor field inert rather than a stale variable the leaf keeps honouring.
+            if (field is null) continue;
             sb.Append(field.EnvName).Append('=').Append(SingleLine(row.Value)).Append('\n');
         }
 

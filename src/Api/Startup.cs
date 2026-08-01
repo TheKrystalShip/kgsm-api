@@ -345,10 +345,21 @@ public class Startup(IConfiguration configuration)
         // systemd drop-in feeds the leaf; the apply broker (LeafConfigService) writes → renders → restarts via
         // IUnitController → polls ILeafProbe (health canary) → auto-rolls-back on failure. IUnitController +
         // ILeafProbe are seams (real impls shell systemctl / read systemd liveness; faked in tests).
+        //
+        // The config SURFACE comes from the descriptors each leaf's own deploy installs (scanned, never
+        // listed here — a new leaf needs no rebuild), falling back to the built-in LeafConfigManifest for a
+        // leaf that has not shipped one yet. LeafFloorReader reads the leaf's own config so each field can
+        // report where its live value actually comes from, and ILeafReachability is the second, separate
+        // verdict a wiring change needs: the liveness canary passes when a leaf restarts cleanly on a socket
+        // path this API can no longer reach.
+        services.AddSingleton<LeafDescriptorStore>();
+        services.AddSingleton<LeafConfigCatalog>();
         services.AddSingleton<LeafOverrideStore>();
         services.AddSingleton<LeafOverrideRenderer>();
+        services.AddSingleton<LeafFloorReader>();
         services.AddSingleton<IUnitController, SystemctlUnitController>();
         services.AddSingleton<ILeafProbe, LeafProbe>();
+        services.AddSingleton<ILeafReachability, LeafReachability>();
         services.AddSingleton<LeafConfigService>();
 
         // M6·a — alerts (the condition-mirror). The engine is ALWAYS-ON (like LeafHealthMonitor, not gated

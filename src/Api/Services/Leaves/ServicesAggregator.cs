@@ -16,12 +16,15 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// interesting case the at-a-glance Overview dot can't show). Read-only in this slice — start/stop/restart
 /// controls are a later increment (polkit grant + admin gate + audit).
 /// </summary>
-public sealed class ServicesAggregator(SystemdReader systemd, LeafHealthMonitor health, LeafRegistry registry)
+public sealed class ServicesAggregator(
+    SystemdReader systemd,
+    LeafHealthMonitor health,
+    LeafRegistry registry,
+    LeafDescriptorStore descriptors)
 {
-    private static readonly IReadOnlyList<LeafDescriptor> Catalog = LeafCatalog.Default;
-
     public async Task<ServicesSnapshot> SnapshotAsync(CancellationToken ct)
     {
+        IReadOnlyList<LeafDescriptor> Catalog = BuildCatalog();
         IReadOnlyList<string> units = Catalog.Select(l => l.Unit).ToList();
         IReadOnlyDictionary<string, UnitState> states = await systemd.ReadAsync(units, ct).ConfigureAwait(false);
         HostCapabilities caps = health.Current;
@@ -48,6 +51,29 @@ public sealed class ServicesAggregator(SystemdReader systemd, LeafHealthMonitor 
                 Health: HealthFor(leaf, caps)));
         }
         return new ServicesSnapshot(rows);
+    }
+
+    /// <summary>
+    /// The built-in catalog, plus any leaf that shipped a config descriptor this API has never heard of.
+    /// A host that runs a leaf added after this API was built still shows it on the board — with its systemd
+    /// liveness, which is universal, and no deep health, which is honest: this API has no probe for a leaf
+    /// it does not know. Known leaves keep the catalog as their identity authority.
+    /// </summary>
+    private IReadOnlyList<LeafDescriptor> BuildCatalog()
+    {
+        List<LeafConfigDescriptor> unknown =
+            [.. descriptors.All.Where(d => !LeafCatalog.Default.Any(l => string.Equals(l.Id, d.Id, StringComparison.Ordinal)))];
+
+        if (unknown.Count == 0)
+            return LeafCatalog.Default;
+
+        return
+        [
+            .. LeafCatalog.Default,
+            .. unknown
+                .OrderBy(d => d.Id, StringComparer.Ordinal)
+                .Select(d => new LeafDescriptor(d.Id, d.Unit, d.DisplayName, d.Role, d.OnDemand, LeafHealthSource.None)),
+        ];
     }
 
     private static LeafServiceHealth? HealthFor(LeafDescriptor leaf, HostCapabilities caps) => leaf.Health switch

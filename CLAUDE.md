@@ -87,6 +87,27 @@ there; the API renders override files unprivileged. It works under `NoNewPrivile
 a polkit-authorized D-Bus call to PID 1, not an in-process escalation). Full reference + verify/undo:
 `deploy/leaf-config/README.md`.
 
+**What is configurable comes from the leaves, not from here.** Each leaf ships a config descriptor its
+own `deploy.sh` installs into `/var/lib/kgsm/leaves/` (`KGSM_API_LEAF_DESCRIPTOR_DIR`), declaring its
+full surface — every key, its type, bounds, coded default and `risk`. `LeafDescriptorStore` **scans that
+directory**, so a leaf that joins the ecosystem later becomes configurable, and appears on the Services
+board, with no rebuild here. `LeafConfigManifest` is the built-in fallback for a leaf that has not
+shipped a descriptor yet, not the authority. Format: `../leaf-config-descriptor.md`.
+
+Two consequences worth knowing before touching this code:
+
+- **Readable and editable are separate.** A descriptor makes a leaf's config visible with full
+  provenance; editing also needs the leaf's override drop-in to exist on this host
+  (`KGSM_API_LEAF_DROPIN_DIR`), because without it a write renders a file nothing reads. `GET` reports
+  `editable:false` with the reason; `PUT` is a **409**, not a 400 — the request is fine, the host is not
+  wired.
+- **`applied_unreachable` is a real outcome.** A `wiring`-risk change passes the liveness canary — the
+  leaf restarts perfectly — while severing this API's link to it. After such a change the broker
+  compares any `pairedApiKey` against this API's own resolved setting and polls reachability, then
+  reports honestly instead of claiming success. It does **not** auto-revert: the change was asked for,
+  and a silent revert would misreport what is running. Reset stays available and needs nothing from the
+  leaf.
+
 Note the two polkit rules are separate on purpose: `48-kgsm-api-deploy.rules` lets **you** deploy,
 `49-kgsm-api-leaf-restart.rules` lets **the running service** restart leaves.
 
