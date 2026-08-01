@@ -30,10 +30,10 @@ public sealed record LeafConfigFieldDef(
 
     /// <summary>Inclusive bounds for a numeric field, mirroring the leaf's own parser floor so a value it
     /// would silently discard is rejected here instead — before any restart.</summary>
-    public long? Min { get; init; }
+    public double? Min { get; init; }
 
     /// <inheritdoc cref="Min"/>
-    public long? Max { get; init; }
+    public double? Max { get; init; }
 
     /// <summary>Display suffix (<c>ms</c>, <c>days</c>, <c>MB</c>). Presentation only.</summary>
     public string? Unit { get; init; }

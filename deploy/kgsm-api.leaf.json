@@ -1,0 +1,813 @@
+{
+  "schemaVersion": 1,
+  "id": "api",
+  "displayName": "Control Panel API",
+  "unit": "kgsm-api.service",
+  "role": "The aggregator serving this Control Panel — the API every surface on this host talks to.",
+  "onDemand": false,
+  "applyMode": "restart",
+  "readOnly": true,
+  "readOnlyReason": "The Control Panel API publishes its own configuration for reading only. Applying a change means restarting it, which would kill the request asking for the change and take the panel down with it — so its settings are edited in /etc/kgsm-api/kgsm-api.env and applied by restarting the service.",
+  "floorSources": [
+    {
+      "kind": "systemd-unit",
+      "path": "/etc/kgsm-api/systemd/kgsm-api.service"
+    },
+    {
+      "kind": "env-file",
+      "path": "/etc/kgsm-api/kgsm-api.env"
+    },
+    {
+      "kind": "appsettings",
+      "path": "/opt/kgsm-api/appsettings.json"
+    }
+  ],
+  "groups": [
+    {
+      "id": "identity",
+      "label": "Identity",
+      "order": 1
+    },
+    {
+      "id": "leaves",
+      "label": "Leaf connections",
+      "order": 2
+    },
+    {
+      "id": "engine",
+      "label": "KGSM engine",
+      "order": 3
+    },
+    {
+      "id": "polling",
+      "label": "Polling",
+      "order": 4
+    },
+    {
+      "id": "auth",
+      "label": "Authentication",
+      "order": 5
+    },
+    {
+      "id": "sessions",
+      "label": "Sessions",
+      "order": 6
+    },
+    {
+      "id": "library",
+      "label": "Game library & cover art",
+      "order": 7
+    },
+    {
+      "id": "files",
+      "label": "File & blueprint editing",
+      "order": 8
+    },
+    {
+      "id": "logs",
+      "label": "Log reading",
+      "order": 9
+    },
+    {
+      "id": "leafconfig",
+      "label": "Leaf configuration",
+      "order": 10
+    },
+    {
+      "id": "cluster",
+      "label": "Cluster",
+      "order": 11
+    },
+    {
+      "id": "storage",
+      "label": "Storage",
+      "order": 12
+    },
+    {
+      "id": "general",
+      "label": "General",
+      "order": 13
+    }
+  ],
+  "fields": [
+    {
+      "key": "logLevel",
+      "env": "Logging__LogLevel__Default",
+      "label": "Log level",
+      "description": "Minimum severity this API logs.",
+      "group": "general",
+      "type": "enum",
+      "default": "Information",
+      "values": [
+        "Trace",
+        "Debug",
+        "Information",
+        "Warning",
+        "Error",
+        "Critical"
+      ],
+      "risk": "safe"
+    },
+    {
+      "key": "bindAddress",
+      "env": "KGSM_API_URLS",
+      "label": "Listen address",
+      "description": "Addresses this API serves on. The Control Panel and every other surface reach it here.",
+      "group": "general",
+      "type": "string",
+      "default": "http://localhost:8080",
+      "risk": "wiring"
+    },
+    {
+      "key": "corsOrigins",
+      "env": "KGSM_API_CORS_ORIGINS",
+      "label": "Allowed browser origins",
+      "description": "Exact origins a browser may call this API from. A panel served from an origin that is not listed is refused by the browser before the request arrives.",
+      "group": "general",
+      "type": "csv",
+      "risk": "wiring"
+    },
+    {
+      "key": "hostId",
+      "env": "KGSM_API_HOST_ID",
+      "label": "Host id",
+      "description": "Identity this host is known by across the whole ecosystem — the audience its tokens are minted for, and the key its stored metrics and history hang off. Empty uses the machine name.",
+      "group": "identity",
+      "type": "string",
+      "risk": "wiring"
+    },
+    {
+      "key": "hostLabel",
+      "env": "KGSM_API_HOST_LABEL",
+      "label": "Display name",
+      "description": "Friendly name shown for this host in the panel. Empty falls back to the host id.",
+      "group": "identity",
+      "type": "string",
+      "risk": "safe"
+    },
+    {
+      "key": "region",
+      "env": "KGSM_API_REGION",
+      "label": "Region",
+      "description": "Where this host is, shown alongside it in a multi-host view. Free text, purely descriptive.",
+      "group": "identity",
+      "type": "string",
+      "risk": "safe"
+    },
+    {
+      "key": "nodeId",
+      "env": "KGSM_API_NODE_ID",
+      "label": "Cluster node id",
+      "description": "Identity this host uses inside a cluster. Empty uses the host id.",
+      "group": "identity",
+      "type": "string",
+      "risk": "wiring"
+    },
+    {
+      "key": "publicBaseUrl",
+      "env": "KGSM_API_PUBLIC_BASE_URL",
+      "label": "Public base URL",
+      "description": "Externally reachable address of this panel, used where a link has to work from outside the host. Empty means links are built from the incoming request instead.",
+      "group": "identity",
+      "type": "string",
+      "risk": "safe"
+    },
+    {
+      "key": "monitorSocket",
+      "env": "KGSM_API_MONITOR_SOCKET",
+      "label": "Monitor socket",
+      "description": "The metrics daemon's socket. Wrong and the metrics capability reports unavailable rather than guessing at numbers.",
+      "group": "leaves",
+      "type": "path",
+      "default": "/run/kgsm-monitor/metrics.sock",
+      "risk": "wiring"
+    },
+    {
+      "key": "watchdogSocket",
+      "env": "KGSM_API_WATCHDOG_SOCKET",
+      "label": "Watchdog socket",
+      "description": "The supervisor's control socket, which every start and stop of a native server goes through.",
+      "group": "leaves",
+      "type": "path",
+      "default": "/run/kgsm-watchdog/control.sock",
+      "risk": "wiring"
+    },
+    {
+      "key": "assistantUrl",
+      "env": "KGSM_API_ASSISTANT_URL",
+      "label": "Assistant URL",
+      "description": "Where the assistant serves. Empty means this host has no assistant and the chat surface reports it absent.",
+      "group": "leaves",
+      "type": "string",
+      "risk": "wiring"
+    },
+    {
+      "key": "assistantRelaySecret",
+      "env": "KGSM_API_ASSISTANT_RELAY_SECRET",
+      "label": "Assistant relay secret",
+      "description": "Shared secret letting this API ask the assistant on a signed-in user's behalf. It has to match the assistant's own relay secret.",
+      "group": "leaves",
+      "type": "secret",
+      "risk": "wiring"
+    },
+    {
+      "key": "firewallSocket",
+      "env": "KGSM_API_FIREWALL_SOCKET",
+      "label": "Firewall socket",
+      "description": "The firewall authority's socket. Empty means port state is reported as unknown rather than assumed closed.",
+      "group": "leaves",
+      "type": "path",
+      "risk": "wiring"
+    },
+    {
+      "key": "schedulerSocket",
+      "env": "KGSM_API_SCHEDULER_SOCKET",
+      "label": "Scheduler socket",
+      "description": "The scheduler's status socket. Empty means the next scheduled restart shows as unknown.",
+      "group": "leaves",
+      "type": "path",
+      "risk": "wiring"
+    },
+    {
+      "key": "kgsmPath",
+      "env": "KGSM_API_KGSM_PATH",
+      "label": "KGSM executable",
+      "description": "Path to the KGSM executable. Everything this API knows about servers, blueprints and configuration is read through it.",
+      "group": "engine",
+      "type": "path",
+      "default": "/usr/bin/kgsm",
+      "risk": "wiring"
+    },
+    {
+      "key": "kgsmSocket",
+      "env": "KGSM_API_KGSM_SOCKET",
+      "label": "KGSM event socket",
+      "description": "Socket the engine delivers events on, which is where the audit trail comes from. It must be listed in the engine's own event socket configuration, and belong to no other consumer.",
+      "group": "engine",
+      "type": "path",
+      "default": "/run/kgsm-api/kgsm-events.sock",
+      "risk": "wiring"
+    },
+    {
+      "key": "systemctlPath",
+      "env": "KGSM_API_SYSTEMCTL_PATH",
+      "label": "systemctl path",
+      "description": "Which systemctl to run when reading a leaf's state or restarting it.",
+      "group": "engine",
+      "type": "path",
+      "default": "systemctl",
+      "risk": "wiring"
+    },
+    {
+      "key": "journalctlPath",
+      "env": "KGSM_API_JOURNALCTL_PATH",
+      "label": "journalctl path",
+      "description": "Which journalctl to run when reading a leaf's logs.",
+      "group": "engine",
+      "type": "path",
+      "default": "journalctl",
+      "risk": "wiring"
+    },
+    {
+      "key": "domainPollMs",
+      "env": "KGSM_API_DOMAIN_POLL_MS",
+      "label": "Server list refresh",
+      "description": "How often the list of servers and their run state is re-read from the engine.",
+      "group": "polling",
+      "type": "int",
+      "default": "5000",
+      "min": 1000,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "metricsPollMs",
+      "env": "KGSM_API_METRICS_POLL_MS",
+      "label": "Metrics refresh",
+      "description": "How often metrics are scraped from the monitor and pushed to connected panels.",
+      "group": "polling",
+      "type": "int",
+      "default": "1000",
+      "min": 250,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "servicesPollMs",
+      "env": "KGSM_API_SERVICES_POLL_MS",
+      "label": "Services refresh",
+      "description": "How often each leaf's systemd state and health are re-read for the Services board.",
+      "group": "polling",
+      "type": "int",
+      "default": "5000",
+      "min": 2000,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "updateCheckPollMs",
+      "env": "KGSM_API_UPDATE_CHECK_POLL_MS",
+      "label": "Update check interval",
+      "description": "How often each server is checked for an available update.",
+      "group": "polling",
+      "type": "int",
+      "default": "600000",
+      "min": 60000,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "updateCheckDisabled",
+      "env": "KGSM_API_UPDATE_CHECK_DISABLED",
+      "label": "Disable update checks",
+      "description": "Stops checking whether servers have updates available. The panel then shows no update state at all rather than a stale one.",
+      "group": "polling",
+      "type": "bool",
+      "default": "false",
+      "risk": "safe"
+    },
+    {
+      "key": "instanceCacheTtlSec",
+      "env": "KGSM_API_INSTANCE_CACHE_TTL_SECONDS",
+      "label": "Server detail cache",
+      "description": "How long a server's detail is reused before being re-read from the engine.",
+      "group": "polling",
+      "type": "int",
+      "default": "60",
+      "min": 10,
+      "unit": "s",
+      "risk": "safe"
+    },
+    {
+      "key": "blueprintCacheTtlSec",
+      "env": "KGSM_API_BLUEPRINT_CACHE_TTL_SECONDS",
+      "label": "Blueprint cache",
+      "description": "How long the blueprint catalog is reused before being re-read from the engine.",
+      "group": "polling",
+      "type": "int",
+      "default": "60",
+      "min": 10,
+      "unit": "s",
+      "risk": "safe"
+    },
+    {
+      "key": "metricsThresholdsDisabled",
+      "env": "KGSM_API_METRICS_THRESHOLDS_DISABLED",
+      "label": "Disable resource alerts",
+      "description": "Stops raising alerts when host or server resource use crosses a threshold.",
+      "group": "polling",
+      "type": "bool",
+      "default": "false",
+      "risk": "safe"
+    },
+    {
+      "key": "authDisabled",
+      "env": "KGSM_API_AUTH_DISABLED",
+      "label": "Disable authentication",
+      "description": "Turns off every authentication check and treats each caller as an administrator. Intended for local development only — on a reachable host it hands full control of every server to anyone who can connect.",
+      "group": "auth",
+      "type": "bool",
+      "default": "false",
+      "risk": "destructive"
+    },
+    {
+      "key": "signingKey",
+      "env": "KGSM_API_AUTH_SIGNING_KEY",
+      "label": "Token signing key",
+      "description": "Secret every session token is signed with. Changing it signs everyone out at once, which is also how you revoke every token in a hurry.",
+      "group": "auth",
+      "type": "secret",
+      "risk": "wiring"
+    },
+    {
+      "key": "discordClientId",
+      "env": "KGSM_API_AUTH_DISCORD_CLIENT_ID",
+      "label": "Discord application id",
+      "description": "The Discord application users sign in through.",
+      "group": "auth",
+      "type": "string",
+      "risk": "wiring"
+    },
+    {
+      "key": "discordClientSecret",
+      "env": "KGSM_API_AUTH_DISCORD_CLIENT_SECRET",
+      "label": "Discord client secret",
+      "description": "Secret for that application, used to complete a sign-in server-side.",
+      "group": "auth",
+      "type": "secret",
+      "risk": "wiring"
+    },
+    {
+      "key": "discordBotToken",
+      "env": "KGSM_API_AUTH_DISCORD_BOT_TOKEN",
+      "label": "Discord bot token",
+      "description": "Token for the same application, used to read whether someone is in the server and which roles they hold.",
+      "group": "auth",
+      "type": "secret",
+      "risk": "wiring"
+    },
+    {
+      "key": "discordGuildId",
+      "env": "KGSM_API_AUTH_DISCORD_GUILD_ID",
+      "label": "Discord server id",
+      "description": "The Discord server whose membership decides who may sign in. Everyone in it can at least look; roles decide the rest.",
+      "group": "auth",
+      "type": "string",
+      "risk": "wiring"
+    },
+    {
+      "key": "discordRedirectUri",
+      "env": "KGSM_API_AUTH_DISCORD_REDIRECT_URI",
+      "label": "Sign-in redirect",
+      "description": "Where Discord sends someone back to after they approve. It has to match the redirect registered on the Discord application exactly.",
+      "group": "auth",
+      "type": "string",
+      "risk": "wiring"
+    },
+    {
+      "key": "authFrontendUrl",
+      "env": "KGSM_API_AUTH_FRONTEND_URL",
+      "label": "Panel URL",
+      "description": "Where to send someone once sign-in completes. Empty returns them to where they started.",
+      "group": "auth",
+      "type": "string",
+      "risk": "safe"
+    },
+    {
+      "key": "roleAdmin",
+      "env": "KGSM_API_AUTH_ROLE_ADMIN",
+      "label": "Administrator roles",
+      "description": "Discord roles granted full control, including configuring leaves and connecting hosts.",
+      "group": "auth",
+      "type": "csv",
+      "risk": "destructive"
+    },
+    {
+      "key": "roleOperator",
+      "env": "KGSM_API_AUTH_ROLE_OPERATOR",
+      "label": "Operator roles",
+      "description": "Discord roles allowed to run and change servers, but not to administer the host itself.",
+      "group": "auth",
+      "type": "csv",
+      "risk": "destructive"
+    },
+    {
+      "key": "roleViewer",
+      "env": "KGSM_API_AUTH_ROLE_VIEWER",
+      "label": "Viewer roles",
+      "description": "Discord roles allowed to look but not act. Anyone in the server can already look, so this is only worth setting to name it explicitly.",
+      "group": "auth",
+      "type": "csv",
+      "risk": "safe"
+    },
+    {
+      "key": "sessionsDisabled",
+      "env": "KGSM_API_SESSIONS_DISABLED",
+      "label": "Disable the session registry",
+      "description": "Stops tracking live sessions. Signing in still works, but a token can no longer be revoked before it expires and the Active Sessions list goes empty.",
+      "group": "sessions",
+      "type": "bool",
+      "default": "false",
+      "risk": "destructive"
+    },
+    {
+      "key": "sessionsCacheTtlMs",
+      "env": "KGSM_API_SESSIONS_CACHE_TTL_MS",
+      "label": "Session lookup cache",
+      "description": "How long a session's validity is reused before it is checked again. Longer means fewer lookups and a longer wait before a revoked session actually stops working.",
+      "group": "sessions",
+      "type": "int",
+      "default": "5000",
+      "min": 500,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "sessionsGcMs",
+      "env": "KGSM_API_SESSIONS_GC_MS",
+      "label": "Expired session cleanup",
+      "description": "How often expired sessions are cleared out of the registry.",
+      "group": "sessions",
+      "type": "int",
+      "default": "600000",
+      "min": 60000,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "sessionsRefreshAbsoluteDays",
+      "env": "KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS",
+      "label": "Maximum session age",
+      "description": "How long a session can keep renewing itself before the user has to sign in again, however active they are.",
+      "group": "sessions",
+      "type": "int",
+      "default": "30",
+      "min": 1,
+      "unit": "days",
+      "risk": "safe"
+    },
+    {
+      "key": "rawgApiKey",
+      "env": "KGSM_API_RAWG_API_KEY",
+      "label": "RAWG API key",
+      "description": "Key for the game-metadata service used for descriptions and artwork. Empty means the panel shows what the blueprints carry and nothing more.",
+      "group": "library",
+      "type": "secret",
+      "risk": "safe"
+    },
+    {
+      "key": "rawgCacheDir",
+      "env": "KGSM_API_RAWG_CACHE_DIR",
+      "label": "Artwork cache directory",
+      "description": "Where downloaded artwork is kept. Pointing it elsewhere abandons what is already downloaded and fetches everything again.",
+      "group": "library",
+      "type": "path",
+      "risk": "destructive"
+    },
+    {
+      "key": "steamCdnBase",
+      "env": "KGSM_API_STEAM_CDN_BASE",
+      "label": "Steam art base URL",
+      "description": "Where Steam cover art is fetched from.",
+      "group": "library",
+      "type": "string",
+      "default": "https://cdn.cloudflare.steamstatic.com/steam/apps",
+      "risk": "safe"
+    },
+    {
+      "key": "steamCoversDisabled",
+      "env": "KGSM_API_STEAM_COVERS_DISABLED",
+      "label": "Disable Steam cover art",
+      "description": "Stops using Steam for cover art, leaving the metadata service as the only source.",
+      "group": "library",
+      "type": "bool",
+      "default": "false",
+      "risk": "safe"
+    },
+    {
+      "key": "libraryRefreshIntervalDays",
+      "env": "KGSM_API_LIBRARY_REFRESH_INTERVAL_DAYS",
+      "label": "Library refresh interval",
+      "description": "How often the game library's metadata and artwork are refreshed. Zero turns the scheduled refresh off.",
+      "group": "library",
+      "type": "int",
+      "default": "7",
+      "min": 0,
+      "unit": "days",
+      "risk": "safe"
+    },
+    {
+      "key": "libraryRefreshHour",
+      "env": "KGSM_API_LIBRARY_REFRESH_HOUR",
+      "label": "Library refresh hour",
+      "description": "Hour of the day the refresh runs, in this host's local time.",
+      "group": "library",
+      "type": "int",
+      "default": "6",
+      "min": 0,
+      "max": 23,
+      "risk": "safe",
+      "dependsOn": "libraryRefreshIntervalDays"
+    },
+    {
+      "key": "filesMaxEntries",
+      "env": "KGSM_API_FILES_MAX_ENTRIES",
+      "label": "Directory listing limit",
+      "description": "How many entries one directory listing returns before it is cut short.",
+      "group": "files",
+      "type": "int",
+      "default": "200",
+      "min": 1,
+      "risk": "safe"
+    },
+    {
+      "key": "filesMaxEditBytes",
+      "env": "KGSM_API_FILES_MAX_EDIT_BYTES",
+      "label": "Editable file size limit",
+      "description": "How large a server file may be and still be opened in the editor.",
+      "group": "files",
+      "type": "int",
+      "default": "2097152",
+      "min": 1024,
+      "unit": "bytes",
+      "risk": "safe"
+    },
+    {
+      "key": "blueprintMaxEditBytes",
+      "env": "KGSM_API_BLUEPRINT_MAX_EDIT_BYTES",
+      "label": "Editable blueprint size limit",
+      "description": "How large a blueprint may be and still be opened in the editor.",
+      "group": "files",
+      "type": "int",
+      "default": "262144",
+      "min": 1024,
+      "unit": "bytes",
+      "risk": "safe"
+    },
+    {
+      "key": "logSources",
+      "env": "KGSM_API_LOG_SOURCES",
+      "label": "Log sources",
+      "description": "Which journal units the host's Logs tab reads. Empty uses the known leaf units.",
+      "group": "logs",
+      "type": "csv",
+      "risk": "safe"
+    },
+    {
+      "key": "logReadTimeoutMs",
+      "env": "KGSM_API_LOG_READ_TIMEOUT_MS",
+      "label": "Log read timeout",
+      "description": "How long to wait for the journal before giving up on a log request.",
+      "group": "logs",
+      "type": "int",
+      "default": "5000",
+      "min": 500,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "leafOverridesDir",
+      "env": "KGSM_API_LEAF_OVERRIDES_DIR",
+      "label": "Override directory",
+      "description": "Where this API writes each leaf's configuration override. It has to match what the leaves' drop-ins load, or every change is written and never read.",
+      "group": "leafconfig",
+      "type": "path",
+      "default": "/var/lib/kgsm-api/leaf-overrides",
+      "risk": "wiring"
+    },
+    {
+      "key": "leafDescriptorDir",
+      "env": "KGSM_API_LEAF_DESCRIPTOR_DIR",
+      "label": "Descriptor directory",
+      "description": "Where leaves publish what they can be configured with. Pointing it elsewhere leaves every leaf's configuration page empty.",
+      "group": "leafconfig",
+      "type": "path",
+      "default": "/var/lib/kgsm/leaves",
+      "risk": "wiring"
+    },
+    {
+      "key": "leafDropInDir",
+      "env": "KGSM_API_LEAF_DROPIN_DIR",
+      "label": "Drop-in directory",
+      "description": "Where the per-leaf systemd drop-ins live. It is how this API tells whether a change can actually be delivered to a leaf.",
+      "group": "leafconfig",
+      "type": "path",
+      "default": "/etc/systemd/system",
+      "risk": "wiring"
+    },
+    {
+      "key": "leafApplyCanaryMs",
+      "env": "KGSM_API_LEAF_APPLY_CANARY_MS",
+      "label": "Post-change health window",
+      "description": "How long a leaf is watched after a configuration change before the change is rolled back as unhealthy.",
+      "group": "leafconfig",
+      "type": "int",
+      "default": "15000",
+      "min": 2000,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "clusterSecret",
+      "env": "KGSM_API_CLUSTER_SECRET",
+      "label": "Cluster secret",
+      "description": "Shared secret every host in the cluster authenticates to the others with. Empty means this host is standalone.",
+      "group": "cluster",
+      "type": "secret",
+      "risk": "wiring"
+    },
+    {
+      "key": "clusterSecretPrevious",
+      "env": "KGSM_API_CLUSTER_SECRET_PREVIOUS",
+      "label": "Previous cluster secret",
+      "description": "The secret being rotated away from, still accepted so the cluster does not split apart mid-rotation.",
+      "group": "cluster",
+      "type": "secret",
+      "risk": "wiring"
+    },
+    {
+      "key": "clusterAdvertiseUrl",
+      "env": "KGSM_API_CLUSTER_ADVERTISE_URL",
+      "label": "Advertised URL",
+      "description": "Address other hosts should reach this one at. Empty means this host does not advertise itself.",
+      "group": "cluster",
+      "type": "string",
+      "risk": "wiring"
+    },
+    {
+      "key": "clusterGossipUrl",
+      "env": "KGSM_API_CLUSTER_GOSSIP_URL",
+      "label": "Peer URL",
+      "description": "A peer to learn the rest of the cluster from. Empty means this host waits to be contacted.",
+      "group": "cluster",
+      "type": "string",
+      "risk": "wiring"
+    },
+    {
+      "key": "clusterGossipMs",
+      "env": "KGSM_API_CLUSTER_GOSSIP_MS",
+      "label": "Peer exchange interval",
+      "description": "How often this host exchanges what it knows with a peer.",
+      "group": "cluster",
+      "type": "int",
+      "default": "5000",
+      "min": 250,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "clusterPollMs",
+      "env": "KGSM_API_CLUSTER_POLL_MS",
+      "label": "Peer refresh interval",
+      "description": "How often each peer's state is re-read.",
+      "group": "cluster",
+      "type": "int",
+      "default": "10000",
+      "min": 250,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "clusterSuspectMs",
+      "env": "KGSM_API_CLUSTER_SUSPECT_MS",
+      "label": "Peer suspect timeout",
+      "description": "How long a silent peer is tolerated before it is treated as suspect.",
+      "group": "cluster",
+      "type": "int",
+      "default": "30000",
+      "min": 1000,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "clusterReapMs",
+      "env": "KGSM_API_CLUSTER_REAP_MS",
+      "label": "Peer removal timeout",
+      "description": "How long a suspect peer is kept before it is dropped from the cluster.",
+      "group": "cluster",
+      "type": "int",
+      "default": "300000",
+      "min": 1000,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "clusterDrainMs",
+      "env": "KGSM_API_CLUSTER_DRAIN_MS",
+      "label": "Outbox drain interval",
+      "description": "How often queued messages for other hosts are sent.",
+      "group": "cluster",
+      "type": "int",
+      "default": "1000",
+      "min": 250,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "clusterGcMs",
+      "env": "KGSM_API_CLUSTER_GC_MS",
+      "label": "Cluster cleanup interval",
+      "description": "How often delivered and expired cluster messages are cleared out.",
+      "group": "cluster",
+      "type": "int",
+      "default": "600000",
+      "min": 60000,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
+      "key": "clusterRetryTtlDays",
+      "env": "KGSM_API_CLUSTER_RETRY_TTL_DAYS",
+      "label": "Undelivered message lifetime",
+      "description": "How long a message for an unreachable host keeps being retried before it is given up on.",
+      "group": "cluster",
+      "type": "int",
+      "default": "7",
+      "min": 1,
+      "unit": "days",
+      "risk": "safe"
+    },
+    {
+      "key": "clusterRetentionDays",
+      "env": "KGSM_API_CLUSTER_RETENTION_DAYS",
+      "label": "Cluster message retention",
+      "description": "How long delivered cluster messages are kept before being deleted. Must outlast the retry window, or a message could be deleted while still being retried.",
+      "group": "cluster",
+      "type": "int",
+      "default": "30",
+      "min": 2,
+      "unit": "days",
+      "risk": "destructive"
+    },
+    {
+      "key": "dbPath",
+      "env": "KGSM_API_DB",
+      "label": "Database file",
+      "description": "File holding this API's own records — the audit trail, live sessions, and per-host settings. Pointing it elsewhere starts empty and leaves the existing history behind.",
+      "group": "storage",
+      "type": "path",
+      "default": "kgsm-api.db",
+      "risk": "destructive"
+    }
+  ]
+}

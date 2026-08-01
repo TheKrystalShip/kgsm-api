@@ -35,17 +35,23 @@ OVERRIDE_DIR="$STATE_DIR/leaf-overrides"            # the API renders <leaf>.env
 DROPIN_NAME="50-kgsm-api-override.conf"             # the per-leaf drop-in filename
 POLKIT_DST="/etc/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules"
 
-# The configurable leaves → their systemd unit. MUST match the leaves in
-# src/Api/Services/Leaves/LeafConfigManifest.cs (a leaf with a manifest but no entry here renders an
-# override file nothing reads, then fails to restart) and the unit names listed in the polkit template
-# (asserted below). NB: assistant carries the '-service' segment — kgsm-assistant-service.service, not
-# kgsm-assistant.service.
+# The leaves this host can deliver a config change to → their systemd unit. Each gets a drop-in that
+# layers the API's override file, and a restart grant in the polkit template (asserted below).
+#
+# What a leaf can be configured WITH comes from the descriptor it ships, discovered at runtime; this map
+# is the separate question of whether a change can be delivered here at all. So it is a superset of the
+# leaves the API can connect and disconnect at runtime: the bot is configurable but not something the API
+# talks to, and a leaf missing from here is served read-only with the reason rather than silently failing
+# at the restart. Wiring a newly-arrived leaf means re-running this script, not rebuilding the API.
+#
+# NB: assistant carries the '-service' segment — kgsm-assistant-service.service, not kgsm-assistant.service.
 declare -A LEAF_UNITS=(
     [monitor]="kgsm-monitor.service"
     [watchdog]="kgsm-watchdog.service"
     [assistant]="kgsm-assistant-service.service"
     [firewall]="kgsm-firewall.service"
     [scheduler]="kgsm-scheduler.service"
+    [bot]="kgsm-bot.service"
 )
 
 SVC_USER="${KGSM_API_USER:-$(id -un)}"

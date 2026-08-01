@@ -394,6 +394,12 @@ public sealed class ApiOptions
     {
         "KGSM_API_HOST_ID" => HostId,
         "KGSM_API_MONITOR_SOCKET" => MonitorSocketPath,
+        "KGSM_API_WATCHDOG_SOCKET" => WatchdogSocketPath,
+        "KGSM_API_SCHEDULER_SOCKET" => SchedulerSocketPath,
+        "KGSM_API_ASSISTANT_URL" => AssistantBaseUrl,
+        "KGSM_API_FIREWALL_SOCKET" => FirewallSocketPath,
+        "KGSM_API_KGSM_PATH" => KgsmPath,
+        "KGSM_API_KGSM_SOCKET" => KgsmSocketPath,
         _ => Environment.GetEnvironmentVariable(envName),
     };
 

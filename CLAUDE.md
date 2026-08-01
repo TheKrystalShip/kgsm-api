@@ -81,8 +81,9 @@ installs the scoped deploy polkit grant, enables the unit, and verifies the gran
 unprivileged. **It also wires the runtime leaf-config feature** (the Services panel) via
 `deploy/setup-leaf-config.sh`: a per-leaf systemd drop-in (layering an API-owned override env file in
 `/var/lib/kgsm-api/leaf-overrides/`) plus a **scoped polkit rule** letting the service user
-`systemctl restart` **only** the config-target leaves (monitor/watchdog/assistant/firewall/scheduler
-— kept in lockstep with `src/Api/Services/Leaves/LeafConfigManifest.cs`). Restart is the *only* privileged op
+`systemctl restart` **only** the leaves this host can deliver a config change to
+(monitor/watchdog/assistant/firewall/scheduler/bot — kept in lockstep with the leaf→unit map in that
+script, which is a superset of the leaves the API connects at runtime). Restart is the *only* privileged op
 there; the API renders override files unprivileged. It works under `NoNewPrivileges=true` (restart is
 a polkit-authorized D-Bus call to PID 1, not an in-process escalation). Full reference + verify/undo:
 `deploy/leaf-config/README.md`.

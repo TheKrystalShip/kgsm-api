@@ -394,17 +394,23 @@ public sealed class LeafConfigService(
                 }
                 // Enforce the leaf's own floor here rather than letting it silently discard the value: the
                 // panel would otherwise report a change the leaf quietly ignored.
-                if (field.Min is { } min && n < min)
-                {
-                    error = $"'{field.Key}' must be at least {min}{Suffix(field)}";
+                if (!WithinBounds(field, n, out error))
                     return false;
-                }
-                if (field.Max is { } max && n > max)
-                {
-                    error = $"'{field.Key}' must be at most {max}{Suffix(field)}";
-                    return false;
-                }
                 value = n.ToString(CultureInfo.InvariantCulture);
+                return true;
+
+            case LeafConfigFieldType.Float:
+                if (!double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out double d)
+                    || double.IsNaN(d) || double.IsInfinity(d))
+                {
+                    error = $"'{field.Key}' must be a number";
+                    return false;
+                }
+                if (!WithinBounds(field, d, out error))
+                    return false;
+                // Round-tripped so the leaf reads back exactly what was accepted, in the invariant format
+                // its own parser expects — a machine with a comma decimal separator must not change this.
+                value = d.ToString("R", CultureInfo.InvariantCulture);
                 return true;
 
             case LeafConfigFieldType.Bool:
@@ -435,6 +441,21 @@ public sealed class LeafConfigService(
                 return true;
         }
     }
+
+    // The leaf's own declared floor/ceiling, enforced here rather than letting the leaf silently discard an
+    // out-of-range value — the panel would otherwise report a change the leaf quietly ignored.
+    private static bool WithinBounds(LeafConfigFieldDef field, double n, out string? error)
+    {
+        error = null;
+        if (field.Min is { } min && n < min)
+            error = $"'{field.Key}' must be at least {Number(min)}{Suffix(field)}";
+        else if (field.Max is { } max && n > max)
+            error = $"'{field.Key}' must be at most {Number(max)}{Suffix(field)}";
+        return error is null;
+    }
+
+    /// <summary>A bound as an operator would write it: no trailing <c>.0</c> on a whole number.</summary>
+    private static string Number(double v) => v.ToString("0.############", CultureInfo.InvariantCulture);
 
     private static string Suffix(LeafConfigFieldDef field) =>
         field.Unit is null ? "" : " " + field.Unit;

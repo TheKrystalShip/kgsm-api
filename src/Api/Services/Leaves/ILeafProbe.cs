@@ -20,11 +20,14 @@ public interface ILeafProbe
 /// socket-activated firewall (which idle-exits to <c>inactive</c>) is healthy as long as it is not
 /// <c>failed</c>.
 /// </summary>
-public sealed class LeafProbe(SystemdReader systemd, ILogger<LeafProbe> logger) : ILeafProbe
+public sealed class LeafProbe(SystemdReader systemd, LeafConfigCatalog catalog, ILogger<LeafProbe> logger) : ILeafProbe
 {
     public async Task<bool> IsHealthyAsync(string leafId, CancellationToken ct)
     {
-        LeafDescriptor? leaf = LeafCatalog.Default.FirstOrDefault(l => string.Equals(l.Id, leafId, StringComparison.Ordinal));
+        // Through the catalog, so a leaf that ships a descriptor without being in this API's built-in list
+        // still gets a real verdict. Resolving from the built-in list alone would fail every such leaf's
+        // canary and roll back a config change that worked.
+        LeafConfigIdentity? leaf = catalog.Identity(leafId);
         if (leaf is null)
             return false;
 

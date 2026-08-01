@@ -204,7 +204,14 @@ public sealed class LeafFloorReader(
 
         try
         {
-            using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(path));
+            // Comments and trailing commas, because Microsoft.Extensions.Configuration's own JSON provider
+            // accepts them — a leaf whose settings file is annotated is reading it fine, and rejecting it
+            // here would report that leaf's whole floor as unknown over punctuation.
+            using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(path), new JsonDocumentOptions
+            {
+                CommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            });
             Flatten(doc.RootElement, prefix: "", into);
             return true;
         }

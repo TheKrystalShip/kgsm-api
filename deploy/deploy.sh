@@ -115,6 +115,11 @@ if [[ "$UNIT_CHANGED" -eq 1 ]]; then
     sysctl_do daemon-reload
 fi
 
+# ── 2b. Publish this API's own leaf config descriptor ──────────────────────────
+# The API is a config target like any other leaf, read-only: the panel shows what this service is
+# configured with, and says why it cannot change it from there.
+install_leaf_descriptor
+
 # ── 3. The swap (minimal window: stop → sync the tree → start) ─────────────────
 log "stopping ${SERVICE} (release the running binary)"
 sysctl_do stop "$SERVICE"

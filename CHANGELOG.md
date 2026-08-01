@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — every leaf on this host declares its own configurable surface
+- **This API ships a descriptor of its own** (`deploy/kgsm-api.leaf.json`, 69 settings in 13 groups), so
+  the Control Panel can show what the API itself is configured with. It declares itself **read-only**:
+  applying a change means restarting this service, which would kill the request asking for it. That is a
+  new leaf-level `readOnly` + `readOnlyReason` in the descriptor format — a property of what the leaf is,
+  not of how the host was provisioned, so it is declared rather than inferred from a missing drop-in.
+  `GET` reports it with the reason and `PUT` is a **409**.
+- **A `float` field type**, for a setting that genuinely carries a fraction (a similarity threshold, a
+  sampling temperature). Coercing one through the integer path would have silently destroyed it. Values
+  are written in the invariant format, so a host with a comma decimal separator cannot corrupt one, and
+  `min`/`max` may themselves be fractional.
+- **The bot is a configuration target.** `deploy/setup-leaf-config.sh` installs its drop-in and the
+  polkit grant covers its unit. The leaf→unit map is now explicitly a superset of the leaves this API
+  connects and disconnects at runtime — the bot is configurable but not something the API talks to.
+- `pairedApiKey` resolves against this API's real setting for every leaf endpoint it names, not just the
+  monitor's — so repointing a leaf's socket is compared against what this API actually reads, and a
+  disagreement is reported instead of passing unnoticed.
+
+### Fixed
+- **A leaf that ships a descriptor without being in this API's built-in list now gets a real health
+  verdict after a config change.** The post-restart canary resolved the unit from the built-in list alone,
+  so any such leaf failed its canary and had a working change rolled back.
+- **A settings file with comments is read as its floor.** `Microsoft.Extensions.Configuration` accepts
+  comments and trailing commas, so a leaf whose annotated settings file it reads fine had its whole floor
+  reported as `unknown` over punctuation.
+
 ### Added — the leaf config surface comes from the leaves
 - **Each leaf declares its own configurable surface** in a descriptor its `deploy.sh` installs into
   `/var/lib/kgsm/leaves/` (`KGSM_API_LEAF_DESCRIPTOR_DIR`). `LeafDescriptorStore` **scans that

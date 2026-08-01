@@ -18,9 +18,10 @@
 // privilege escalation, so it works fine under NNP. Do NOT remove NoNewPrivileges to "make restart work";
 // it already works. (NNP only stops the API's own process from gaining privileges via exec.)
 //
-// ⚠ The unit names MUST stay in lockstep with src/Api/Services/Leaves/LeafConfigManifest.cs (the config
-// targets) and with the leaf→unit map in deploy/setup-leaf-config.sh. The setup script asserts this
-// template names every unit it installs a drop-in for, so drift fails loudly at setup time.
+// ⚠ The unit names MUST stay in lockstep with the leaf→unit map in deploy/setup-leaf-config.sh. The setup
+// script asserts this template names every unit it installs a drop-in for, so drift fails loudly at setup
+// time. What each leaf can be configured with comes from the descriptor it ships, not from here — this
+// grant only decides which units the API may bounce to make a change take effect.
 polkit.addRule(function(action, subject) {
     if (action.id !== "org.freedesktop.systemd1.manage-units") {
         return;
@@ -33,7 +34,8 @@ polkit.addRule(function(action, subject) {
         "kgsm-watchdog.service": true,
         "kgsm-assistant-service.service": true,
         "kgsm-firewall.service": true,
-        "kgsm-scheduler.service": true
+        "kgsm-scheduler.service": true,
+        "kgsm-bot.service": true
     };
     if (units[action.lookup("unit")] !== true) {
         return;

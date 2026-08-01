@@ -32,10 +32,12 @@ public sealed record LeafConfigGroupDto(string Id, string Label, int Order);
 
 /// <summary>
 /// One settable config field. <see cref="Key"/> is the stable id used in <see cref="LeafConfigUpdate"/>;
-/// <see cref="EnvName"/> is the env var the override writes (info only). Honesty: <see cref="Default"/> (the
-/// deploy-floor value) is null when the API can't know it (it never reads the leaf's own files — never
-/// fabricated); a secret's <see cref="Value"/> is <strong>always null</strong> (write-only), surfaced instead
-/// as <see cref="Set"/> + an optional last-4 <see cref="Fingerprint"/>.
+/// <see cref="EnvName"/> is the env var the override writes (info only). Honesty: <see cref="Default"/> is
+/// the leaf's coded default as its own descriptor declares it, and <see cref="Floor"/> what the host's
+/// deploy files set — either is null when there is genuinely none, and <see cref="Source"/> says
+/// <c>unknown</c> rather than picking a plausible tier. A secret's <see cref="Value"/> is
+/// <strong>always null</strong> (write-only), surfaced instead as <see cref="Set"/> + an optional last-4
+/// <see cref="Fingerprint"/>.
 /// </summary>
 public sealed record LeafConfigField(
     string Key,
@@ -53,7 +55,9 @@ public sealed record LeafConfigField(
     // The leaf's coded default from its descriptor. Null when it declares none, or when the leaf has shipped
     // no descriptor — never fabricated.
     string? Default,
-    // Secret-only: whether a secret override is currently set, and an optional last-4 fingerprint (debug).
+    // Secret-only: whether this secret has a value at all — an override, or one the leaf's own deploy files
+    // already carry — and a last-4 fingerprint of the override when there is one. Knowing a secret is set is
+    // not knowing the secret, so this is reported while the value never is.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Set = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Fingerprint = null,
     // The leaf's own configured value (its unit / env file / settings file), when this API could read the
@@ -69,8 +73,8 @@ public sealed record LeafConfigField(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Group = null,
     string Risk = LeafConfigRisk.Safe,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Unit = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Min = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? Max = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Min = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Max = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PairedApiKey = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DependsOn = null);
 
@@ -118,8 +122,12 @@ public static class LeafConfigFieldType
     /// <summary>An integer quantity of time; coerced like <see cref="Int"/> with the field's unit.</summary>
     public const string Duration = "duration";
 
+    /// <summary>A number that may carry a fraction (a similarity threshold, a sampling temperature).
+    /// Separate from <see cref="Int"/> because coercing one to an integer would silently destroy it.</summary>
+    public const string Float = "float";
+
     public static readonly IReadOnlyList<string> All =
-        [String, Int, Bool, Enum, Secret, Path, Csv, Duration];
+        [String, Int, Bool, Enum, Secret, Path, Csv, Duration, Float];
 }
 
 /// <summary>

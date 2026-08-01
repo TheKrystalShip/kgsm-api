@@ -19,9 +19,10 @@ or undo it.
 | **systemd drop-in** (one per leaf) | `/etc/systemd/system/<unit>.d/50-kgsm-api-override.conf` | Layers that leaf's override env file on **last** (`EnvironmentFile=-…`), so the API's overrides win — the leaf never references the API. |
 | **polkit rule** | `/etc/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules` | Lets the service user `systemctl restart` **only** those leaf units (restart family verbs only), with no interactive auth agent. |
 
-The **config-target leaves** and their exact units. This set is the one in
-`src/Api/Services/Leaves/LeafConfigManifest.cs` — a leaf with a manifest but no drop-in here would
-render an override file nothing reads and then fail to restart, so the two must stay in lockstep:
+The leaves this host can **deliver** a config change to, and their exact units. What each leaf can be
+configured *with* comes from the descriptor it ships (`/var/lib/kgsm/leaves/`), discovered at runtime;
+this table is the separate question of whether a change can be applied here at all. A leaf missing from
+it is served read-only with the reason, rather than having an override file written that nothing reads:
 
 | Leaf | Unit |
 |---|---|
@@ -30,6 +31,7 @@ render an override file nothing reads and then fail to restart, so the two must 
 | `assistant` | `kgsm-assistant-service.service` &nbsp;← note the `-service` segment |
 | `firewall` | `kgsm-firewall.service` |
 | `scheduler` | `kgsm-scheduler.service` |
+| `bot` | `kgsm-bot.service` |
 
 `api` and `bot` are **not** config targets (the API does not configure itself; the bot is out of scope).
 
@@ -93,5 +95,5 @@ restart.
 
 - `dropins/50-kgsm-api-override.conf.in` — the drop-in template (`@LEAF@` → the leaf id).
 - `49-kgsm-api-leaf-restart.rules.in` — the polkit rule template (`@SVC_USER@` → the service user;
-  the units are literal, to stay reviewable and matched to `LeafConfigManifest.cs`).
+  the units are literal, to stay reviewable and matched to the leaf→unit map in the installer).
 - The installer is one level up: [`../setup-leaf-config.sh`](../setup-leaf-config.sh).

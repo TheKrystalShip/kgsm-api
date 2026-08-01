@@ -6,11 +6,14 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// </summary>
 /// <param name="FromDescriptor">True when the leaf declared its own surface. False means only the keys this
 /// API historically knew are exposed — the panel says so rather than implying the short list is everything.</param>
+/// <param name="OnDemand">True for a socket-activated, idle-exiting unit: <c>inactive</c> is its resting
+/// state, so the post-restart canary must not read it as a failure.</param>
 public sealed record LeafConfigIdentity(
     string Id,
     string DisplayName,
     string Unit,
     string ApplyMode,
+    bool OnDemand,
     bool FromDescriptor,
     IReadOnlyList<LeafConfigGroup> Groups,
     LeafConfigDescriptor? Descriptor);
@@ -53,7 +56,7 @@ public sealed class LeafConfigCatalog(LeafDescriptorStore descriptors, ApiOption
     {
         LeafConfigDescriptor? d = descriptors.For(leafId);
         if (d is not null)
-            return new LeafConfigIdentity(d.Id, d.DisplayName, d.Unit, d.ApplyMode, true, d.Groups, d);
+            return new LeafConfigIdentity(d.Id, d.DisplayName, d.Unit, d.ApplyMode, d.OnDemand, true, d.Groups, d);
 
         if (!LeafConfigManifest.IsConfigTarget(leafId))
             return null;
@@ -61,7 +64,7 @@ public sealed class LeafConfigCatalog(LeafDescriptorStore descriptors, ApiOption
         LeafDescriptor? known = LeafCatalog.Default.FirstOrDefault(l => string.Equals(l.Id, leafId, StringComparison.Ordinal));
         return known is null
             ? null
-            : new LeafConfigIdentity(known.Id, known.DisplayName, known.Unit, "restart", false, [], null);
+            : new LeafConfigIdentity(known.Id, known.DisplayName, known.Unit, "restart", known.OnDemand, false, [], null);
     }
 
     /// <summary>
@@ -75,6 +78,15 @@ public sealed class LeafConfigCatalog(LeafDescriptorStore descriptors, ApiOption
         if (identity is null)
         {
             reason = $"'{leafId}' has no configuration surface on this host.";
+            return false;
+        }
+
+        // A leaf can declare itself read-only, and then no amount of host provisioning changes that — so it
+        // is answered before the drop-in check, whose "run setup to wire it" advice would be a dead end.
+        if (identity.Descriptor is { ReadOnly: true } ro)
+        {
+            reason = ro.ReadOnlyReason
+                ?? $"{identity.DisplayName} publishes its configuration for reading only.";
             return false;
         }
 

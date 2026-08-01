@@ -35,7 +35,14 @@ public sealed record LeafConfigDescriptor(
     string ApplyMode,
     IReadOnlyList<LeafFloorSource> FloorSources,
     IReadOnlyList<LeafConfigGroup> Groups,
-    IReadOnlyList<LeafConfigFieldDef> Fields)
+    IReadOnlyList<LeafConfigFieldDef> Fields,
+    /// <summary>The leaf declaring that its configuration can be read here but not changed here — the one
+    /// case being this API itself, which cannot restart itself to apply a change without killing the
+    /// request that asked for it. Distinct from an unwired host: no amount of provisioning changes it.</summary>
+    bool ReadOnly = false,
+    /// <summary>Why, in the leaf's own words. Shown instead of the "run setup" advice, which would be
+    /// misleading here — there is nothing to run.</summary>
+    string? ReadOnlyReason = null)
 {
     /// <summary>The only schema version this API understands. A descriptor declaring anything else is skipped
     /// rather than guessed at — the format's forward-compatibility contract.</summary>
@@ -206,7 +213,7 @@ public static class LeafConfigDescriptorParser
 
         return new LeafConfigDescriptor(
             raw.SchemaVersion, raw.Id!, raw.DisplayName!, raw.Unit!, raw.Role!,
-            raw.OnDemand, applyMode, floors, groups, fields);
+            raw.OnDemand, applyMode, floors, groups, fields, raw.ReadOnly, raw.ReadOnlyReason);
     }
 
     private static bool Required(string? value, string what, ref string? error)
@@ -229,7 +236,9 @@ public static class LeafConfigDescriptorParser
         string? ApplyMode,
         IReadOnlyList<RawFloorSource>? FloorSources,
         IReadOnlyList<RawGroup>? Groups,
-        IReadOnlyList<RawField>? Fields);
+        IReadOnlyList<RawField>? Fields,
+        bool ReadOnly = false,
+        string? ReadOnlyReason = null);
 
     private sealed record RawFloorSource(string? Kind, string? Path);
 
@@ -244,8 +253,8 @@ public static class LeafConfigDescriptorParser
         string? Type,
         string? Default,
         IReadOnlyList<string>? Values,
-        long? Min,
-        long? Max,
+        double? Min,
+        double? Max,
         string? Unit,
         string? Risk,
         string? PairedApiKey,
