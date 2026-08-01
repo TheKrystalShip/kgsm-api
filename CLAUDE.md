@@ -14,88 +14,11 @@ its leaves + this API. The API aggregates **only its own host's** leaves; cross-
 > **This repo is a from-scratch rewrite.** The superseded .NET 9 attempt (it fabricated
 > metrics — the sin that got it scrapped, keystone O4) is parked in `legacy/` for
 > *harvest only* — **never treat `legacy/` as authoritative or a design reference.** The
-> root `tks/CLAUDE.md` still tags kgsm-api "superseded"; that refers to `legacy/`. The
 > live project is `src/Api/`, built per `PLAN.md`.
 
-**Status:** M0 (skeleton + runtime/stack decision), **M1·a** (hosts — monitor scrape + §4·b
-capabilities), **M1·b** (servers — the kgsm-lib domain+run-state ⋈ monitor metrics join, the
-honest `Server` DTO), **M2** (realtime — the `GET /api/v1/stream` fetch-based SSE stream (migrated
-off WebSocket 2026-07-02) + the always-on
-leaf-health capability model), **M3** (commands — the first write path: `POST /servers/{id}/commands`
-→ gate → `202` + job → `jobs` WS → verify; verbs `start`/`stop`/`restart`, `update` deferred),
-**M4·a/M4·b** (auth — Discord per-host, Model A; HMAC JWT bearer + viewer/operator/admin tier
-policies + `[Authorize]` everywhere, live OAuth round-trip validated) and **M4·c** (session management +
-revocation: a `SessionEntry` registry + a `sid`-claim per-request check cached 5s is the revocation authority;
-sliding-window refresh with `jti` rotation/reuse-detection, server-side logout, the `GET /auth/sessions` +
-self/admin revoke surface, three `auth.session.*` audit actions, `/me.recentLogins`, mint-time `expiresAt`,
-and a 10-min GC worker; identity stays a login-time JWT-claim snapshot — no user-profile row.
-`docs/session-management-plan.md` authoritative; 655/655 tests) and now **M5** (audit — the
-append-only action log: kgsm events → audit rows via kgsm-lib `IEventService`, the command path stamping
-actor+origin so the engine echo carries provenance with **no double-write**, `GET /audit` keyset +
-the `audit` WS topic; SQLite via `EnsureCreated`, no EF migration) are `built` & self-validated, plus
-**M6·0** (kgsm-lib bumped 1.8.0→1.13.0 + the audit consumer extended with `server.crash` from the watchdog
-crash events and `network.ports.open`/`.close` from the CLI-path firewall echoes — internal, no wire contract;
-**live-validated** 2026-06-16 with real `files firewall enable`/`disable` + a real watchdog crash → audit rows,
-also discharging M5's owed socket round-trip), and now **M6·b** (ports — the `network` block on
-`GET /servers/{id}` detail (required ⋈ firewall-open via `IFirewallService.ListOwnedAsync`), the host
-`network.openPorts[]` grid on `GET /hosts/{id}`, and the intent-only `open_ports` command (server-derived
-target → `EnsureOpenAsync` → re-probe verify → **direct** `network.ports.open` audit write, no echo, no
-double-write); `reachable` reserved-null, honest-unknown `open`, firewall probed **on-demand** not polled;
-backend self-validated + the operational firewall **read** path live-validated 2026-06-16, and the `open_ports`
-**mutation** round-trip **LIVE-VALIDATED 8/8 with ufw active** 2026-06-16 — write→enforce→`open:true`→direct audit
-row→app-join→`network.patch` WS deliver→restore, commits `50b4dab`/`1813cb5`; only the frontend gate remains), and now **M6·a** (alerts — the condition-mirror: `GET /alerts?status=firing|resolved&since=24h`
-+ the `alerts` WS topic (`alert.raise`/`resolve`/`retract`), read-only + in-memory + viewer-gated. **Crash source only**
-— the `AlertEngine` polls the watchdog's supervision state via kgsm-lib `IWatchdogClient` (poll-as-authority: the
-interval IS the raise debounce; api-owned 30s resolve probation; mirrored escalation; retract on a vanished instance;
-honest-unknown on a blind poll; rebuilds on restart). The alert↔audit `resolution.actionId` bridges a
-start|restart recovery — operator/api OR (since kgsm-watchdog `d4b453f`) the watchdog's **autonomous** crash-restart,
-which now emits `instance_restarted` (system/system) → a `server.restart` row. The watchdog **boot-autostart**
-(`instance_started` system/system) is audited but **NOT** bridged (`IsRecoveryAction` excludes the system-origin
-start — a boot bring-up is not a crash recovery); a stop-cleared crash also links null. The bridge is
-**episode-scoped** — `BuildResolution` stamps a stashed action only when its audit-row timestamp post-dates that
-crash's raise, so a dropped recovery event can't mislink a stale prior-episode id (root-cause closed).
-Built + self-validated + **LIVE-VALIDATED 2026-06-16** (real watchdog crash on `factorio-test` → `warn` raise →
-30s-probation resolve → `actionId:null` auto-heal, no flap); the contract is **proposed** (§6 divergences pending
-frontend sign-off)), and now **M7** (assistant turn relay — `POST /api/v1/assistant/turn`, **viewer**-gated,
-near-verbatim SSE relay of the assistant's now-§5·a-shaped `/turn` stream; **resolves keystone O1**. Strategy:
-the §5·a shaping is pushed UPSTREAM into the assistant (kgsm-llm Phase 1, committed `bda373a`), NOT an API re-wrap;
-**fork (a)** — a confirmed command executes via the M3 path, so `command.verified` is NOT a turn-stream event.
-Auth is the **trusted co-located relay**: the assistant gained a relay-auth path (shared `Assistant:Relay:Secret`
-+ forwarded Discord identity → principal, authority still from the bot, per-user memory key `web:<userId>` intact);
-the API forwards the verified caller's Discord id + `KGSM_API_ASSISTANT_RELAY_SECRET`. Degrade-gracefully capability
-gate (absent → 404, down → 503, reject → 502) decided before the SSE commits; `OpenTurnStreamAsync` uses
-`ResponseHeadersRead` so the long stream isn't `HttpClient.Timeout`-bound. The **full relay path is stub-proven**
-(a smoke stub-assistant phase gates on the secret + echoes the user → proves `X-Relay-Secret`/`X-Relay-User`
-forwarding + byte-faithful streaming); only a **real-model (Ollama) end-to-end** remains owed), and now
-**M8·a** (library — the installable-game catalog `GET /library`, **viewer**-gated: a pure kgsm-lib blueprint
-scrape via `IBlueprintService.ListDetailed`, mapped to the honest `LibraryEntry`; engine-base degrade → `[]`,
-the `ServerAggregator` pattern. **`cover`/`rawgSlug` reserved-`null`** — RAWG cover resolution is a later
-increment (honesty bars a fuzzy `DisplayName`→RAWG match; resolve only from an exact key like `SteamAppId`);
-`name` falls back to the blueprint `id` when uncurated; steam ids are honest-`null` not `"0"`; `specs`
-all-null today; `ports` structured `[{start,end,proto}]` emitted **directly by kgsm** on `blueprints` JSON
-(the 1.10.0 canonical-port-format migration extended to the blueprint surface — `Blueprint.Ports` is now
-`List<PortMapping>`), so the api never parses a port string. kgsm-lib bumped to **1.17.0** (BREAKING)), and now
-**M8·b** (install/uninstall — `POST /servers` + `DELETE /servers/{id}`, **operator**-gated, async → `202` + a
-`job` reusing the M3 `JobRegistry`/`CommandRunner`. `install`/`uninstall` are new `job.Verb`s but NOT in the
-`/commands` `IsKnown` set — dedicated endpoints. Honors `blueprint`(required)+`name`+`origin`; the rest of the
-§3·h form is accepted-but-inert. The backend assigns the id via kgsm `generate-id` (passed as the install
-`--name`, which kgsm echoes verbatim → `job.serverId` == the new instance == the audit/verify key). **Echo-path
-audit, NO double-write** — the command stamps actor+origin, kgsm emits `instance_installed`/`_uninstalled`, the
-M5 consumer writes `server.install`/`server.uninstall`; verify = `server.patch` (new server) / `server.removed`
-(tombstone). **No upstream work** — kgsm-lib `Install`/`Uninstall`/`GenerateId`, the bash events with global
-provenance stamping, and the audit consumer handlers were all already in place; `name` is honored as the kgsm
-instance name (a free-text display name is deferred upstream))
-(`scripts/smoke.sh` **47/47** — +3 M8·b gate checks, all rejection/no-mutation like M3 — +
-**tests/Api.Tests 135** (incl. the now-closed model-validation `{error}`-envelope gap on typed bodies — see Gotchas).
-**Install + uninstall LIVE-VALIDATED GREEN end-to-end on `hotrod` 2026-06-19** (real `POST /servers {factorio}` →
-`server.install`; real `DELETE` → instance removed + `server.uninstall` `origin:api`). The uninstall surfaced — and
-the fix resolved — an **upstream** gap: `kgsm uninstall` was interactive-only (no bypass, returned `0` on cancel), so
-**kgsm gained a `--force`/`-y` flag** (+ `EC_CANCELLED` on decline) and **kgsm-lib `Uninstall` passes `--force`**
-(bumped here `1.17.0 → 1.18.0`, **no kgsm-api code change**));
-the config surfaces (`/settings`, `/me`, `/integrations/discord`) and the M6·a/M7/M8·a/M8·b frontend gates are
-`planned`. **Auth is ON by default**
-— `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged dev escape hatch (synthetic admin; the pre-M4
-open trust window). Trust `PLAN.md`'s per-milestone status, not assumptions.
+**Status:** `PLAN.md` is the authority for what's built vs planned, per milestone.
+**Auth is ON by default** — `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged
+dev escape hatch (synthetic admin). Trust `PLAN.md`'s per-milestone status, not assumptions.
 
 ## Read first (sources of truth)
 
