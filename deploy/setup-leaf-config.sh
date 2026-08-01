@@ -12,9 +12,9 @@
 # It does the THREE things — the ONLY privileged setup this feature needs:
 #   1. ensure /var/lib/kgsm-api/leaf-overrides/ exists (0700, owned by the service user) — the API
 #      writes each leaf's override env file here UNPRIVILEGED (it's inside the API's own state dir).
-#   2. install a systemd drop-in per configurable leaf (monitor/watchdog/assistant/firewall) that
-#      layers that leaf's override env file on LAST, the leaf staying unaware of the API.
-#   3. install a scoped polkit rule letting the service user `systemctl restart` ONLY those four units.
+#   2. install a systemd drop-in per configurable leaf (monitor/watchdog/assistant/firewall/scheduler)
+#      that layers that leaf's override env file on LAST, the leaf staying unaware of the API.
+#   3. install a scoped polkit rule letting the service user `systemctl restart` ONLY those units.
 #
 # Run it as the SERVICE USER (not root); it sudo's ONLY the steps that touch /etc + systemd, exactly
 # like deploy.sh. No password is ever stored here — privileged calls go through "$SUDO" (default: sudo).
@@ -35,14 +35,17 @@ OVERRIDE_DIR="$STATE_DIR/leaf-overrides"            # the API renders <leaf>.env
 DROPIN_NAME="50-kgsm-api-override.conf"             # the per-leaf drop-in filename
 POLKIT_DST="/etc/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules"
 
-# The configurable leaves → their systemd unit. MUST match src/Api/Services/Leaves/LeafCatalog.cs and
-# the unit names listed in the polkit template (asserted below). NB: assistant carries the '-service'
-# segment — kgsm-assistant-service.service, not kgsm-assistant.service.
+# The configurable leaves → their systemd unit. MUST match the leaves in
+# src/Api/Services/Leaves/LeafConfigManifest.cs (a leaf with a manifest but no entry here renders an
+# override file nothing reads, then fails to restart) and the unit names listed in the polkit template
+# (asserted below). NB: assistant carries the '-service' segment — kgsm-assistant-service.service, not
+# kgsm-assistant.service.
 declare -A LEAF_UNITS=(
     [monitor]="kgsm-monitor.service"
     [watchdog]="kgsm-watchdog.service"
     [assistant]="kgsm-assistant-service.service"
     [firewall]="kgsm-firewall.service"
+    [scheduler]="kgsm-scheduler.service"
 )
 
 SVC_USER="${KGSM_API_USER:-$(id -un)}"
@@ -94,10 +97,27 @@ for leaf in "${!LEAF_UNITS[@]}"; do
     unit="${LEAF_UNITS[$leaf]}"
     grep -q "\"$unit\"" "$POLKIT_RENDERED" || {
         err "drift: '$unit' (leaf '$leaf') is NOT granted by $POLKIT_TEMPLATE — refusing to install a"
-        err "drop-in for a unit the polkit rule can't restart. Reconcile the template with LeafCatalog.cs."
+        err "drop-in for a unit the polkit rule can't restart. Reconcile the template with the leaf set."
         exit 1
     }
 done
+
+# The other half of the same drift guard, in the other direction: every leaf the API treats as a config
+# target must HAVE a drop-in + a grant here. A config target with no drop-in is silently broken at
+# runtime — the API renders an override env file nothing reads, then fails at the restart. Source the
+# expected set from ProvisionableLeaf.cs so adding a leaf there fails setup until it is wired here.
+PROVISIONABLE_SRC="$REPO_DIR/src/Api/Services/Leaves/ProvisionableLeaf.cs"
+if [[ -f "$PROVISIONABLE_SRC" ]]; then
+    while read -r leaf; do
+        [[ -n "${LEAF_UNITS[$leaf]+x}" ]] || {
+            err "drift: leaf '$leaf' is a config target in ProvisionableLeaf.cs but has NO entry in the"
+            err "LEAF_UNITS map here — it would get an override file nothing reads and a restart that is"
+            err "not granted. Add it to LEAF_UNITS and to $(basename "$POLKIT_TEMPLATE")."
+            exit 1
+        }
+    done < <(grep -oE 'public const string [A-Za-z]+ = "[a-z-]+"' "$PROVISIONABLE_SRC" \
+             | sed -E 's/.*"([a-z-]+)"/\1/')
+fi
 
 log "kgsm-api leaf-config setup — service user '${SVC_USER}', ${#LEAF_UNITS[@]} configurable leaves"
 
@@ -129,7 +149,7 @@ for leaf in "${!LEAF_UNITS[@]}"; do
     fi
 done
 
-# ── 3. The scoped polkit rule (restart ONLY the four leaves) ───────────────────
+# ── 3. The scoped polkit rule (restart ONLY the configurable leaves) ───────────
 if install_if_changed "$POLKIT_RENDERED" "$POLKIT_DST" 0644; then
     log "installed polkit rule → ${POLKIT_DST} (restart grant for '${SVC_USER}')"
     # polkitd watches rules.d and reloads on its own — no service reload needed for the rule itself.
@@ -147,7 +167,7 @@ trap - ERR
 # ── 5. Summary ────────────────────────────────────────────────────────────────
 log "leaf-config wiring in place ✓"
 printf '   granted: %s may  systemctl restart  (and try-restart / reload-or-restart) ONLY:\n' "$SVC_USER"
-for leaf in monitor watchdog assistant firewall; do
+for leaf in "${!LEAF_UNITS[@]}"; do
     printf '            • %-9s → %s\n' "$leaf" "${LEAF_UNITS[$leaf]}"
 done
 printf '   overrides: %s/<leaf>.env  (API writes these unprivileged; applied on the next restart)\n' "$OVERRIDE_DIR"

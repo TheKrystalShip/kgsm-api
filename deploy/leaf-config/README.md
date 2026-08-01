@@ -16,11 +16,12 @@ or undo it.
 | Artifact | Where | What it does |
 |---|---|---|
 | **Override dir** | `/var/lib/kgsm-api/leaf-overrides/` (`0700`, service user) | The API renders each leaf's `<leaf>.env` here **unprivileged** — it's inside the API's own `StateDirectory`. |
-| **systemd drop-in** (×4) | `/etc/systemd/system/<unit>.d/50-kgsm-api-override.conf` | Layers that leaf's override env file on **last** (`EnvironmentFile=-…`), so the API's overrides win — the leaf never references the API. |
-| **polkit rule** | `/etc/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules` | Lets the service user `systemctl restart` **only** the four leaf units (restart family verbs only), with no interactive auth agent. |
+| **systemd drop-in** (one per leaf) | `/etc/systemd/system/<unit>.d/50-kgsm-api-override.conf` | Layers that leaf's override env file on **last** (`EnvironmentFile=-…`), so the API's overrides win — the leaf never references the API. |
+| **polkit rule** | `/etc/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules` | Lets the service user `systemctl restart` **only** those leaf units (restart family verbs only), with no interactive auth agent. |
 
-The four **config-target leaves** and their exact units (kept in lockstep with
-`src/Api/Services/Leaves/LeafCatalog.cs`):
+The **config-target leaves** and their exact units. This set is the one in
+`src/Api/Services/Leaves/LeafConfigManifest.cs` — a leaf with a manifest but no drop-in here would
+render an override file nothing reads and then fail to restart, so the two must stay in lockstep:
 
 | Leaf | Unit |
 |---|---|
@@ -28,6 +29,7 @@ The four **config-target leaves** and their exact units (kept in lockstep with
 | `watchdog` | `kgsm-watchdog.service` |
 | `assistant` | `kgsm-assistant-service.service` &nbsp;← note the `-service` segment |
 | `firewall` | `kgsm-firewall.service` |
+| `scheduler` | `kgsm-scheduler.service` |
 
 `api` and `bot` are **not** config targets (the API does not configure itself; the bot is out of scope).
 
@@ -35,7 +37,7 @@ The four **config-target leaves** and their exact units (kept in lockstep with
 
 - **The only ongoing privileged operation is `restart`.** The API writes the override env files
   unprivileged (its own state dir) and only needs help to *apply* a change = restart the unit. That
-  one capability is granted by the scoped polkit rule, bounded to the four units and the restart verb
+  one capability is granted by the scoped polkit rule, bounded to those units and the restart verb
   family — never start/stop/enable/mask, never any other unit.
 - **Config is override, never surgery.** The API never edits a leaf's own `appsettings.json` / env
   file (the hand-deployed *floor*, which already holds secrets). It only adds a separate override layer
@@ -85,5 +87,5 @@ restart.
 
 - `dropins/50-kgsm-api-override.conf.in` — the drop-in template (`@LEAF@` → the leaf id).
 - `49-kgsm-api-leaf-restart.rules.in` — the polkit rule template (`@SVC_USER@` → the service user;
-  the four units are literal, to stay reviewable and matched to `LeafCatalog.cs`).
+  the units are literal, to stay reviewable and matched to `LeafConfigManifest.cs`).
 - The installer is one level up: [`../setup-leaf-config.sh`](../setup-leaf-config.sh).

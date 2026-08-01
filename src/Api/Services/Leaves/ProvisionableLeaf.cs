@@ -19,10 +19,10 @@ public static class ProvisionableLeaf
     public const string Firewall = "firewall";
     public const string Scheduler = "scheduler";
 
-    /// <summary>The four provisionable + config-target leaf ids, in Services-board order.</summary>
+    /// <summary>The provisionable + config-target leaf ids, in Services-board order.</summary>
     public static readonly IReadOnlyList<string> All = [Monitor, Watchdog, Assistant, Firewall, Scheduler];
 
-    /// <summary>True when <paramref name="leafId"/> is one of the four runtime-provisionable leaves
+    /// <summary>True when <paramref name="leafId"/> is one of the runtime-provisionable leaves
     /// (everything else — <c>api</c>/<c>bot</c>/unknown — is not).</summary>
     public static bool IsProvisionable(string? leafId) =>
         leafId is Monitor or Watchdog or Assistant or Firewall or Scheduler;

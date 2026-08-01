@@ -3,8 +3,8 @@
 // Installed by deploy/setup-leaf-config.sh into /etc/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules
 // (@SVC_USER@ is substituted with the kgsm-api service user at install time).
 //
-// What it grants: the kgsm-api service user may `systemctl restart` EXACTLY the four configurable KGSM
-// leaf units below — nothing else, and only the restart verb family (never start/stop/enable/mask/...).
+// What it grants: the kgsm-api service user may `systemctl restart` EXACTLY the configurable KGSM leaf
+// units below — nothing else, and only the restart verb family (never start/stop/enable/mask/...).
 // This is the ONLY ongoing privileged operation the feature needs: the API renders each leaf's override
 // env file UNPRIVILEGED in its own state dir, and only needs help to APPLY it = restart the unit.
 //
@@ -18,7 +18,7 @@
 // privilege escalation, so it works fine under NNP. Do NOT remove NoNewPrivileges to "make restart work";
 // it already works. (NNP only stops the API's own process from gaining privileges via exec.)
 //
-// ⚠ The four unit names MUST stay in lockstep with src/Api/Services/Leaves/LeafCatalog.cs (the config
+// ⚠ The unit names MUST stay in lockstep with src/Api/Services/Leaves/LeafConfigManifest.cs (the config
 // targets) and with the leaf→unit map in deploy/setup-leaf-config.sh. The setup script asserts this
 // template names every unit it installs a drop-in for, so drift fails loudly at setup time.
 polkit.addRule(function(action, subject) {
@@ -32,7 +32,8 @@ polkit.addRule(function(action, subject) {
         "kgsm-monitor.service": true,
         "kgsm-watchdog.service": true,
         "kgsm-assistant-service.service": true,
-        "kgsm-firewall.service": true
+        "kgsm-firewall.service": true,
+        "kgsm-scheduler.service": true
     };
     if (units[action.lookup("unit")] !== true) {
         return;
