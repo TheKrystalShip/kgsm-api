@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the connect port travels with every server row
+- **`connectPort` on the `Server` DTO** — the player-facing port (the first of the instance's required
+  ports, as `Instance.Ports` orders them), present on `GET /servers`, the `servers` stream **and**
+  `GET /servers/{id}`. The `network` block already carried the same port, but it is detail-only because
+  it wraps a bounded firewall probe; this is pure roster truth with no I/O behind it, so it costs nothing
+  to carry everywhere — and it is what lets a client render and copy `host:port` from a list row without
+  fetching each server's detail. Null when an instance declares no ports: honest unknown, never a
+  fabricated `0` or a guessed per-game default. `ServerAggregator` derives it with the same
+  first-valid-mapping rule `NetworkAggregator` expands with, so the two surfaces can never name different
+  ports.
+
 ### Added — every leaf on this host declares its own configurable surface
 - **This API ships a descriptor of its own** (`deploy/kgsm-api.leaf.json`, 69 settings in 13 groups), so
   the Control Panel can show what the API itself is configured with. It declares itself **read-only**:

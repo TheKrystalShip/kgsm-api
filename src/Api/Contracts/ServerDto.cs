@@ -97,6 +97,14 @@ public sealed record Server(
     // uptime from a start timestamp); the upstream parse gap is flagged for a kgsm-lib/kgsm fix (emit ISO,
     // and/or a start_time converter), out of scope for this read slice. Never a guessed timezone.
     DateTimeOffset? StartedAt = null,
+    // The player-facing connect PORT — the first of this instance's required ports (kgsm lists the
+    // game/connect port first in the blueprint), read straight off the cached Instance.Ports. Unlike the
+    // Network block below it is present on the list, the `servers` stream AND the detail view: this is pure
+    // domain truth already in the roster, with no firewall probe behind it, so carrying it everywhere costs
+    // nothing — and it is what lets a surface render and copy `host:port` from a list row alone, without
+    // fetching the detail. Null when the instance declares no ports (honest unknown, never a fabricated 0
+    // and never a guessed game default).
+    int? ConnectPort = null,
     // RAWG.io cover-art + hero banner for this server's blueprint, joined from this host's cached library
     // metadata (RawgStore, keyed on the blueprint id == this server's Blueprint) — populated ONLY on the
     // GET /servers/{id} detail view, like Network; omitted on the list + the `servers` stream so those stay

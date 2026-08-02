@@ -249,7 +249,22 @@ public sealed class ServerAggregator
             UpdateAvailable: updateAvailable,
             LatestVersion: latestVersion,
             UpdateCheckedAt: updateCheckedAt,
-            StartedAt: startedAt);
+            StartedAt: startedAt,
+            ConnectPort: ConnectPortOf(instance.Ports));
+    }
+
+    // The player-facing connect port: the FIRST port this instance requires. kgsm writes the game/connect
+    // port first in the blueprint's port spec, and NetworkAggregator's expansion preserves that source
+    // order, so this is the same port the detail view's network.required[0] carries — one rule, two
+    // surfaces that agree. Inverted ranges are skipped defensively (as they are there); no ports, or only
+    // malformed ones, is honest null rather than a fabricated default.
+    private static int? ConnectPortOf(IReadOnlyList<PortMapping>? ports)
+    {
+        if (ports is null) return null;
+        foreach (PortMapping m in ports)
+            if (m is not null && m.End >= m.Start && m.Start > 0)
+                return m.Start;
+        return null;
     }
 
     // The clean blueprint id, e.g. "factorio" from ".../factorio.bp.yaml". Unified blueprints are

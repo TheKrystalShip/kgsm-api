@@ -156,6 +156,77 @@ public sealed class ServerAggregatorBuildServerTests
         Assert.Equal(now, s.UpdateCheckedAt);
     }
 
+    // --- connect port (the list-visible player-facing port) -----------------------------------------
+
+    [Fact]
+    public void ConnectPort_IsTheFirstRequiredPort()
+    {
+        // The blueprint writes the game/connect port first, so the first mapping wins even when a later
+        // one is numerically lower — order is the signal, not magnitude.
+        var statuses = Up("factorio-1");
+        var i = new Instance
+        {
+            Name = "factorio-1",
+            BlueprintFile = "factorio.bp.yaml",
+            Ports = [new PortMapping { Start = 34197, End = 34197, Protocol = "udp" },
+                     new PortMapping { Start = 27015, End = 27015, Protocol = "tcp" }],
+        };
+
+        Server s = ServerAggregator.BuildServer("factorio-1", i, statuses, NoUpdateReadings, NoMetrics, "host-1",
+            isStarting: _ => false);
+
+        Assert.Equal(34197, s.ConnectPort);
+    }
+
+    [Fact]
+    public void ConnectPort_RangeYieldsItsStart()
+    {
+        var statuses = Up("factorio-1");
+        var i = new Instance
+        {
+            Name = "factorio-1",
+            BlueprintFile = "factorio.bp.yaml",
+            Ports = [new PortMapping { Start = 27015, End = 27020, Protocol = "udp" }],
+        };
+
+        Server s = ServerAggregator.BuildServer("factorio-1", i, statuses, NoUpdateReadings, NoMetrics, "host-1",
+            isStarting: _ => false);
+
+        Assert.Equal(27015, s.ConnectPort);
+    }
+
+    [Fact]
+    public void ConnectPort_NoPorts_IsNull_NeverFabricated()
+    {
+        // TestInstance declares no ports — honest null, never a 0 or a guessed game default.
+        var statuses = Up("factorio-1");
+
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoMetrics, "host-1",
+            isStarting: _ => false);
+
+        Assert.Null(s.ConnectPort);
+    }
+
+    [Fact]
+    public void ConnectPort_SkipsMalformedMappings()
+    {
+        // An inverted range is skipped exactly as NetworkAggregator's expansion skips it, so the two
+        // surfaces can never disagree about which port is "first".
+        var statuses = Up("factorio-1");
+        var i = new Instance
+        {
+            Name = "factorio-1",
+            BlueprintFile = "factorio.bp.yaml",
+            Ports = [new PortMapping { Start = 27020, End = 27015, Protocol = "udp" },
+                     new PortMapping { Start = 34197, End = 34197, Protocol = "udp" }],
+        };
+
+        Server s = ServerAggregator.BuildServer("factorio-1", i, statuses, NoUpdateReadings, NoMetrics, "host-1",
+            isStarting: _ => false);
+
+        Assert.Equal(34197, s.ConnectPort);
+    }
+
     // --- helpers -----------------------------------------------------------------------------------
 
     private static Dictionary<string, Reading<InstanceRuntimeStatus>> Up(string id) => new()
