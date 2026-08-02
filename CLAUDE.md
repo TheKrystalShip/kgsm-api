@@ -312,4 +312,5 @@ of leaves present.
   `InvalidModelStateResponseFactory` that returns the frozen `{error:{code:"bad_request"…}}` envelope
   (regression-tested, type-mismatch + malformed JSON). **Don't remove it** — it's what keeps invariant #4
   (every non-2xx is the envelope) true for any typed request body, here and on every future POST/PATCH.
-- Nothing here is committed unless the user asked; commit/push only on explicit request.
+- A finished feature is committed without being asked (the ecosystem-wide rule — see the workspace
+  `CLAUDE.md`). Pushing still needs an explicit request.
