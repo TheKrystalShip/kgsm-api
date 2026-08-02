@@ -1,3 +1,4 @@
+using System.Globalization;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Leaves;
@@ -250,7 +251,28 @@ public sealed class ServerAggregator
             LatestVersion: latestVersion,
             UpdateCheckedAt: updateCheckedAt,
             StartedAt: startedAt,
-            ConnectPort: ConnectPortOf(instance.Ports));
+            ConnectPort: ConnectPortOf(instance.Ports),
+            Note: NoteOf(instance));
+    }
+
+    // The operator-authored note, or null when the instance has no note. kgsm-lib decodes the body
+    // (Instance.NoteBody); attribution is honest-null when the config carries none — a hand-edited
+    // note renders without a fabricated author, and an unparseable timestamp is dropped rather than
+    // guessed. internal so DomainPump's change-detection and the note controller share one rule.
+    internal static ServerNote? NoteOf(Instance instance)
+    {
+        string? body = instance.NoteBody;
+        if (string.IsNullOrEmpty(body))
+            return null;
+
+        string? by = string.IsNullOrWhiteSpace(instance.NoteUpdatedBy) ? null : instance.NoteUpdatedBy;
+        DateTimeOffset? at = DateTimeOffset.TryParse(instance.NoteUpdatedAt,
+            CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+            out DateTimeOffset parsed)
+            ? parsed
+            : null;
+
+        return new ServerNote(body, by, at);
     }
 
     // The player-facing connect port: the FIRST port this instance requires. kgsm writes the game/connect

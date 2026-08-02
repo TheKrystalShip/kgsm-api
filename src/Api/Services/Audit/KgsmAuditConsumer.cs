@@ -277,7 +277,12 @@ public sealed class KgsmAuditConsumer(
         // meta (the event never carries the value — secret hygiene). Pure mapper, socket-free.
         events.RegisterHandler<InstanceConfigChangedData>(d =>
         {
-            PublishLive(AuditMapping.FromConfigChangedEvent(d, options.HostId));
+            // A server note spans three keys, so one edit emits three of these. Publish only the body's
+            // event; the two attribution keys would triple the same action in the live feed. The
+            // monitor-history path (MonitorEventShaping) drops the same pair, so the merged /audit and
+            // the live stream can't disagree about what an edit looks like.
+            if (!AuditMapping.IsNoteAttributionKey(d.Key))
+                PublishLive(AuditMapping.FromConfigChangedEvent(d, options.HostId));
             return Task.CompletedTask;
         });
 

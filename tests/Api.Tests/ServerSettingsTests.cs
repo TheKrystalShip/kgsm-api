@@ -361,6 +361,7 @@ public sealed class ServerSettingsTests
         public Dictionary<string, Reading<InstanceRuntimeStatus>> GetAllStatuses(bool fast = false) => new();
 
         // --- unused by the Phase 0 settings path: honest NotImplemented (never silently fabricate) ---
+        public InstanceNoteResult SetInstanceNote(string instanceName, string body, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public InstanceRuntimeStatus? GetInstanceStatus(string instanceName) => throw new NotImplementedException();
         public ICollection<string> GetLogs(string instanceName, int maxLines = 10) => throw new NotImplementedException();
         public Task<ICollection<string>> GetLogsAsync(string instanceName, int maxLines = 10, CancellationToken cancellationToken = default) => throw new NotImplementedException();

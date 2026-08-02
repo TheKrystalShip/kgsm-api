@@ -445,6 +445,10 @@ public sealed class Tier1OpsTests
             return new KgsmResult(0);
         }
 
+        // The note has its own surface (PUT/DELETE /servers/{id}/note); the config PATCH refuses its
+        // keys outright, so this fake never sees a note write.
+        public InstanceNoteResult SetInstanceNote(string instanceName, string body, string? actor = null, string? origin = null) => throw new NotImplementedException();
+
         // Newest first, as the engine lists. The second id deliberately has NO manifest below, to
         // prove such a backup is still reported (id alone) rather than dropped from the listing.
         public KgsmResult GetBackups(string instanceName) =>

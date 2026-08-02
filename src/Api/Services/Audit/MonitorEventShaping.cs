@@ -44,6 +44,7 @@ public static class MonitorEventShaping
     {
         ArgumentNullException.ThrowIfNull(item);
         if (SilentTypes.Contains(item.Type)) return null;
+        if (IsNoteAttributionChange(item)) return null;
 
         AuditWrite? write = item.Type switch
         {
@@ -92,6 +93,25 @@ public static class MonitorEventShaping
         };
 
         return write is not null ? AuditMapping.ToRecordDirect(write, item.Id) : GenericShape(item, hostId);
+    }
+
+    // A server note is one operator action spread over three config keys (body + who + when), so the
+    // engine emits three instance_config_changed events for it. Only the body's event is surfaced; the
+    // two attribution keys are dropped here so an edit reads as one line in a feed that shows three.
+    // Nothing is destroyed — the raw events remain in the monitor's store, which is the neutral record.
+    // The live path (KgsmAuditConsumer) applies the same rule, so both halves of the merge agree.
+    private static bool IsNoteAttributionChange(MonitorEventItem item)
+    {
+        if (!string.Equals(item.Type, "instance_config_changed", StringComparison.Ordinal)) return false;
+        if (item.Data is not { ValueKind: JsonValueKind.Object } data) return false;
+
+        // kgsm emits the payload PascalCased ("Key"); JsonElement lookup is case-sensitive, so accept
+        // either spelling rather than depending on the engine's casing staying put.
+        if (!data.TryGetProperty("Key", out JsonElement key) && !data.TryGetProperty("key", out key))
+            return false;
+
+        return key.ValueKind == JsonValueKind.String
+            && AuditMapping.IsNoteAttributionKey(key.GetString());
     }
 
     // Deserialize item.Data into T (reflection-based STJ — fine under kgsm-api's JIT runtime, unlike

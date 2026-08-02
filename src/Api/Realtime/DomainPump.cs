@@ -127,10 +127,14 @@ public sealed class DomainPump(
     // The update fields (UpdateAvailable/LatestVersion/UpdateCheckedAt) ride along: a flip is low-frequency
     // (the slow probe ticks at KGSM_API_UPDATE_CHECK_POLL_MS, ~10min per instance), so carrying it here never
     // turns the `servers` topic into a firehose — it is the status/roster cadence, not the metric one.
+    // The note rides here for the same reason as the update fields: an operator edits it by hand, so
+    // a flip is rare, and carrying it means an edit made in one browser reaches every other open panel
+    // without a refresh. `record` equality compares the note's body + attribution structurally.
     private static bool CoreChanged(Server a, Server b) =>
         a.Status != b.Status || a.Version != b.Version || a.Name != b.Name
         || a.Blueprint != b.Blueprint || a.Runtime != b.Runtime
         || a.UpdateAvailable != b.UpdateAvailable
         || a.LatestVersion != b.LatestVersion
-        || a.UpdateCheckedAt != b.UpdateCheckedAt;
+        || a.UpdateCheckedAt != b.UpdateCheckedAt
+        || a.Note != b.Note;
 }

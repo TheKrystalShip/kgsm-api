@@ -274,6 +274,7 @@ public sealed class FileBrowserApiTests
         // --- unused by the file surface ---
         public InstanceRuntimeStatus? GetInstanceStatus(string instanceName) => throw new NotImplementedException();
         public KgsmResult SetInstanceConfigValue(string instanceName, string key, string value, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public InstanceNoteResult SetInstanceNote(string instanceName, string body, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult GetBackups(string instanceName) => throw new NotImplementedException();
         public List<InstanceBackup> GetBackupsDetailed(string instanceName) => throw new NotImplementedException();
         public KgsmResult CreateBackup(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();

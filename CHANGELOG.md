@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the server note
+
+- **`GET/PUT/DELETE /servers/{id}/note`** — the operator-authored note on a game server (mods, rules, a
+  heads-up before joining). Reads are viewer-gated, writes operator-gated. `PUT` refuses an empty body
+  and points at `DELETE`, so an accidentally-emptied editor can never silently wipe a note; `DELETE`
+  blanks the body while attribution records who cleared it and when. Bodies are capped at 600
+  characters measured after sanitizing, and an over-long one is **rejected, never truncated**.
+- **`note` on the `Server` DTO** — carried on `GET /servers`, `GET /servers/{id}` **and** the `servers`
+  stream, because the dashboard tile renders it: a list row must show a note without a detail fetch, and
+  an edit in one browser must reach another without a refresh. `null` when the instance has no note.
+- The note is **engine-owned**, living in the kgsm instance's own `.config.ini` (kgsm-lib 1.48.0 owns the
+  encoding and the three keys), so it travels with the instance and dies with it on uninstall. This
+  service holds no note state and writes no audit row of its own — each key write emits
+  `instance_config_changed` carrying the actor+origin the request stamps.
+- **One audit row per edit.** A note write touches three config keys, so the engine emits three events;
+  both audit paths (the live consumer and the monitor-history shaping) drop the two attribution keys, so
+  the feed reads as the single "set config 'note'" line a reader expects. The raw events are untouched
+  in the monitor's store.
+- **`PATCH /servers/{id}/config` refuses the note's keys**, pointing at the note endpoint. kgsm accepts
+  them as ordinary runtime values, but a raw write there would drop an unencoded body into a file that is
+  sourced as `key="value"` and skip the attribution stamp.
+
 ### Added — the connect port travels with every server row
 - **`connectPort` on the `Server` DTO** — the player-facing port (the first of the instance's required
   ports, as `Instance.Ports` orders them), present on `GET /servers`, the `servers` stream **and**

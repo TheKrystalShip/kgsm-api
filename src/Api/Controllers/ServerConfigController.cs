@@ -102,6 +102,15 @@ public sealed class ServerConfigController(ServerAggregator aggregator) : Contro
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 $"protected or invalid config key(s): {string.Join(", ", rejected)}");
 
+        // The server note's keys are engine-editable, but writing them here would bypass the encoding
+        // and the attribution stamp the note endpoint applies — a raw body would land in a file that is
+        // sourced as key="value". Point the caller at the surface that owns the note.
+        string[] noteKeys = values.Keys.Where(ServerConfigMapping.IsNoteKey).ToArray();
+        if (noteKeys.Length > 0)
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                $"the server note is not editable here: use PUT/DELETE /servers/{{id}}/note "
+                + $"(rejected: {string.Join(", ", noteKeys)})");
+
         // actor = the bearer identity (discord:<username>), or null → kgsm's own OS-user fallback.
         string? actor = AuditPrincipal.ActorString(User);
 

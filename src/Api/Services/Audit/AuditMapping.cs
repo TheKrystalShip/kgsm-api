@@ -279,6 +279,18 @@ public static class AuditMapping
     /// passwords/tokens), so this row can never leak one. A blank key degrades to a key-less summary + null
     /// meta (defensive — the event guarantees a non-null key), never a fabricated placeholder.
     /// </summary>
+    /// <summary>
+    /// Whether a changed config key is one of the server note's two <em>attribution</em> keys
+    /// (<c>note_updated_by</c> / <c>note_updated_at</c>). A note write touches three keys, so the
+    /// engine emits three <c>instance_config_changed</c> events for one operator action; both audit
+    /// paths (the live consumer and the monitor-history shaping) drop these two so the feed shows the
+    /// single "set config 'note'" row a reader expects. The body's own event is never suppressed —
+    /// changing a player-facing note stays fully audited.
+    /// </summary>
+    public static bool IsNoteAttributionKey(string? key) =>
+        string.Equals(key, InstanceNote.UpdatedByKey, StringComparison.Ordinal)
+        || string.Equals(key, InstanceNote.UpdatedAtKey, StringComparison.Ordinal);
+
     public static AuditWrite FromConfigChangedEvent(InstanceConfigChangedData d, string hostId)
     {
         string instance = Instance(d);

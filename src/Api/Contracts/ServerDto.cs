@@ -119,7 +119,35 @@ public sealed record Server(
     // (and the servers/{id}/network WS patch); omitted entirely on the list + the `servers` stream, so
     // those stay byte-identical to the frozen M1·b shape (detail ≠ list, the first such split). See
     // ServerNetwork for the honest-unknown + reserved-`reachable` semantics.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ServerNetwork? Network = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ServerNetwork? Network = null,
+    // The operator-authored server note (mods, rules, a heads-up before joining), read off the cached
+    // Instance. Unlike Cover/Hero/Network this rides the list, the detail AND the `servers` stream: the
+    // dashboard tile renders it, so a list row must carry it without a detail fetch, and an edit in one
+    // browser must reach another without a refresh. Null when the instance has no note — the honest
+    // "nothing written", which is what makes the SPA hide the card for a non-operator.
+    ServerNote? Note = null);
+
+/// <summary>
+/// A server's operator-authored note — free text an Operator writes for players and teammates
+/// (<c>GET/PUT/DELETE /servers/{id}/note</c>, and carried on the <see cref="Server"/> DTO).
+/// </summary>
+/// <remarks>
+/// Lives in the kgsm instance's own <c>.config.ini</c> (kgsm-lib's <c>InstanceNote</c> owns the
+/// encoding), so it is engine-owned domain data like every other instance field — not API-local
+/// state — and it dies with the instance on uninstall.
+/// <para><see cref="UpdatedBy"/>/<see cref="UpdatedAt"/> are honest-null for a note that was never
+/// written through a surface (someone hand-edited the config): the body still renders, with no
+/// fabricated author or timestamp.</para>
+/// </remarks>
+/// <param name="Body">The note text, verbatim. Plain text — surfaces must render it as text, never
+/// as markup, since it reaches player-facing surfaces.</param>
+/// <param name="UpdatedBy">The actor who last wrote it (the same actor string the audit trail
+/// carries), or null when unknown.</param>
+/// <param name="UpdatedAt">When it was last written (UTC), or null when unknown/unparseable.</param>
+public sealed record ServerNote(
+    string Body,
+    string? UpdatedBy,
+    DateTimeOffset? UpdatedAt);
 
 /// <summary>
 /// One server's resource sample, mapped 1:1 from the monitor's <c>ServerMetrics</c> with its native

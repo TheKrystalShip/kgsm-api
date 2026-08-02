@@ -41,6 +41,17 @@ public static class ServerConfigMapping
         return !IsProtectedKey(key);
     }
 
+    /// <summary>
+    /// Whether <paramref name="key"/> is one of the server note's three keys. kgsm accepts them as
+    /// ordinary runtime values, but the note has its own surface (<c>PUT/DELETE /servers/{id}/note</c>)
+    /// that owns the encoding and the attribution stamp — a raw write here would put an unencoded body
+    /// into a file that is sourced as <c>key="value"</c>. Kept OUT of <see cref="IsEditableKey"/> so
+    /// that predicate stays a faithful mirror of the engine's protected set; the config PATCH applies
+    /// this as its own, surface-level refusal.
+    /// </summary>
+    public static bool IsNoteKey(string? key) =>
+        key is InstanceNote.BodyKey or InstanceNote.UpdatedByKey or InstanceNote.UpdatedAtKey;
+
     // The exact mirror of kgsm's __is_protected_instance_config_key (engine authority).
     private static bool IsProtectedKey(string key)
     {
