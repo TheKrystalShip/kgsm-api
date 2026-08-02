@@ -29,6 +29,7 @@ public sealed class DomainPump(
     StreamHub hub,
     InstanceCache cache,
     UpdateCheckCache updateChecks,
+    BackupCache backups,
     MonitorClient monitor,
     ApiOptions options,
     ILogger<DomainPump> logger)
@@ -81,7 +82,8 @@ public sealed class DomainPump(
                     // Build the current server list from cache data.
                     var byId = new Dictionary<string, Server>(StringComparer.Ordinal);
                     foreach ((string id, var instance) in roster)
-                        byId[id] = ServerAggregator.BuildServer(id, instance, statuses, updateChecks.Readings, metricsById, options.HostId, cache.IsStarting);
+                        byId[id] = ServerAggregator.BuildServer(id, instance, statuses, updateChecks.Readings,
+                            backups.Readings, metricsById, options.HostId, cache.IsStarting);
 
                     if (!primed)
                     {
@@ -130,11 +132,17 @@ public sealed class DomainPump(
     // The note rides here for the same reason as the update fields: an operator edits it by hand, so
     // a flip is rare, and carrying it means an edit made in one browser reaches every other open panel
     // without a refresh. `record` equality compares the note's body + attribution structurally.
+    // The backup fields ride here on the same reasoning: a backup is taken or restored rarely, so a flip
+    // costs nothing on this topic, and carrying it is what lets a backup taken from the CLI (or by another
+    // operator) reach every open panel — the SPA's backup KPIs update without a refresh. `record` equality
+    // compares the whole manifest record structurally, so a re-scan that changes nothing emits nothing.
     private static bool CoreChanged(Server a, Server b) =>
         a.Status != b.Status || a.Version != b.Version || a.Name != b.Name
         || a.Blueprint != b.Blueprint || a.Runtime != b.Runtime
         || a.UpdateAvailable != b.UpdateAvailable
         || a.LatestVersion != b.LatestVersion
         || a.UpdateCheckedAt != b.UpdateCheckedAt
-        || a.Note != b.Note;
+        || a.Note != b.Note
+        || a.LastBackup != b.LastBackup
+        || a.BackupCount != b.BackupCount;
 }

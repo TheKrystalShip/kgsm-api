@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — last-backup on the server DTO
+
+- **`server.lastBackup` + `server.backupCount`** — a game server now carries its newest backup's full
+  manifest record (the same `ServerBackup` shape `GET /servers/{id}/backups` serves, through the shared
+  `ServerBackupMapping`, so the two surfaces cannot describe the same backup differently) plus how many
+  backups it holds. Both ride the list, the detail AND the `servers` stream, like `note`, because the
+  dashboard summarizes backup freshness across the whole roster and must not need a detail fetch per
+  server to do it. Carried in full rather than as a bare timestamp so a surface can render what the
+  snapshot actually is — size, what it captured, which version, whether it is an archive — instead of
+  characterizing it.
+
+- **`BackupCache`** — the always-on scan behind those fields, beside `InstanceCache`/`UpdateCheckCache`:
+  listing backups is a kgsm process spawn per instance, far too expensive for the roster refresh that
+  serves `GET /servers`. It runs on its own relaxed `KGSM_API_BACKUP_SCAN_POLL_MS` cadence (default 5min,
+  floor 30s), and the kgsm `instance_backup_created`/`instance_backup_restored` event echo re-scans the
+  one affected instance immediately — so an operator sees their own backup land, and a backup taken
+  straight from the CLI lands just as promptly. A failed read keeps the prior reading; the id set comes
+  from `InstanceCache.Roster`.
+
+- **`backupCount: 0` is a measured zero; `null` is "not scanned yet".** The two are deliberately
+  distinct: kgsm-lib's `GetBackupsDetailed` collapses a failed read and an empty store into the same
+  empty list, so the cache reads the id-only `GetBackups` first (whose exit code carries that signal)
+  and only spends a second spawn on the manifests when there is something to read. A surface may only
+  say "no backups yet" for the measured zero.
+
 ### Added — the server note
 
 - **`GET/PUT/DELETE /servers/{id}/note`** — the operator-authored note on a game server (mods, rules, a

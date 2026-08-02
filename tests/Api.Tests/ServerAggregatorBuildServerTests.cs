@@ -19,13 +19,14 @@ public sealed class ServerAggregatorBuildServerTests
     private static readonly Instance TestInstance = new() { Name = "factorio-1", BlueprintFile = "factorio.bp.yaml" };
     private static readonly Dictionary<string, Snap.ServerMetrics> NoMetrics = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, UpdateReading> NoUpdateReadings = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, BackupReading> NoBackupReadings = new(StringComparer.Ordinal);
 
     [Fact]
     public void MeasuredUp_NotLatched_IsRunning()
     {
         var statuses = Up("factorio-1");
 
-        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoMetrics, "host-1",
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: _ => false);
 
         Assert.Equal(ServerStatus.Running, s.Status);
@@ -36,7 +37,7 @@ public sealed class ServerAggregatorBuildServerTests
     {
         var statuses = Up("factorio-1");
 
-        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoMetrics, "host-1",
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: id => id == "factorio-1");
 
         Assert.Equal(ServerStatus.Starting, s.Status);
@@ -50,7 +51,7 @@ public sealed class ServerAggregatorBuildServerTests
         // trusts a stale/inconsistent latch over an honest "down" reading).
         var statuses = Down("factorio-1");
 
-        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoMetrics, "host-1",
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: _ => true);
 
         Assert.Equal(ServerStatus.Stopped, s.Status);
@@ -64,7 +65,7 @@ public sealed class ServerAggregatorBuildServerTests
             ["factorio-1"] = Reading<InstanceRuntimeStatus>.Unavailable("requires regeneration"),
         };
 
-        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoMetrics, "host-1",
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: _ => true);
 
         Assert.Equal(ServerStatus.Unknown, s.Status);
@@ -74,7 +75,7 @@ public sealed class ServerAggregatorBuildServerTests
     public void MissingFromStatuses_IsUnknown()
     {
         Server s = ServerAggregator.BuildServer("factorio-1", TestInstance,
-            new Dictionary<string, Reading<InstanceRuntimeStatus>>(), NoUpdateReadings, NoMetrics, "host-1",
+            new Dictionary<string, Reading<InstanceRuntimeStatus>>(), NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: _ => false);
 
         Assert.Equal(ServerStatus.Unknown, s.Status);
@@ -92,9 +93,9 @@ public sealed class ServerAggregatorBuildServerTests
         };
         var i2 = new Instance { Name = "factorio-2", BlueprintFile = "factorio.bp.yaml" };
 
-        Server s1 = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoMetrics, "host-1",
+        Server s1 = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: id => id == "factorio-1");
-        Server s2 = ServerAggregator.BuildServer("factorio-2", i2, statuses, NoUpdateReadings, NoMetrics, "host-1",
+        Server s2 = ServerAggregator.BuildServer("factorio-2", i2, statuses, NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: id => id == "factorio-1");
 
         Assert.Equal(ServerStatus.Starting, s1.Status);
@@ -110,7 +111,7 @@ public sealed class ServerAggregatorBuildServerTests
         // honest-null triple — never a fabricated false/"no update".
         var statuses = Up("factorio-1");
 
-        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoMetrics, "host-1",
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: _ => false);
 
         Assert.Null(s.UpdateAvailable);
@@ -128,7 +129,7 @@ public sealed class ServerAggregatorBuildServerTests
             ["factorio-1"] = new(true, "1.4.2", now),
         };
 
-        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, updates, NoMetrics, "host-1",
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, updates, NoBackupReadings, NoMetrics, "host-1",
             isStarting: _ => false);
 
         Assert.True(s.UpdateAvailable);
@@ -148,7 +149,7 @@ public sealed class ServerAggregatorBuildServerTests
             ["factorio-1"] = new(false, null, now),
         };
 
-        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, updates, NoMetrics, "host-1",
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, updates, NoBackupReadings, NoMetrics, "host-1",
             isStarting: _ => false);
 
         Assert.False(s.UpdateAvailable);
@@ -172,7 +173,7 @@ public sealed class ServerAggregatorBuildServerTests
                      new PortMapping { Start = 27015, End = 27015, Protocol = "tcp" }],
         };
 
-        Server s = ServerAggregator.BuildServer("factorio-1", i, statuses, NoUpdateReadings, NoMetrics, "host-1",
+        Server s = ServerAggregator.BuildServer("factorio-1", i, statuses, NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: _ => false);
 
         Assert.Equal(34197, s.ConnectPort);
@@ -189,7 +190,7 @@ public sealed class ServerAggregatorBuildServerTests
             Ports = [new PortMapping { Start = 27015, End = 27020, Protocol = "udp" }],
         };
 
-        Server s = ServerAggregator.BuildServer("factorio-1", i, statuses, NoUpdateReadings, NoMetrics, "host-1",
+        Server s = ServerAggregator.BuildServer("factorio-1", i, statuses, NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: _ => false);
 
         Assert.Equal(27015, s.ConnectPort);
@@ -201,7 +202,7 @@ public sealed class ServerAggregatorBuildServerTests
         // TestInstance declares no ports — honest null, never a 0 or a guessed game default.
         var statuses = Up("factorio-1");
 
-        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoMetrics, "host-1",
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: _ => false);
 
         Assert.Null(s.ConnectPort);
@@ -221,10 +222,80 @@ public sealed class ServerAggregatorBuildServerTests
                      new PortMapping { Start = 34197, End = 34197, Protocol = "udp" }],
         };
 
-        Server s = ServerAggregator.BuildServer("factorio-1", i, statuses, NoUpdateReadings, NoMetrics, "host-1",
+        Server s = ServerAggregator.BuildServer("factorio-1", i, statuses, NoUpdateReadings, NoBackupReadings, NoMetrics, "host-1",
             isStarting: _ => false);
 
         Assert.Equal(34197, s.ConnectPort);
+    }
+
+    [Fact]
+    public void NoBackupReading_BothFieldsNull_NotScannedIsNotZeroBackups()
+    {
+        // The cold-cache case. "We have not looked yet" must NOT render as "this server has no backups" —
+        // a null count is what lets a surface say "unknown" instead of claiming a measured zero.
+        var statuses = Up("factorio-1");
+
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings,
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false);
+
+        Assert.Null(s.LastBackup);
+        Assert.Null(s.BackupCount);
+    }
+
+    [Fact]
+    public void MeasuredZeroBackups_CountIsZero_NotNull()
+    {
+        // The engine was read and honestly reported no backups. That is a measured zero, and it must be
+        // distinguishable from the cold-cache case above — this is the whole reason BackupCount exists.
+        var statuses = Up("factorio-1");
+        var backups = new Dictionary<string, BackupReading> { ["factorio-1"] = new(null, 0) };
+
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings,
+            backups, NoMetrics, "host-1", isStarting: _ => false);
+
+        Assert.Null(s.LastBackup);
+        Assert.Equal(0, s.BackupCount);
+    }
+
+    [Fact]
+    public void LatestBackup_CarriesTheWholeManifestRecord()
+    {
+        var statuses = Up("factorio-1");
+        var taken = DateTimeOffset.UtcNow.AddHours(-3);
+        var latest = new ServerBackup("factorio-1-20260802T200543Z-7f7e04", taken, "1.4.1",
+            SizeBytes: 4096, FileCount: 12, Compressed: true, Consistency: "cold",
+            Sources: ["install", "saves"], Sha256: "abc123");
+        var backups = new Dictionary<string, BackupReading> { ["factorio-1"] = new(latest, 3) };
+
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings,
+            backups, NoMetrics, "host-1", isStarting: _ => false);
+
+        Assert.Equal(3, s.BackupCount);
+        Assert.NotNull(s.LastBackup);
+        Assert.Equal("factorio-1-20260802T200543Z-7f7e04", s.LastBackup!.Name);
+        Assert.Equal(taken, s.LastBackup.CreatedAt);
+        Assert.Equal("1.4.1", s.LastBackup.Version);
+        Assert.Equal(4096, s.LastBackup.SizeBytes);
+        Assert.Equal("cold", s.LastBackup.Consistency);
+        Assert.Equal(["install", "saves"], s.LastBackup.Sources!);
+    }
+
+    [Fact]
+    public void BackupsAreIndependentOfRunStateAndMetrics()
+    {
+        // A stopped server with no metrics row still holds whatever backups it holds. Backup standing is
+        // its own axis — never inferred from, or suppressed by, run-state or metric presence.
+        var statuses = Down("factorio-1");
+        var latest = new ServerBackup("factorio-1-20260802T200543Z-7f7e04", DateTimeOffset.UtcNow.AddDays(-1));
+        var backups = new Dictionary<string, BackupReading> { ["factorio-1"] = new(latest, 1) };
+
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoUpdateReadings,
+            backups, NoMetrics, "host-1", isStarting: _ => false);
+
+        Assert.Equal(ServerStatus.Stopped, s.Status);
+        Assert.Null(s.Metrics);
+        Assert.Equal(1, s.BackupCount);
+        Assert.NotNull(s.LastBackup);
     }
 
     // --- helpers -----------------------------------------------------------------------------------

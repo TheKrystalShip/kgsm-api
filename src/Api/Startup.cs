@@ -183,6 +183,15 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<UpdateCheckCache>();
         services.AddHostedService(sp => sp.GetRequiredService<UpdateCheckCache>());
 
+        // Backup cache: each instance's newest snapshot + how many it holds, populating the
+        // Server.LastBackup/BackupCount contract fields. Listing backups is a kgsm process spawn per
+        // instance, so like the update check it runs on its own relaxed BackupScanPollMs cadence rather than
+        // on the roster refresh; the kgsm backup created/restored event echo refreshes the one affected
+        // instance immediately so an operator sees their own backup land. Reads InstanceCache.Roster for the
+        // authoritative id set, and both fields are honest-null until the first scan completes.
+        services.AddSingleton<BackupCache>();
+        services.AddHostedService(sp => sp.GetRequiredService<BackupCache>());
+
         // M8·a — the installable-game catalog (GET /library). A blueprint scrape via kgsm-lib
         // IBlueprintService (resolved per-request, degrading to an empty catalog (logged once) when the engine
         // is unconfigured — the engine-is-base posture as ServerAggregator), joined with this host's cached

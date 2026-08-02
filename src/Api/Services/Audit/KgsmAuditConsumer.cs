@@ -41,6 +41,7 @@ public sealed class KgsmAuditConsumer(
     InstanceCache instanceCache,
     Services.Library.BlueprintCache blueprintCache,
     Aggregation.UpdateCheckCache updateCheckCache,
+    Aggregation.BackupCache backupCache,
     ApiOptions options,
     StreamHub hub,
     JobRegistry jobRegistry,
@@ -189,13 +190,23 @@ public sealed class KgsmAuditConsumer(
                 Meta(("blueprint", d.Blueprint)));
         });
 
-        // backup.* — source + version of the snapshot.
+        // backup.* — source + version of the snapshot. Both also re-scan that ONE instance's backups, so
+        // server.lastBackup/backupCount reflect the change within a tick instead of waiting out the scan
+        // cadence. This is what makes an operator see their own backup land, and it covers a backup taken
+        // straight from the CLI just as well, since the trigger is the engine's event rather than our own
+        // command path. Fire-and-forget: the scan must never delay or fail the audit push.
         events.RegisterHandler<InstanceBackupCreatedData>(d =>
-            WriteServer(d, AuditAction.BackupCreate, AuditSeverity.Success, "backed up",
-                Meta(("source", d.Source), ("version", d.Version))));
+        {
+            RefreshBackupsOf(d.InstanceName);
+            return WriteServer(d, AuditAction.BackupCreate, AuditSeverity.Success, "backed up",
+                Meta(("source", d.Source), ("version", d.Version)));
+        });
         events.RegisterHandler<InstanceBackupRestoredData>(d =>
-            WriteServer(d, AuditAction.BackupRestore, AuditSeverity.Success, "restored backup for",
-                Meta(("source", d.Source), ("version", d.Version))));
+        {
+            RefreshBackupsOf(d.InstanceName);
+            return WriteServer(d, AuditAction.BackupRestore, AuditSeverity.Success, "restored backup for",
+                Meta(("source", d.Source), ("version", d.Version)));
+        });
 
         // server.crash — the resident supervisor's autonomous signals (kgsm-watchdog, kgsm-lib 1.9.0),
         // both stamped Actor/Origin = "system" upstream. Per-event policy (action/severity/summary/meta)
@@ -349,6 +360,26 @@ public sealed class KgsmAuditConsumer(
                 new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, patched));
         }
         return Task.CompletedTask;
+    }
+
+    // Re-scan one instance's backups off the event path. Deliberately fire-and-forget: the scan spawns a
+    // kgsm process, and the audit push must not wait on it — nor fail if it fails, since the cache keeps
+    // its prior reading and the next scheduled scan corrects it either way.
+    private void RefreshBackupsOf(string? instanceName)
+    {
+        if (string.IsNullOrWhiteSpace(instanceName)) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await backupCache.RefreshInstanceAsync(instanceName, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "post-backup rescan for {Instance} failed; the scheduled scan will correct it.",
+                    instanceName);
+            }
+        });
     }
 
     private Task WriteServer(

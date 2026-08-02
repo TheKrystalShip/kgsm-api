@@ -258,6 +258,17 @@ public sealed class ApiOptions
     /// </summary>
     public bool UpdateCheckDisabled { get; init; }
 
+    /// <summary>
+    /// How often the always-on <see cref="Services.Aggregation.BackupCache"/> re-scans each instance's
+    /// backups (<c>KGSM_API_BACKUP_SCAN_POLL_MS</c>, default 300000 = 5min, floor 30000 = 30s). Listing
+    /// backups is a kgsm process spawn per instance, so it cannot ride the roster refresh that serves
+    /// <c>GET /servers</c>; this relaxed cadence carries the steady state while the kgsm
+    /// <c>instance_backup_created</c>/<c>instance_backup_restored</c> event echo refreshes the one affected
+    /// instance immediately, which is the case that actually needs to be prompt. A failed read keeps the
+    /// prior reading (never wipes); the fields start honest-null until the first scan completes.
+    /// </summary>
+    public int BackupScanPollMs { get; init; } = 300_000;
+
     // Metrics history is owned by kgsm-monitor now (the API relays GET /metrics/history verbatim);
     // no history persistence config lives here.
 
@@ -689,6 +700,7 @@ public sealed class ApiOptions
             // 1min floor): the per-game upstream API hit makes it the slowest surface, so it runs on its own
             // dedicated cadence — independent of the fast-mode 60s instance cache. NOT subscriber-gated.
             UpdateCheckPollMs = Math.Max(60_000, IntOr(configuration["KGSM_API_UPDATE_CHECK_POLL_MS"], 600_000)),
+            BackupScanPollMs = Math.Max(30_000, IntOr(configuration["KGSM_API_BACKUP_SCAN_POLL_MS"], 300_000)),
             // Kill-switch for the always-on update-check probe. Off by default; set to inert it (a test harness,
             // an offline smoke) so the slow probe never fires and the update fields stay honest-null.
             UpdateCheckDisabled = Flag(configuration["KGSM_API_UPDATE_CHECK_DISABLED"]),

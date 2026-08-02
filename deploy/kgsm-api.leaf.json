@@ -317,6 +317,18 @@
       "risk": "safe"
     },
     {
+      "key": "backupScanPollMs",
+      "env": "KGSM_API_BACKUP_SCAN_POLL_MS",
+      "label": "Backup scan interval",
+      "description": "How often each server's backups are re-scanned for the panel's backup KPIs. A backup taken or restored through KGSM refreshes that server immediately, so this only bounds how quickly other changes are noticed.",
+      "group": "polling",
+      "type": "int",
+      "default": "300000",
+      "min": 30000,
+      "unit": "ms",
+      "risk": "safe"
+    },
+    {
       "key": "updateCheckDisabled",
       "env": "KGSM_API_UPDATE_CHECK_DISABLED",
       "label": "Disable update checks",

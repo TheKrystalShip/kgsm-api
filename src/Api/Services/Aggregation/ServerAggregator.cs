@@ -30,6 +30,7 @@ public sealed class ServerAggregator
     private readonly RawgStore _rawg;
     private readonly InstanceCache _cache;
     private readonly UpdateCheckCache _updateChecks;
+    private readonly BackupCache _backups;
     private readonly ILogger<ServerAggregator> _logger;
 
     public ServerAggregator(
@@ -39,6 +40,7 @@ public sealed class ServerAggregator
         RawgStore rawg,
         InstanceCache cache,
         UpdateCheckCache updateChecks,
+        BackupCache backups,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
@@ -47,6 +49,7 @@ public sealed class ServerAggregator
         _rawg = rawg;
         _cache = cache;
         _updateChecks = updateChecks;
+        _backups = backups;
         _logger = logger;
     }
 
@@ -67,7 +70,8 @@ public sealed class ServerAggregator
         Task<Snap.Snapshot?> snapshotTask = _monitor.GetLatestAsync(ct);
         await snapshotTask.ConfigureAwait(false);
 
-        IReadOnlyList<Server> servers = Join(_cache.Roster, _cache.Statuses, _updateChecks.Readings, snapshotTask.Result);
+        IReadOnlyList<Server> servers = Join(
+            _cache.Roster, _cache.Statuses, _updateChecks.Readings, _backups.Readings, snapshotTask.Result);
         return new ServersRead(true, servers);
     }
 
@@ -106,7 +110,8 @@ public sealed class ServerAggregator
         await snapshotTask.ConfigureAwait(false);
 
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshotTask.Result);
-        Server server = BuildServer(id, instance, _cache.Statuses, _updateChecks.Readings, metricsById, _options.HostId, _cache.IsStarting);
+        Server server = BuildServer(id, instance, _cache.Statuses, _updateChecks.Readings, _backups.Readings,
+            metricsById, _options.HostId, _cache.IsStarting);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -155,13 +160,15 @@ public sealed class ServerAggregator
         IReadOnlyDictionary<string, Instance> roster,
         IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> statuses,
         IReadOnlyDictionary<string, UpdateReading> updateReadings,
+        IReadOnlyDictionary<string, BackupReading> backupReadings,
         Snap.Snapshot? snapshot)
     {
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshot);
 
         var servers = new List<Server>(roster.Count);
         foreach ((string id, Instance instance) in roster)
-            servers.Add(BuildServer(id, instance, statuses, updateReadings, metricsById, _options.HostId, _cache.IsStarting));
+            servers.Add(BuildServer(id, instance, statuses, updateReadings, backupReadings, metricsById,
+                _options.HostId, _cache.IsStarting));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -190,6 +197,7 @@ public sealed class ServerAggregator
         Instance instance,
         IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> statuses,
         IReadOnlyDictionary<string, UpdateReading> updateReadings,
+        IReadOnlyDictionary<string, BackupReading> backupReadings,
         IReadOnlyDictionary<string, Snap.ServerMetrics> metricsById,
         string hostId,
         Func<string, bool> isStarting)
@@ -235,6 +243,13 @@ public sealed class ServerAggregator
             ? MetricsMapping.ToServerMetrics(m)
             : null;
 
+        // Backup standing is independent of run-state and of the metrics row — an instance that is stopped,
+        // or that the monitor has no sample for, still has whatever backups it has. A missing entry is the
+        // honest "not scanned yet" (both fields null), never a claim that there are none.
+        BackupReading backups = backupReadings.TryGetValue(id, out BackupReading? br)
+            ? br
+            : BackupReading.Unknown;
+
         return new Server(
             Id: id,
             Name: string.IsNullOrWhiteSpace(instance.Name) ? id : instance.Name,
@@ -252,7 +267,9 @@ public sealed class ServerAggregator
             UpdateCheckedAt: updateCheckedAt,
             StartedAt: startedAt,
             ConnectPort: ConnectPortOf(instance.Ports),
-            Note: NoteOf(instance));
+            Note: NoteOf(instance),
+            LastBackup: backups.Latest,
+            BackupCount: backups.Count);
     }
 
     // The operator-authored note, or null when the instance has no note. kgsm-lib decodes the body

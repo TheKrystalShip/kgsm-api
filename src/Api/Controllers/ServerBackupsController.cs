@@ -72,17 +72,8 @@ public sealed class ServerBackupsController(
 
         IReadOnlyList<ServerBackup> backups = ids
             .Select(backupId => detail.TryGetValue(backupId, out InstanceBackup? m)
-                ? new ServerBackup(
-                    backupId,
-                    m.CreatedAt,
-                    m.Version,
-                    m.SizeBytes,
-                    m.FileCount,
-                    m.Compressed,
-                    m.Consistency,
-                    m.Sources.Count == 0 ? null : m.Sources,
-                    m.Sha256)
-                : new ServerBackup(backupId))
+                ? ServerBackupMapping.FromManifest(m)
+                : ServerBackupMapping.IdOnly(backupId))
             .ToArray();
 
         return Ok(new ServerBackupList(id, backups));

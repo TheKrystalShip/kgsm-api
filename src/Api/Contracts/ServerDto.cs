@@ -125,7 +125,24 @@ public sealed record Server(
     // dashboard tile renders it, so a list row must carry it without a detail fetch, and an edit in one
     // browser must reach another without a refresh. Null when the instance has no note — the honest
     // "nothing written", which is what makes the SPA hide the card for a non-operator.
-    ServerNote? Note = null);
+    ServerNote? Note = null,
+    // This instance's most recent backup, as its own manifest records it — the same ServerBackup shape the
+    // GET /servers/{id}/backups listing serves, through the same mapper, so a backup described on a server
+    // card and in the list cannot disagree. Carried in full rather than as a bare timestamp because the
+    // facts a surface needs to be honest about a snapshot (what it captured, how big it is, which version,
+    // whether it is an archive) all live on the manifest; a surface renders the fields the manifest
+    // actually carried and omits the rest. Sourced from BackupCache, and like Note it rides the list, the
+    // detail AND the `servers` stream, because the dashboard summarizes backup freshness across the whole
+    // roster and must not need a detail fetch per server to do it.
+    //
+    // Null means EITHER "no backups" OR "not scanned yet" — BackupCount is what separates them (0 vs null).
+    // Never a fabricated timestamp for an instance the scan has not reached.
+    ServerBackup? LastBackup = null,
+    // How many backups this instance holds. 0 is a MEASURED zero (the engine was read and reported none);
+    // null is "not scanned yet" (cold cache, or the engine read failed and no prior reading exists). Keeping
+    // those apart is what lets a surface say "no backups yet" only when that is actually known, and show an
+    // honest unknown otherwise.
+    int? BackupCount = null);
 
 /// <summary>
 /// A server's operator-authored note — free text an Operator writes for players and teammates
