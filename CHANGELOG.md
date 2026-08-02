@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — scheduled backups have their own cadence
+
+- **`GET`/`PATCH /servers/{id}/settings` carry `backupSchedule`, `backupTime`, `backupDay` and
+  `nextBackupUtc`; `autoBackupOnRestart` is gone.** A backup is taken against the instance as it
+  is, so the schedule no longer needs a restart window to hang off — the guard that rejected
+  enabling auto-backup without a restart cadence is removed with it. The cadence, time and day are
+  validated on write the same way the restart schedule's are, and `nextBackupUtc` comes from the
+  scheduler leaf's status socket (null when it is absent — honest unknown, never a computed guess).
+
 ### Added — last-backup on the server DTO
 
 - **`server.lastBackup` + `server.backupCount`** — a game server now carries its newest backup's full

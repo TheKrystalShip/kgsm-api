@@ -91,8 +91,14 @@ public sealed record SchedulerInstanceStatus(
     DateTimeOffset? LastRunUtc,
     bool? LastRunOk,
     string? LastRunMessage,
-    // Phase 4 — auto-backup last-run outcome (all nullable: null when the scheduler hasn't run a backup yet
+    // Auto-backup last-run outcome (all nullable: null when the scheduler hasn't run a backup yet
     // or predates the feature). Honest unknown, never guessed.
     DateTimeOffset? LastBackupUtc = null,
     bool? LastBackupOk = null,
-    string? LastBackupMessage = null);
+    string? LastBackupMessage = null,
+    // The backup schedule, independent of the restart schedule — a backup is taken against the
+    // instance as it is, so it needs no restart window to run in.
+    string? BackupSchedule = null,
+    string? BackupTime = null,
+    string? BackupDay = null,
+    DateTimeOffset? NextBackupUtc = null);

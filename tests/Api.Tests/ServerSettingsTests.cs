@@ -94,13 +94,15 @@ public sealed class ServerSettingsTests
     }
 
     [Fact]
-    public async Task Get_returns_AutoBackupOnRestart_from_instance_config()
+    public async Task Get_returns_the_backup_schedule_from_instance_config()
     {
         HttpResponseMessage resp = await Get(_engine, AuthTier.Viewer, "factorio-backup");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-        Assert.True(doc.RootElement.GetProperty("autoBackupOnRestart").GetBoolean());
+        Assert.Equal("6h", doc.RootElement.GetProperty("backupSchedule").GetString());
+        Assert.Equal("05:00", doc.RootElement.GetProperty("backupTime").GetString());
+        Assert.Equal("wed", doc.RootElement.GetProperty("backupDay").GetString());
     }
 
     [Fact]
@@ -188,19 +190,52 @@ public sealed class ServerSettingsTests
         Assert.Equal("factorio-1", doc.RootElement.GetProperty("settings").GetProperty("serverId").GetString());
     }
 
-    // --- Phase 4 — auto-backup (autoBackupOnRestart / backupRetention) ------------------------------
+    // --- Scheduled backups (backupSchedule / backupTime / backupDay / backupRetention) -------------
 
     [Fact]
-    public async Task Patch_AutoBackupOnRestart_writes_config_key()
+    public async Task Patch_BackupSchedule_writes_config_keys()
     {
-        // A concurrently-set cadence satisfies the "auto-backup needs a schedule" guard → the write applies.
         HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1",
-            "{\"autoBackupOnRestart\":true,\"scheduledRestart\":\"daily\"}");
+            "{\"backupSchedule\":\"daily\",\"backupTime\":\"05:30\",\"backupDay\":\"fri\"}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         var applied = doc.RootElement.GetProperty("applied").EnumerateArray().Select(e => e.GetString()).ToList();
-        Assert.Contains("autoBackupOnRestart", applied);
+        Assert.Contains("backupSchedule", applied);
+        Assert.Contains("backupTime", applied);
+        Assert.Contains("backupDay", applied);
+    }
+
+    [Fact]
+    public async Task Patch_BackupSchedule_needs_no_restart_schedule()
+    {
+        // factorio-1 has no scheduled_restart at all. A backup is taken against the instance as it is,
+        // so it needs no restart window to run in and must not be gated on one.
+        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1",
+            "{\"backupSchedule\":\"6h\"}");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        var applied = doc.RootElement.GetProperty("applied").EnumerateArray().Select(e => e.GetString()).ToList();
+        Assert.Contains("backupSchedule", applied);
+    }
+
+    [Fact]
+    public async Task Patch_BackupSchedule_invalid_cadence_returns_400()
+    {
+        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1",
+            "{\"backupSchedule\":\"hourly\"}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Patch_BackupTime_invalid_returns_400()
+    {
+        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1",
+            "{\"backupTime\":\"25:00\"}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -215,15 +250,6 @@ public sealed class ServerSettingsTests
     public async Task Patch_BackupRetention_invalid_high_returns_400()
     {
         HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1", "{\"backupRetention\":101}");
-        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
-        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
-    }
-
-    [Fact]
-    public async Task Patch_AutoBackupOnRestart_true_without_cadence_returns_400()
-    {
-        // factorio-1 has no scheduled_restart and the patch supplies none → enabling auto-backup is rejected.
-        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "factorio-1", "{\"autoBackupOnRestart\":true}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -332,7 +358,9 @@ public sealed class ServerSettingsTests
                 BlueprintFile = "factorio.bp.yaml",
                 AutoUpdate = false,
                 ScheduledRestart = "daily",
-                AutoBackupOnRestart = true,
+                BackupSchedule = "6h",
+                BackupTime = "05:00",
+                BackupDay = "wed",
                 BackupRetention = 10,
                 CrashRestart = true,
                 CrashMaxRestarts = 5,
@@ -353,7 +381,7 @@ public sealed class ServerSettingsTests
             string? actor = null, string? origin = null) =>
             key is "auto_update" or "cpu_priority" or "memory_cap_mb"
                 or "scheduled_restart" or "restart_time" or "restart_day" or "timezone"
-                or "auto_backup_on_restart" or "backup_retention"
+                or "backup_schedule" or "backup_time" or "backup_day" or "backup_retention"
                 or "crash_restart" or "crash_max_restarts"
                 ? new KgsmResult(0)
                 : new KgsmResult(1, "", $"the engine refused '{key}'");

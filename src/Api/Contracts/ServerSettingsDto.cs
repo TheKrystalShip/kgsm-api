@@ -22,9 +22,13 @@ public sealed record ServerSettings(
     string? RestartDay,
     string? Timezone,
     DateTimeOffset? NextFireUtc,
-    // Phase 4 — auto-backup: config (from kgsm instance config) + last-run status (from the scheduler
-    // status socket; null when the scheduler is absent or no backup has run yet — honest unknown).
-    bool? AutoBackupOnRestart,
+    // Scheduled backups: config (from kgsm instance config) + next fire and last-run status (from the
+    // scheduler status socket; null when the scheduler is absent or no backup has run yet — honest
+    // unknown). The cadence is independent of the restart schedule; the two share only Timezone.
+    string? BackupSchedule,
+    string? BackupTime,
+    string? BackupDay,
+    DateTimeOffset? NextBackupUtc,
     int? BackupRetention,
     DateTimeOffset? LastBackupUtc,
     bool? LastBackupOk,
@@ -54,8 +58,10 @@ public sealed record ServerSettingsPatch(
     string? RestartTime,
     string? RestartDay,
     string? Timezone,
-    // Phase 4 — auto-backup config
-    bool? AutoBackupOnRestart,
+    // Scheduled backup config
+    string? BackupSchedule,
+    string? BackupTime,
+    string? BackupDay,
     int? BackupRetention,
     // Phase 6 — crash-restart policy
     bool? CrashRestart = null,

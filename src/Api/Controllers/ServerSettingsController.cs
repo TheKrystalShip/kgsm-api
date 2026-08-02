@@ -47,7 +47,8 @@ public sealed class ServerSettingsController(
             id, instance.AutoUpdate, autostart, instance.CpuPriority, instance.MemoryCapMb,
             instance.ScheduledRestart, instance.RestartTime, instance.RestartDay, instance.Timezone,
             schedStatus?.NextFireUtc,
-            instance.AutoBackupOnRestart, instance.BackupRetention,
+            instance.BackupSchedule, instance.BackupTime, instance.BackupDay,
+            schedStatus?.NextBackupUtc, instance.BackupRetention,
             schedStatus?.LastBackupUtc, schedStatus?.LastBackupOk,
             instance.CrashRestart, instance.CrashMaxRestarts));
     }
@@ -68,7 +69,8 @@ public sealed class ServerSettingsController(
             && body.CpuPriority is null && body.MemoryCapMb is null
             && body.ScheduledRestart is null && body.RestartTime is null
             && body.RestartDay is null && body.Timezone is null
-            && body.AutoBackupOnRestart is null && body.BackupRetention is null
+            && body.BackupSchedule is null && body.BackupTime is null
+            && body.BackupDay is null && body.BackupRetention is null
             && body.CrashRestart is null && body.CrashMaxRestarts is null)
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "no recognized settings fields in body");
@@ -107,7 +109,23 @@ public sealed class ServerSettingsController(
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 $"timezone '{tz}' is not a recognized IANA timezone");
 
-        // Phase 4 — auto-backup value validation (pure, no instance needed): retention is a bounded count.
+        // Scheduled-backup value validation (pure, no instance needed). The cadence mirrors the restart
+        // cadence's vocabulary but is validated separately: the two schedules are independent, and a
+        // backup is valid with no restart schedule at all.
+        if (body.BackupSchedule is { } backupCadence
+            && backupCadence.Trim().ToLowerInvariant() is not ("off" or "daily" or "weekly" or "6h"))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "backupSchedule must be one of: off, daily, weekly, 6h");
+
+        if (body.BackupTime is { Length: > 0 } btime && !IsValidHhMm(btime))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "backupTime must be HH:MM (24h)");
+
+        if (body.BackupDay is { Length: > 0 } bday
+            && bday.Trim().ToLowerInvariant() is not ("sun" or "mon" or "tue" or "wed" or "thu" or "fri" or "sat"))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "backupDay must be one of: sun, mon, tue, wed, thu, fri, sat");
+
         if (body.BackupRetention is { } retentionCheck && retentionCheck is < 1 or > 100)
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "backupRetention must be between 1 and 100");
@@ -123,19 +141,6 @@ public sealed class ServerSettingsController(
 
         if (!await ExistsAsync(id, ct).ConfigureAwait(false))
             return NotFound();
-
-        // Phase 4 — auto-backup-on-restart needs a scheduled cadence to hook onto (backup runs in the restart
-        // window). Guard here, before any write: effective cadence = the patch value if it's also being set,
-        // else the instance's current one. Reject enabling auto-backup with no/off schedule.
-        if (body.AutoBackupOnRestart == true)
-        {
-            string? effectiveCadence = body.ScheduledRestart is { } patchCadence
-                ? patchCadence.Trim().ToLowerInvariant()
-                : instances.GetInstanceInfo(id)?.ScheduledRestart;
-            if (string.IsNullOrEmpty(effectiveCadence) || effectiveCadence == "off")
-                return Error(StatusCodes.Status400BadRequest, "bad_request",
-                    "autoBackupOnRestart requires scheduledRestart to be set (not 'off')");
-        }
 
         string? actor = AuditPrincipal.ActorString(User);
         var applied = new List<string>(4);
@@ -246,12 +251,20 @@ public sealed class ServerSettingsController(
                 applied, "timezone", out IActionResult? tzErr))
             return tzErr!;
 
-        // Phase 4 — auto-backup config keys (echo-path audit, same as the schedule keys — the scheduler leaf
+        // Scheduled-backup config keys (echo-path audit, same as the schedule keys — the scheduler leaf
         // re-reads kgsm config as its source of truth, so persisting the key is the whole apply).
-        if (body.AutoBackupOnRestart is { } autoBackup && !TryApplyConfig(
-                instances, id, "auto_backup_on_restart", autoBackup ? "true" : "false", actor, origin,
-                applied, "autoBackupOnRestart", out IActionResult? abErr))
-            return abErr!;
+        if (body.BackupSchedule is { } bsched && !TryApplyConfig(
+                instances, id, "backup_schedule", bsched.Trim().ToLowerInvariant(), actor, origin,
+                applied, "backupSchedule", out IActionResult? bsErr))
+            return bsErr!;
+        if (body.BackupTime is { } bt && !TryApplyConfig(
+                instances, id, "backup_time", bt.Trim(), actor, origin,
+                applied, "backupTime", out IActionResult? btErr))
+            return btErr!;
+        if (body.BackupDay is { } bd && !TryApplyConfig(
+                instances, id, "backup_day", bd.Trim().ToLowerInvariant(), actor, origin,
+                applied, "backupDay", out IActionResult? bdErr))
+            return bdErr!;
         if (body.BackupRetention is { } retention && !TryApplyConfig(
                 instances, id, "backup_retention", retention.ToString(), actor, origin,
                 applied, "backupRetention", out IActionResult? brErr))
@@ -277,7 +290,8 @@ public sealed class ServerSettingsController(
             id, freshAutoUpdate, freshAutostart, fresh?.CpuPriority, fresh?.MemoryCapMb,
             fresh?.ScheduledRestart, fresh?.RestartTime, fresh?.RestartDay, fresh?.Timezone,
             freshSchedStatus?.NextFireUtc,
-            fresh?.AutoBackupOnRestart, fresh?.BackupRetention,
+            fresh?.BackupSchedule, fresh?.BackupTime, fresh?.BackupDay,
+            freshSchedStatus?.NextBackupUtc, fresh?.BackupRetention,
             freshSchedStatus?.LastBackupUtc, freshSchedStatus?.LastBackupOk,
             fresh?.CrashRestart, fresh?.CrashMaxRestarts);
         return Ok(new ServerSettingsApplied(applied, settings));
