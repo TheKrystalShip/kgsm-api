@@ -129,7 +129,6 @@ public class Startup(IConfiguration configuration)
             services.AddKgsmServices(new KgsmOptions
             {
                 KgsmPath = apiOptions.KgsmPath,
-                EventTransport = KgsmEventTransport.Journal,
                 EventJournalDirectory = apiOptions.KgsmJournalDir,
                 EventStartPosition = EventStartPosition.Tail
             });

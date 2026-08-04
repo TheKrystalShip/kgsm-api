@@ -53,7 +53,7 @@ public sealed class KgsmSeamResolutionTests
     {
         var services = new ServiceCollection();
         services.AddLogging(b => b.SetMinimumLevel(LogLevel.None));
-        services.AddKgsmServices("/usr/bin/kgsm", "/run/kgsm/does-not-exist.sock");
+        services.AddKgsmServices("/usr/bin/kgsm");
         services.AddTransient<IInstanceFileService, InstanceFileService>();
         services.AddTransient<IBlueprintFileService, BlueprintFileService>();
 

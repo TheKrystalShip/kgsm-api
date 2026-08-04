@@ -434,10 +434,10 @@ migrated WebSocket→SSE 2026-07-02, `sse-migration-plan.md`; frontend gate pend
   the round-trip); the no-double-write provenance contract.
 - **Coverage honesty (the live half, like M3's mutation happy path):** the **event-sourced append from a
   real kgsm event** is `tests/`-proven (mapping + the service/WS path with a seeded write) but the live
-  socket round-trip (a real `kgsm start` → an `instance_started` event → an audit row with the stamped
-  provenance) is a **trusted-host live-validate**, owed once exercised against the dev kgsm. It needs the
-  api's `KGSM_API_KGSM_SOCKET` bound first **and** that path listed in kgsm's `config_event_socket_filenames`
-  (the multi-listener model) — events emitted while the api isn't listening are not backfilled.
+  journal round-trip (a real `kgsm start` → an `instance_started` event → an audit row with the stamped
+  provenance) is a **trusted-host live-validate**. It needs only a readable `KGSM_API_KGSM_JOURNAL`; the api
+  reads at `Tail` and keeps no cursor, so events emitted while it is down are not replayed here — the
+  durable record is kgsm's journal and kgsm-monitor's index of it.
 - **Frontend gate:** `auditStore` prepends on `audit.append`; filters map to indexed columns.
 
 ### M6 — Alerts (condition-mirror) + ports  ·  `partial`
@@ -1016,9 +1016,9 @@ Keys are always present with explicit nulls so the SPA binds a stable shape.
 so it is provisioned-by-default at the AUR-packaged path (`KGSM_API_KGSM_PATH=/usr/bin/kgsm`); an
 unconfigured engine is a *misconfiguration* surfaced as an empty `/servers` + a one-time log, NOT a
 §4·b "engine" capability (there is none). `IInstanceService` is process-based (it shells `kgsm.sh`),
-so the kgsm event socket (`KGSM_API_KGSM_SOCKET`) is only a registration formality here — the event
-consumer that opens it lands at M5; the kgsm-lib singletons are lazy, so a non-existent socket never
-blocks startup. `IInstanceService` is transient, resolved per-request from the provider (the same
+so the kgsm event journal (`KGSM_API_KGSM_JOURNAL`) is only a registration formality here — the event
+consumer that reads it lands at M5; the kgsm-lib singletons are lazy, and the reader tolerates a journal
+directory that does not exist yet, so neither blocks startup. `IInstanceService` is transient, resolved per-request from the provider (the same
 optional-resolve pattern `HostAggregator` uses for the watchdog client). The two blocking kgsm-lib
 spawns (`GetAll`, `GetAllStatuses(fast:true)`) run on the thread pool concurrently with the async
 monitor scrape. `fast:true` skips the slow per-instance update-check (Version.Latest goes null — not
@@ -1369,11 +1369,11 @@ and the dev box had no stale DB; verified the `audit` table lands by `_dbcheck` 
 `GET /audit` query, not assumed from a green build.)
 
 **Socket direction (verified, not assumed).** kgsm-lib's `UnixSocketClient` **binds + listens**; kgsm
-**connects outbound** (`socat - UNIX-CONNECT:`) to push each event, and only to a socket file that already
-exists (the `config_event_socket_filenames` multi-listener list). So the api must bind its **own dedicated**
-`KGSM_API_KGSM_SOCKET` first (the listener deletes any file at its path before binding — a shared default
-could clobber another consumer's live socket; smoke uses a temp path to avoid this). Events emitted while the
-api isn't listening are not backfilled — the honest downstream-consumer boundary.
+**appends** each event to a date-named journal segment and delivers to nobody. The api tails
+`KGSM_API_KGSM_JOURNAL` — no path to bind, nothing to reserve, and no risk of clobbering another consumer's
+channel, because a file has no exclusive binding and every consumer reads the same segments. The api starts
+at the tail and keeps no cursor: it publishes and notifies rather than persisting, so a replay after restart
+would re-fire notifications for things that already happened. Durability lives in kgsm-monitor's index.
 
 **Self-validated:** `scripts/smoke.sh` → **33/33** (8 M0 + 4 M1·a + 6 M1·b + 7 M2 + 3 M3 + **2 M5** + 3 M4·a);
 the 2 M5 checks prove the `GET /audit` empty `{data:[],nextCursor:null}` page + the filter params (the table
