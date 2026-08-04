@@ -393,18 +393,25 @@ public sealed class PlayerHistoryService(
 
     /// <summary>Ban a player. Sets status to <c>banned</c>, stores the reason, and publishes
     /// a <c>players.ban</c> WS frame.</summary>
-    public void Ban(string serverId, string playerIdentity, string? reason, DateTimeOffset at)
+    /// <remarks>
+    /// <see cref="RosterPlayer.LastSeen"/> is deliberately left alone: it means when this player was
+    /// last <em>present</em>, and only a join or a leave changes that. Moderating someone who is not
+    /// connected does not make them more recently seen — and because the roster sorts on it, writing
+    /// the moment of the ban would also jump them to the top of the list for something they did not do.
+    /// The same reasoning is why this takes no timestamp at all.
+    /// </remarks>
+    public void Ban(string serverId, string playerIdentity, string? reason)
     {
         if (string.IsNullOrEmpty(serverId) || string.IsNullOrEmpty(playerIdentity)) return;
 
         // Update in-memory cache.
         if (_cache.TryGetValue(serverId, out var roster) && roster.TryGetValue(playerIdentity, out var existing))
         {
-            var banned = existing with { Status = PlayerStatus.banned, BanReason = reason, LastSeen = at };
+            var banned = existing with { Status = PlayerStatus.banned, BanReason = reason };
             roster[playerIdentity] = banned;
 
             _ = UpsertAsync(serverId, playerIdentity, existing.PlayerId, existing.PlayerName,
-                existing.PlayerAddr, PlayerStatus.banned, existing.FirstSeen, at, reason);
+                existing.PlayerAddr, PlayerStatus.banned, existing.FirstSeen, existing.LastSeen, reason);
 
             hub.Publish(StreamProtocol.PlayersTopic, StreamProtocol.PlayerEntityKey(serverId, playerIdentity),
                 new StreamMessage(StreamProtocol.PlayersTopic, StreamProtocol.PlayersBan,
@@ -484,20 +491,23 @@ public sealed class PlayerHistoryService(
     /// <summary>Lift a ban. Returns the player to <c>offline</c> and clears the reason, publishing a
     /// <c>players.ban</c> frame so a watching client sees the status change.</summary>
     /// <remarks>
-    /// The player goes to <c>offline</c>, not <c>online</c>: lifting a block permits a connection, it
-    /// does not make one. A real join event is what moves them to <c>online</c>.
+    /// <para>The player goes to <c>offline</c>, not <c>online</c>: lifting a block permits a connection,
+    /// it does not make one. A real join event is what moves them to <c>online</c>.</para>
+    /// <para><see cref="RosterPlayer.LastSeen"/> is left alone for the same reason as
+    /// <see cref="Ban"/> — presence is what that field records, and a moderation action is not a
+    /// sighting.</para>
     /// </remarks>
-    public void Unban(string serverId, string playerIdentity, DateTimeOffset at)
+    public void Unban(string serverId, string playerIdentity)
     {
         if (string.IsNullOrEmpty(serverId) || string.IsNullOrEmpty(playerIdentity)) return;
 
         if (_cache.TryGetValue(serverId, out var roster) && roster.TryGetValue(playerIdentity, out var existing))
         {
-            var lifted = existing with { Status = PlayerStatus.offline, BanReason = null, LastSeen = at };
+            var lifted = existing with { Status = PlayerStatus.offline, BanReason = null };
             roster[playerIdentity] = lifted;
 
             _ = UpsertAsync(serverId, playerIdentity, existing.PlayerId, existing.PlayerName,
-                existing.PlayerAddr, PlayerStatus.offline, existing.FirstSeen, at, banReason: null);
+                existing.PlayerAddr, PlayerStatus.offline, existing.FirstSeen, existing.LastSeen, banReason: null);
 
             hub.Publish(StreamProtocol.PlayersTopic, StreamProtocol.PlayerEntityKey(serverId, playerIdentity),
                 new StreamMessage(StreamProtocol.PlayersTopic, StreamProtocol.PlayersBan,

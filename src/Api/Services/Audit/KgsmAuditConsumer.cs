@@ -303,7 +303,7 @@ public sealed class KgsmAuditConsumer(
         {
             string? identity = history.FindIdentityByTarget(d.InstanceName, d.Target);
             if (identity is not null)
-                history.Ban(d.InstanceName, identity, reason: null, d.Timestamp ?? DateTimeOffset.UtcNow);
+                history.Ban(d.InstanceName, identity, reason: null);
 
             PublishLive(AuditMapping.FromPlayerModerationEvent(
                 d, options.HostId, AuditAction.PlayerBan, "banned"));
@@ -313,7 +313,7 @@ public sealed class KgsmAuditConsumer(
         {
             string? identity = history.FindIdentityByTarget(d.InstanceName, d.Target);
             if (identity is not null)
-                history.Unban(d.InstanceName, identity, d.Timestamp ?? DateTimeOffset.UtcNow);
+                history.Unban(d.InstanceName, identity);
 
             PublishLive(AuditMapping.FromPlayerModerationEvent(
                 d, options.HostId, AuditAction.PlayerUnban, "unbanned"));

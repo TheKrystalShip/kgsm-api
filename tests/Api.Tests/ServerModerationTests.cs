@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Core.Interfaces;
@@ -219,6 +221,34 @@ public sealed class ServerModerationTests
         Assert.Contains("not running", doc.RootElement.GetProperty("error").GetProperty("message").GetString());
 
         Engine.FailWith = null;
+        History.Reset(ByIp);
+    }
+
+    [Fact]
+    public void BanAndUnban_DoNotTouchLastSeen_OnlyPresenceDoes()
+    {
+        // lastSeen means "when this player was last PRESENT". Moderating someone who is not
+        // connected is not a sighting, and because the roster sorts on lastSeen, writing the moment
+        // of the ban would also jump them up the list for something they did not do.
+        History.Reset(ByIp);
+        var joinedAt = DateTimeOffset.UtcNow.AddHours(-3);
+        History.Join(ByIp, sessionKey: "1.2.3.4:5", id: null, name: "Stale", addr: "1.2.3.4:5", joinedAt);
+        History.Leave(ByIp, sessionKey: "1.2.3.4:5", id: null, name: "Stale", addr: "1.2.3.4:5", joinedAt);
+
+        string identity = History.GetRoster(ByIp).Single(p => p.PlayerName == "Stale").PlayerIdentity;
+        DateTimeOffset before = History.GetRoster(ByIp).Single(p => p.PlayerName == "Stale").LastSeen;
+
+        History.Ban(ByIp, identity, reason: null);
+        RosterPlayer banned = History.GetRoster(ByIp).Single(p => p.PlayerName == "Stale");
+        Assert.Equal(PlayerStatus.banned, banned.Status);
+        Assert.Equal(before, banned.LastSeen);
+
+        History.Unban(ByIp, identity);
+        RosterPlayer lifted = History.GetRoster(ByIp).Single(p => p.PlayerName == "Stale");
+        Assert.Equal(PlayerStatus.offline, lifted.Status);
+        Assert.Null(lifted.BanReason);
+        Assert.Equal(before, lifted.LastSeen);
+
         History.Reset(ByIp);
     }
 

@@ -153,11 +153,13 @@ public sealed class PlayerHistoryServiceTests
         var t0 = DateTimeOffset.UtcNow;
         history.Join("factorio-1", "sess-1", "id-1", "Heisen", null, t0);
 
-        history.Ban("factorio-1", "id-1", "griefing", t0.AddMinutes(5));
+        history.Ban("factorio-1", "id-1", "griefing");
 
         RosterPlayer p = Assert.Single(history.GetRoster("factorio-1"));
         Assert.Equal(PlayerStatus.banned, p.Status);
         Assert.Equal("griefing", p.BanReason);
+        // A ban is not a sighting: the join is still the last time this player was present.
+        Assert.Equal(t0, p.LastSeen);
     }
 
     [Fact]
