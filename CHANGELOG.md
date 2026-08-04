@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — two on-disk test fixtures for contracts an in-memory fake can't see
+
+Both cover behaviour kgsm-web's live smoke used to prove by writing to the real host, which put a
+permanent row in the operator's audit log on every run. They belong here anyway: each is this API's
+contract, not the SPA's.
+
+- **`ServerNoteRoundTripTests`** — the note's storage trip through a **real bash-sourced**
+  `.config.ini`. `ServerNoteTests` records note writes into memory, so it cannot see the one bug
+  class that matters in that position: a body carrying `"`, `$`, a backtick or a newline is inert
+  only because it is base64. The fake `IInstanceService` here writes `key="value"` into a real file
+  and reads it back by sourcing it, over seven hostile bodies, on both the detail and list-DTO paths.
+  A final test writes one body unencoded to show the mangling the encoding prevents (variable
+  expansion, never command substitution).
+- **`AuditJournalRelayTests`** — a line appended to a temp event journal reaching a subscribed client
+  on the `audit` SSE topic, with the engine's actor and origin intact. `AuditTests` starts at
+  `AuditService`; everything upstream of it — the journal tail, kgsm-lib's reader, the consumer's
+  typed handler, the mapping — had no coverage. It also locks the no-double-write half: the event is
+  published live but never persisted as a local row.
+
+Both fixtures are temp directories/files. The engine's real journal is one shared host-wide file that
+every kgsm-api on the box reads, so a test writing to it would land permanently in the operator's
+audit log.
+
 ### Added — player moderation
 
 - **`POST /servers/{id}/players/{playerIdentity}/kick|ban|unban`** (operator-gated). Requires
