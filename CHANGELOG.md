@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — configuration is typed, and the settings file declares all of it
+
+**This deploy renames every environment variable the API reads, and changes what the boolean knobs
+accept.** A host carrying the old names loses those overrides silently and falls back to the settings
+file — which for this service means losing the TLS bind address, the signing key and the Discord
+credentials, so update `/etc/kgsm-api/kgsm-api.env` in the same step. The Control Panel needs no
+change: the descriptor's `key` values are untouched, so a stored override keeps working.
+
+The rename is mechanical: `KGSM_API_<THING>` becomes `Api__<PropertyName>`, spelled exactly as the
+property on `ApiSettings` — `KGSM_API_DOMAIN_POLL_MS` → `Api__DomainPollMs`,
+`KGSM_API_AUTH_SIGNING_KEY` → `Api__SigningKey`, `KGSM_API_DB` → `Api__DbPath`. The full table is
+`src/Api/kgsm-api.settings.json`, which is now the only place the surface is written down.
+
+- **`kgsm-api.settings.json` replaces `appsettings.json`** and declares the whole configurable
+  surface — 69 keys under one `Api` section, each with its default, plus the framework's own
+  `Kestrel`/`Logging` sections. An environment variable overrides one key of it by spelling that
+  key's path with `__`. There is no longer a set of variable names that only the code knows: a name
+  not in that file binds to nothing.
+- **`ApiSettings` binds it in one step and `ApiOptions.FromSettings` is the only interpreter.**
+  `ApiOptions` no longer reads `IConfiguration` at all, and neither does anything else: `Startup`'s
+  two remaining string lookups (the DB path and the CORS allowlist) now come off the resolved
+  options, which also means both are declared, described and checkable like every other knob.
+- **The boolean knobs take `true`/`false` only.** The hand-rolled parser also accepted `1`, `0`,
+  `yes` and `on`; typed binding refuses them with a startup error naming the key. The Control Panel
+  writes `true`/`false`, so nothing on that path is affected, but `scripts/` and the docs said `=1`
+  and now say `=true` — notably `set-api-auth.sh on`, which wrote `=0` and would otherwise have
+  failed the API's next start.
+- **Every number and flag is nullable, so a knob written blank means unset.** Binding a blank value
+  to a non-nullable `int` throws, which would make one stray `Api__DomainPollMs=` line a startup
+  crash for a service that terminates TLS for the whole panel; a null one binds to `0`/`false`,
+  silently discarding the coded default. Strings stay nullable for a different reason: null and empty
+  are genuinely different here — absent means "use the default", present-but-blank means
+  "deliberately off", which is how a leaf endpoint declares its capability `absent`.
+- **`ResolvedByEnvName` spells its cases from the property names**, so a rename moves the case label
+  with the property instead of leaving a string that resolves to nothing. The sibling leaves'
+  `pairedApiKey` values move with it, in `kgsm-monitor`, `kgsm-watchdog`, `kgsm-scheduler`,
+  `kgsm-firewall` and `kgsm-llm`.
+- **The settings files are read from beside the binary**, by absolute path, and the environment is
+  re-registered after them so it still wins — appending a file to the sources `CreateDefaultBuilder`
+  installed would otherwise put it ahead of that builder's own environment provider.
+- **The seven dead `KGSM_API_METRICS_*` history keys are gone.** Nothing has read them since
+  kgsm-monitor took ownership of metrics history and this API became a verbatim proxy; they sat in
+  `appsettings.json` looking like configuration. `scripts/dev.sh`'s `KGSM_API_KGSM_SOCKET` goes with
+  them — dead since the socket event transport was removed.
+
+### Fixed — the Control Panel showed two defaults this API does not use
+- **`bindAddress` and `steamCdnBase` had drifted in the descriptor**, advertising
+  `http://localhost:8080` and a `cdn.cloudflare.steamstatic.com` base the code stopped using. Every
+  descriptor default is now checked against the settings file's declared value, so the two can no
+  longer disagree.
+- **`floorSources` declares the settings file first.** The list is lowest-precedence-first and the
+  settings file is the base the environment overrides; listed last, it would outrank the unit and
+  report the file's defaults as the deployed values.
+
+### Added
+- **The coverage test pins a chain of three**, in both directions at every link: a property on
+  `ApiSettings`, a key in the settings file, a field in the descriptor. It also fails the build if
+  `deploy/kgsm-api.env.example` sets a key the settings file never declared — an operator setting a
+  key that binds to nothing is the exact silent failure this arrangement exists to prevent.
+
+### Security
+- **Secrets are declared blank in the committed settings file and set only in
+  `/etc/kgsm-api/kgsm-api.env`.** The local `kgsm-api.settings.Development.json` may still hold real
+  dev credentials — it is gitignored, and the csproj keeps it out of the publish tree so a deploy
+  cannot copy it onto a host.
+
 ### Changed — kgsm-lib 2.0.0 (the socket event transport is gone)
 - **Pinned to `TheKrystalShip.KGSM.Lib` 2.0.0**, which removes `UnixSocketClient`,
   `KgsmEventTransport` and `KgsmOptions.SocketPath`/`EventTransport`. This service already read the
@@ -15,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed — engine events come from the journal, not a socket
 
-- **`KGSM_API_KGSM_JOURNAL` replaces `KGSM_API_KGSM_SOCKET`.** The audit consumer tails the
+- **`Api__KgsmJournalDir` replaces `KGSM_API_KGSM_SOCKET`.** The audit consumer tails the
   engine's append-only event journal instead of binding a socket for the engine to connect to.
   The API no longer owns a path anything else could collide with, and the engine no longer has
   to be configured with this consumer's existence — a journal is a file that any number of
@@ -49,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`BackupCache`** — the always-on scan behind those fields, beside `InstanceCache`/`UpdateCheckCache`:
   listing backups is a kgsm process spawn per instance, far too expensive for the roster refresh that
-  serves `GET /servers`. It runs on its own relaxed `KGSM_API_BACKUP_SCAN_POLL_MS` cadence (default 5min,
+  serves `GET /servers`. It runs on its own relaxed `Api__BackupScanPollMs` cadence (default 5min,
   floor 30s), and the kgsm `instance_backup_created`/`instance_backup_restored` event echo re-scans the
   one affected instance immediately — so an operator sees their own backup land, and a backup taken
   straight from the CLI lands just as promptly. A failed read keeps the prior reading; the id set comes
@@ -122,7 +188,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added — the leaf config surface comes from the leaves
 - **Each leaf declares its own configurable surface** in a descriptor its `deploy.sh` installs into
-  `/var/lib/kgsm/leaves/` (`KGSM_API_LEAF_DESCRIPTOR_DIR`). `LeafDescriptorStore` **scans that
+  `/var/lib/kgsm/leaves/` (`Api__LeafDescriptorDir`). `LeafDescriptorStore` **scans that
   directory** — this API holds no list of leaves, so a leaf that joins the ecosystem later becomes
   configurable and appears on the Services board with no rebuild here. A malformed or
   unknown-`schemaVersion` descriptor is skipped with a logged reason (once per file revision), never
@@ -142,7 +208,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`GET .../config` also carries** `groups`, per-field `risk`/`unit`/`min`/`max`/`pairedApiKey`/
   `dependsOn`, `applyMode`, and `editable` + `editableReason`.
 - **Readable and editable are separate questions.** A descriptor makes a leaf's config visible;
-  editing also needs its override drop-in to exist on this host (`KGSM_API_LEAF_DROPIN_DIR`), because
+  editing also needs its override drop-in to exist on this host (`Api__LeafDropInDir`), because
   without it a write renders a file nothing reads and then fails at the restart. Such a leaf is served
   read-only with the reason, and a `PUT` is a **409** — the request is well-formed, the host is not
   wired.
@@ -208,7 +274,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assertion that fails **before building** with "run `deploy/setup.sh`" when the host is not
   provisioned.
 - **Fixed: the health check no longer false-fails on a non-default bind.** The post-deploy probe
-  resolves its URL from the configured `KGSM_API_URLS` (preferring plain HTTP, mapping `0.0.0.0` →
+  resolves its URL from the configured `Api__Urls` (preferring plain HTTP, mapping `0.0.0.0` →
   `127.0.0.1`) instead of hardcoding `:8080` — this host binds loopback `:8097`.
 - `deploy/deploy-common.sh` carries the project block plus the shared helpers, sourced by both entry
   points so they cannot drift. Canonical template and contract:
@@ -226,7 +292,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added (v0.32.0) — the update-check pipeline
 - **A dedicated always-on `UpdateCheckCache` IHostedService runs the slow (networked) fleet-wide kgsm
-  update check on its own relaxed cadence** (`KGSM_API_UPDATE_CHECK_POLL_MS`, 10-min default, 1-min floor)
+  update check on its own relaxed cadence** (`Api__UpdateCheckPollMs`, 10-min default, 1-min floor)
   and populates three `Server` DTO fields the SPA's update surfaces already consumed as null:
   `updateAvailable` (bool?, the flag that lights the "Update" chip), `latestVersion` (string?, the target
   version the chip shows as "→ `<version>`"), and `updateCheckedAt` (DateTimeOffset?, "checked N min ago"
@@ -237,7 +303,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   successful check completes after a 5s startup delay (a slow probe can take minutes — startup is never
   blocked). A failed/empty read keeps the prior snapshot; a per-instance soft failure (Checked=false, an
   Unavailable reading) keeps the last known reading for that id; an instance the probe never reached stays
-  null — never a fabricated `false` ("no update") for an unchecked instance. A `KGSM_API_UPDATE_CHECK_DISABLED`
+  null — never a fabricated `false` ("no update") for an unchecked instance. A `Api__UpdateCheckDisabled`
   kill-switch inerts the probe for a deterministic test harness / offline host.
 - **`server.patch` now carries update flips.** `DomainPump.CoreChanged` includes the three new fields so a
   flip streams to subscribed SPA clients — low-frequency (a flip per ~10min per instance), so the
@@ -266,8 +332,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on it. These are the first events whose subject is not an instance — the row targets the blueprint and its
   `serverId` is **null**, since a blueprint is the template servers are installed from, not a server.
   `meta` carries name/tier/runtime/override state, never the file content or a diff.
-- **`KGSM_API_BLUEPRINT_MAX_EDIT_BYTES`** (default 256 KiB) — its own ceiling separate from
-  `KGSM_API_FILES_MAX_EDIT_BYTES`, because a blueprint is a short hand-written YAML rather than an
+- **`Api__BlueprintMaxEditBytes`** (default 256 KiB) — its own ceiling separate from
+  `Api__FilesMaxEditBytes`, because a blueprint is a short hand-written YAML rather than an
   arbitrary game file.
 
 ### Changed (v0.31.0)
@@ -394,7 +460,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`scripts/mint-dev-token.py` mints a usable session now.** It adds the `sid`/`jti` claims and inserts
   the matching `sessions` row the M4·c registry requires (a token with no live session row is rejected
   401), so a minted dev bearer authenticates against the real auth-ON API — not just an
-  `KGSM_API_AUTH_DISABLED` host. New `--db` (defaults to `KGSM_API_DB` / env file /
+  `Api__AuthDisabled` host. New `--db` (defaults to `Api__DbPath` / env file /
   `/var/lib/kgsm-api/kgsm-api.db`) and `--no-session` (token-only) flags; the row carries a
   recognisable User-Agent so these dev sessions show in Active Sessions and are GC'd on expiry.
 - **`scripts/smoke.sh` is green against a live engine.** The audit + console checks asserted a
@@ -491,7 +557,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added (v0.22.0) — cluster membership gossip (convergence, P0.5)
 - **Masterless anti-entropy gossip** (`PLAN-peers.md §2·b`, P0.5) turns the manually-seeded mesh into
   "add one, join all" — no new service or dependency. `GossipWorker` (a `BackgroundService`, inert unless
-  `ClusterEnabled`) each `KGSM_API_CLUSTER_GOSSIP_MS` round advances the failure timers, picks one random
+  `ClusterEnabled`) each `Api__ClusterGossipMs` round advances the failure timers, picks one random
   enabled non-terminal peer, and runs a push-pull roster exchange with it.
 - **`POST /api/v1/peers/sync`** — the ephemeral roster-exchange endpoint (cluster-token authed +
   disable-list gated, same fail-closed posture as `/inbox`). Deliberately separate from the durable message
@@ -511,14 +577,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Failure detection = a last-evidence clock** (`GossipService.AdvanceFailureTimersAsync`): evidence is
   mutual — our own successful probe OR an authenticated inbound sync **from** the peer (`RecordInboundContactAsync`,
   stamped against the token's node id, never the spoofable body `From`). No evidence for
-  `KGSM_API_CLUSTER_SUSPECT_MS` → `suspect`, another window silent → `dead`, reaped after
-  `KGSM_API_CLUSTER_REAP_MS`. So a node we can't probe but that still gossips to us stays `alive` (an
+  `Api__ClusterSuspectMs` → `suspect`, another window silent → `dead`, reaped after
+  `Api__ClusterReapMs`. So a node we can't probe but that still gossips to us stays `alive` (an
   asymmetric partition resolves for the demonstrably-live node; the refute/re-suspect oscillation can't run
   away) — the honest first cut of the indirect-probe refinement `§2·b` G5 defers.
-- **New knobs** (`ApiOptions`, all floored, inert off-cluster): `KGSM_API_CLUSTER_ADVERTISE_URL` /
-  `_GOSSIP_URL` (the two-URL split, §2 #13a), `KGSM_API_CLUSTER_GOSSIP_MS` (5s), `KGSM_API_CLUSTER_POLL_MS`
-  (the latency poller's cadence, now configurable, 10s), `KGSM_API_CLUSTER_SUSPECT_MS` (30s),
-  `KGSM_API_CLUSTER_REAP_MS` (5 min).
+- **New knobs** (`ApiOptions`, all floored, inert off-cluster): `Api__ClusterAdvertiseUrl` /
+  `_GOSSIP_URL` (the two-URL split, §2 #13a), `Api__ClusterGossipMs` (5s), `Api__ClusterPollMs`
+  (the latency poller's cadence, now configurable, 10s), `Api__ClusterSuspectMs` (30s),
+  `Api__ClusterReapMs` (5 min).
 - **Self-validated** (§9 P0.5): `RosterMergerTests` (9 facts pin the decision table) + the in-process
   multi-node `GossipConvergenceTests` (seed A→B + B→C converges A to know C with no direct add; a silenced
   node → suspect → dead → reaped; a false-`dead`-about-self refuted via a higher incarnation; a phantom
@@ -554,7 +620,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed (v0.20.2) — quiet EF command logging
 - **`src/Api/appsettings.json`** — set `Microsoft.EntityFrameworkCore.Database.Command` to `Warning`.
   EF logs every executed SQL statement at Information; with the cluster outbox drainer running a
-  due-scan every second (once `KGSM_API_CLUSTER_SECRET` is set), that flooded journald with a
+  due-scan every second (once `Api__ClusterSecret` is set), that flooded journald with a
   full SELECT line per second. Warning keeps failures/warnings; drop back to Information transiently
   when debugging a query.
 
@@ -588,9 +654,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ListDueAsync`, `MarkDeliveredAsync`, `MarkTransientFailureAsync`, `MarkDeadAsync`, `PruneAsync`.
 - **`OutboxDrainer`** (`Services/Cluster/OutboxDrainer.cs`) — the `BackgroundService` that actually
   sends. Inert (no timer) when `ClusterEnabled` is false; a startup catch-up pass, then a
-  `PeriodicTimer` loop (`KGSM_API_CLUSTER_DRAIN_MS`, default 1s) with a per-tick swallow so one bad
+  `PeriodicTimer` loop (`Api__ClusterDrainMs`, default 1s) with a per-tick swallow so one bad
   tick never kills it. Per due row (`pending`, `NextAttemptAt<=now`, capped at 100/tick,
-  oldest-first): a TTL check first (`KGSM_API_CLUSTER_RETRY_TTL_DAYS`, default 7 — a row this old is
+  oldest-first): a TTL check first (`Api__ClusterRetryTtlDays`, default 7 — a row this old is
   dead-lettered with a loud log without ever being sent); else rebuilds the `ClusterEnvelope`
   (`from=NodeId`, `ts=CreatedAt`) and POSTs it, freshly bearer-tokened via `IClusterTokenService`, to
   `{TargetUrl}/api/v1/peers/inbox` through a named `HttpClient` (10s timeout, via
@@ -603,13 +669,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loop is correct without it, just slower to notice a recovered peer.
 - **`ClusterBusGcWorker`** (`Services/Cluster/ClusterBusGcWorker.cs`) — mirrors
   `SessionCleanupWorker` exactly (inert when `ClusterEnabled` is false, startup catch-up, then a
-  `PeriodicTimer` loop at `KGSM_API_CLUSTER_GC_MS`, default 10 min). Each pass calls
+  `PeriodicTimer` loop at `Api__ClusterGcMs`, default 10 min). Each pass calls
   `ClusterBus.PruneAsync(now - ClusterRetentionDays, now)`, deleting `delivered`/`dead` outbox rows
   and old inbox dedupe-ledger rows; a `pending` row is never pruned regardless of age.
-- **Config** (`ApiOptions` + `appsettings.json`): `KGSM_API_CLUSTER_DRAIN_MS` (default 1000, floor
-  250), `KGSM_API_CLUSTER_RETRY_TTL_DAYS` (default 7, floor 1), `KGSM_API_CLUSTER_RETENTION_DAYS`
+- **Config** (`ApiOptions` + `appsettings.json`): `Api__ClusterDrainMs` (default 1000, floor
+  250), `Api__ClusterRetryTtlDays` (default 7, floor 1), `Api__ClusterRetentionDays`
   (default 30, clamped to at least `ClusterRetryTtlDays + 1` so a late redelivery right at the TTL
-  boundary is still recognized as a duplicate rather than re-applied), `KGSM_API_CLUSTER_GC_MS`
+  boundary is still recognized as a duplicate rather than re-applied), `Api__ClusterGcMs`
   (default 600000, floor 60000). All four are non-`required` (defaulted), so the many existing
   test-built `ApiOptions` literals needed no changes.
 - **`Startup.cs`**: registers the named `cluster-outbox-drainer` `HttpClient` (10s timeout, via
@@ -630,7 +696,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added (v0.19.0) — cluster message bus receive path (Phase 2)
 - **`POST /api/v1/peers/inbox`** (`Controllers/PeersController.cs`) — the wire endpoint
   (`docs/cluster-message-bus-plan.md §4`). `[AllowAnonymous]` w.r.t. the user auth scheme (it runs
-  regardless of `KGSM_API_AUTH_DISABLED`); does its own fail-closed cluster-token auth inline. Status
+  regardless of `Api__AuthDisabled`); does its own fail-closed cluster-token auth inline. Status
   mapping: `401 invalid_cluster_token` (no/invalid bearer), `403 peer_disabled` (the `IClusterPeerGate`
   seam, below), `403 from_mismatch` (`envelope.from` ≠ the token's node id), `413 payload_too_large`
   (over 64 KiB — checked against `Content-Length` up front, then re-enforced by a hard-capped manual
@@ -668,7 +734,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token as enabled — correct under today's one-guild trust boundary; swap the registration for a
   `Peers`-table-backed implementation when that milestone lands, no controller change needed.
 - **`tests/Api.Tests/ClusterInboxTests.cs`** — boots the real pipeline with a configured
-  `KGSM_API_CLUSTER_SECRET`/`KGSM_API_NODE_ID`, mints real cluster tokens through the running
+  `Api__ClusterSecret`/`Api__NodeId`, mints real cluster tokens through the running
   `IClusterTokenService`. Covers: a valid `session.revoke` (scope `sid`) actually revoking the row and
   evicting the validator cache; no bearer → `401`; a token signed with the wrong secret → `401`; a
   `from`/token mismatch → `403`; the same envelope id delivered twice → both `200`, exactly one ledger
@@ -676,7 +742,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Not built this phase** (Phase 3): the outbox drainer, `IClusterBus.Enqueue`, and inbox/outbox GC.
 
 ### Added (v0.18.0) — cluster message bus foundation (Phase 1)
-- **`KGSM_API_CLUSTER_SECRET` / `KGSM_API_CLUSTER_SECRET_PREVIOUS` / `KGSM_API_NODE_ID`** —
+- **`Api__ClusterSecret` / `Api__ClusterSecretPrevious` / `Api__NodeId`** —
   the config keys behind the cluster service token (`docs/cluster-message-bus-plan.md`,
   `PLAN-peers.md §3`). Blank secret (the default) ⇒ `ApiOptions.ClusterEnabled` is `false` — this
   host is not part of a cluster. `NodeId` defaults to `HostId` (`PLAN-peers.md §2` #2).
@@ -699,11 +765,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added (v0.17.0) — session GC worker (M4·c Increment 8)
 - **`SessionCleanupWorker`** — a new `BackgroundService` that permanently bounds the `sessions`
-  table: on a timer (`KGSM_API_SESSIONS_GC_MS`, default 10 min, floor 60s), it bulk-deletes every
+  table: on a timer (`Api__SessionsGcMs`, default 10 min, floor 60s), it bulk-deletes every
   session row whose `Expires` has passed — **both revoked and non-revoked** (an expired row is dead
   regardless of whether it was ever revoked; the 30-day absolute cap already killed it). Runs once at
   startup as a catch-up pass (a host that was down doesn't wait a full interval to start shedding
-  rows), then on the `PeriodicTimer`. **Inert when `KGSM_API_SESSIONS_DISABLED=1`** (the master
+  rows), then on the `PeriodicTimer`. **Inert when `Api__SessionsDisabled=true`** (the master
   switch) — logs once and returns with no timer at all, matching the registry's "whole thing is
   off" posture.
 - **`SessionStore.DeleteExpiredAsync(DateTimeOffset now)`** — the new store method backing the
@@ -753,7 +819,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added (v0.14.0) — rolling refresh tokens + session revocation (M4·c Inc 4·b)
 - **Rolling (sliding) refresh window.** `POST /auth/session/refresh` now slides the session's
-  `Expires` forward to `now + KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS` (default 30d) on every
+  `Expires` forward to `now + Api__SessionsRefreshAbsoluteDays` (default 30d) on every
   successful refresh and bumps `LastSeen`. A session used at least once inside the window stays
   logged in indefinitely; an idle session still dies N days after its last use. (Supersedes the
   M4·c plan's D8 "no sliding" — user directive.)
@@ -852,7 +918,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   New `scheduler` leaf registered in `LeafCatalog` + `LeafHealthMonitor`; degrades
   gracefully when the scheduler daemon is absent (nextFireUtc null, scheduled-tasks
   card gated in the SPA). New `SchedulerClient` reads the NDJSON-over-unix-socket status
-  snapshot at `KGSM_API_SCHEDULER_SOCKET` (opt-in — blank default). kgsm-lib upgraded to 1.33.0.
+  snapshot at `Api__SchedulerSocketPath` (opt-in — blank default). kgsm-lib upgraded to 1.33.0.
 - **Settings Phase 2 — Resources.** `GET /servers/{id}/settings` now includes `cpuPriority: string|null`
   and `memoryCapMb: int|null`. `PATCH /servers/{id}/settings` accepts both fields: `cpuPriority`
   (low/normal/high — validated, live-applied via `IWatchdogClient.SetCpuPriorityAsync`, best-effort)
@@ -875,7 +941,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Blueprint catalog cached in-memory (60s TTL, background refresh).** `GET /library` no longer
   spawns a `kgsm.sh` process on every request — a singleton `BlueprintCache` serves the blueprint
   dictionary from memory, refreshed by a background `PeriodicTimer` every 60s (configurable via
-  `KGSM_API_BLUEPRINT_CACHE_TTL_SECONDS`). First request triggers an on-demand load; subsequent
+  `Api__BlueprintCacheTtlSeconds`). First request triggers an on-demand load; subsequent
   reads are instant. The `LibraryHydrationWorker` shares the same cache instead of making its own
   process spawn per sweep.
 

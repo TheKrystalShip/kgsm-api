@@ -313,7 +313,7 @@ public sealed class AlertEngineTests
 
     private static ApiOptions BuildOptions() =>
         ApiOptions.FromConfiguration(new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["KGSM_API_HOST_ID"] = "hotrod" })
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Api:HostId"] = "hotrod" })
             .Build());
 
     // A hub with no connections: Publish never serializes (no subscribers), so default JSON options suffice.

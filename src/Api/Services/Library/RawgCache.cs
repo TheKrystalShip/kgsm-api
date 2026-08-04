@@ -5,7 +5,7 @@ namespace TheKrystalShip.Api.Services.Library;
 /// readers (the serving endpoint + the aggregator URL builder) can never drift:
 /// <list type="bullet">
 ///   <item><description>the <b>on-disk file name</b> per blueprint/slot (<c>{id}_cover.jpg</c> / <c>{id}_hero.jpg</c>),</description></item>
-///   <item><description>the <b>cache directory</b> (<c>KGSM_API_RAWG_CACHE_DIR</c>, default a <c>covers/</c> dir
+///   <item><description>the <b>cache directory</b> (<c>Api__RawgCacheDir</c>, default a <c>covers/</c> dir
 ///     beside the SQLite DB),</description></item>
 ///   <item><description>the <b>route segment</b> the aggregator builds an absolute URL from and the controller serves
 ///     (<c>cover</c> / <c>hero</c>).</description></item>

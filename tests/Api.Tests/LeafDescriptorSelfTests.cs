@@ -18,29 +18,27 @@ namespace TheKrystalShip.Api.Tests;
 /// </summary>
 public class LeafDescriptorSelfTests
 {
-    private const string EnvPrefix = "KGSM_API_";
+    /// <summary>
+    /// Keys the framework resolves for us. They are settable and described, but they are not
+    /// <see cref="ApiSettings"/> properties, so the property-level checks skip them. Named by prefix
+    /// rather than allowed by a pattern over everything, so the exception cannot quietly widen.
+    /// </summary>
+    private static bool IsFrameworkKey(string key) =>
+        key.StartsWith("Logging__", StringComparison.Ordinal)
+        || key.StartsWith("Kestrel__", StringComparison.Ordinal)
+        || key.StartsWith("MetricsThresholds__", StringComparison.Ordinal)
+        || key == "AllowedHosts";
 
     /// <summary>
-    /// Real settings this API reads that are not <c>KGSM_API_*</c> literals in its source: the ecosystem
-    /// logging level, resolved through Microsoft.Extensions.Logging. Named explicitly so the exception
-    /// cannot quietly widen.
+    /// Settable keys the Control Panel deliberately does not describe. The threshold rules are an
+    /// array of objects, which an override file cannot express one key at a time, and the framework's
+    /// own plumbing is not operator configuration in the sense this panel means.
     /// </summary>
-    private static readonly HashSet<string> FrameworkKeys = new(StringComparer.Ordinal)
-    {
-        "Logging__LogLevel__Default",
-    };
-
-    /// <summary>
-    /// <c>KGSM_API_*</c> names that appear in the source but are not operator configuration, each for a
-    /// stated reason. Describing one would put a control on the panel that configures nothing.
-    /// </summary>
-    private static readonly HashSet<string> NotConfiguration = new(StringComparer.Ordinal)
-    {
-        // Prefixes, not settings: one enumerates the KGSM_API_* space, the other names a family of keys
-        // in a log line ("KGSM_API_AUTH_DISCORD_* are set"). Neither is a variable anything reads.
-        "KGSM_API_",
-        "KGSM_API_AUTH_DISCORD_",
-    };
+    private static bool IsNotPanelConfiguration(string key) =>
+        key.StartsWith("Kestrel__", StringComparison.Ordinal)
+        || key.StartsWith("MetricsThresholds__", StringComparison.Ordinal)
+        || key == "AllowedHosts"
+        || key.StartsWith("Logging__LogLevel__Microsoft", StringComparison.Ordinal);
 
     // ── Fixtures ─────────────────────────────────────────────────────────────
 
@@ -70,53 +68,185 @@ public class LeafDescriptorSelfTests
     private static string? OptionalStr(JsonElement field, string name) =>
         field.TryGetProperty(name, out JsonElement v) ? v.GetString() : null;
 
-    /// <summary>Every KGSM_API_* name that appears anywhere in this API's own source.</summary>
-    private static HashSet<string> EnvKeysInSource()
+    private static string SettingsPath() => Path.Combine(RepoRoot(), "src", "Api", "kgsm-api.settings.json");
+
+    private static JsonDocument SettingsDoc() =>
+        JsonDocument.Parse(File.ReadAllText(SettingsPath()),
+            new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
+
+    /// <summary>
+    /// Every environment variable that can set something, derived from the settings file itself by
+    /// walking it to its leaves and joining each path with <c>__</c> — exactly the spelling
+    /// configuration binds. A key absent here binds to nothing, whatever names it.
+    /// </summary>
+    private static HashSet<string> SettableEnvKeys()
     {
-        string src = Path.Combine(RepoRoot(), "src", "Api");
+        Assert.True(File.Exists(SettingsPath()), $"the settings file is missing: {SettingsPath()}");
+        using JsonDocument doc = SettingsDoc();
+
         var found = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (string file in Directory.EnumerateFiles(src, "*.cs", SearchOption.AllDirectories))
+        static void Walk(JsonElement node, string prefix, HashSet<string> into)
         {
-            if (file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
-                file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-                continue;
-
-            foreach (Match m in Regex.Matches(File.ReadAllText(file), @"KGSM_API_[A-Z0-9_]*"))
-                found.Add(m.Value);
+            foreach (JsonProperty prop in node.EnumerateObject())
+            {
+                string key = prefix.Length == 0 ? prop.Name : $"{prefix}__{prop.Name}";
+                if (prop.Value.ValueKind == JsonValueKind.Object) Walk(prop.Value, key, into);
+                else into.Add(key);
+            }
         }
+        Walk(doc.RootElement, string.Empty, found);
 
-        found.ExceptWith(NotConfiguration);
-        Assert.NotEmpty(found);
+        Assert.NotEmpty(found);   // a scan that finds nothing would pass every check below vacuously
         return found;
+    }
+
+    /// <summary>The env-var spelling of every property the API binds.</summary>
+    private static HashSet<string> SettingsPropertyKeys() =>
+        typeof(ApiSettings)
+            .GetProperties()
+            .Select(p => $"{ApiSettings.Section}__{p.Name}")
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>The declared value of one <c>Api</c> key, rendered the way a descriptor default is
+    /// (always a string), or null when it is blank — which the descriptor spells as no default.</summary>
+    private static string? DeclaredDefault(string property)
+    {
+        using JsonDocument doc = SettingsDoc();
+        JsonElement v = doc.RootElement.GetProperty(ApiSettings.Section).GetProperty(property);
+        string? text = v.ValueKind switch
+        {
+            JsonValueKind.String => v.GetString(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            JsonValueKind.Null => null,
+            _ => v.GetRawText(),
+        };
+        return string.IsNullOrWhiteSpace(text) ? null : text;
     }
 
     // ── Coverage: the descriptor and the code agree, both ways ───────────────
 
     [Fact]
-    public void Every_setting_this_api_reads_is_described()
+    public void Every_configurable_key_is_described()
     {
         var described = Fields().Select(f => Str(f, "env")).ToHashSet(StringComparer.Ordinal);
-        var missing = EnvKeysInSource().Where(k => !described.Contains(k))
+        var missing = SettableEnvKeys()
+            .Where(k => !described.Contains(k) && !IsNotPanelConfiguration(k))
             .OrderBy(k => k, StringComparer.Ordinal).ToList();
 
         Assert.True(missing.Count == 0,
-            "these settings are read by this API but not described in deploy/kgsm-api.leaf.json, so the " +
-            "Control Panel cannot show them:\n  " + string.Join("\n  ", missing));
+            "these keys are settable but not described in deploy/kgsm-api.leaf.json, so the Control Panel " +
+            "cannot show them:\n  " + string.Join("\n  ", missing));
     }
 
     [Fact]
-    public void Every_described_setting_is_real()
+    public void Every_described_key_is_really_settable()
     {
-        var inSource = EnvKeysInSource();
+        var settable = SettableEnvKeys();
         var fabricated = Fields()
             .Select(f => Str(f, "env"))
-            .Where(e => !inSource.Contains(e) && !FrameworkKeys.Contains(e))
+            .Where(e => !settable.Contains(e))
             .OrderBy(e => e, StringComparer.Ordinal)
             .ToList();
 
         Assert.True(fabricated.Count == 0,
-            "these descriptor fields name settings this API does not read:\n  " + string.Join("\n  ", fabricated));
+            "these descriptor fields name keys the settings file does not declare, so they bind to nothing — an " +
+            "override written for one would be reported as applied while changing nothing:\n  " +
+            string.Join("\n  ", fabricated));
+    }
+
+    [Fact]
+    public void Every_settings_key_binds_to_a_property()
+    {
+        var properties = SettingsPropertyKeys();
+        var unbound = SettableEnvKeys()
+            .Where(k => !IsFrameworkKey(k) && !properties.Contains(k))
+            .OrderBy(k => k, StringComparer.Ordinal).ToList();
+
+        Assert.True(unbound.Count == 0,
+            "these keys are declared in kgsm-api.settings.json but have no matching property on ApiSettings, " +
+            "so binding silently drops them:\n  " + string.Join("\n  ", unbound));
+    }
+
+    [Fact]
+    public void Every_settings_property_is_declared_in_the_file()
+    {
+        var settable = SettableEnvKeys();
+        var undeclared = SettingsPropertyKeys().Where(k => !settable.Contains(k))
+            .OrderBy(k => k, StringComparer.Ordinal).ToList();
+
+        Assert.True(undeclared.Count == 0,
+            "these ApiSettings properties are missing from kgsm-api.settings.json, which is supposed to declare " +
+            "the whole configurable surface with its defaults:\n  " + string.Join("\n  ", undeclared));
+    }
+
+    /// <summary>
+    /// The env file is where a host actually sets things, so a key in it that the settings file does
+    /// not declare is a knob an operator believes they set and that binds to nothing — the exact
+    /// silent failure this whole arrangement exists to make impossible. Checked against the shipped
+    /// example, which is the file <c>setup.sh</c> seeds a fresh host from.
+    /// </summary>
+    [Fact]
+    public void The_env_example_sets_no_key_the_settings_file_does_not_declare()
+    {
+        string path = Path.Combine(RepoRoot(), "deploy", "kgsm-api.env.example");
+        Assert.True(File.Exists(path), $"the env example is missing: {path}");
+
+        var settable = SettableEnvKeys();
+        var unknown = new List<string>();
+        foreach (string line in File.ReadAllLines(path))
+        {
+            string t = line.Trim();
+            // A commented line is documentation, not configuration — but the ones written as
+            // "#Key=value" are meant to be uncommented, so they are checked too.
+            if (t.Length == 0) continue;
+            if (t.StartsWith('#')) t = t[1..].TrimStart();
+
+            int eq = t.IndexOf('=');
+            if (eq <= 0) continue;
+
+            // An EnvironmentFile assignment has no space around the '=', so a commented sentence that
+            // happens to contain one ("# Cert = Let's Encrypt via certbot") is prose, not a setting.
+            string key = t[..eq];
+            if (key.Length == 0 || char.IsWhiteSpace(key[^1]) || key.Contains(' ')) continue;
+
+            // Host/runtime variables, read by the .NET host itself before any of our configuration
+            // exists. They are real settings, just not ours to declare.
+            if (key is "ASPNETCORE_ENVIRONMENT" or "DOTNET_ENVIRONMENT") continue;
+            if (key.StartsWith("DOTNET_", StringComparison.Ordinal)) continue;
+
+            if (!settable.Contains(key)) unknown.Add(key);
+        }
+
+        Assert.True(unknown.Count == 0,
+            "these keys are set in deploy/kgsm-api.env.example but declared nowhere in " +
+            "kgsm-api.settings.json, so they bind to nothing:\n  " + string.Join("\n  ", unknown.Distinct()));
+    }
+
+    /// <summary>
+    /// A descriptor default is what the Control Panel shows an operator as "what this is if you set
+    /// nothing", so it has to be the value the settings file actually declares — not a second, separately
+    /// maintained copy of it. Two of these had drifted before the check existed: the bind address and the
+    /// Steam CDN base both named values the API has not used in some time.
+    /// </summary>
+    [Fact]
+    public void Every_described_default_is_the_declared_one()
+    {
+        var wrong = new List<string>();
+        foreach (JsonElement f in Fields())
+        {
+            string env = Str(f, "env");
+            if (!env.StartsWith($"{ApiSettings.Section}__", StringComparison.Ordinal)) continue;
+
+            string? declared = DeclaredDefault(env[(ApiSettings.Section.Length + 2)..]);
+            string? described = OptionalStr(f, "default");
+            if (declared != described)
+                wrong.Add($"{Str(f, "key")}: descriptor says {described ?? "<none>"}, settings file declares {declared ?? "<blank>"}");
+        }
+
+        Assert.True(wrong.Count == 0,
+            "these descriptor defaults disagree with kgsm-api.settings.json, so the Control Panel would show an " +
+            "operator a default this API does not use:\n  " + string.Join("\n  ", wrong));
     }
 
     // ── Structure ────────────────────────────────────────────────────────────
@@ -172,13 +302,13 @@ public class LeafDescriptorSelfTests
     {
         string[] mustBeSecret =
         [
-            "KGSM_API_AUTH_SIGNING_KEY",
-            "KGSM_API_AUTH_DISCORD_CLIENT_SECRET",
-            "KGSM_API_AUTH_DISCORD_BOT_TOKEN",
-            "KGSM_API_ASSISTANT_RELAY_SECRET",
-            "KGSM_API_CLUSTER_SECRET",
-            "KGSM_API_CLUSTER_SECRET_PREVIOUS",
-            "KGSM_API_RAWG_API_KEY",
+            "Api__SigningKey",
+            "Api__DiscordClientSecret",
+            "Api__DiscordBotToken",
+            "Api__AssistantRelaySecret",
+            "Api__ClusterSecret",
+            "Api__ClusterSecretPrevious",
+            "Api__RawgApiKey",
         ];
 
         foreach (string env in mustBeSecret)

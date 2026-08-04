@@ -37,7 +37,7 @@ public sealed class DomainPump(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Configurable (KGSM_API_DOMAIN_POLL_MS, default 5s): reads are now free (cache reference),
+        // Configurable (Api__DomainPollMs, default 5s): reads are now free (cache reference),
         // but the interval still bounds how quickly out-of-band changes (caught by the background
         // refresh or events) reach subscribed clients.
         TimeSpan interval = TimeSpan.FromMilliseconds(options.DomainPollMs);
@@ -127,7 +127,7 @@ public sealed class DomainPump(
 
     // Ignores the metrics block on purpose — see the class remarks (status/roster, not the metric firehose).
     // The update fields (UpdateAvailable/LatestVersion/UpdateCheckedAt) ride along: a flip is low-frequency
-    // (the slow probe ticks at KGSM_API_UPDATE_CHECK_POLL_MS, ~10min per instance), so carrying it here never
+    // (the slow probe ticks at Api__UpdateCheckPollMs, ~10min per instance), so carrying it here never
     // turns the `servers` topic into a firehose — it is the status/roster cadence, not the metric one.
     // The note rides here for the same reason as the update fields: an operator edits it by hand, so
     // a flip is rare, and carrying it means an edit made in one browser reaches every other open panel

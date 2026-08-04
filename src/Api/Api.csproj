@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.41.1</Version>
+    <Version>0.42.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -27,7 +27,7 @@
          them); the RID is supplied at publish time (deploy/deploy.sh passes -r linux-x64).
          Native libs that can't be embedded (SQLitePCLRaw's e_sqlite3) are published BESIDE the
          binary rather than self-extracted — simpler, and avoids a runtime extraction step. The
-         artifact is: the `kgsm-api` binary + appsettings.json + a couple of .so files. -->
+         artifact is: the `kgsm-api` binary + kgsm-api.settings.json + a couple of .so files. -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>false</SelfContained>
 
@@ -58,22 +58,22 @@
        kgsm-api.runtimeconfig.json by filename convention, independent of any Content item), so
        it must NOT ship in the publish tree. The Web SDK globs **/*.json into Content by default,
        which would copy it to /opt/kgsm-api on deploy — drop it so the artifact stays exactly the
-       binary + appsettings.json + the .so. Removing it from Content does not affect the merge. -->
+       binary + kgsm-api.settings.json + the .so. Removing it from Content does not affect the merge. -->
   <ItemGroup>
     <Content Remove="runtimeconfig.template.json" />
     <None Include="runtimeconfig.template.json" />
   </ItemGroup>
 
-  <!-- Keep appsettings.Development.json OUT of the publish tree. The Web SDK globs **/*.json
+  <!-- Keep kgsm-api.settings.Development.json OUT of the publish tree. The Web SDK globs **/*.json
        into Content, which would otherwise rsync this (gitignored) local-dev file — holding the
        REAL Discord client secret + bot token — onto the production host at /opt/kgsm-api on every
        deploy. It is inert there (ASPNETCORE_ENVIRONMENT=Production never loads it), but a plaintext
        secret-at-rest leak regardless. Prod creds come from /etc/kgsm-api/kgsm-api.env, never a
-       committed/published appsettings file. Dev still loads it normally (it stays in the project
-       dir; only the publish copy is dropped). Demote it from Content to None. -->
+       published settings file. Dev still loads it normally (it stays in the project dir; only the
+       publish copy is dropped). Demote it from Content to None. -->
   <ItemGroup>
-    <Content Remove="appsettings.Development.json" />
-    <None Include="appsettings.Development.json" Condition="Exists('appsettings.Development.json')" />
+    <Content Remove="kgsm-api.settings.Development.json" />
+    <None Include="kgsm-api.settings.Development.json" Condition="Exists('kgsm-api.settings.Development.json')" />
   </ItemGroup>
 
   <!-- Scoped NuGet-audit suppression (NOT a blanket NuGetAudit=off): GHSA-2m69-gcr7-jv3q is an

@@ -511,8 +511,8 @@ public sealed class BlueprintFileApiTests
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["KGSM_API_KGSM_PATH"] = "/usr/bin/kgsm",
-                    ["KGSM_API_KGSM_JOURNAL"] = Path.Combine(
+                    ["Api:KgsmPath"] = "/usr/bin/kgsm",
+                    ["Api:KgsmJournalDir"] = Path.Combine(
                         Path.GetTempPath(), $"kgsm-api-tests-bp-{Guid.NewGuid():N}"),
                 });
             });

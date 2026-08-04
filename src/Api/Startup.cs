@@ -41,6 +41,13 @@ public class Startup(IConfiguration configuration)
 
     public void ConfigureServices(IServiceCollection services)
     {
+        // Resolve the whole configurable surface once, up front. Everything below reads it from here
+        // rather than by string key, so there is exactly one place a knob is interpreted and one place
+        // its default lives — the binding chain is ApiSettings (what was written) -> ApiOptions (what
+        // we run on), and nothing short-circuits it.
+        ApiOptions apiOptions = ApiOptions.FromConfiguration(configuration);
+        services.AddSingleton(apiOptions);
+
         // Controllers + the shared JSON conventions. ConfigureHttpJsonOptions applies the
         // same shaping to the HTTP path (WriteAsJsonAsync, used by the error writer) so
         // every response — from a controller or the pipeline — is camelCase / 'Z' identical.
@@ -67,17 +74,14 @@ public class Startup(IConfiguration configuration)
         services.ConfigureHttpJsonOptions(o => ApiJson.Configure(o.SerializerOptions));
 
         // EF Core over SQLite — the API's own operational metadata (sessions M4, audit M5).
-        // DB path env/config-driven; the file is created on first use. M0 uses EnsureCreated
-        // via the _dbcheck probe; real schema evolution uses EF migrations from M5 on.
-        string dbPath = configuration["KGSM_API_DB"] ?? "kgsm-api.db";
-        services.AddDbContext<AppDbContext>(options => options.UseSqlite($"Data Source={dbPath}"));
+        // The file is created on first use. M0 uses EnsureCreated via the _dbcheck probe; real
+        // schema evolution uses EF migrations from M5 on.
+        services.AddDbContext<AppDbContext>(options => options.UseSqlite($"Data Source={apiOptions.DbPath}"));
 
-        // M1·a — leaf aggregation. ApiOptions consolidates the env config (host identity +
-        // leaf endpoints). The monitor client owns the cached-latest scrape; the watchdog
-        // client (kgsm-lib) is registered ONLY when provisioned so the capability probe can
-        // resolve it optionally and report 'absent' when the leaf is not declared on this host.
-        ApiOptions apiOptions = ApiOptions.FromConfiguration(configuration);
-        services.AddSingleton(apiOptions);
+        // M1·a — leaf aggregation. ApiOptions consolidates host identity + leaf endpoints. The
+        // monitor client owns the cached-latest scrape; the watchdog client (kgsm-lib) is registered
+        // ONLY when provisioned so the capability probe can resolve it optionally and report 'absent'
+        // when the leaf is not declared on this host.
 
         // Leaf runtime-provisioning registry (the leaf-runtime-provisioning feature): the DB-backed,
         // runtime-mutable source of truth for which leaves are connected, replacing the immutable
@@ -167,7 +171,7 @@ public class Startup(IConfiguration configuration)
             o.RequestTimeout = TimeSpan.FromSeconds(30);
         });
         // Settings Phase 3 — the kgsm-scheduler leaf (NDJSON-over-unix-socket status). OPT-IN like the
-        // firewall/assistant: registered ONLY when KGSM_API_SCHEDULER_SOCKET is configured, so a host with
+        // firewall/assistant: registered ONLY when Api__SchedulerSocketPath is configured, so a host with
         // no scheduler resolves the client as null → the capability is 'absent' and nextFireUtc is null
         // (never a perpetually-'down' row). Consumers (LeafHealthMonitor, ServerSettingsController) resolve
         // it optionally. Config-provisioned, NOT the runtime DB LeafRegistry (not one of the four
@@ -230,7 +234,7 @@ public class Startup(IConfiguration configuration)
         services.AddHttpClient<ISteamCoverClient, SteamCoverClient>(c => c.Timeout = TimeSpan.FromSeconds(10));
         // The hydration worker: boot sweep + a configurable periodic refresh (weekly by default, at a local
         // hour). Runs if EITHER source is on (Steam is on by default — keyless; RAWG is opt-in via
-        // KGSM_API_RAWG_API_KEY). Off the request path; never blocks startup. Registered singleton + hosted
+        // Api__RawgApiKey). Off the request path; never blocks startup. Registered singleton + hosted
         // (same instance) like the other pumps, so the admin POST /library/refresh can force an immediate sweep.
         services.AddSingleton<LibraryHydrationWorker>();
         services.AddHostedService(sp => sp.GetRequiredService<LibraryHydrationWorker>());
@@ -331,7 +335,7 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<ISessionValidator>(sp => sp.GetRequiredService<SessionValidator>());
 
         // M4·c Increment 8 — the session GC worker: deletes expired rows (revoked or not) on a timer
-        // (KGSM_API_SESSIONS_GC_MS, default 10min) so the sessions table stays permanently bounded.
+        // (Api__SessionsGcMs, default 10min) so the sessions table stays permanently bounded.
         // A startup catch-up pass + PeriodicTimer. Inert (no timer at all) when SessionsEnabled is false.
         services.AddHostedService<SessionCleanupWorker>();
 
@@ -395,7 +399,7 @@ public class Startup(IConfiguration configuration)
 
         // Cluster message bus — Phase 1 foundation (docs/cluster-message-bus-plan.md, PLAN-peers.md §3).
         // The service-token mint/validate seam. Registered unconditionally — ClusterTokenService itself
-        // degrades to a throwing Mint()/always-null ValidateAsync when KGSM_API_CLUSTER_SECRET is blank
+        // degrades to a throwing Mint()/always-null ValidateAsync when Api__ClusterSecret is blank
         // (the normal, opt-in-and-off-by-default posture, mirroring the assistant relay secret).
         services.AddSingleton<IClusterTokenService, ClusterTokenService>();
 
@@ -406,7 +410,7 @@ public class Startup(IConfiguration configuration)
         // IClusterMessageHandler is registered as a collection (resolved as IEnumerable<> by ClusterInbox)
         // — session.revoke is the first, and so far only, message type. All inert on a non-cluster node:
         // PeersController's own auth 401s everything before ClusterInbox is ever reached (ClusterTokenService
-        // never validates a token when KGSM_API_CLUSTER_SECRET is blank).
+        // never validates a token when Api__ClusterSecret is blank).
         services.AddSingleton<ClusterInbox>();
         services.AddSingleton<IClusterPeerGate, PeersTableGate>();
         services.AddSingleton<IClusterMessageHandler, Services.Cluster.Handlers.SessionRevokeHandler>();
@@ -465,7 +469,7 @@ public class Startup(IConfiguration configuration)
             c => c.Timeout = TimeSpan.FromSeconds(10));
         services.AddSingleton<IAuthorizationHandler, TierAuthorizationHandler>();
 
-        // Auth is ON by default; KGSM_API_AUTH_DISABLED=1 swaps the default scheme for a synthetic-admin
+        // Auth is ON by default; Api__AuthDisabled=true swaps the default scheme for a synthetic-admin
         // handler so every policy passes (the explicit, loudly-logged dev/open window). When enabled, the
         // JwtBearer scheme validates the session JWTs with the SAME parameters the token service mints under
         // (shared via the post-configure below). SSE streams carry the bearer as an Authorization header;
@@ -493,7 +497,7 @@ public class Startup(IConfiguration configuration)
                         // M4·c — the per-request session check (cached). The sid claim is the session
                         // registry key; the validator consults the SessionEntry row (≤5s cache) for
                         // `Id == sid && !Revoked && Expires > now`. The escape hatch
-                        // (KGSM_API_SESSIONS_DISABLED) bypasses the whole block — the pre-M4·c stateless
+                        // (Api__SessionsDisabled) bypasses the whole block — the pre-M4·c stateless
                         // posture, for debugging. ⚠ D10: a pre-M4·c token (no sid claim) is REJECTED here
                         // → 401 → relogin. That's the clean break the milestone ships — only sid-bearing
                         // tokens pass. The check runs AFTER the access-kind gate (a refresh token never
@@ -554,15 +558,14 @@ public class Startup(IConfiguration configuration)
         services.AddExceptionHandler<ApiExceptionHandler>();
         services.AddProblemDetails();
 
-        // CORS allowlist is env/config-driven — the frontend's origin isn't known yet, and
-        // the validation venue is still open. KGSM_API_CORS_ORIGINS is a comma-separated
-        // list; when unset we allow any origin (dev only — no credentials to leak until M4).
-        string[] corsOrigins = (configuration["KGSM_API_CORS_ORIGINS"] ?? "")
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        // CORS allowlist is config-driven — the frontend's origin isn't known yet, and the
+        // validation venue is still open. When unset we allow any origin (dev only — safe because
+        // bearers ride the Authorization header, not cookies).
+        IReadOnlyList<string> corsOrigins = apiOptions.CorsOrigins;
         services.AddCors(options => options.AddPolicy(CorsPolicy, policy =>
         {
-            if (corsOrigins.Length > 0)
-                policy.WithOrigins(corsOrigins).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
+            if (corsOrigins.Count > 0)
+                policy.WithOrigins([.. corsOrigins]).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
             else
                 policy.SetIsOriginAllowed(_ => true).AllowAnyHeader().AllowAnyMethod();
         }));
@@ -575,12 +578,12 @@ public class Startup(IConfiguration configuration)
         ILogger startupLog = loggerFactory.CreateLogger("TheKrystalShip.Api.Startup");
         if (options.AuthDisabled)
             startupLog.LogWarning(
-                "AUTH DISABLED (KGSM_API_AUTH_DISABLED) — every request is authenticated as admin. "
+                "AUTH DISABLED (Api__AuthDisabled) — every request is authenticated as admin. "
                 + "This is the pre-M4 open trust window; never enable it on an exposed host.");
         else if (!options.DiscordConfigured)
             startupLog.LogWarning(
                 "Auth is ON but Discord is not fully configured — the /auth/discord/* login endpoints "
-                + "will 503 until KGSM_API_AUTH_DISCORD_* are set. Protected endpoints require a bearer (401).");
+                + "will 503 until the Api__Discord* settings are set. Protected endpoints require a bearer (401).");
 
         // Same-origin SPA delivery: when the Control Panel SPA's built bundle is present in the web root
         // (the deploy drops kgsm-web's dist/ into wwwroot), Kestrel serves it at / on the SAME origin as
@@ -601,7 +604,7 @@ public class Startup(IConfiguration configuration)
         // deploy probe and a local `curl http://127.0.0.1:8097/health` don't speak TLS and the cert isn't
         // valid for 127.0.0.1, so those must pass through un-redirected. We gate on the RECEIVING interface
         // (a loopback local address ⇒ an ops call) rather than a hard-coded port, so it stays correct if the
-        // ops port ever changes. For an external http:// to reach here at all, KGSM_API_URLS must include a
+        // ops port ever changes. For an external http:// to reach here at all, Api__Urls must include a
         // plain-http public bind (http://0.0.0.0:80); without one, bare http simply refuses the connection.
         app.Use(async (context, next) =>
         {

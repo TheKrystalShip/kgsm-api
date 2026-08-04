@@ -19,8 +19,8 @@ namespace TheKrystalShip.Api.Services.Library;
 /// not on Steam / no capsule) AND the sole authority for everything else (hero, description, genres, tags).
 /// The two never gate each other.</para>
 /// <para><b>Opt-in / off switch.</b> Steam covers are ON by default (keyless); RAWG is opt-in
-/// (<c>KGSM_API_RAWG_API_KEY</c>). When <b>both</b> are off the worker logs once and no-ops. The periodic wake
-/// is disabled by <c>KGSM_API_LIBRARY_REFRESH_INTERVAL_DAYS=0</c> (boot sweep + on-demand refresh only).</para>
+/// (<c>Api__RawgApiKey</c>). When <b>both</b> are off the worker logs once and no-ops. The periodic wake
+/// is disabled by <c>Api__LibraryRefreshIntervalDays=0</c> (boot sweep + on-demand refresh only).</para>
 /// <para><b>Honest / never-fabricate.</b> A Steam 404 → fall back to RAWG; a RAWG 404 / network failure → the
 /// existing row is <b>never wiped</b>; we record <see cref="RawgEntry.Status"/> and keep whatever good bytes we
 /// already have. A Steam-only hydration (no RAWG key) records <c>cover_only</c> so a later key fills the rest

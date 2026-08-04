@@ -332,7 +332,7 @@ public sealed class InstanceCache : IHostedService, IDisposable
         {
             if (Interlocked.Exchange(ref _engineUnavailableLogged, 1) == 0)
                 _logger.LogWarning(
-                    "kgsm engine is not configured (KGSM_API_KGSM_PATH is empty) — instance cache stays empty.");
+                    "kgsm engine is not configured (Api__KgsmPath is empty) — instance cache stays empty.");
             _engineRead = true; // honest empty roster, not a failed read
             return;
         }

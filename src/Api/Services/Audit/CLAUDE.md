@@ -58,7 +58,7 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   unknown provider keeps the name but leaves provider `null` (never coerce). The load-bearing test is the
   **round-trip** (`discord:haru` → `{user,haru,discord}`) — keep it green when you touch the parser.
 - **kgsm-lib only / the journal is shared and read-only.** Events come through `IEventService`, never a
-  raw file read. `KGSM_API_KGSM_JOURNAL` names a directory the engine writes and every consumer reads —
+  raw file read. `Api__KgsmJournalDir` names a directory the engine writes and every consumer reads —
   the API owns nothing there and nothing on the engine side needs configuring for it to arrive.
 - **The API starts at the TAIL and keeps no cursor.** It never *persists* an engine event: it shapes each
   one into a live audit row, fans it out over SSE, and hands it to the notification bus. Replaying

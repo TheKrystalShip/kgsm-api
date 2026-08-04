@@ -9,7 +9,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// <strong>NDJSON-over-unix-socket</strong>, not HTTP: on connect it writes exactly one JSON line — the
 /// status snapshot (per-instance <c>nextFireUtc</c> + last-run) — then closes. This client dials that socket,
 /// reads the single line, and parses it. It is registered ONLY when the socket is configured
-/// (<c>KGSM_API_SCHEDULER_SOCKET</c>); consumers resolve it optionally and degrade to <c>absent</c>/null when
+/// (<c>Api__SchedulerSocketPath</c>); consumers resolve it optionally and degrade to <c>absent</c>/null when
 /// it is missing.
 /// </summary>
 /// <remarks>

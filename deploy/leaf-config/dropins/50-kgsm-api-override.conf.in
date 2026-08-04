@@ -7,10 +7,10 @@
 # plumbing — static, installed once + daemon-reload; the override file's CONTENTS change at runtime
 # (the API rewrites them unprivileged), which needs no reload, only a restart to apply.
 #
-# Layering, last wins:  this override env  >  the leaf's own EnvironmentFile / appsettings.json.
+# Layering, last wins:  this override env  >  the leaf's own EnvironmentFile / settings file.
 # Two reasons it wins: (1) a drop-in is parsed AFTER the unit's own [Service] directives, so this
 # EnvironmentFile is the last one loaded and its KEY=value beat any earlier Environment=/EnvironmentFile=;
-# (2) for the .NET leaves an environment variable already overrides appsettings.json. So a key set here
+# (2) for the .NET leaves an environment variable already overrides the settings file. So a key set here
 # overrides the hand-deployed floor WITHOUT the API ever editing that floor.
 #
 # The leading '-' makes a missing file non-fatal: the override file does not exist until the API first

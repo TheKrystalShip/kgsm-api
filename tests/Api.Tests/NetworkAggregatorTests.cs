@@ -239,7 +239,7 @@ public sealed class NetworkAggregatorTests
         var config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["KGSM_API_FIREWALL_SOCKET"] = firewallProvisioned ? "/run/kgsm-firewall/firewall.sock" : "",
+                ["Api:FirewallSocketPath"] = firewallProvisioned ? "/run/kgsm-firewall/firewall.sock" : "",
             })
             .Build();
         return ApiOptions.FromConfiguration(config);

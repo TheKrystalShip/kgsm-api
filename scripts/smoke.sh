@@ -16,7 +16,7 @@
 #   quiet under the metric firehose, and the capability lifecycle: kill the monitor -> metric ticks
 #   fall silent + a capabilities patch reports metrics 'down' (provisioned:true — never "lost"); restart
 #   it -> metrics flips back 'operational' + ticks resume. Degrade AND recover gracefully, capability set fixed.
-#   M4·a (§3·f): auth is ON by default. The M0–M3 checks above run under KGSM_API_AUTH_DISABLED=1 (the
+#   M4·a (§3·f): auth is ON by default. The M0–M3 checks above run under Api__AuthDisabled=true (the
 #   dev escape hatch — synthetic admin), then a dedicated AUTH-ENABLED instance proves the no-token
 #   sweep: every protected endpoint 401s with the frozen envelope, /health + /api/v1 stay open, and the
 #   login endpoint 503s until Discord is configured (the M4·b live half). The full 401/403/tier matrix +
@@ -69,11 +69,11 @@ KGSM_SOCK="${SMOKE_KGSM_SOCKET:-/tmp/kgsm-api-smoke-events.sock}"; rm -f "$KGSM_
 # M4·a: auth is ON by default. The M0–M3 checks below run under the dev escape hatch (synthetic admin)
 # so they exercise the domain contracts unchanged; the auth boundary itself gets its own ENABLED
 # instance + no-token sweep at the end (and the full tier matrix lives in tests/Api.Tests).
-export KGSM_API_AUTH_DISABLED=1
+export Api__AuthDisabled=true
 # Steam covers are keyless + ON by default, so without this the worker would fetch real Steam capsules over
 # the network and the offline "cover null (no RAWG key)" assertions below would flake. Disable it here so the
 # smoke stays offline + deterministic; the Steam-primary/RAWG-fallback logic is unit-tested with fakes.
-export KGSM_API_STEAM_COVERS_DISABLED=1
+export Api__SteamCoversDisabled=true
 # Unix socket for the embedded stub monitor (Phase B — proves the join's present-branch).
 STUB_SOCK="/tmp/kgsm-api-smoke-stub-monitor.sock"; rm -f "$STUB_SOCK"
 # Canned per-server metric values the stub serves; the join must carry these through verbatim.
@@ -115,10 +115,10 @@ trap cleanup EXIT
 
 # start_api MONITOR_SOCKET — launch the API with the given monitor socket; wait for /health.
 start_api() {
-  KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" \
-  KGSM_API_HOST_ID="$HOST_ID" KGSM_API_MONITOR_SOCKET="$1" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" \
-  KGSM_API_KGSM_PATH="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
-  KGSM_API_UPDATE_CHECK_DISABLED=1 \
+  Api__Urls="$BASE" Api__DbPath="$DB" \
+  Api__HostId="$HOST_ID" Api__MonitorSocketPath="$1" Api__WatchdogSocketPath="$WD_SOCK" \
+  Api__KgsmPath="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
+  Api__UpdateCheckDisabled=true \
     dotnet "$DLL" >/tmp/kgsm-api-smoke.log 2>&1 &
   SRV=$!; PIDS+=("$SRV")
   for _ in $(seq 1 80); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
@@ -129,10 +129,10 @@ stop_api() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
 # start_api_auth — launch with auth ENABLED (the escape hatch unset for this child only), Discord
 # unconfigured (ephemeral signing key). Used by the M4·a no-token sweep.
 start_api_auth() {
-  env -u KGSM_API_AUTH_DISABLED \
-    KGSM_API_URLS="$BASE" KGSM_API_DB="$DB" \
-    KGSM_API_HOST_ID="$HOST_ID" \
-    KGSM_API_MONITOR_SOCKET="$MON_SOCK" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" KGSM_API_KGSM_PATH="$KGSM_PATH" \
+  env -u Api__AuthDisabled \
+    Api__Urls="$BASE" Api__DbPath="$DB" \
+    Api__HostId="$HOST_ID" \
+    Api__MonitorSocketPath="$MON_SOCK" Api__WatchdogSocketPath="$WD_SOCK" Api__KgsmPath="$KGSM_PATH" \
     KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
     dotnet "$DLL" >/tmp/kgsm-api-smoke-auth.log 2>&1 &
   SRV=$!; PIDS+=("$SRV")
@@ -167,10 +167,10 @@ sys.exit(0 if d['capabilities']['metrics']['status']!='unknown' else 1)
 M7_DB="${DB%.db}-m7.db"
 start_api_assistant() {
   rm -f "$M7_DB" "$M7_DB"-wal "$M7_DB"-shm
-  KGSM_API_URLS="$BASE" KGSM_API_DB="$M7_DB" KGSM_API_HOST_ID="$HOST_ID" \
-  KGSM_API_MONITOR_SOCKET="$MON_SOCK" KGSM_API_WATCHDOG_SOCKET="$WD_SOCK" \
-  KGSM_API_KGSM_PATH="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
-  KGSM_API_ASSISTANT_URL="$1" KGSM_API_ASSISTANT_RELAY_SECRET="$2" \
+  Api__Urls="$BASE" Api__DbPath="$M7_DB" Api__HostId="$HOST_ID" \
+  Api__MonitorSocketPath="$MON_SOCK" Api__WatchdogSocketPath="$WD_SOCK" \
+  Api__KgsmPath="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
+  Api__AssistantBaseUrl="$1" Api__AssistantRelaySecret="$2" \
     dotnet "$DLL" >/tmp/kgsm-api-smoke-m7.log 2>&1 &
   SRV=$!; PIDS+=("$SRV")
   for _ in $(seq 1 80); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
@@ -386,7 +386,7 @@ if [[ "$CODE" == 200 ]] && EXP="$HOST_ID" python3 -c "
 import json,os,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 if not (isinstance(d,list) and len(d)>=1): sys.exit(2)   # empty roster -> can't prove a real read
-keys={'id','name','blueprint','status','version','runtime','hostId','steamAppId','clientSteamAppId','isSteamAccountRequired','metrics','updateAvailable','latestVersion','updateCheckedAt','startedAt'}
+keys={'id','name','blueprint','status','version','runtime','hostId','steamAppId','clientSteamAppId','isSteamAccountRequired','metrics','updateAvailable','latestVersion','updateCheckedAt','startedAt','connectPort','note','lastBackup','backupCount'}
 for s in d:
     if set(s)!=keys: sys.exit(3)
     if s['status'] not in ('running','stopped','unknown'): sys.exit(4)
@@ -420,7 +420,7 @@ req GET /api/v1/servers/does-not-exist
 # Phase A reads the REAL dev kgsm catalog (no monitor needed — blueprints are engine-only). Proves the
 # honest DTO end-to-end: the frozen key set, structured ports emitted directly by kgsm (no C# parse),
 # steam-id honesty (null for a non-Steam blueprint, never "0"). Cover hydration is OFF in this run — no RAWG
-# key AND KGSM_API_STEAM_COVERS_DISABLED=1 (set above so the keyless Steam source can't reach the network) —
+# key AND Api__SteamCoversDisabled=true (set above so the keyless Steam source can't reach the network) —
 # so cover/hero stay null and genres/tags []; rawgSlug is still POPULATED from the curated blueprints
 # (Phase 1 wrote 29 slugs) — so we assert string-or-null and that at least one is non-null.
 echo "==> M8·a library checks — Phase A (live blueprint catalog; kgsm=${KGSM_PATH})"
@@ -539,12 +539,14 @@ d=json.load(open('/tmp/kgsm-api-smoke.body'))
 keys={f['key'] for f in d['fields']}
 envs={f['envName'] for f in d['fields']}
 ok=(d['leaf']=='monitor' and 'logLevel' in keys and 'intervalMs' in keys
-    and 'Logging__LogLevel__Default' in envs and 'KGSM_MONITOR_INTERVAL_MS' in envs)
+    and 'Logging__LogLevel__Default' in envs and 'Monitor__IntervalMs' in envs)
 sys.exit(0 if ok else 1)
 " 2>/dev/null; then
-  req GET "/api/v1/hosts/${HOST_ID}/services/bot/config"
+  # A leaf id nothing ships a descriptor for. NOT "bot" — kgsm-bot ships one now, so bot is a real
+  # config target and 200 is the correct answer for it.
+  req GET "/api/v1/hosts/${HOST_ID}/services/nope/config"
   [[ "$CODE" == 404 ]] && ok "/services/{leaf}/config manifest (real env names); non-target leaf → 404" \
-    || bad "/services/bot/config not 404 (code=$CODE)"
+    || bad "/services/nope/config not 404 (code=$CODE)"
 else bad "/services/monitor/config manifest (code=$CODE body=$BODY)"; fi
 
 # LP5. PUT config VALIDATION (no mutation, no restart): an unknown key and a bad enum value each 400 with the
@@ -1186,7 +1188,7 @@ sys.exit(0 if ('path' in m and 'sizeBytes' in m and str(m.get('sha256','')).star
   # --- M7 assistant turn relay: the gates that run before any upstream call ------
   echo "==> M7 assistant relay checks — POST /api/v1/assistant/turn (auth + capability gates, no upstream)"
 
-  # The smoke instance configures NO assistant (KGSM_API_ASSISTANT_URL unset) -> capability absent, so the
+  # The smoke instance configures NO assistant (Api__AssistantBaseUrl unset) -> capability absent, so the
   # relay degrades to an honest 404 BEFORE any upstream call (degrade-gracefully, never a 500).
   req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
   [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \

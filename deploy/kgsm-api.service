@@ -15,28 +15,28 @@ Group=heisen
 
 # Framework-dependent single-file publish — REQUIRES the .NET 10 + ASP.NET Core shared runtime
 # on the host (deploy/deploy.sh checks for it). Smaller artifact than self-contained; the binary,
-# appsettings.json and libe_sqlite3.so are published into /opt/kgsm-api by the deploy script:
+# kgsm-api.settings.json and libe_sqlite3.so are published into /opt/kgsm-api by the deploy script:
 #   dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --no-self-contained
 ExecStart=/opt/kgsm-api/kgsm-api
 # REQUIRED: the .NET content root defaults to the process working dir. Without this it is "/"
-# and appsettings.json / appsettings.Development.json (shipped next to the binary) are NOT
+# and kgsm-api.settings.json / kgsm-api.settings.Development.json (shipped next to the binary) are NOT
 # loaded — Discord/role config silently goes missing and login 503s. Pin it to the app dir.
 WorkingDirectory=/opt/kgsm-api
 
 # Operational config (bind + paths). Secrets and host specifics live in the EnvironmentFile
 # below, which is read AFTER these and therefore overrides them.
-Environment=KGSM_API_URLS=http://0.0.0.0:8080
-Environment=KGSM_API_KGSM_PATH=/usr/local/bin/kgsm
-Environment=KGSM_API_KGSM_JOURNAL=/var/lib/kgsm/events
-Environment=KGSM_API_MONITOR_SOCKET=/run/kgsm-monitor/metrics.sock
-Environment=KGSM_API_DB=/var/lib/kgsm-api/kgsm-api.db
+Environment=Api__Urls=http://0.0.0.0:8080
+Environment=Api__KgsmPath=/usr/local/bin/kgsm
+Environment=Api__KgsmJournalDir=/var/lib/kgsm/events
+Environment=Api__MonitorSocketPath=/run/kgsm-monitor/metrics.sock
+Environment=Api__DbPath=/var/lib/kgsm-api/kgsm-api.db
 # Production by default; a host may flip this to Development in the env file to load Discord
-# creds from a co-located appsettings.Development.json instead of the env file.
+# creds from a co-located kgsm-api.settings.Development.json instead of the env file.
 Environment=ASPNETCORE_ENVIRONMENT=Production
 
-# Secrets + host overrides: KGSM_API_AUTH_SIGNING_KEY (a STABLE random key — required so
+# Secrets + host overrides: Api__SigningKey (a STABLE random key — required so
 # sessions/refresh tokens survive a restart), the Discord OAuth app/guild/bot + role->tier map,
-# KGSM_API_CORS_ORIGINS (the SPA origin), KGSM_API_AUTH_FRONTEND_URL. See deploy/kgsm-api.env.example.
+# Api__CorsOrigins (the SPA origin), Api__AuthFrontendUrl. See deploy/kgsm-api.env.example.
 EnvironmentFile=-/etc/kgsm-api/kgsm-api.env
 
 # systemd creates these owned by the service user: the DB lives under StateDirectory, the
@@ -57,7 +57,7 @@ NoNewPrivileges=true
 # Kestrel terminates TLS directly (NO reverse proxy) and binds the privileged ports 80 (the
 # http->https redirect) + 443 (TLS). To do that as a NON-root service, grant exactly one capability —
 # CAP_NET_BIND_SERVICE (bind ports <1024) — and bound the set to nothing else. The prod env file sets
-# KGSM_API_URLS=http://0.0.0.0:80;https://0.0.0.0:443 + the Kestrel cert paths (see
+# Api__Urls=http://0.0.0.0:80;https://0.0.0.0:443 + the Kestrel cert paths (see
 # deploy/kgsm-api.env.example); these lines are harmless when the unit's default http://0.0.0.0:8080
 # bind is used instead. Works alongside NoNewPrivileges (systemd grants ambient caps at exec; the
 # process never escalates).

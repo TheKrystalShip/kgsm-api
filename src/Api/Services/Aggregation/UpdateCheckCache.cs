@@ -142,7 +142,7 @@ public sealed class UpdateCheckCache : IHostedService, IDisposable
         _stoppingToken = cancellationToken;
         if (_disabled)
         {
-            _logger.LogInformation("update-check cache: disabled (KGSM_API_UPDATE_CHECK_DISABLED) — probe inert, fields stay null.");
+            _logger.LogInformation("update-check cache: disabled (Api__UpdateCheckDisabled) — probe inert, fields stay null.");
             return;
         }
         _timer = new PeriodicTimer(_interval);
@@ -206,7 +206,7 @@ public sealed class UpdateCheckCache : IHostedService, IDisposable
         {
             if (Interlocked.Exchange(ref _engineUnavailableLogged, 1) == 0)
                 _logger.LogWarning(
-                    "kgsm engine is not configured (KGSM_API_KGSM_PATH is empty) — update-check cache stays empty.");
+                    "kgsm engine is not configured (Api__KgsmPath is empty) — update-check cache stays empty.");
             return;
         }
 

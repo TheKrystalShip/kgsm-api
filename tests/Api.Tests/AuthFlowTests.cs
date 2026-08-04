@@ -144,13 +144,13 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
         Assert.Contains("\"code\":\"invalid_state\"", await resp.Content.ReadAsStringAsync());
     }
 
-    // --- /auth/discord/callback — SPA fragment handoff (KGSM_API_AUTH_FRONTEND_URL set) -----------
+    // --- /auth/discord/callback — SPA fragment handoff (Api__AuthFrontendUrl set) -----------
     // With a frontend URL configured the callback 302s the browser back to the SPA carrying the outcome
     // in the URL FRAGMENT (never the query — tokens must not reach access logs or the Referer header),
     // instead of the JSON contract. The redirect target is the single configured URL (no open-redirect).
     private WebApplicationFactory<Program> FrontendFactory() =>
         factory.WithWebHostBuilder(b => b.ConfigureAppConfiguration((_, c) =>
-            c.AddInMemoryCollection(new Dictionary<string, string?> { ["KGSM_API_AUTH_FRONTEND_URL"] = "https://panel.test" })));
+            c.AddInMemoryCollection(new Dictionary<string, string?> { ["Api:AuthFrontendUrl"] = "https://panel.test" })));
 
     private static async Task<(HttpClient Client, string State)> BeginLoginOn(WebApplicationFactory<Program> f)
     {

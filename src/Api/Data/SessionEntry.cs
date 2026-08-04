@@ -61,10 +61,10 @@ public sealed class SessionEntry
     public DateTimeOffset LastSeen { get; set; }
 
     /// <summary>
-    /// The session's expiry — at login <c>Created + KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS</c>
+    /// The session's expiry — at login <c>Created + Api__SessionsRefreshAbsoluteDays</c>
     /// (default 30 days). <b>Sliding</b> on refresh (the rolling-refresh step — user directive
     /// supersedes the plan's D8 "no sliding"): each successful <c>/auth/session/refresh</c> slides
-    /// this to <c>now + KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS</c> and re-mints both tokens with the
+    /// this to <c>now + Api__SessionsRefreshAbsoluteDays</c> and re-mints both tokens with the
     /// same <see cref="Id"/> — so a session used at least once inside the window stays alive. An idle
     /// session dies `this`-days after its LAST refresh; past <see cref="Expires"/> the session is dead
     /// regardless of <see cref="Revoked"/>. UTC.

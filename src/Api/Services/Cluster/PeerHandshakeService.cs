@@ -96,7 +96,7 @@ public sealed class PeerHandshakeService
 
         // GET /identity is cluster-token authed on the far side (it's the same handshake endpoint this
         // node itself exposes) — mint OUR OWN service token to present, same as any other node-to-node
-        // call. Both sides share KGSM_API_CLUSTER_SECRET, so a candidate that is genuinely a cluster
+        // call. Both sides share Api__ClusterSecret, so a candidate that is genuinely a cluster
         // member of ours will accept it.
         MintedClusterToken token;
         try
@@ -105,7 +105,7 @@ public sealed class PeerHandshakeService
         }
         catch (InvalidOperationException)
         {
-            // This node itself isn't cluster-enabled (blank KGSM_API_CLUSTER_SECRET) — it has no
+            // This node itself isn't cluster-enabled (blank Api__ClusterSecret) — it has no
             // identity to present to anyone, so the handshake cannot proceed. POST /peers is
             // meaningless on a non-cluster node in the first place; collapse to the same honest
             // "couldn't reach it" outcome as any other handshake failure rather than a 500.

@@ -1,0 +1,222 @@
+{
+  // === KGSM Control Panel API — per-host configuration ===
+  //
+  // This file declares the API's WHOLE configurable surface, each key with its default. It is the
+  // floor; an environment variable overrides one key of it by spelling that key's path with "__" —
+  // Api__DomainPollMs, Logging__LogLevel__Default, Kestrel__Certificates__Default__Path. A variable
+  // naming a key that is not declared here binds to nothing.
+  //
+  // Every key under "Api" maps 1:1 onto a property of ApiSettings, which the API binds in one step.
+  // A test fails the build if the two ever disagree, in either direction, or if the leaf descriptor
+  // (deploy/kgsm-api.leaf.json — what the Control Panel renders) drifts from either.
+  //
+  // SECRETS ARE DECLARED HERE, NEVER SET HERE. A signing key, a bot token, a relay or cluster secret
+  // is declared blank so the Control Panel can see it exists; the real value belongs in the
+  // root-owned /etc/kgsm-api/kgsm-api.env, which is not in version control.
+
+  "Api": {
+
+      // ── Identity ──
+      // Stable identity of this host. Blank takes the OS machine name.
+      "HostId": "",
+      // Human-friendly label. Blank falls back to the host id.
+      "HostLabel": "",
+      // Deployment region, an arbitrary free string. Blank stays unset rather than guessing one.
+      "Region": "",
+      // This node's cluster identity. Blank takes the host id.
+      "NodeId": "",
+      // Public base URL absolute cover/hero URLs are built from. Blank derives it from the request.
+      "PublicBaseUrl": "",
+
+      // ── Leaf connections ──
+      // kgsm-monitor metrics socket. Blank reports the metrics capability absent.
+      "MonitorSocketPath": "/run/kgsm-monitor/metrics.sock",
+      // kgsm-watchdog control socket. Blank reports the watchdog capability absent.
+      "WatchdogSocketPath": "/run/kgsm-watchdog/control.sock",
+      // Assistant base URL. Blank reports the assistant absent.
+      "AssistantBaseUrl": "",
+      // Shared secret for the assistant turn relay (X-Relay-Secret). Blank sends none.
+      "AssistantRelaySecret": "",
+      // kgsm-firewall control socket. Blank reports the ports surface absent.
+      "FirewallSocketPath": "",
+      // kgsm-scheduler status socket. Blank reports the scheduler absent.
+      "SchedulerSocketPath": "",
+
+      // ── KGSM engine ──
+      // Path to the host's kgsm entrypoint. Blank is a misconfiguration, not a capability toggle.
+      "KgsmPath": "/usr/bin/kgsm",
+      // The engine's append-only event journal the audit consumer tails.
+      "KgsmJournalDir": "/var/lib/kgsm/events",
+      // systemctl binary the Services board shells. Resolved via PATH by default.
+      "SystemctlPath": "systemctl",
+      // journalctl binary the host-logs surface shells. Resolved via PATH by default.
+      "JournalctlPath": "journalctl",
+
+      // ── Polling ──
+      // How often the servers topic re-reads the roster from kgsm. Floor 1000.
+      "DomainPollMs": 5000,
+      // How often the metrics topics scrape the monitor for the live tick. Floor 250.
+      "MetricsPollMs": 1000,
+      // How often the Services board re-reads leaf liveness. Floor 2000.
+      "ServicesPollMs": 5000,
+      // How often the slow fleet-wide update probe runs. Floor 60000.
+      "UpdateCheckPollMs": 600000,
+      // How often each instance's backups are re-scanned. Floor 30000.
+      "BackupScanPollMs": 300000,
+      // Kill-switch for the always-on update-check probe.
+      "UpdateCheckDisabled": false,
+      // Instance in-memory cache TTL. Floor 10.
+      "InstanceCacheTtlSeconds": 60,
+      // Blueprint in-memory cache TTL. Floor 10.
+      "BlueprintCacheTtlSeconds": 60,
+      // Kill-switch for the whole metric-threshold alert pass.
+      "MetricsThresholdsDisabled": false,
+
+      // ── Authentication ──
+      // Dev escape hatch: authenticate every request as a synthetic admin.
+      "AuthDisabled": false,
+      // HMAC signing key for session JWTs. Blank generates an ephemeral per-process key.
+      "SigningKey": "",
+      // Discord OAuth application id.
+      "DiscordClientId": "",
+      // Discord OAuth application secret.
+      "DiscordClientSecret": "",
+      // Bot token used to read guild member roles, the only path to them.
+      "DiscordBotToken": "",
+      // The guild whose roles authorize this host.
+      "DiscordGuildId": "",
+      // This host's OAuth redirect URI; must match the app registry.
+      "DiscordRedirectUri": "",
+      // SPA origin the OAuth callback hands the session back to. Blank returns JSON.
+      "AuthFrontendUrl": "",
+      // Comma-separated Discord role ids granting admin.
+      "RoleAdminIds": "",
+      // Comma-separated Discord role ids granting operator.
+      "RoleOperatorIds": "",
+      // Comma-separated Discord role ids granting viewer.
+      "RoleViewerIds": "",
+
+      // ── Sessions ──
+      // Turns the session registry inert, leaving revocation unenforceable.
+      "SessionsDisabled": false,
+      // Per-request session validator cache TTL, the accepted revocation lag. Floor 500.
+      "SessionsCacheTtlMs": 5000,
+      // How often expired session rows are deleted. Floor 60000.
+      "SessionsGcMs": 600000,
+      // The sliding session refresh window in days. Floor 1.
+      "SessionsRefreshAbsoluteDays": 30,
+
+      // ── Game library & cover art ──
+      // RAWG.io API key. Blank no-ops the hydration worker.
+      "RawgApiKey": "",
+      // Directory self-hosted cover/hero images are written to. Blank uses covers/ beside the DB.
+      "RawgCacheDir": "",
+      // Base URL for the keyless Steam library-capsule cover source.
+      "SteamCdnBaseUrl": "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps",
+      // Off switch for the keyless Steam cover source, leaving RAWG only.
+      "SteamCoversDisabled": false,
+      // Re-fetch cover/metadata older than this many days. 0 disables the periodic wake.
+      "LibraryRefreshIntervalDays": 7,
+      // Local hour the periodic library refresh wakes. Clamped to 0..23.
+      "LibraryRefreshHour": 6,
+
+      // ── File & blueprint editing ──
+      // Max directory entries one file listing returns before truncating. Floor 1.
+      "FilesMaxEntries": 200,
+      // Max file size the editor will open or save. Floor 1024.
+      "FilesMaxEditBytes": 2097152,
+      // Max blueprint-file size the library editor will open or save. Floor 1024.
+      "BlueprintMaxEditBytes": 262144,
+
+      // ── Log reading ──
+      // Host-log source map as source:unit pairs. Blank derives it from the leaf catalog.
+      "LogSources": "",
+      // How long a journal read may take before giving up. Floor 500.
+      "LogReadTimeoutMs": 5000,
+
+      // ── Leaf configuration ──
+      // Directory the per-leaf override env files render to.
+      "LeafOverridesDir": "/var/lib/kgsm-api/leaf-overrides",
+      // Shared directory the leaf config descriptors are discovered in.
+      "LeafDescriptorDir": "/var/lib/kgsm/leaves",
+      // Directory the per-leaf systemd drop-ins live in.
+      "LeafDropInDir": "/etc/systemd/system",
+      // How long a leaf's health is watched after a config restart before the change is declared good. Floor 2000.
+      "LeafApplyCanaryMs": 15000,
+
+      // ── Cluster ──
+      // The shared cluster HMAC secret. Blank means this host is not part of a cluster.
+      "ClusterSecret": "",
+      // The previous cluster secret, accepted during a rotation overlap.
+      "ClusterSecretPrevious": "",
+      // The client URL this node advertises to peers. Blank advertises none.
+      "ClusterAdvertiseUrl": "",
+      // The gossip URL this node advertises to peers. Blank advertises none.
+      "ClusterGossipUrl": "",
+      // How often membership gossip is pushed. Floor 250.
+      "ClusterGossipMs": 5000,
+      // How often peers are polled for membership. Floor 250.
+      "ClusterPollMs": 10000,
+      // Silence after which a peer is marked suspect. Floor 1000.
+      "ClusterSuspectMs": 30000,
+      // Silence after which a suspect peer is reaped. Floor 1000.
+      "ClusterReapMs": 300000,
+      // How often the cluster outbox drainer ticks. Floor 250.
+      "ClusterDrainMs": 1000,
+      // How often the cluster retention GC sweeps. Floor 60000.
+      "ClusterGcMs": 600000,
+      // Days a pending outbox row may keep retrying before it is dead-lettered. Floor 1.
+      "ClusterRetryTtlDays": 7,
+      // Days a delivered or dead outbox row is kept. Clamped above the retry TTL so a late redelivery is still deduped.
+      "ClusterRetentionDays": 30,
+
+      // ── Storage ──
+      // SQLite file for the API's own operational metadata.
+      "DbPath": "kgsm-api.db",
+
+      // ── General ──
+      // HTTP bind address(es), semicolon-separated. Read before the host exists, so it is bound separately in Program.
+      "Urls": "http://127.0.0.1:8080",
+      // Comma-separated CORS origin allowlist. Blank allows any origin, which is a dev-only posture.
+      "CorsOrigins": ""
+  },
+
+  "MetricsThresholds": {
+    "Rules": [
+      { "key": "host-disk", "metric": "HostDiskUsedPct", "warn": 90,   "danger": 95,   "fireForSec": 60,  "clearForSec": 300, "clearMargin": 3,   "enabled": true  },
+      { "key": "host-mem",  "metric": "HostMemUsedPct",  "warn": 90,   "danger": 97,   "fireForSec": 120, "clearForSec": 120, "clearMargin": 5,   "enabled": true  },
+      { "key": "host-swap", "metric": "HostSwapUsedPct", "warn": 50,   "danger": 90,   "fireForSec": 120, "clearForSec": 120, "clearMargin": 10,  "enabled": true  },
+      { "key": "host-load", "metric": "HostLoadPerCore", "warn": 1.5,  "danger": 4.0,  "fireForSec": 120, "clearForSec": 120, "clearMargin": 0.3, "enabled": true  },
+      { "key": "host-temp", "metric": "HostTempC",       "warn": 85,   "danger": 95,   "fireForSec": 30,  "clearForSec": 60,  "clearMargin": 5,   "enabled": true  },
+      { "key": "srv-pids",  "metric": "ServerPids",      "warn": 1000, "danger": null, "fireForSec": 120, "clearForSec": 120, "clearMargin": 50,  "enabled": false },
+      { "key": "srv-mem",   "metric": "ServerMemBytes",  "warn": 0,    "danger": null, "fireForSec": 120, "clearForSec": 120, "clearMargin": 0,   "enabled": false },
+      { "key": "srv-cpu",   "metric": "ServerCpuPctCore","warn": 0,    "danger": null, "fireForSec": 120, "clearForSec": 120, "clearMargin": 0,   "enabled": false }
+    ]
+  },
+
+  // --- Standard ASP.NET Core keys ---------------------------------------------------------------
+  // Not part of the "Api" section: these are the framework's own, spelled the way ASP.NET expects.
+  // Kestrel's certificate paths are set per-host in the env file (TLS is terminated here directly,
+  // with no reverse proxy), so the keys are declared blank rather than pointed anywhere.
+  "Kestrel": {
+    "Certificates": {
+      "Default": {
+        "Path": "",
+        "KeyPath": ""
+      }
+    }
+  },
+
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+      // EF logs every executed SQL command at Information — far too noisy for a service that
+      // polls (the cluster outbox drainer alone runs a due-scan every second). Warning keeps
+      // failures/warnings; drop to Information transiently when debugging a query.
+      "Microsoft.EntityFrameworkCore.Database.Command": "Warning"
+    }
+  },
+
+  "AllowedHosts": "*"
+}

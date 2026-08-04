@@ -13,7 +13,7 @@ namespace TheKrystalShip.Api.Services.Library;
 /// </summary>
 public interface ISteamCoverClient
 {
-    /// <summary>Whether the Steam cover source is active (<c>KGSM_API_STEAM_COVERS_DISABLED</c> off + a CDN base).
+    /// <summary>Whether the Steam cover source is active (<c>Api__SteamCoversDisabled</c> off + a CDN base).
     /// When false the worker skips Steam and the cover falls back to RAWG.</summary>
     bool Enabled { get; }
 

@@ -20,8 +20,8 @@ internal static class TestTokens
         IConfiguration config = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["KGSM_API_HOST_ID"] = hostId,
-                ["KGSM_API_AUTH_SIGNING_KEY"] = signingKey,
+                ["Api:HostId"] = hostId,
+                ["Api:SigningKey"] = signingKey,
             })
             .Build();
         var tokens = new SessionTokenService(ApiOptions.FromConfiguration(config), NullLogger<SessionTokenService>.Instance);

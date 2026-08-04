@@ -274,7 +274,7 @@ public sealed class MetricsThresholdAlertTests
 
     private static ApiOptions OptionsWith(params ThresholdRule[] rules)
     {
-        var dict = new Dictionary<string, string?> { ["KGSM_API_HOST_ID"] = "hotrod" };
+        var dict = new Dictionary<string, string?> { ["Api:HostId"] = "hotrod" };
         for (int i = 0; i < rules.Length; i++)
         {
             ThresholdRule r = rules[i];

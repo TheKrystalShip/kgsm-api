@@ -16,7 +16,7 @@ namespace TheKrystalShip.Api.Tests;
 /// <para>
 /// The load-bearing test is <see cref="ReconcileStartingLatch_DoesNotPromote_WhileStillMeasuredUp"/> —
 /// the background boolean reconcile (which re-derives run-state from kgsm every
-/// <c>KGSM_API_INSTANCE_CACHE_TTL_SECONDS</c>) sees the same "process up" signal for both a starting AND
+/// <c>Api__InstanceCacheTtlSeconds</c>) sees the same "process up" signal for both a starting AND
 /// a running instance, and must never be allowed to flip <c>starting -&gt; running</c> on its own; only
 /// <c>MarkReady</c> (the <c>instance_ready</c> event) may do that.
 /// </para>

@@ -129,7 +129,7 @@ public sealed record SensorSample(string Chip, string? Label, double ValueC);
 /// </summary>
 public sealed record HostIdentity(
     // Deployment region — an arbitrary free string (e.g. "eu-west", "homelab-basement"), NOT a restricted
-    // enum. Null when neither the override nor KGSM_API_REGION is set (honest unknown).
+    // enum. Null when neither the override nor Api__Region is set (honest unknown).
     string? Region,
     // The OS the API/host runs on (name/kernel/arch). Null only if even the runtime OS description is blank.
     OsInfo? Os,
@@ -144,7 +144,7 @@ public sealed record HostIdentity(
 /// <summary>
 /// Sparse update body for <c>PATCH /hosts/{id}</c> (admin) — the editable half of the identity card. Only
 /// the present fields change: a <see langword="null"/> field is left unchanged; an explicit empty string
-/// <strong>clears</strong> the override (the value falls back to its <c>KGSM_API_*</c> config default). Both
+/// <strong>clears</strong> the override (the value falls back to its <c>Api__*</c> config default). Both
 /// are free-form strings (length-bounded by the controller); region is NOT a restricted enum.
 /// </summary>
 public sealed record HostPatch(string? Label, string? Region);

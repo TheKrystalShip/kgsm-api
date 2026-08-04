@@ -14,7 +14,7 @@ public interface IClusterTokenService
     /// <summary>
     /// Mint a fresh service token for THIS node. Throws <see cref="InvalidOperationException"/> when
     /// <see cref="ApiOptions.ClusterEnabled"/> is <see langword="false"/> (a blank
-    /// <c>KGSM_API_CLUSTER_SECRET</c> means this host cannot present itself as a cluster member at
+    /// <c>Api__ClusterSecret</c> means this host cannot present itself as a cluster member at
     /// all — minting would produce a token nobody, including this same host, could ever validate).
     /// </summary>
     MintedClusterToken Mint();

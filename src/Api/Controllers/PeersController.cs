@@ -28,7 +28,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// (<see cref="IClusterTokenService"/>), a completely separate credential from the Discord-derived user
 /// JWT the rest of the API's <c>[Authorize]</c> tier policies check — they carry <c>[AllowAnonymous]</c>
 /// individually and do their OWN fail-closed auth inline, first thing, every call. It must work
-/// identically whether <c>KGSM_API_AUTH_DISABLED</c> is set or not — a node-to-node call is not a
+/// identically whether <c>Api__AuthDisabled</c> is set or not — a node-to-node call is not a
 /// browser session, so it must NOT be gated (or auto-granted) by the user auth pipeline at all.
 /// <b>Deliberately NOT a class-level <see cref="AllowAnonymousAttribute"/></b> — that would win over
 /// every action-level <c>[Authorize]</c> below (ASP.NET Core resolves <c>AllowAnonymous</c> at the

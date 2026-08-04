@@ -435,7 +435,7 @@ public sealed class ServerSettingsTests
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["KGSM_API_WATCHDOG_SOCKET"] = "/tmp/kgsm-api-tests-watchdog.sock",
+                    ["Api:WatchdogSocketPath"] = "/tmp/kgsm-api-tests-watchdog.sock",
                 });
             });
             builder.ConfigureTestServices(services =>

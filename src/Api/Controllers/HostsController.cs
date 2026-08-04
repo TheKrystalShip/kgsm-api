@@ -43,7 +43,7 @@ public sealed class HostsController(
 
     /// <summary>Edit this host's identity overrides — the editable half of the card (architecture §4·a).
     /// Admin-gated (host config). Sparse: an absent field is unchanged, an explicit empty string clears the
-    /// override (back to the <c>KGSM_API_*</c> config default). Returns the refreshed host detail.</summary>
+    /// override (back to the <c>Api__*</c> config default). Returns the refreshed host detail.</summary>
     [HttpPatch("{id}")]
     [Authorize(Policy = AuthPolicy.Admin)] // host config — admin only (M4·a), tightening the class-level viewer gate
     public async Task<ActionResult<Host>> Patch(string id, [FromBody] HostPatch? body, CancellationToken ct)

@@ -114,7 +114,7 @@ public sealed class BlueprintCache : IHostedService, IDisposable
         {
             if (Interlocked.Exchange(ref _engineUnavailableLogged, 1) == 0)
                 _logger.LogWarning(
-                    "kgsm engine is not configured (KGSM_API_KGSM_PATH is empty) — blueprint cache stays empty.");
+                    "kgsm engine is not configured (Api__KgsmPath is empty) — blueprint cache stays empty.");
             return;
         }
 

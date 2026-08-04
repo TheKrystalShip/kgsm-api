@@ -14,7 +14,7 @@ namespace TheKrystalShip.Api.Tests;
 /// checks the <c>SessionEntry</c> registry for <c>Id == sid &amp;&amp; !Revoked &amp;&amp; Expires &gt; now</c>.
 /// The 5s in-memory cache is the revocation-lag bound (D2); <c>Evict</c> makes a revoke ~instant, the
 /// TTL is the backstop. D10: pre-M4·c tokens (no <c>sid</c> claim) are rejected — the clean break.
-/// The escape hatch (<c>KGSM_API_SESSIONS_DISABLED=1</c>) bypasses the whole check.
+/// The escape hatch (<c>Api__SessionsDisabled=true</c>) bypasses the whole check.
 /// <para>
 /// Each test mints a token + inserts a <see cref="SessionEntry"/> row with a KNOWN sid (so the test
 /// can revoke/expire/evict that specific row). <c>/api/v1/me</c> is the probe endpoint (viewer-gated,
@@ -128,12 +128,12 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
     [Fact]
     public async Task SessionsDisabled_TokenWithoutRow_Passes200()
     {
-        // KGSM_API_SESSIONS_DISABLED=1 → the validator + the OnTokenValidated sid check BOTH bypass.
+        // Api__SessionsDisabled=true → the validator + the OnTokenValidated sid check BOTH bypass.
         // A token whose sid has NO row (no SessionStore.CreateAsync call) passes — the pre-M4·c
         // stateless posture, available for debugging. The derived factory overrides the config key.
         WebApplicationFactory<Program> disabled = factory.WithWebHostBuilder(b =>
             b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(
-                new Dictionary<string, string?> { ["KGSM_API_SESSIONS_DISABLED"] = "1" })));
+                new Dictionary<string, string?> { ["Api:SessionsDisabled"] = "true" })));
 
         // Mint WITHOUT inserting a row — just the token, no SessionStore call. Under sessions-ON this
         // would 401 (no row → validator false); under sessions-OFF the bypass makes it pass.
@@ -158,7 +158,7 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
         // make this test slow.
         WebApplicationFactory<Program> fast = factory.WithWebHostBuilder(b =>
             b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(
-                new Dictionary<string, string?> { ["KGSM_API_SESSIONS_CACHE_TTL_MS"] = "600" })));
+                new Dictionary<string, string?> { ["Api:SessionsCacheTtlMs"] = "600" })));
 
         (string token, string sid) = MintWithKnownSid(fast.Services, AuthTier.Viewer);
         HttpClient c = fast.CreateClient();

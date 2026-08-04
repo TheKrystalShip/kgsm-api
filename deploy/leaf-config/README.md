@@ -50,9 +50,9 @@ would read. So wiring a new config-target leaf is exactly: add it here and to th
 - **Config is override, never surgery.** The API never edits a leaf's own `appsettings.json` / env
   file (the hand-deployed *floor*, which already holds secrets). It only adds a separate override layer
   that loads **last**. Layering, last wins:
-  `override env  >  the leaf's own EnvironmentFile / appsettings.json` — a drop-in is parsed after the
+  `override env  >  the leaf's own EnvironmentFile / settings file` — a drop-in is parsed after the
   unit's own directives (so the override `EnvironmentFile` is read last), and for the .NET leaves an
-  env var already beats `appsettings.json`.
+  env var already beats the settings file.
 - **`NoNewPrivileges=true` on the API unit does not block the restart.** `systemctl restart` is a
   D-Bus call to PID 1 authorized by polkit, **not** an in-process privilege escalation — so it works
   fine under NNP. Do **not** remove `NoNewPrivileges` to "make restart work"; it already works. (NNP

@@ -28,7 +28,7 @@ public sealed class LeafDescriptorParseTests
           "description": "How often.", "group": "sampling", "type": "int", "default": "1000",
           "min": 100, "unit": "ms", "risk": "safe" },
         { "key": "socketPath", "env": "KGSM_MONITOR_SOCKET", "label": "Socket", "description": "Where.",
-          "type": "path", "risk": "wiring", "pairedApiKey": "KGSM_API_MONITOR_SOCKET",
+          "type": "path", "risk": "wiring", "pairedApiKey": "Api:MonitorSocketPath",
           "dependsOn": "intervalMs" }
       ]
     }
@@ -57,7 +57,7 @@ public sealed class LeafDescriptorParseTests
 
         LeafConfigFieldDef socket = d.Field("socketPath")!;
         Assert.Equal(LeafConfigRisk.Wiring, socket.Risk);
-        Assert.Equal("KGSM_API_MONITOR_SOCKET", socket.PairedApiKey);
+        Assert.Equal("Api:MonitorSocketPath", socket.PairedApiKey);
         Assert.Equal("intervalMs", socket.DependsOn);
         Assert.Null(socket.Default);            // declares none → never fabricated
     }
@@ -238,9 +238,9 @@ public sealed class LeafDescriptorParseTests
         ApiOptions.FromConfiguration(new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["KGSM_API_LEAF_DESCRIPTOR_DIR"] = descriptorDir,
-                ["KGSM_API_LEAF_DROPIN_DIR"] = dropInDir,
-                ["KGSM_API_LEAF_OVERRIDES_DIR"] = overridesDir,
+                ["Api:LeafDescriptorDir"] = descriptorDir,
+                ["Api:LeafDropInDir"] = dropInDir,
+                ["Api:LeafOverridesDir"] = overridesDir,
             })
             .Build());
 

@@ -11,10 +11,13 @@ namespace TheKrystalShip.Api;
 public class Program
 {
     // Kestrel binds to whatever the standard "urls" configuration key resolves to; we feed
-    // that key from KGSM_API_URLS so the bind address is one of the documented KGSM_API_*
-    // settings (appsettings.json) rather than an invisible env-only knob.
+    // that key from Api:Urls so the bind address is one of the documented settings rather than
+    // an invisible env-only knob.
     private const string ServerUrlsKey = "urls";
     private const string DefaultUrls = "http://127.0.0.1:8080";
+
+    /// <summary>The settings file, and its per-environment companion, beside the binary.</summary>
+    private const string SettingsFile = "kgsm-api.settings.json";
 
     public static void Main(string[] args)
     {
@@ -23,14 +26,30 @@ public class Program
 
     public static IHostBuilder CreateHostBuilder(string[] args) =>
         Host.CreateDefaultBuilder(args)
-            // Route the bind address through configuration like every other KGSM_API_* key:
-            // appsettings.json supplies the default and the KGSM_API_URLS env var overrides it.
-            // This callback is registered after CreateDefaultBuilder's appsettings.json/env
-            // sources, so building here reads the fully merged value; we then alias it onto
-            // Kestrel's standard "urls" key.
-            .ConfigureAppConfiguration((_, config) =>
+            .ConfigureAppConfiguration((ctx, config) =>
             {
-                string urls = config.Build()["KGSM_API_URLS"] ?? DefaultUrls;
+                // The settings files live beside the binary, which under systemd is not the working
+                // directory, so they are named absolutely rather than by the appsettings.json
+                // convention CreateDefaultBuilder resolves against the content root.
+                config.AddJsonFile(Path.Combine(AppContext.BaseDirectory, SettingsFile),
+                    optional: true, reloadOnChange: false);
+                config.AddJsonFile(
+                    Path.Combine(AppContext.BaseDirectory,
+                        $"kgsm-api.settings.{ctx.HostingEnvironment.EnvironmentName}.json"),
+                    optional: true, reloadOnChange: false);
+
+                // Environment variables and the command line are re-registered so they sit LAST and
+                // therefore win. Configuration resolves by source order, and the two files above were
+                // appended after everything CreateDefaultBuilder installed — including its own
+                // environment provider. Without this the files would outrank every Api__* and
+                // Logging__* variable, and an override would read as applied while changing nothing.
+                config.AddEnvironmentVariables();
+                if (args.Length > 0) config.AddCommandLine(args);
+
+                // Alias the resolved bind address onto Kestrel's standard "urls" key. Building here
+                // reads the fully merged value, which is why this runs after the sources above.
+                string urls = config.Build()[$"{ApiSettings.Section}:{nameof(ApiSettings.Urls)}"] ?? DefaultUrls;
+                if (string.IsNullOrWhiteSpace(urls)) urls = DefaultUrls;
                 config.AddInMemoryCollection(new Dictionary<string, string?> { [ServerUrlsKey] = urls });
             })
             // Ecosystem-standard logging (see ../tks/logging-convention.md): one journald-native
@@ -48,7 +67,7 @@ public class Program
                 // so SSE streams + REST multiplex on one connection (kills the ~6-conn/origin cap).
                 // Plain HTTP (dev) stays h1.1 — SSE works fine there. Additive: negotiates down for
                 // any client that doesn't support h2. ConfigureEndpointDefaults runs for every
-                // endpoint, including the URL-bound ones from KGSM_API_URLS.
+                // endpoint, including the URL-bound ones from Api:Urls.
                 webBuilder.ConfigureKestrel(o =>
                     o.ConfigureEndpointDefaults(e => e.Protocols = HttpProtocols.Http1AndHttp2));
                 webBuilder.UseStartup<Startup>();

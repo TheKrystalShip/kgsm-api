@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
-/// The <c>KGSM_API_AUTH_DISABLED=1</c> escape hatch (the pre-M4 open trust window, now explicit).
+/// The <c>Api__AuthDisabled=true</c> escape hatch (the pre-M4 open trust window, now explicit).
 /// Authenticates EVERY request as a synthetic <c>admin</c>, so every tier policy passes and the
 /// existing smoke/dev flow runs unchanged. Registered as the default scheme only when auth is off;
 /// the loud warning is logged once at startup (see <c>Startup.Configure</c>). Never wire this on an

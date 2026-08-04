@@ -28,7 +28,7 @@ public sealed class SessionCleanupWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // The master switch (KGSM_API_SESSIONS_DISABLED) makes the whole registry inert (M4·a
+        // The master switch (Api__SessionsDisabled) makes the whole registry inert (M4·a
         // stateless-JWT posture, a debugging escape hatch) — no per-request check, no revoke
         // endpoints, and (here) no GC either: there's nothing writing rows for this to clean up, and
         // starting the timer anyway would just be a silent no-op loop. Return cleanly (no timer at

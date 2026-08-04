@@ -12,7 +12,7 @@
 *.user
 *.userosscache
 *.sln.docstates
-appsettings.Development.json
+kgsm-api.settings.Development.json
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs

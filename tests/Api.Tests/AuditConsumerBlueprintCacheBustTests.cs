@@ -139,11 +139,11 @@ public sealed class AuditConsumerBlueprintCacheBustTests : IClassFixture<AuditCo
             {
                 // KgsmProvisioned=true ⇒ Startup.cs runs services.AddKgsmServices(...) and registers
                 // IEventService/IBlueprintService as singletons — both replaced below.
-                ["KGSM_API_KGSM_PATH"] = "/usr/bin/kgsm",
+                ["Api:KgsmPath"] = "/usr/bin/kgsm",
                 // Unique socket path: Initialize() on the fake is a no-op and the path never binds,
                 // but the consumer logs it, so it must be a per-fixture unique path so parallel test
                 // classes don't share a real socket resource by accident.
-                ["KGSM_API_KGSM_JOURNAL"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-journal-{Guid.NewGuid():N}"),
+                ["Api:KgsmJournalDir"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-journal-{Guid.NewGuid():N}"),
             }));
 
             builder.ConfigureTestServices(services =>

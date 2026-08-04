@@ -59,7 +59,7 @@ render_unit() {   # $1 = unit filename
         "${REPO_DIR}/deploy/$1"
 }
 
-# Where to prove the API actually serves. The bind comes from KGSM_API_URLS, which the operator
+# Where to prove the API actually serves. The bind comes from Api__Urls, which the operator
 # env file overrides (this host serves HTTPS on :443 and plain HTTP on loopback:8097, while the
 # unit's built-in default is :8080). Resolve it rather than hardcoding a port — a health check
 # aimed at the wrong scheme or port fails a deploy that actually succeeded.
@@ -68,10 +68,10 @@ resolve_health_url() {
     # systemd EnvironmentFile format (KEY=VALUE / # comments); a plain grep is the safe reader —
     # do NOT source it, it can hold values systemd parses but bash would mangle.
     if [[ -r "$ENV_FILE" ]]; then
-        urls="$(grep -E '^[[:space:]]*KGSM_API_URLS=' "$ENV_FILE" 2>/dev/null \
+        urls="$(grep -E '^[[:space:]]*Api__Urls=' "$ENV_FILE" 2>/dev/null \
                   | tail -n1 | cut -d= -f2- | tr -d '"'"'"' ')"
     fi
-    [[ -n "$urls" ]] || urls="$(grep -E '^Environment=KGSM_API_URLS=' "${REPO_DIR}/deploy/${UNITS[0]}" \
+    [[ -n "$urls" ]] || urls="$(grep -E '^Environment=Api__Urls=' "${REPO_DIR}/deploy/${UNITS[0]}" \
                                   | tail -n1 | cut -d= -f3-)"
     # Prefer a plain-HTTP endpoint: the HTTPS one may carry a cert this host cannot verify locally.
     for u in ${urls//;/ }; do

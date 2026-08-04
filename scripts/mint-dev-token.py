@@ -9,7 +9,7 @@ verified once at OAuth, then represented as a short-lived HMAC-signed JWT (see
 src/Api/Services/Auth/). There is no user-profile table; the audit log's actor is read
 straight off the token's `uname` claim (AuditPrincipal.ActorString -> "discord:<uname>").
 
-Because the bearer is signed by KGSM_API_AUTH_SIGNING_KEY alone (no Discord call on
+Because the bearer is signed by Api__SigningKey alone (no Discord call on
 validation), we can mint a valid, distinctly-attributable token for an agent identity
 ("claude") WITHOUT a Discord round-trip. This is appropriate ONLY on a trusted dev host —
 it bypasses Discord by design. It does NOT weaken auth for anyone else (auth stays ON); it
@@ -25,7 +25,7 @@ WITH a `sid`/`jti` and inserts the matching session row into the API's DB (the s
 operational row a real OAuth login would create — a session row, not a user profile). The
 row is marked with a recognisable User-Agent so these dev sessions are visible in the
 Active Sessions UI and swept by the normal GC worker once expired. Pass --no-session to
-skip the insert (only useful when the API runs with KGSM_API_AUTH_DISABLED=1, where the
+skip the insert (only useful when the API runs with Api__AuthDisabled=true, where the
 sid check is bypassed).
 
 The signing key is read from the host env file at runtime and never written anywhere.
@@ -41,7 +41,7 @@ Usage
   ./mint-dev-token.py --tier operator --ttl 1h
   ./mint-dev-token.py --username claude --display 'Claude (agent)' --host hotrod
   ./mint-dev-token.py --db /var/lib/kgsm-api/kgsm-api.db     # override the DB the row lands in
-  ./mint-dev-token.py --no-session          # token only (KGSM_API_AUTH_DISABLED hosts)
+  ./mint-dev-token.py --no-session          # token only (Api__AuthDisabled hosts)
 """
 import argparse
 import base64
@@ -61,11 +61,11 @@ def b64url(raw: bytes) -> str:
 
 
 def read_signing_key(env_file: str) -> str:
-    # Pull KGSM_API_AUTH_SIGNING_KEY out of a systemd EnvironmentFile-style file.
+    # Pull Api__SigningKey out of a systemd EnvironmentFile-style file.
     # Honor the same precedence as the API: env var of the same name wins if exported.
     import os
-    if os.environ.get("KGSM_API_AUTH_SIGNING_KEY"):
-        return os.environ["KGSM_API_AUTH_SIGNING_KEY"]
+    if os.environ.get("Api__SigningKey"):
+        return os.environ["Api__SigningKey"]
     try:
         with open(env_file, "r", encoding="utf-8") as fh:
             for line in fh:
@@ -73,11 +73,11 @@ def read_signing_key(env_file: str) -> str:
                 if line.startswith("#") or "=" not in line:
                     continue
                 k, _, v = line.partition("=")
-                if k.strip() == "KGSM_API_AUTH_SIGNING_KEY":
+                if k.strip() == "Api__SigningKey":
                     return v.strip().strip('"').strip("'")
     except FileNotFoundError:
-        sys.exit(f"error: env file not found: {env_file} (pass --env-file or export KGSM_API_AUTH_SIGNING_KEY)")
-    sys.exit(f"error: KGSM_API_AUTH_SIGNING_KEY not present in {env_file} — auth may be running with an "
+        sys.exit(f"error: env file not found: {env_file} (pass --env-file or export Api__SigningKey)")
+    sys.exit(f"error: Api__SigningKey not present in {env_file} — auth may be running with an "
              f"ephemeral key (tokens die on restart); set a stable key first.")
 
 
@@ -87,12 +87,12 @@ TICKS_AT_UNIX_EPOCH = 621_355_968_000_000_000
 
 
 def resolve_db_path(explicit: str | None, env_file: str) -> str:
-    # Precedence mirrors the API: an explicit flag, then KGSM_API_DB in the environment, then the
+    # Precedence mirrors the API: an explicit flag, then Api__DbPath in the environment, then the
     # host env file, then the systemd unit's StateDirectory default.
     if explicit:
         return explicit
-    if os.environ.get("KGSM_API_DB"):
-        return os.environ["KGSM_API_DB"]
+    if os.environ.get("Api__DbPath"):
+        return os.environ["Api__DbPath"]
     try:
         with open(env_file, "r", encoding="utf-8") as fh:
             for line in fh:
@@ -100,7 +100,7 @@ def resolve_db_path(explicit: str | None, env_file: str) -> str:
                 if line.startswith("#") or "=" not in line:
                     continue
                 k, _, v = line.partition("=")
-                if k.strip() == "KGSM_API_DB":
+                if k.strip() == "Api__DbPath":
                     return v.strip().strip('"').strip("'")
     except FileNotFoundError:
         pass
@@ -146,14 +146,14 @@ def main() -> None:
     ap.add_argument("--display", default="Claude (agent)", help="display name (profile snapshot)")
     ap.add_argument("--user-id", default="claude", help="sub becomes discord:<user-id>")
     ap.add_argument("--tier", default="admin", choices=["viewer", "operator", "admin"])
-    ap.add_argument("--host", default="hotrod", help="host id == token audience (KGSM_API_HOST_ID, default machine name)")
+    ap.add_argument("--host", default="hotrod", help="host id == token audience (Api__HostId, default machine name)")
     ap.add_argument("--ttl", default="12h", help="lifetime: 30m / 12h / 7d (default 12h)")
     ap.add_argument("--env-file", default="/etc/kgsm-api/kgsm-api.env", help="EnvironmentFile holding the signing key")
     ap.add_argument("--db", default=None,
-                    help="API DB to insert the session row into (default: KGSM_API_DB / env file / "
+                    help="API DB to insert the session row into (default: Api__DbPath / env file / "
                          "/var/lib/kgsm-api/kgsm-api.db)")
     ap.add_argument("--no-session", action="store_true",
-                    help="mint the token only; skip the session row (for KGSM_API_AUTH_DISABLED hosts)")
+                    help="mint the token only; skip the session row (for Api__AuthDisabled hosts)")
     args = ap.parse_args()
 
     secret = read_signing_key(args.env_file)

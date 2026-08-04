@@ -25,7 +25,7 @@ namespace TheKrystalShip.Api.Tests;
 /// </summary>
 /// <remarks>
 /// <b>The latency-poll cadence.</b> <see cref="PeerLatencyPoller"/>'s interval is <see cref="ApiOptions.ClusterPollMs"/>
-/// (env <c>KGSM_API_CLUSTER_POLL_MS</c>, floored at 250ms) — every <see cref="ClusterNodeFactory"/> node below
+/// (env <c>Api__ClusterPollMs</c>, floored at 250ms) — every <see cref="ClusterNodeFactory"/> node below
 /// pins it to <c>250</c> (the <c>pollMs</c> ctor default), the same order of magnitude as the gossip cadence, so
 /// a first-hand probe result (promotion to <c>reachable</c>, or the initial unreachable detection that seeds
 /// the failure timer) lands within a couple hundred ms rather than a fixed 10s wait. Timeouts below are still

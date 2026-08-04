@@ -195,7 +195,7 @@ public sealed class BackupCache : IHostedService, IDisposable
         {
             if (Interlocked.Exchange(ref _engineUnavailableLogged, 1) == 0)
                 _logger.LogWarning(
-                    "kgsm engine is not configured (KGSM_API_KGSM_PATH is empty) — backup cache stays empty.");
+                    "kgsm engine is not configured (Api__KgsmPath is empty) — backup cache stays empty.");
             return;
         }
 

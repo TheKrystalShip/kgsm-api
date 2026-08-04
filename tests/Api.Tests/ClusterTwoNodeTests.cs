@@ -395,22 +395,22 @@ public sealed class ClusterNodeFactory(
         {
             var settings = new Dictionary<string, string?>
             {
-                ["KGSM_API_HOST_ID"] = ClusterHostId,
-                ["KGSM_API_NODE_ID"] = NodeId,
-                ["KGSM_API_DB"] = DbPath,
-                ["KGSM_API_CLUSTER_SECRET"] = clusterSecret,
+                ["Api:HostId"] = ClusterHostId,
+                ["Api:NodeId"] = NodeId,
+                ["Api:DbPath"] = DbPath,
+                ["Api:ClusterSecret"] = clusterSecret,
                 // Clamped to a 250ms floor by ApiOptions.FromConfiguration regardless of what's passed.
-                ["KGSM_API_CLUSTER_DRAIN_MS"] = drainMs.ToString(CultureInfo.InvariantCulture),
+                ["Api:ClusterDrainMs"] = drainMs.ToString(CultureInfo.InvariantCulture),
                 // P0.5 gossip cadence — floored by ApiOptions.FromConfiguration (gossip 250ms,
                 // suspect/reap 1000ms) regardless of what's passed here.
-                ["KGSM_API_CLUSTER_GOSSIP_MS"] = gossipMs.ToString(CultureInfo.InvariantCulture),
-                ["KGSM_API_CLUSTER_SUSPECT_MS"] = suspectMs.ToString(CultureInfo.InvariantCulture),
-                ["KGSM_API_CLUSTER_REAP_MS"] = reapMs.ToString(CultureInfo.InvariantCulture),
+                ["Api:ClusterGossipMs"] = gossipMs.ToString(CultureInfo.InvariantCulture),
+                ["Api:ClusterSuspectMs"] = suspectMs.ToString(CultureInfo.InvariantCulture),
+                ["Api:ClusterReapMs"] = reapMs.ToString(CultureInfo.InvariantCulture),
                 // PeerLatencyPoller's first-hand probe cadence — floored at 250ms, same as gossip.
-                ["KGSM_API_CLUSTER_POLL_MS"] = pollMs.ToString(CultureInfo.InvariantCulture),
+                ["Api:ClusterPollMs"] = pollMs.ToString(CultureInfo.InvariantCulture),
             };
             if (advertiseUrl is not null)
-                settings["KGSM_API_CLUSTER_ADVERTISE_URL"] = advertiseUrl;
+                settings["Api:ClusterAdvertiseUrl"] = advertiseUrl;
             config.AddInMemoryCollection(settings);
         });
 

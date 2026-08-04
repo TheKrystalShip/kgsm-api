@@ -110,7 +110,7 @@ public sealed class SessionCleanupTests(AuthTestFactory factory) : IClassFixture
         // anything) can't race the assertion — it has nothing to delete yet when it fires.
         WebApplicationFactory<Program> derived = factory.WithWebHostBuilder(b =>
             b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(
-                new Dictionary<string, string?> { ["KGSM_API_SESSIONS_GC_MS"] = "60000" })));
+                new Dictionary<string, string?> { ["Api:SessionsGcMs"] = "60000" })));
         IServiceProvider services = derived.Services; // forces host build + start (the real worker's own catch-up pass runs here, on an empty table)
 
         string expired = await SeedRowAsync(services, DateTimeOffset.UtcNow.AddMinutes(-1));
@@ -135,12 +135,12 @@ public sealed class SessionCleanupTests(AuthTestFactory factory) : IClassFixture
     [Fact]
     public async Task Worker_InertWhenSessionsDisabled_ExpiredRowSurvives()
     {
-        // KGSM_API_SESSIONS_DISABLED=1 → ExecuteAsync logs + returns immediately, no timer, no delete.
+        // Api__SessionsDisabled=true → ExecuteAsync logs + returns immediately, no timer, no delete.
         // Seed the expired row BEFORE constructing/starting the worker (CreateAsync itself doesn't care
         // about the master switch — it's a plain table write) and confirm the disabled worker leaves it.
         WebApplicationFactory<Program> disabled = factory.WithWebHostBuilder(b =>
             b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(
-                new Dictionary<string, string?> { ["KGSM_API_SESSIONS_DISABLED"] = "1" })));
+                new Dictionary<string, string?> { ["Api:SessionsDisabled"] = "true" })));
         IServiceProvider services = disabled.Services;
 
         string expired = await SeedRowAsync(services, DateTimeOffset.UtcNow.AddMinutes(-1));

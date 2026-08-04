@@ -110,7 +110,7 @@ public sealed class HostSettingsStore(IServiceScopeFactory scopeFactory, ApiOpti
     /// defaults to the host id — never blank).</summary>
     public string EffectiveLabel(HostSettingsRecord record) => record.Label ?? options.HostLabel;
 
-    /// <summary>Effective region: the stored override, else the configured <c>KGSM_API_REGION</c>
+    /// <summary>Effective region: the stored override, else the configured <c>Api__Region</c>
     /// (null when neither is set — honest unknown, never fabricated).</summary>
     public string? EffectiveRegion(HostSettingsRecord record) => record.Region ?? options.Region;
 }

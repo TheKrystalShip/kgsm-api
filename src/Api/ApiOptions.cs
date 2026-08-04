@@ -3,11 +3,11 @@ using TheKrystalShip.Api.Services.Alerts;
 namespace TheKrystalShip.Api;
 
 /// <summary>
-/// Consolidated configuration for the api (introduced at M1, replacing the inline env reads
-/// of M0). Values are read through <see cref="IConfiguration"/>, so each key is documented
-/// in <c>appsettings.json</c> (the schema + defaults) and overridable by an environment
-/// variable of the same name (systemd-friendly). Resolved once at startup via
-/// <see cref="FromConfiguration"/> and registered as a singleton.
+/// The validated configuration the API runs on, produced from <see cref="ApiSettings"/> — which is
+/// bound 1:1 from the <c>Api</c> section of <c>kgsm-api.settings.json</c>, the file that declares the
+/// whole configurable surface with its defaults. Resolved once at startup via
+/// <see cref="FromConfiguration"/> and registered as a singleton, so every consumer reads one
+/// interpretation of the configuration rather than re-deriving its own.
 /// </summary>
 /// <remarks>
 /// A leaf's <c>*Provisioned</c> flag is derived from whether its endpoint is configured:
@@ -26,6 +26,25 @@ namespace TheKrystalShip.Api;
 public sealed class ApiOptions
 {
     /// <summary>
+    /// HTTP bind address(es), semicolon-separated. Carried here so the whole configurable surface is
+    /// one type, but <see cref="Program"/> reads the key directly as well: the bind address has to be
+    /// known before the host that would resolve these options exists.
+    /// </summary>
+    public string Urls { get; init; } = "http://127.0.0.1:8080";
+
+    /// <summary>
+    /// CORS origin allowlist, already split. Empty means any-origin, which is safe only because
+    /// bearers ride the Authorization header rather than cookies — set real origins on a deployed host.
+    /// </summary>
+    public IReadOnlyList<string> CorsOrigins { get; init; } = [];
+
+    /// <summary>
+    /// SQLite file for the API's own operational metadata. Also the anchor for
+    /// <see cref="RawgCacheDir"/>'s default, so the image cache lands in the same state directory.
+    /// </summary>
+    public string DbPath { get; init; } = "kgsm-api.db";
+
+    /// <summary>
     /// Stable identity of THIS host. Config-driven (default: machine name) and deliberately
     /// NOT derived from a leaf snapshot — identity must not flap when the monitor blips.
     /// Every server/alert this host reports carries it as <c>hostId</c> (architecture §4·a).
@@ -37,7 +56,7 @@ public sealed class ApiOptions
     public required string HostLabel { get; init; }
 
     /// <summary>
-    /// Deployment region (<c>KGSM_API_REGION</c>) — an <strong>arbitrary free string</strong> (e.g.
+    /// Deployment region (<c>Api__Region</c>) — an <strong>arbitrary free string</strong> (e.g.
     /// <c>eu-west</c>, <c>us-east</c>, <c>homelab</c>), NOT a restricted enum. The deploy-time default for the
     /// host identity card; an admin <c>PATCH /hosts/{id}</c> override (stored in <c>host_settings</c>) wins at
     /// runtime. <see langword="null"/> when unset — surfaced as honest unknown, never a fabricated region.
@@ -57,7 +76,7 @@ public sealed class ApiOptions
     public required string AssistantBaseUrl { get; init; }
 
     /// <summary>
-    /// Shared secret for the M7 assistant turn relay (<c>KGSM_API_ASSISTANT_RELAY_SECRET</c>) — the
+    /// Shared secret for the M7 assistant turn relay (<c>Api__AssistantRelaySecret</c>) — the
     /// API presents it as <c>X-Relay-Secret</c> so the co-located assistant trusts the forwarded
     /// end-user identity (it must match the assistant's <c>Assistant:Relay:Secret</c>). Empty ⇒ no
     /// secret is sent; if the assistant requires one the relay is refused (its 401 → our 502).
@@ -106,7 +125,7 @@ public sealed class ApiOptions
     // --- Library RAWG.io cover-art / metadata (the M8·a library increment) ------------------------
 
     /// <summary>
-    /// RAWG.io API key (<c>KGSM_API_RAWG_API_KEY</c>). <strong>Opt-in: blank by default</strong> → the
+    /// RAWG.io API key (<c>Api__RawgApiKey</c>). <strong>Opt-in: blank by default</strong> → the
     /// hydration worker no-ops and the library's cover/hero stay null (the SPA's gradient fallback),
     /// genres/tags <c>[]</c>. Set it to enable cover-art/metadata hydration. <strong>A secret</strong>:
     /// the RAWG client's <c>HttpClient</c> uses <c>RemoveAllLoggers()</c> so the <c>?key=…</c> never logs.
@@ -115,13 +134,13 @@ public sealed class ApiOptions
 
     /// <summary>
     /// Directory the self-hosted cover/hero <c>.jpg</c>s are written to and served from
-    /// (<c>KGSM_API_RAWG_CACHE_DIR</c>). Default: a <c>covers/</c> dir beside the SQLite DB
+    /// (<c>Api__RawgCacheDir</c>). Default: a <c>covers/</c> dir beside the SQLite DB
     /// (<c>/var/lib/kgsm-api/covers</c> on a deployed host). The worker creates it on first write.
     /// </summary>
     public required string RawgCacheDir { get; init; }
 
     /// <summary>
-    /// Optional public base URL (<c>KGSM_API_PUBLIC_BASE_URL</c>, e.g. <c>https://panel.example.com</c>) the
+    /// Optional public base URL (<c>Api__PublicBaseUrl</c>, e.g. <c>https://panel.example.com</c>) the
     /// absolute cover/hero URLs are built from for a reverse-proxy deployment. Blank (the default) ⇒ the URLs
     /// are derived from the incoming request (<c>{scheme}://{host}</c>), which resolves per-host for the
     /// multi-host SPA registry. Any trailing slash is trimmed.
@@ -130,21 +149,21 @@ public sealed class ApiOptions
 
     /// <summary>
     /// Base URL the Steam library-capsule cover (<c>{base}/{appId}/library_600x900.jpg</c> — the 2:3 portrait
-    /// art Steam shows in the library view) is fetched from (<c>KGSM_API_STEAM_CDN_BASE</c>). Default: Steam's
+    /// art Steam shows in the library view) is fetched from (<c>Api__SteamCdnBaseUrl</c>). Default: Steam's
     /// public store-asset CDN. Any trailing slash is trimmed. <strong>Steam is the cover authority</strong> —
     /// keyed by the blueprint's <c>client_steam_app_id</c>, fully <b>decoupled from RAWG</b> (no key needed);
     /// RAWG's <c>background_image</c> is only the fallback when a game isn't on Steam / has no capsule.
     /// </summary>
     public required string SteamCdnBaseUrl { get; init; }
 
-    /// <summary>Kill-switch for the keyless Steam cover source (<c>KGSM_API_STEAM_COVERS_DISABLED</c>). Off by
+    /// <summary>Kill-switch for the keyless Steam cover source (<c>Api__SteamCoversDisabled</c>). Off by
     /// default (Steam covers ON — they need no key); set to disable so the cover falls back to RAWG only (and,
     /// with no RAWG key either, the worker no-ops — the offline/test posture the smoke pins).</summary>
     public bool SteamCoversDisabled { get; init; }
 
     /// <summary>
     /// How stale (in days) a cached library row may get before the periodic worker re-fetches it from
-    /// Steam/RAWG (<c>KGSM_API_LIBRARY_REFRESH_INTERVAL_DAYS</c>, default 7 = weekly). Cover/metadata for a
+    /// Steam/RAWG (<c>Api__LibraryRefreshIntervalDays</c>, default 7 = weekly). Cover/metadata for a
     /// fixed game catalog is near-static, so this is the per-game refresh cadence; <c>0</c> (or negative)
     /// disables the periodic wake entirely (boot sweep + the admin <c>POST /library/refresh</c> only). The
     /// boot sweep also honours it (a frequent restart doesn't re-hammer fresh rows).
@@ -152,21 +171,21 @@ public sealed class ApiOptions
     public required int LibraryRefreshIntervalDays { get; init; }
 
     /// <summary>The <b>local</b> hour-of-day (0–23) the periodic refresh wakes to check
-    /// (<c>KGSM_API_LIBRARY_REFRESH_HOUR</c>, default 6 = 06:00 local — a quiet window). The worker wakes at
+    /// (<c>Api__LibraryRefreshHour</c>, default 6 = 06:00 local — a quiet window). The worker wakes at
     /// this hour each day and re-fetches any row older than <see cref="LibraryRefreshIntervalDays"/>; the wake
     /// itself is cheap (a DB read) when nothing is stale.</summary>
     public required int LibraryRefreshHour { get; init; }
 
     /// <summary>
     /// How long (seconds) the in-memory blueprint cache serves before a background refresh
-    /// (<c>KGSM_API_BLUEPRINT_CACHE_TTL_SECONDS</c>, default 60). Blueprints change infrequently
+    /// (<c>Api__BlueprintCacheTtlSeconds</c>, default 60). Blueprints change infrequently
     /// (install/uninstall), so a short staleness window is acceptable. Floor: 10s.
     /// </summary>
     public required int BlueprintCacheTtlSeconds { get; init; }
 
     /// <summary>
     /// How long (seconds) the in-memory instance cache serves before a background refresh
-    /// (<c>KGSM_API_INSTANCE_CACHE_TTL_SECONDS</c>, default 60). Instances change infrequently
+    /// (<c>Api__InstanceCacheTtlSeconds</c>, default 60). Instances change infrequently
     /// (start/stop/install/uninstall), and kgsm events update runtime state between refreshes.
     /// Floor: 10s.
     /// </summary>
@@ -204,7 +223,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// How often the <see cref="Realtime.DomainPump"/> re-fetches the instance roster + run-state from
-    /// kgsm (<c>KGSM_API_DOMAIN_POLL_MS</c>, default 5000 = 5s, floor 1000). This is the poll the
+    /// kgsm (<c>Api__DomainPollMs</c>, default 5000 = 5s, floor 1000). This is the poll the
     /// <c>servers</c> WS topic rides — each tick spawns <c>kgsm.sh</c> (a process), so it is deliberately
     /// relaxed: instances change rarely, the SPA has a manual refresh, and every operator-initiated
     /// start/stop/install already pushes an immediate verify <c>server.patch</c> off the command path, so
@@ -216,7 +235,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// How often the <see cref="Realtime.MetricsPump"/> scrapes the monitor socket and fans the live
-    /// resource tick out to the <c>*/metrics</c> topics (<c>KGSM_API_METRICS_POLL_MS</c>, default 1000 =
+    /// resource tick out to the <c>*/metrics</c> topics (<c>Api__MetricsPollMs</c>, default 1000 =
     /// 1s, floor 250). This is the live performance feed (≈ the monitor's own self-tick), <b>not</b> the
     /// instance/blueprint poll — relaxing it makes the SPA's performance charts choppy, so it stays at 1s
     /// by default. Gated on subscribers. This is the live feed only; durable metrics history is owned by
@@ -226,7 +245,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// How often the <see cref="Realtime.ServicesPump"/> polls systemd for leaf-service state changes and
-    /// emits <c>service.patch</c> on the <c>hosts/{id}/services</c> topic (<c>KGSM_API_SERVICES_POLL_MS</c>,
+    /// emits <c>service.patch</c> on the <c>hosts/{id}/services</c> topic (<c>Api__ServicesPollMs</c>,
     /// default 5000 = 5s, floor 2000). Subscriber-gated — an idle stream costs nothing. Coarser than the
     /// metrics tick (1s) because systemd state changes are infrequent and the UI doesn't need sub-second
     /// granularity for service status. Distinct from the <see cref="Realtime.LeafHealthMonitor"/> 2s
@@ -237,7 +256,7 @@ public sealed class ApiOptions
     /// <summary>
     /// How often the always-on <see cref="UpdateCheckCache"/> runs the per-instance networked update check
     /// — the fleet-wide <c>kgsm instances list --status --json</c> SLOW read
-    /// (<c>KGSM_API_UPDATE_CHECK_POLL_MS</c>, default 600000 = 10min, floor 60000 = 1min). The slow read
+    /// (<c>Api__UpdateCheckPollMs</c>, default 600000 = 10min, floor 60000 = 1min). The slow read
     /// probes SteamCMD / per-game upstream APIs for <c>Version.Latest</c>/<c>UpdatesAvailable</c>, which the
     /// instance cache's <c>--fast</c> refresh deliberately skips; running it on the relaxed 10-min cadence
     /// keeps upstream API pressure gentle while still lighting the SPA's "Update available" surfaces within
@@ -248,7 +267,7 @@ public sealed class ApiOptions
     public required int UpdateCheckPollMs { get; init; }
 
     /// <summary>
-    /// Kill-switch for the always-on update-check probe (<c>KGSM_API_UPDATE_CHECK_DISABLED</c>,
+    /// Kill-switch for the always-on update-check probe (<c>Api__UpdateCheckDisabled</c>,
     /// "1"/"true"/"yes"/"on"). Off by default — the probe runs and populates
     /// <see cref="Contracts.Server.UpdateAvailable"/>/<c>LatestVersion</c>/<c>UpdateCheckedAt</c>.
     /// Set it on a host where the slow (networked) probe must stay inert (a deterministic test harness,
@@ -259,7 +278,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// How often the always-on <see cref="Services.Aggregation.BackupCache"/> re-scans each instance's
-    /// backups (<c>KGSM_API_BACKUP_SCAN_POLL_MS</c>, default 300000 = 5min, floor 30000 = 30s). Listing
+    /// backups (<c>Api__BackupScanPollMs</c>, default 300000 = 5min, floor 30000 = 30s). Listing
     /// backups is a kgsm process spawn per instance, so it cannot ride the roster refresh that serves
     /// <c>GET /servers</c>; this relaxed cadence carries the steady state while the kgsm
     /// <c>instance_backup_created</c>/<c>instance_backup_restored</c> event echo refreshes the one affected
@@ -272,7 +291,7 @@ public sealed class ApiOptions
     // no history persistence config lives here.
 
     // --- Metric-threshold alerts (the alerts `metrics`/`host-monitor` source, increment 1 of 2 — see
-    //     metrics-threshold-alerts-plan.md). Policy storage is appsettings/env ONLY this increment: a
+    //     metrics-threshold-alerts-plan.md). Policy storage is the settings file/env: a
     //     baked-in Default, optionally wholesale-overridden by the MetricsThresholds:Rules config section.
     //     DB-backed/panel-editable policy is increment 2, out of scope. ----------------------------------
 
@@ -280,12 +299,12 @@ public sealed class ApiOptions
     /// The active metric-threshold policy. Defaults to <see cref="MetricsThresholdPolicy.Default"/>; a
     /// present, non-empty <c>MetricsThresholds:Rules</c> config section overrides it WHOLESALE (not
     /// merged field-by-field). Tuning a threshold or enabling a per-server rule means editing
-    /// <c>appsettings.json</c>/the env file and restarting the API — the expected increment-1 UX.
+    /// <c>kgsm-api.settings.json</c>/the env file and restarting the API.
     /// </summary>
     public MetricsThresholdPolicy Policy { get; init; } = MetricsThresholdPolicy.Default;
 
     /// <summary>Kill-switch for the whole metric-threshold alert pass
-    /// (<c>KGSM_API_METRICS_THRESHOLDS_DISABLED</c>), independent of each rule's own <c>enabled</c> flag —
+    /// (<c>Api__MetricsThresholdsDisabled</c>), independent of each rule's own <c>enabled</c> flag —
     /// flips the entire source off without touching the rule config.</summary>
     public bool MetricsThresholdsDisabled { get; init; }
 
@@ -302,14 +321,14 @@ public sealed class ApiOptions
 
     /// <summary>
     /// Max directory entries a single <c>GET /servers/{id}/files</c> returns before truncating with a
-    /// <c>truncated:true</c> signal (<c>KGSM_API_FILES_MAX_ENTRIES</c>, default 200). The constraint is
+    /// <c>truncated:true</c> signal (<c>Api__FilesMaxEntries</c>, default 200). The constraint is
     /// FRONTEND rendering (one DOM node per entry, not virtualized) — a save subdir with thousands of map
     /// chunks janks the tree, not the API. Truncation is always signaled, never a silent refusal (plan §5).
     /// </summary>
     public required int FilesMaxEntries { get; init; }
 
     /// <summary>
-    /// Max file size (bytes) the editor will open or save (<c>KGSM_API_FILES_MAX_EDIT_BYTES</c>, default
+    /// Max file size (bytes) the editor will open or save (<c>Api__FilesMaxEditBytes</c>, default
     /// ~2 MiB). A read past this returns <c>file_too_large</c> (the SPA shows "can't open" honestly rather
     /// than rendering megabytes of text); a save past it is refused. Hashing ≤ this for the etag is trivial.
     /// </summary>
@@ -317,7 +336,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// Max blueprint-file size (bytes) the library editor will open or save
-    /// (<c>KGSM_API_BLUEPRINT_MAX_EDIT_BYTES</c>, default 256 KiB). Separate from
+    /// (<c>Api__BlueprintMaxEditBytes</c>, default 256 KiB). Separate from
     /// <see cref="FilesMaxEditBytes"/> because the two surfaces edit different things: an instance's
     /// working directory holds arbitrary game files, while a blueprint is a short hand-written YAML
     /// (~25 lines native, ~70 container). A ceiling three orders of magnitude above the largest real
@@ -329,7 +348,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// The ordered source-id → systemd-unit map the host-log aggregator reads
-    /// (<c>KGSM_API_LOG_SOURCES</c>, e.g. <c>watchdog:kgsm-watchdog.service,monitor:kgsm-monitor.service</c>).
+    /// (<c>Api__LogSources</c>, e.g. <c>watchdog:kgsm-watchdog.service,monitor:kgsm-monitor.service</c>).
     /// Blank/unset ⇒ the default leaf set (assistant, monitor, watchdog, firewall, api, bot). Order is the
     /// order the frontend presents the sources. Reading the journal needs the api's user to have journal read
     /// access (the <c>systemd-journal</c>/<c>wheel</c> ACL); a host whose units are named differently overrides
@@ -337,17 +356,17 @@ public sealed class ApiOptions
     /// </summary>
     public required IReadOnlyList<LogSourceMap> LogSources { get; init; }
 
-    /// <summary>The <c>journalctl</c> binary the host-log reader shells (<c>KGSM_API_JOURNALCTL_PATH</c>,
+    /// <summary>The <c>journalctl</c> binary the host-log reader shells (<c>Api__JournalctlPath</c>,
     /// default <c>journalctl</c> — resolved via PATH). The reader degrades to an empty page if it's missing.</summary>
     public required string JournalctlPath { get; init; }
 
     /// <summary>The <c>systemctl</c> binary the Services board (<c>GET /hosts/{id}/services</c>) shells to read
-    /// each leaf unit's live state (<c>KGSM_API_SYSTEMCTL_PATH</c>, default <c>systemctl</c> — resolved via
+    /// each leaf unit's live state (<c>Api__SystemctlPath</c>, default <c>systemctl</c> — resolved via
     /// PATH). Reading unit state is unprivileged; the reader degrades each unit to <c>unknown</c> if it's
     /// missing. Same host-OS-introspection category as <see cref="JournalctlPath"/> — NOT a §4·b capability.</summary>
     public required string SystemctlPath { get; init; }
 
-    /// <summary>Hard wall-clock budget (ms) for a single host-log read (<c>KGSM_API_LOG_READ_TIMEOUT_MS</c>,
+    /// <summary>Hard wall-clock budget (ms) for a single host-log read (<c>Api__LogReadTimeoutMs</c>,
     /// default 5000, floor 500). On timeout the reader returns the lines it gathered (honest partial), never a
     /// fabricated tail.</summary>
     public required int LogReadTimeoutMs { get; init; }
@@ -356,7 +375,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// Directory the per-leaf override files (<c>&lt;leaf&gt;.env</c>) are rendered to
-    /// (<c>KGSM_API_LEAF_OVERRIDES_DIR</c>, default <c>/var/lib/kgsm-api/leaf-overrides</c> — the API's own
+    /// (<c>Api__LeafOverridesDir</c>, default <c>/var/lib/kgsm-api/leaf-overrides</c> — the API's own
     /// state dir, so the API writes it <strong>unprivileged</strong>; a systemd drop-in the leaf is unaware of
     /// feeds it via <c>EnvironmentFile=-</c>). The renderer mkdirs it <c>0700</c> and writes each file
     /// <c>0600</c> (the overrides can hold secrets). The override file is a deterministic render of the
@@ -366,14 +385,14 @@ public sealed class ApiOptions
 
     /// <summary>
     /// How long (ms) the apply broker watches a leaf's health after a config restart before declaring the
-    /// change good (<c>KGSM_API_LEAF_APPLY_CANARY_MS</c>, default 15000, floor 2000). If the leaf is not
+    /// change good (<c>Api__LeafApplyCanaryMs</c>, default 15000, floor 2000). If the leaf is not
     /// healthy within this window the override is restored and the leaf restarted again (auto-rollback) — so a
     /// bad value is a caught, reverted failure, not a downed leaf.
     /// </summary>
     public required int LeafApplyCanaryMs { get; init; }
 
     /// <summary>
-    /// Directory the leaf config descriptors are read from (<c>KGSM_API_LEAF_DESCRIPTOR_DIR</c>, default
+    /// Directory the leaf config descriptors are read from (<c>Api__LeafDescriptorDir</c>, default
     /// <c>/var/lib/kgsm/leaves</c>). Each leaf's own <c>deploy.sh</c> installs <c>&lt;leaf&gt;.json</c> here
     /// declaring its full configurable surface; this API only ever <strong>scans and reads</strong> it, so a
     /// leaf that joins the ecosystem later becomes configurable with no rebuild here. Format:
@@ -382,7 +401,7 @@ public sealed class ApiOptions
     public required string LeafDescriptorDir { get; init; }
 
     /// <summary>
-    /// Where systemd unit drop-ins live (<c>KGSM_API_LEAF_DROPIN_DIR</c>, default
+    /// Where systemd unit drop-ins live (<c>Api__LeafDropInDir</c>, default
     /// <c>/etc/systemd/system</c>). Read for two things: to tell whether a leaf is wired for config delivery
     /// at all (its <c>50-kgsm-api-override.conf</c> exists), and to resolve a leaf's floor values from the
     /// unit fragments that set them. Never written — the drop-ins are installed by
@@ -402,14 +421,16 @@ public sealed class ApiOptions
     /// </remarks>
     public string? ResolvedByEnvName(string envName) => envName switch
     {
-        "KGSM_API_HOST_ID" => HostId,
-        "KGSM_API_MONITOR_SOCKET" => MonitorSocketPath,
-        "KGSM_API_WATCHDOG_SOCKET" => WatchdogSocketPath,
-        "KGSM_API_SCHEDULER_SOCKET" => SchedulerSocketPath,
-        "KGSM_API_ASSISTANT_URL" => AssistantBaseUrl,
-        "KGSM_API_FIREWALL_SOCKET" => FirewallSocketPath,
-        "KGSM_API_KGSM_PATH" => KgsmPath,
-        "KGSM_API_KGSM_JOURNAL" => KgsmJournalDir,
+        // Spelled from the settings property names, so a rename moves the case label with the
+        // property rather than leaving a string here that resolves to nothing.
+        $"{ApiSettings.Section}__{nameof(ApiSettings.HostId)}" => HostId,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.MonitorSocketPath)}" => MonitorSocketPath,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.WatchdogSocketPath)}" => WatchdogSocketPath,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerSocketPath)}" => SchedulerSocketPath,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantBaseUrl)}" => AssistantBaseUrl,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.FirewallSocketPath)}" => FirewallSocketPath,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.KgsmPath)}" => KgsmPath,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.KgsmJournalDir)}" => KgsmJournalDir,
         _ => Environment.GetEnvironmentVariable(envName),
     };
 
@@ -419,7 +440,7 @@ public sealed class ApiOptions
     //     bus stays dormant (no inbox endpoint, no drainer — those land in later phases). -------------
 
     /// <summary>
-    /// The shared cluster HMAC secret (<c>KGSM_API_CLUSTER_SECRET</c>) every node in the guild is
+    /// The shared cluster HMAC secret (<c>Api__ClusterSecret</c>) every node in the guild is
     /// configured with — distinct from <see cref="SigningKey"/> (leaking one never hands over the
     /// other's forgery). Blank ⇒ the cluster capability is not provisioned (<see cref="ClusterEnabled"/>
     /// is <see langword="false"/>): no service token can be minted or validated on this host.
@@ -427,7 +448,7 @@ public sealed class ApiOptions
     public required string ClusterSecret { get; init; }
 
     /// <summary>
-    /// The previous cluster secret (<c>KGSM_API_CLUSTER_SECRET_PREVIOUS</c>), accepted alongside
+    /// The previous cluster secret (<c>Api__ClusterSecretPrevious</c>), accepted alongside
     /// <see cref="ClusterSecret"/> during a rotation overlap window (<c>PLAN-peers.md §2</c> #9): roll
     /// one node at a time, then drop this once every node is on the new secret. Blank ⇒ no previous
     /// secret is accepted (the normal, non-rotating posture).
@@ -435,7 +456,7 @@ public sealed class ApiOptions
     public required string ClusterSecretPrevious { get; init; }
 
     /// <summary>
-    /// This node's cluster identity (<c>KGSM_API_NODE_ID</c>) — the <c>sub</c>/<c>iss</c> a minted
+    /// This node's cluster identity (<c>Api__NodeId</c>) — the <c>sub</c>/<c>iss</c> a minted
     /// service token carries. Defaults to <see cref="HostId"/> (<c>PLAN-peers.md §2</c> #2: "config-driven
     /// nodeId, default: machine name, same as HostId") — a cluster node's identity is the same stable id
     /// already used for the host card, never a second independent name.
@@ -456,7 +477,7 @@ public sealed class ApiOptions
     //     that is inert whenever ClusterEnabled is false. -----------------------------------------------
 
     /// <summary>
-    /// How often (ms) the outbox drainer ticks (<c>KGSM_API_CLUSTER_DRAIN_MS</c>, default 1000 = 1s,
+    /// How often (ms) the outbox drainer ticks (<c>Api__ClusterDrainMs</c>, default 1000 = 1s,
     /// floor 250). Each tick pulls the due <c>pending</c> rows (<c>NextAttemptAt &lt;= now</c>) and
     /// attempts delivery; a row's own backoff — not this cadence — governs its individual retry spacing.
     /// </summary>
@@ -464,7 +485,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// Days a still-<c>pending</c> outbox row may keep retrying before the drainer dead-letters it
-    /// (<c>KGSM_API_CLUSTER_RETRY_TTL_DAYS</c>, default 7, floor 1). Anchored on the row's
+    /// (<c>Api__ClusterRetryTtlDays</c>, default 7, floor 1). Anchored on the row's
     /// <c>CreatedAt</c> — seven days covers any realistic node outage; a message still queued after
     /// that is an operational alarm (a loud log), not a silent loss (plan §6).
     /// </summary>
@@ -472,7 +493,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// Days a <c>delivered</c>/<c>dead</c> outbox row or an inbox dedupe-ledger row is kept before the
-    /// GC worker prunes it (<c>KGSM_API_CLUSTER_RETENTION_DAYS</c>, default 30). <b>Must exceed
+    /// GC worker prunes it (<c>Api__ClusterRetentionDays</c>, default 30). <b>Must exceed
     /// <see cref="ClusterRetryTtlDays"/></b> — <see cref="FromConfiguration"/> clamps it to at least
     /// <c>ClusterRetryTtlDays + 1</c> so a message redelivered right at the retry TTL boundary is still
     /// recognized as a duplicate by the (not-yet-pruned) inbox ledger, never re-applied (plan §7).
@@ -480,7 +501,7 @@ public sealed class ApiOptions
     public int ClusterRetentionDays { get; init; } = 30;
 
     /// <summary>
-    /// How often (ms) the cluster bus GC worker sweeps (<c>KGSM_API_CLUSTER_GC_MS</c>, default 600000 =
+    /// How often (ms) the cluster bus GC worker sweeps (<c>Api__ClusterGcMs</c>, default 600000 =
     /// 10 min, floor 60000) — the same cadence family as <see cref="SessionsGcMs"/>.
     /// </summary>
     public int ClusterGcMs { get; init; } = 600000;
@@ -490,7 +511,7 @@ public sealed class ApiOptions
     //     defaults so existing ApiOptions literals need no update. ------------------------------------------
 
     /// <summary>
-    /// This node's <b>advertised, browser-reachable client URL</b> (<c>KGSM_API_CLUSTER_ADVERTISE_URL</c>,
+    /// This node's <b>advertised, browser-reachable client URL</b> (<c>Api__ClusterAdvertiseUrl</c>,
     /// <c>PLAN-peers.md §2</c> #13a) — the address it puts in its own gossip self-entry so peers that learn
     /// it via gossip know where the SPA should reach it. Blank ⇒ this node omits its own URL from gossip
     /// (peers still learn it from whoever seeded it by handshake); a node discovered ONLY through this node's
@@ -499,7 +520,7 @@ public sealed class ApiOptions
     public string ClusterAdvertiseUrl { get; init; } = "";
 
     /// <summary>
-    /// This node's <b>node-to-node gossip URL</b> (<c>KGSM_API_CLUSTER_GOSSIP_URL</c>, <c>PLAN-peers.md
+    /// This node's <b>node-to-node gossip URL</b> (<c>Api__ClusterGossipUrl</c>, <c>PLAN-peers.md
     /// §2</c> #13a), when it differs from <see cref="ClusterAdvertiseUrl"/> (e.g. an internal/VPN address).
     /// Blank ⇒ falls back to <see cref="ClusterAdvertiseUrl"/> in the self-entry.
     /// </summary>
@@ -507,14 +528,14 @@ public sealed class ApiOptions
 
     /// <summary>
     /// How often (ms) the gossip worker runs one random-peer push-pull sync round
-    /// (<c>KGSM_API_CLUSTER_GOSSIP_MS</c>, default 5000 = 5s, floor 250) — one peer per round, O(1) work
+    /// (<c>Api__ClusterGossipMs</c>, default 5000 = 5s, floor 250) — one peer per round, O(1) work
     /// per node (<c>PLAN-peers.md §2·b</c>, G1). Each round also advances the failure timers.
     /// </summary>
     public int ClusterGossipMs { get; init; } = 5000;
 
     /// <summary>
     /// How often (ms) the latency poller probes each enabled peer's <c>/identity</c> first-hand
-    /// (<c>KGSM_API_CLUSTER_POLL_MS</c>, default 10000 = 10s, floor 250; <c>PLAN-peers.md §4</c>). This is
+    /// (<c>Api__ClusterPollMs</c>, default 10000 = 10s, floor 250; <c>PLAN-peers.md §4</c>). This is
     /// the failure detector's sampling rate: a peer must go unreachable across probes before the timers
     /// escalate it, so keep it comfortably below <see cref="ClusterSuspectMs"/> (several probes per suspect
     /// window). It is also the first-hand-auth cadence that promotes a gossip-discovered peer to <c>alive</c>.
@@ -523,14 +544,14 @@ public sealed class ApiOptions
 
     /// <summary>
     /// How long (ms) a peer stays <c>suspect</c> — no successful first-hand probe — before the failure timer
-    /// escalates it to <c>dead</c> (<c>KGSM_API_CLUSTER_SUSPECT_MS</c>, default 30000 = 30s, floor 1000;
+    /// escalates it to <c>dead</c> (<c>Api__ClusterSuspectMs</c>, default 30000 = 30s, floor 1000;
     /// <c>PLAN-peers.md §2·b</c>, G5).
     /// </summary>
     public int ClusterSuspectMs { get; init; } = 30000;
 
     /// <summary>
     /// How long (ms) a peer stays <c>dead</c>/<c>left</c> before it is reaped (row deleted) from the roster
-    /// (<c>KGSM_API_CLUSTER_REAP_MS</c>, default 300000 = 5 min, floor 1000; <c>PLAN-peers.md §2·b</c>, G5 /
+    /// (<c>Api__ClusterReapMs</c>, default 300000 = 5 min, floor 1000; <c>PLAN-peers.md §2·b</c>, G5 /
     /// §6 P0.5). Long enough that a briefly-bounced node refutes its own <c>dead</c> (via a higher
     /// incarnation) before it is forgotten.
     /// </summary>
@@ -543,34 +564,34 @@ public sealed class ApiOptions
     // bot uses) — keystone §4: this is configuration, NOT a process dependency on kgsm-bot.
 
     /// <summary>
-    /// Dev escape hatch (<c>KGSM_API_AUTH_DISABLED=1</c>). When set, every request is authenticated
+    /// Dev escape hatch (<c>Api__AuthDisabled=true</c>). When set, every request is authenticated
     /// as a synthetic <c>admin</c> and all tier policies pass — the pre-M4 unauthenticated trust
     /// window, now explicit and loudly logged. Off by default: <strong>auth is on by default</strong>.
     /// </summary>
     public bool AuthDisabled { get; init; }
 
-    /// <summary>HMAC signing key for the host-scoped session JWTs (<c>KGSM_API_AUTH_SIGNING_KEY</c>).
+    /// <summary>HMAC signing key for the host-scoped session JWTs (<c>Api__SigningKey</c>).
     /// Empty + auth enabled ⇒ an ephemeral per-process key is generated (tokens die on restart;
     /// logged loudly). Set a stable secret on a real host.</summary>
     public required string SigningKey { get; init; }
 
-    /// <summary>Discord OAuth application client id (<c>KGSM_API_AUTH_DISCORD_CLIENT_ID</c>).</summary>
+    /// <summary>Discord OAuth application client id (<c>Api__DiscordClientId</c>).</summary>
     public required string DiscordClientId { get; init; }
-    /// <summary>Discord OAuth application client secret (<c>KGSM_API_AUTH_DISCORD_CLIENT_SECRET</c>).</summary>
+    /// <summary>Discord OAuth application client secret (<c>Api__DiscordClientSecret</c>).</summary>
     public required string DiscordClientSecret { get; init; }
     /// <summary>The host's OAuth redirect URI — this host's <c>/auth/discord/callback</c>
-    /// (<c>KGSM_API_AUTH_DISCORD_REDIRECT_URI</c>).</summary>
+    /// (<c>Api__DiscordRedirectUri</c>).</summary>
     public required string DiscordRedirectUri { get; init; }
     /// <summary>Bot token used to read guild member roles via the Discord REST API
-    /// (<c>KGSM_API_AUTH_DISCORD_BOT_TOKEN</c>) — the only path to roles, since the
+    /// (<c>Api__DiscordBotToken</c>) — the only path to roles, since the
     /// <c>identify guilds</c> user scopes don't carry them. Same token the host's bot uses.</summary>
     public required string DiscordBotToken { get; init; }
-    /// <summary>The Discord guild whose roles authorize this host (<c>KGSM_API_AUTH_DISCORD_GUILD_ID</c>).</summary>
+    /// <summary>The Discord guild whose roles authorize this host (<c>Api__DiscordGuildId</c>).</summary>
     public required string DiscordGuildId { get; init; }
 
     /// <summary>
     /// The SPA origin/URL the OAuth callback hands the session back to
-    /// (<c>KGSM_API_AUTH_FRONTEND_URL</c>). When set, <c>/auth/discord/callback</c> 302s the browser
+    /// (<c>Api__AuthFrontendUrl</c>). When set, <c>/auth/discord/callback</c> 302s the browser
     /// here with the result in the URL <b>fragment</b> (<c>#access=…&amp;refresh=…</c> on success,
     /// <c>#error=…</c> otherwise) instead of returning JSON — the SPA token handoff. The redirect target
     /// is THIS single configured value, never a request-supplied one (no open-redirect). Blank → the
@@ -579,12 +600,12 @@ public sealed class ApiOptions
     public required string AuthFrontendUrl { get; init; }
 
     /// <summary>Discord role ids granting the <c>admin</c> tier (comma-separated;
-    /// <c>KGSM_API_AUTH_ROLE_ADMIN</c>).</summary>
+    /// <c>Api__RoleAdminIds</c>).</summary>
     public required IReadOnlyList<string> RoleAdminIds { get; init; }
-    /// <summary>Discord role ids granting the <c>operator</c> tier (<c>KGSM_API_AUTH_ROLE_OPERATOR</c>);
+    /// <summary>Discord role ids granting the <c>operator</c> tier (<c>Api__RoleOperatorIds</c>);
     /// the natural mapping for the bot's existing Ops <c>ActionRoleId</c>.</summary>
     public required IReadOnlyList<string> RoleOperatorIds { get; init; }
-    /// <summary>Discord role ids granting the <c>viewer</c> tier (<c>KGSM_API_AUTH_ROLE_VIEWER</c>).</summary>
+    /// <summary>Discord role ids granting the <c>viewer</c> tier (<c>Api__RoleViewerIds</c>).</summary>
     public required IReadOnlyList<string> RoleViewerIds { get; init; }
 
     /// <summary>Auth is on unless the dev escape hatch is set.</summary>
@@ -598,7 +619,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// Master switch for the session registry + the cached per-request validator +
-    /// the revocation surface (<c>KGSM_API_SESSIONS_DISABLED</c>, default <see langword="false"/>
+    /// the revocation surface (<c>Api__SessionsDisabled</c>, default <see langword="false"/>
     /// → sessions ON). When <see langword="true"/> the registry is inert — no per-request check,
     /// no <c>GET /auth/sessions</c>, no revoke endpoints (the M4·a stateless-JWT posture, an
     /// escape hatch for debugging). ⚠ In-flight tokens under <c>DISABLED</c> are always alive
@@ -609,7 +630,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// The in-memory cache TTL (ms) for the per-request session validator
-    /// (<c>KGSM_API_SESSIONS_CACHE_TTL_MS</c>, default 5000 = 5s, floor 500). The accepted
+    /// (<c>Api__SessionsCacheTtlMs</c>, default 5000 = 5s, floor 500). The accepted
     /// revocation-lag bound (D2): a revoke evicts the cache entry immediately (best-effort), and
     /// the TTL is the backstop — worst case a revoked session lives up to this long before the
     /// next access → 401. Per-host single-instance so no cross-node coherence is needed. Lower
@@ -620,7 +641,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// How often the session GC worker deletes expired rows
-    /// (<c>KGSM_API_SESSIONS_GC_MS</c>, default 600000 = 10 min, floor 60000). Both revoked and
+    /// (<c>Api__SessionsGcMs</c>, default 600000 = 10 min, floor 60000). Both revoked and
     /// non-revoked rows whose <c>Expires &lt; now</c> are deleted (expired is dead regardless of
     /// revocation) — keeps the table permanently bounded. Runs once at startup for catch-up after
     /// downtime. Inert when <see cref="SessionsEnabled"/> is <see langword="false"/>.
@@ -628,7 +649,7 @@ public sealed class ApiOptions
     public required int SessionsGcMs { get; init; }
 
     /// <summary>
-    /// The session absolute-cap window in days (<c>KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS</c>,
+    /// The session absolute-cap window in days (<c>Api__SessionsRefreshAbsoluteDays</c>,
     /// default 30, floor 1). A session row's <c>Expires = Created + this</c>. <b>No sliding</b>
     /// on refresh (the cap stays absolute, per the original M4·a lock rationale) — D8. ⚠ Must
     /// stay in lockstep with <see cref="Services.Auth.SessionTokenService"/>'s refresh-token TTL:
@@ -658,159 +679,177 @@ public sealed class ApiOptions
     /// rather than returning JSON. True iff a frontend URL is configured.</summary>
     public bool FrontendRedirectEnabled => !string.IsNullOrWhiteSpace(AuthFrontendUrl);
 
-    public static ApiOptions FromConfiguration(IConfiguration configuration)
+    public static ApiOptions FromConfiguration(IConfiguration configuration) =>
+        FromSettings(
+            configuration.GetSection(ApiSettings.Section).Get<ApiSettings>() ?? new ApiSettings(),
+            LoadThresholdPolicy(configuration));
+
+    /// <summary>
+    /// Validates what configuration supplied and produces the form the API runs on: clamps every
+    /// cadence to its floor, resolves a blank path to the coded default where an empty one would
+    /// throw, splits the CSV knobs, and inverts the two disable-flags into the enabled-by-default
+    /// properties the code reads.
+    /// </summary>
+    /// <remarks>
+    /// The distinction between <see langword="null"/> and <c>""</c> is load-bearing throughout, and
+    /// is why the settings type holds nullable strings. A key absent from configuration means "use
+    /// the default"; a key present but blank means "deliberately off", which is how a leaf endpoint
+    /// declares its capability <c>absent</c> rather than merely unset. <see cref="Defaulted"/> keeps
+    /// that difference; <see cref="BlankFallback"/> deliberately collapses it, for the few paths an
+    /// empty string would make <c>Path.*</c> throw on.
+    /// </remarks>
+    public static ApiOptions FromSettings(ApiSettings s, MetricsThresholdPolicy policy)
     {
-        string? hostId = Clean(configuration["KGSM_API_HOST_ID"]);
-        hostId ??= Environment.MachineName;
+        string hostId = Clean(s.HostId) ?? Environment.MachineName;
 
         // Computed ahead of the object initializer so ClusterRetentionDays's floor can reference it
         // (an initializer can't read a sibling property off the object being constructed).
-        int clusterRetryTtlDays = Math.Max(1, IntOr(configuration["KGSM_API_CLUSTER_RETRY_TTL_DAYS"], 7));
+        int clusterRetryTtlDays = Math.Max(1, s.ClusterRetryTtlDays ?? 7);
 
         return new ApiOptions
         {
+            Urls = BlankFallback(s.Urls, "http://127.0.0.1:8080"),
+            CorsOrigins = Csv(s.CorsOrigins),
+
             HostId = hostId,
-            HostLabel = Clean(configuration["KGSM_API_HOST_LABEL"]) ?? hostId,
+            HostLabel = Clean(s.HostLabel) ?? hostId,
             // Region: an arbitrary free string. Null when unset (honest unknown) — Clean() collapses blank to null.
-            Region = Clean(configuration["KGSM_API_REGION"]),
+            Region = Clean(s.Region),
             // For socket/url defaults we distinguish "unset" (use the default) from
             // "set to empty" (deliberately mark the capability absent): a present-but-empty
             // value stays empty, an absent key falls back to the standard path.
-            MonitorSocketPath = Defaulted(configuration["KGSM_API_MONITOR_SOCKET"], "/run/kgsm-monitor/metrics.sock"),
-            WatchdogSocketPath = Defaulted(configuration["KGSM_API_WATCHDOG_SOCKET"], "/run/kgsm-watchdog/control.sock"),
-            AssistantBaseUrl = Defaulted(configuration["KGSM_API_ASSISTANT_URL"], ""),
-            AssistantRelaySecret = Defaulted(configuration["KGSM_API_ASSISTANT_RELAY_SECRET"], ""),
+            MonitorSocketPath = Defaulted(s.MonitorSocketPath, "/run/kgsm-monitor/metrics.sock"),
+            WatchdogSocketPath = Defaulted(s.WatchdogSocketPath, "/run/kgsm-watchdog/control.sock"),
+            AssistantBaseUrl = Defaulted(s.AssistantBaseUrl, ""),
+            AssistantRelaySecret = Defaulted(s.AssistantRelaySecret, ""),
             // Opt-in (blank = absent): the firewall authority is a separate optional install.
-            FirewallSocketPath = Defaulted(configuration["KGSM_API_FIREWALL_SOCKET"], ""),
-            // Opt-in (blank = absent): the scheduler is a separate optional leaf (Settings Phase 3). Set it
-            // to /run/kgsm-scheduler/status.sock on a host that runs kgsm-scheduler.
-            SchedulerSocketPath = Defaulted(configuration["KGSM_API_SCHEDULER_SOCKET"], ""),
-            KgsmPath = Defaulted(configuration["KGSM_API_KGSM_PATH"], "/usr/bin/kgsm"),
-            KgsmJournalDir = Defaulted(configuration["KGSM_API_KGSM_JOURNAL"], "/var/lib/kgsm/events"),
+            FirewallSocketPath = Defaulted(s.FirewallSocketPath, ""),
+            // Opt-in (blank = absent): the scheduler is a separate optional leaf. Set it to
+            // /run/kgsm-scheduler/status.sock on a host that runs kgsm-scheduler.
+            SchedulerSocketPath = Defaulted(s.SchedulerSocketPath, ""),
+            KgsmPath = Defaulted(s.KgsmPath, "/usr/bin/kgsm"),
+            KgsmJournalDir = Defaulted(s.KgsmJournalDir, "/var/lib/kgsm/events"),
+            DbPath = BlankFallback(s.DbPath, "kgsm-api.db"),
 
-            // Realtime pump cadences (M2). The domain (instance) poll is relaxed by default (5s) — it
+            // Realtime pump cadences. The domain (instance) poll is relaxed by default (5s) — it
             // spawns kgsm.sh and the roster changes rarely (the SPA also has a manual refresh); floored at
             // 1s. The metrics tick stays at the monitor's ~1s self-tick (the live charts feed); floored at
             // 250ms. Blueprints have no poll — GET /library reads them live per request.
-            DomainPollMs = Math.Max(1000, IntOr(configuration["KGSM_API_DOMAIN_POLL_MS"], 5000)),
-            MetricsPollMs = Math.Max(250, IntOr(configuration["KGSM_API_METRICS_POLL_MS"], 1000)),
-            ServicesPollMs = Math.Max(2000, IntOr(configuration["KGSM_API_SERVICES_POLL_MS"], 5000)),
+            DomainPollMs = Math.Max(1000, s.DomainPollMs ?? 5000),
+            MetricsPollMs = Math.Max(250, s.MetricsPollMs ?? 1000),
+            ServicesPollMs = Math.Max(2000, s.ServicesPollMs ?? 5000),
             // Update-check poll — the slow (networked) fleet-wide probe's cadence. Relaxed (10min default,
             // 1min floor): the per-game upstream API hit makes it the slowest surface, so it runs on its own
             // dedicated cadence — independent of the fast-mode 60s instance cache. NOT subscriber-gated.
-            UpdateCheckPollMs = Math.Max(60_000, IntOr(configuration["KGSM_API_UPDATE_CHECK_POLL_MS"], 600_000)),
-            BackupScanPollMs = Math.Max(30_000, IntOr(configuration["KGSM_API_BACKUP_SCAN_POLL_MS"], 300_000)),
+            UpdateCheckPollMs = Math.Max(60_000, s.UpdateCheckPollMs ?? 600_000),
+            BackupScanPollMs = Math.Max(30_000, s.BackupScanPollMs ?? 300_000),
             // Kill-switch for the always-on update-check probe. Off by default; set to inert it (a test harness,
             // an offline smoke) so the slow probe never fires and the update fields stay honest-null.
-            UpdateCheckDisabled = Flag(configuration["KGSM_API_UPDATE_CHECK_DISABLED"]),
+            UpdateCheckDisabled = s.UpdateCheckDisabled ?? false,
 
             // Library RAWG cover/metadata. Opt-in (blank key => worker no-ops). The cache dir always resolves
-            // to a concrete path: an explicit KGSM_API_RAWG_CACHE_DIR wins, else (unset OR blank — the
-            // appsettings.json default is "") a covers/ subdir beside the SQLite DB, so it lands in the
-            // StateDirectory the deployed unit sets. (BlankFallback, not Defaulted — a blank must NOT stay
-            // blank here: Path.* would throw on an empty cache dir.)
-            RawgApiKey = Defaulted(configuration["KGSM_API_RAWG_API_KEY"], ""),
-            RawgCacheDir = BlankFallback(
-                configuration["KGSM_API_RAWG_CACHE_DIR"],
-                DefaultCacheDir(configuration["KGSM_API_DB"])),
-            PublicBaseUrl = Defaulted(configuration["KGSM_API_PUBLIC_BASE_URL"], "").TrimEnd('/'),
+            // to a concrete path: an explicit RawgCacheDir wins, else a covers/ subdir beside the SQLite DB,
+            // so it lands in the StateDirectory the deployed unit sets. (BlankFallback, not Defaulted — a
+            // blank must NOT stay blank here: Path.* would throw on an empty cache dir.)
+            RawgApiKey = Defaulted(s.RawgApiKey, ""),
+            RawgCacheDir = BlankFallback(s.RawgCacheDir, DefaultCacheDir(s.DbPath)),
+            PublicBaseUrl = Defaulted(s.PublicBaseUrl, "").TrimEnd('/'),
 
             // Steam library-capsule cover (the 2:3 portrait). The cover AUTHORITY, decoupled from RAWG: keyless,
-            // so it defaults ON (BlankFallback keeps a concrete CDN base even if the appsettings default is "").
-            // KGSM_API_STEAM_COVERS_DISABLED forces RAWG-only (the offline smoke sets it so cover stays null).
+            // so it defaults ON (BlankFallback keeps a concrete CDN base even if the declared default is blank).
+            // SteamCoversDisabled forces RAWG-only (the offline smoke sets it so cover stays null).
             SteamCdnBaseUrl = BlankFallback(
-                configuration["KGSM_API_STEAM_CDN_BASE"],
+                s.SteamCdnBaseUrl,
                 "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps").TrimEnd('/'),
-            SteamCoversDisabled = Flag(configuration["KGSM_API_STEAM_COVERS_DISABLED"]),
+            SteamCoversDisabled = s.SteamCoversDisabled ?? false,
             // Periodic refresh of the cover/metadata cache (in-process, off the request path). Weekly by
             // default; runs at a configurable local hour (a quiet window). Clamped: interval >= 0 (0 disables
             // the periodic wake), hour into 0..23.
-            LibraryRefreshIntervalDays = Math.Max(0, IntOr(configuration["KGSM_API_LIBRARY_REFRESH_INTERVAL_DAYS"], 7)),
-            LibraryRefreshHour = Math.Clamp(IntOr(configuration["KGSM_API_LIBRARY_REFRESH_HOUR"], 6), 0, 23),
+            LibraryRefreshIntervalDays = Math.Max(0, s.LibraryRefreshIntervalDays ?? 7),
+            LibraryRefreshHour = Math.Clamp(s.LibraryRefreshHour ?? 6, 0, 23),
             // Blueprint in-memory cache TTL (background refresh interval). Floor 10s.
-            BlueprintCacheTtlSeconds = Math.Max(10, IntOr(configuration["KGSM_API_BLUEPRINT_CACHE_TTL_SECONDS"], 60)),
+            BlueprintCacheTtlSeconds = Math.Max(10, s.BlueprintCacheTtlSeconds ?? 60),
             // Instance in-memory cache TTL (background refresh interval). Floor 10s.
-            InstanceCacheTtlSeconds = Math.Max(10, IntOr(configuration["KGSM_API_INSTANCE_CACHE_TTL_SECONDS"], 60)),
+            InstanceCacheTtlSeconds = Math.Max(10, s.InstanceCacheTtlSeconds ?? 60),
 
-            // Metric-threshold alerts (increment 1 — appsettings/env only). The kill-switch is independent
-            // of each rule's own enabled flag; the policy itself wholesale-overrides the baked-in Default
-            // only when MetricsThresholds:Rules is present and non-empty (see LoadThresholdPolicy).
-            MetricsThresholdsDisabled = Flag(configuration["KGSM_API_METRICS_THRESHOLDS_DISABLED"]),
-            Policy = LoadThresholdPolicy(configuration),
+            // Metric-threshold alerts. The kill-switch is independent of each rule's own enabled flag;
+            // the policy itself wholesale-overrides the baked-in Default only when MetricsThresholds:Rules
+            // is present and non-empty (see LoadThresholdPolicy).
+            MetricsThresholdsDisabled = s.MetricsThresholdsDisabled ?? false,
+            Policy = policy,
 
-            // File browser (Tier 3 #12). Entry cap is a frontend-render bound; edit ceiling guards the
+            // File browser. Entry cap is a frontend-render bound; edit ceiling guards the
             // editor against megabyte blobs. Clamped sane: at least 1 entry, at least 1 KiB.
-            FilesMaxEntries = Math.Max(1, IntOr(configuration["KGSM_API_FILES_MAX_ENTRIES"], 200)),
-            FilesMaxEditBytes = Math.Max(1024, LongOr(configuration["KGSM_API_FILES_MAX_EDIT_BYTES"], 2 * 1024 * 1024)),
-            BlueprintMaxEditBytes = Math.Max(1024, LongOr(configuration["KGSM_API_BLUEPRINT_MAX_EDIT_BYTES"], 256 * 1024)),
+            FilesMaxEntries = Math.Max(1, s.FilesMaxEntries ?? 200),
+            FilesMaxEditBytes = Math.Max(1024, s.FilesMaxEditBytes ?? 2 * 1024 * 1024),
+            BlueprintMaxEditBytes = Math.Max(1024, s.BlueprintMaxEditBytes ?? 256 * 1024),
 
             // Host logs (GET /hosts/{id}/logs). The unit map defaults to the host's leaf services; override
-            // KGSM_API_LOG_SOURCES on a host whose units are named differently. journalctl resolves via PATH.
-            LogSources = ParseLogSources(configuration["KGSM_API_LOG_SOURCES"]),
-            JournalctlPath = BlankFallback(configuration["KGSM_API_JOURNALCTL_PATH"], "journalctl"),
-            SystemctlPath = BlankFallback(configuration["KGSM_API_SYSTEMCTL_PATH"], "systemctl"),
-            LogReadTimeoutMs = Math.Max(500, IntOr(configuration["KGSM_API_LOG_READ_TIMEOUT_MS"], 5000)),
+            // LogSources on a host whose units are named differently. journalctl resolves via PATH.
+            LogSources = ParseLogSources(s.LogSources),
+            JournalctlPath = BlankFallback(s.JournalctlPath, "journalctl"),
+            SystemctlPath = BlankFallback(s.SystemctlPath, "systemctl"),
+            LogReadTimeoutMs = Math.Max(500, s.LogReadTimeoutMs ?? 5000),
 
-            // Leaf runtime config (Phase 2). The override dir lives in the API's StateDirectory by default
+            // Leaf runtime config. The override dir lives in the API's StateDirectory by default
             // (unprivileged write); the canary window is floored at 2s so a bad value can't be declared good
             // before the leaf has even restarted.
-            LeafOverridesDir = BlankFallback(configuration["KGSM_API_LEAF_OVERRIDES_DIR"], "/var/lib/kgsm-api/leaf-overrides"),
-            LeafApplyCanaryMs = Math.Max(2000, IntOr(configuration["KGSM_API_LEAF_APPLY_CANARY_MS"], 15000)),
-            LeafDescriptorDir = BlankFallback(configuration["KGSM_API_LEAF_DESCRIPTOR_DIR"], "/var/lib/kgsm/leaves"),
-            LeafDropInDir = BlankFallback(configuration["KGSM_API_LEAF_DROPIN_DIR"], "/etc/systemd/system"),
+            LeafOverridesDir = BlankFallback(s.LeafOverridesDir, "/var/lib/kgsm-api/leaf-overrides"),
+            LeafApplyCanaryMs = Math.Max(2000, s.LeafApplyCanaryMs ?? 15000),
+            LeafDescriptorDir = BlankFallback(s.LeafDescriptorDir, "/var/lib/kgsm/leaves"),
+            LeafDropInDir = BlankFallback(s.LeafDropInDir, "/etc/systemd/system"),
 
             // Cluster message bus foundation. Blank secret => ClusterEnabled false => the cluster
-            // service token seam stays dormant (PLAN-peers.md §2 #3/#9). NodeId defaults to the
-            // already-resolved HostId (#2), not Environment.MachineName a second time.
-            ClusterSecret = Defaulted(configuration["KGSM_API_CLUSTER_SECRET"], ""),
-            ClusterSecretPrevious = Defaulted(configuration["KGSM_API_CLUSTER_SECRET_PREVIOUS"], ""),
-            NodeId = Clean(configuration["KGSM_API_NODE_ID"]) ?? hostId,
+            // service token seam stays dormant. NodeId defaults to the already-resolved HostId,
+            // not Environment.MachineName a second time.
+            ClusterSecret = Defaulted(s.ClusterSecret, ""),
+            ClusterSecretPrevious = Defaulted(s.ClusterSecretPrevious, ""),
+            NodeId = Clean(s.NodeId) ?? hostId,
 
-            // Phase 3 — the outbox drainer + GC cadence/TTL. The retention floor is computed from the
+            // The outbox drainer + GC cadence/TTL. The retention floor is computed from the
             // just-parsed retry TTL (Math.Max(ClusterRetryTtlDays + 1, …)) so a custom TTL still gets a
             // sane retention margin, not a fixed constant that could undercut it.
-            ClusterDrainMs = Math.Max(250, IntOr(configuration["KGSM_API_CLUSTER_DRAIN_MS"], 1000)),
+            ClusterDrainMs = Math.Max(250, s.ClusterDrainMs ?? 1000),
             ClusterRetryTtlDays = clusterRetryTtlDays,
-            ClusterRetentionDays = Math.Max(
-                clusterRetryTtlDays + 1, IntOr(configuration["KGSM_API_CLUSTER_RETENTION_DAYS"], 30)),
-            ClusterGcMs = Math.Max(60000, IntOr(configuration["KGSM_API_CLUSTER_GC_MS"], 600000)),
+            ClusterRetentionDays = Math.Max(clusterRetryTtlDays + 1, s.ClusterRetentionDays ?? 30),
+            ClusterGcMs = Math.Max(60000, s.ClusterGcMs ?? 600000),
 
-            // P0.5 — membership gossip. Advertised/gossip URLs default blank (honest: a node that doesn't
+            // Membership gossip. Advertised/gossip URLs default blank (honest: a node that doesn't
             // know its own client address just doesn't advertise it). Intervals share the drainer's
             // clamp-to-a-floor posture so a fat-fingered tiny value can't spin the loop.
-            ClusterAdvertiseUrl = Defaulted(configuration["KGSM_API_CLUSTER_ADVERTISE_URL"], ""),
-            ClusterGossipUrl = Defaulted(configuration["KGSM_API_CLUSTER_GOSSIP_URL"], ""),
-            ClusterGossipMs = Math.Max(250, IntOr(configuration["KGSM_API_CLUSTER_GOSSIP_MS"], 5000)),
-            ClusterPollMs = Math.Max(250, IntOr(configuration["KGSM_API_CLUSTER_POLL_MS"], 10000)),
-            ClusterSuspectMs = Math.Max(1000, IntOr(configuration["KGSM_API_CLUSTER_SUSPECT_MS"], 30000)),
-            ClusterReapMs = Math.Max(1000, IntOr(configuration["KGSM_API_CLUSTER_REAP_MS"], 300000)),
+            ClusterAdvertiseUrl = Defaulted(s.ClusterAdvertiseUrl, ""),
+            ClusterGossipUrl = Defaulted(s.ClusterGossipUrl, ""),
+            ClusterGossipMs = Math.Max(250, s.ClusterGossipMs ?? 5000),
+            ClusterPollMs = Math.Max(250, s.ClusterPollMs ?? 10000),
+            ClusterSuspectMs = Math.Max(1000, s.ClusterSuspectMs ?? 30000),
+            ClusterReapMs = Math.Max(1000, s.ClusterReapMs ?? 300000),
 
-            // Auth (M4·a). On by default; the dev escape hatch is the only way to the old open window.
-            AuthDisabled = Flag(configuration["KGSM_API_AUTH_DISABLED"]),
-            SigningKey = Defaulted(configuration["KGSM_API_AUTH_SIGNING_KEY"], ""),
-            DiscordClientId = Defaulted(configuration["KGSM_API_AUTH_DISCORD_CLIENT_ID"], ""),
-            DiscordClientSecret = Defaulted(configuration["KGSM_API_AUTH_DISCORD_CLIENT_SECRET"], ""),
-            DiscordRedirectUri = Defaulted(configuration["KGSM_API_AUTH_DISCORD_REDIRECT_URI"], ""),
-            DiscordBotToken = Defaulted(configuration["KGSM_API_AUTH_DISCORD_BOT_TOKEN"], ""),
-            DiscordGuildId = Defaulted(configuration["KGSM_API_AUTH_DISCORD_GUILD_ID"], ""),
-            AuthFrontendUrl = Defaulted(configuration["KGSM_API_AUTH_FRONTEND_URL"], ""),
-            RoleAdminIds = Csv(configuration["KGSM_API_AUTH_ROLE_ADMIN"]),
-            RoleOperatorIds = Csv(configuration["KGSM_API_AUTH_ROLE_OPERATOR"]),
-            RoleViewerIds = Csv(configuration["KGSM_API_AUTH_ROLE_VIEWER"]),
+            // Auth. On by default; the dev escape hatch is the only way to the old open window.
+            AuthDisabled = s.AuthDisabled ?? false,
+            SigningKey = Defaulted(s.SigningKey, ""),
+            DiscordClientId = Defaulted(s.DiscordClientId, ""),
+            DiscordClientSecret = Defaulted(s.DiscordClientSecret, ""),
+            DiscordRedirectUri = Defaulted(s.DiscordRedirectUri, ""),
+            DiscordBotToken = Defaulted(s.DiscordBotToken, ""),
+            DiscordGuildId = Defaulted(s.DiscordGuildId, ""),
+            AuthFrontendUrl = Defaulted(s.AuthFrontendUrl, ""),
+            RoleAdminIds = Csv(s.RoleAdminIds),
+            RoleOperatorIds = Csv(s.RoleOperatorIds),
+            RoleViewerIds = Csv(s.RoleViewerIds),
 
-            // Sessions (M4·c). SessionsEnabled is the default-ON twin of `!KGSM_API_SESSIONS_DISABLED`
-            // (a disable-flag with inverted polarity). The cache TTL bounds the revocation lag
-            // (D2); the GC cadence bounds the table; the refresh-absolute-days mirrors the JWT refresh
+            // Sessions. SessionsEnabled is the default-ON twin of the written SessionsDisabled
+            // (a disable-flag with inverted polarity). The cache TTL bounds the revocation lag;
+            // the GC cadence bounds the table; the refresh-absolute-days mirrors the JWT refresh
             // TTL (the two must stay in lockstep — see the property's doc).
-            SessionsEnabled = !Flag(configuration["KGSM_API_SESSIONS_DISABLED"]),
-            SessionsCacheTtlMs = Math.Max(500, IntOr(configuration["KGSM_API_SESSIONS_CACHE_TTL_MS"], 5000)),
-            SessionsGcMs = Math.Max(60000, IntOr(configuration["KGSM_API_SESSIONS_GC_MS"], 600000)),
-            SessionsRefreshAbsoluteDays = Math.Max(1, IntOr(configuration["KGSM_API_SESSIONS_REFRESH_ABSOLUTE_DAYS"], 30)),
+            SessionsEnabled = !(s.SessionsDisabled ?? false),
+            SessionsCacheTtlMs = Math.Max(500, s.SessionsCacheTtlMs ?? 5000),
+            SessionsGcMs = Math.Max(60000, s.SessionsGcMs ?? 600000),
+            SessionsRefreshAbsoluteDays = Math.Max(1, s.SessionsRefreshAbsoluteDays ?? 30),
         };
     }
 
     // The default RAWG image cache dir: a covers/ subdir beside the SQLite DB (so it inherits the
-    // StateDirectory the systemd unit sets via KGSM_API_DB). With no DB path (the bare default
+    // StateDirectory the systemd unit sets via Api__DbPath). With no DB path (the bare default
     // "kgsm-api.db" — relative, no dir) it falls back to a relative "covers" dir in the cwd.
     private static string DefaultCacheDir(string? dbPath)
     {
@@ -850,7 +889,7 @@ public sealed class ApiOptions
     private static string Defaulted(string? value, string fallback) => value is null ? fallback : value.Trim();
 
     // null OR blank/whitespace -> fallback; otherwise the trimmed value. For a value that must never be empty
-    // (e.g. a filesystem path Path.* will throw on), where the appsettings.json default is a blank "".
+    // (e.g. a filesystem path Path.* will throw on), where the declared default is a blank "".
     private static string BlankFallback(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
 
@@ -864,7 +903,7 @@ public sealed class ApiOptions
 
     // The default host-log source map is DERIVED from the canonical leaf catalog (LeafCatalog) — the single
     // source of truth for "which units make up a host" — so the host-log sources and the Services board can
-    // never drift on the unit set. KGSM_API_LOG_SOURCES still overrides this map for a host whose units are
+    // never drift on the unit set. Api__LogSources still overrides this map for a host whose units are
     // named differently (logs only; the Services board reads the catalog directly). Order = catalog order.
     private static readonly IReadOnlyList<LogSourceMap> DefaultLogSources =
         Services.Leaves.LeafCatalog.Default.Select(l => new LogSourceMap(l.Id, l.Unit)).ToArray();

@@ -42,7 +42,7 @@ public sealed class LeafConfigSurfaceTests
           "min": 1000, "unit": "ms", "risk": "safe" },
         { "key": "hostId", "env": "KGSM_MONITOR_HOST_ID", "label": "Host id",
           "description": "Identity metrics are stored under.", "group": "sampling", "type": "string",
-          "risk": "wiring", "pairedApiKey": "KGSM_API_HOST_ID" },
+          "risk": "wiring", "pairedApiKey": "Api__HostId" },
         { "key": "socketPath", "env": "KGSM_MONITOR_SOCKET", "label": "Metrics socket",
           "description": "Where consumers scrape.", "group": "sockets", "type": "path",
           "default": "/run/kgsm-monitor/metrics.sock", "risk": "wiring" }
@@ -279,14 +279,14 @@ public sealed class LeafConfigSurfaceTests
         using var f = new LeafConfigTestFactory();
         f.InstallDescriptor("monitor", MonitorDescriptor(FloorFile(f, "")));
 
-        // hostId is wiring and pairs with KGSM_API_HOST_ID. Setting the leaf's to something else means the
+        // hostId is wiring and pairs with Api__HostId. Setting the leaf's to something else means the
         // monitor stores its metrics under one identity and this API queries another.
         JsonElement result = await Json(Put(Admin(f), "monitor", """{"values":{"hostId":"some-other-host"}}"""));
 
         Assert.Equal("applied_unreachable", result.GetProperty("outcome").GetString());
         string message = result.GetProperty("message").GetString()!;
         Assert.Contains("some-other-host", message);      // what the leaf now says
-        Assert.Contains("KGSM_API_HOST_ID", message);     // and what this API still reads
+        Assert.Contains("Api__HostId", message);     // and what this API still reads
     }
 
     [Fact]

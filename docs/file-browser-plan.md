@@ -87,7 +87,7 @@ GET /api/v1/servers/{id}/files/content?path=config/server.cfg   [Operator]
   "etag": "sha256:…"                // for optimistic concurrency on save
 }
 409 → editable:false reason "binary"     (NUL byte / not valid UTF-8)
-409 → editable:false reason "too-large"  (> KGSM_API_FILES_MAX_EDIT_BYTES)
+409 → editable:false reason "too-large"  (> Api__FilesMaxEditBytes)
 ```
 
 Binary/too-large return the `{error}` envelope with a machine code
@@ -152,7 +152,7 @@ The constraint is **frontend rendering** (`FileTreeRow` is one DOM node per entr
 virtualized) — a save subdir with thousands of map-chunk files janks the UI, not the API.
 
 - **Cap + honest truncation signal, never a silent refusal.** Return up to
-  `KGSM_API_FILES_MAX_ENTRIES` entries (config knob, **default 200**) plus
+  `Api__FilesMaxEntries` entries (config knob, **default 200**) plus
   `truncated:true` when more exist. A flat refusal would *hide* a legitimate file at
   position N+1 — the silent-coverage-gap the honesty rule forbids. The FE shows "showing
   200 of many — directory too large to browse fully."
@@ -193,8 +193,8 @@ Mirror `ServerConfigController` / `ServerBackupsController` exactly (resolve
    `AuthController` `AppendAsync(new AuditWrite(...))` pattern. Provisional `lang` from a
    small extension→hint map (presentation hint only).
 5. **Config** — add `FilesMaxEntries` (default 200) + `FilesMaxEditBytes` (default
-   ~2 MiB) to `ApiOptions`, bound from `KGSM_API_FILES_MAX_ENTRIES` /
-   `KGSM_API_FILES_MAX_EDIT_BYTES`; document in `appsettings.json`.
+   ~2 MiB) to `ApiOptions`, bound from `Api__FilesMaxEntries` /
+   `Api__FilesMaxEditBytes`; document in `appsettings.json`.
 6. **Startup** — register `IInstanceFileService` (scoped/transient). No new leaf, no
    capability axis (engine-base, like config/backups).
 7. **Tests** — `Api.Tests` WebApplicationFactory: operator-gate (viewer 403), unknown

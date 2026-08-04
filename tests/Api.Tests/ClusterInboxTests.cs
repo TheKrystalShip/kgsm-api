@@ -17,7 +17,7 @@ namespace TheKrystalShip.Api.Tests;
 /// <c>POST /api/v1/peers/inbox</c> receive path: fail-closed cluster-token auth, the <c>from</c>-spoof
 /// guard, dedupe, and dispatch to the first registered handler, <c>session.revoke</c>. Boots the real
 /// app (via <see cref="AuthTestFactory"/>'s shared fixture, re-configured with a known
-/// <c>KGSM_API_CLUSTER_SECRET</c>/<c>KGSM_API_NODE_ID</c> the same way <c>SessionCleanupTests</c>
+/// <c>Api__ClusterSecret</c>/<c>Api__NodeId</c> the same way <c>SessionCleanupTests</c>
 /// layers config onto the base factory) so a real, validly-signed cluster service token can be minted
 /// through the running pipeline's own <see cref="IClusterTokenService"/> — the same "mint through the
 /// server's own service" posture <see cref="AuthTestFactory.AccessToken"/> uses for user tokens.
@@ -37,8 +37,8 @@ public sealed class ClusterInboxTests : IClassFixture<AuthTestFactory>
         _app = factory.WithWebHostBuilder(b =>
             b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["KGSM_API_CLUSTER_SECRET"] = ClusterSecret,
-                ["KGSM_API_NODE_ID"] = NodeId,
+                ["Api:ClusterSecret"] = ClusterSecret,
+                ["Api:NodeId"] = NodeId,
             })));
         _client = _app.CreateClient();
     }
@@ -119,9 +119,9 @@ public sealed class ClusterInboxTests : IClassFixture<AuthTestFactory>
         IConfiguration wrongConfig = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["KGSM_API_HOST_ID"] = "node-imposter",
-                ["KGSM_API_CLUSTER_SECRET"] = "a-totally-different-secret",
-                ["KGSM_API_NODE_ID"] = NodeId,
+                ["Api:HostId"] = "node-imposter",
+                ["Api:ClusterSecret"] = "a-totally-different-secret",
+                ["Api:NodeId"] = NodeId,
             })
             .Build();
         var wrongTokens = new ClusterTokenService(

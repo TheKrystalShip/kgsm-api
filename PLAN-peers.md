@@ -21,7 +21,7 @@ designed, not built · `open` = not yet decided.
 
 **A cluster is one Discord guild, and therefore one trust domain, single-owner.**
 Every node in a cluster is configured with the **same** Discord application, the
-**same** `KGSM_API_AUTH_SIGNING_KEY`, and the **same** `KGSM_API_AUTH_ROLE_*`
+**same** `Api__SigningKey`, and the **same** `KGSM_API_AUTH_ROLE_*`
 tier map. This is a hard cluster-formation precondition, not an implementation
 detail:
 
@@ -70,7 +70,7 @@ per-leaf status, not from a status line on the capability itself.
 |---|---|---|
 | 1 | Peer transport | REST over HTTPS on the existing API surface |
 | 2 | Node identity | Config-driven `nodeId` (default: machine name, same as HostId) |
-| 3 | Cluster membership proof | A shared **`KGSM_API_CLUSTER_SECRET`** (HMAC), distinct from the user JWT signing key |
+| 3 | Cluster membership proof | A shared **`Api__ClusterSecret`** (HMAC), distinct from the user JWT signing key |
 | 4 | Node-to-node auth | A **service JWT** signed with the cluster secret (`sub=node:<id>`, `aud=cluster`, `iss=<id>`, short TTL) |
 | 5 | No per-node keypairs | Symmetric shared secret only — no Ed25519, no per-request asymmetric signing |
 | 6 | Handshake | Admin pastes a URL → local node pulls the remote `/identity` over TLS → stores it. No key exchange, no fingerprint confirmation |
@@ -127,8 +127,8 @@ two controller endpoints), **no new service, broker, or dependency**.
 ## 3 · Trust & auth model
 
 ```
-Cluster secret  KGSM_API_CLUSTER_SECRET   (HMAC, shared by every node in the guild)
-JWT signing key KGSM_API_AUTH_SIGNING_KEY (HMAC, shared — signs user tokens)
+Cluster secret  Api__ClusterSecret   (HMAC, shared by every node in the guild)
+JWT signing key Api__SigningKey (HMAC, shared — signs user tokens)
                 └─ deliberately two secrets: leaking the cluster secret does not
                    also hand over user-token forgery, and vice-versa.
 ```
@@ -140,7 +140,7 @@ JWT signing key KGSM_API_AUTH_SIGNING_KEY (HMAC, shared — signs user tokens)
 │  Wants: GET {B}/api/v1/peers/self/resources          │
 │  Mints a service JWT:                                 │
 │    { sub:"node:A", iss:"A", aud:"cluster", exp:+60s } │
-│    signed with KGSM_API_CLUSTER_SECRET                │
+│    signed with Api__ClusterSecret                │
 │  Sends: Authorization: Bearer <service JWT>           │
 └───────────────────┬───────────────────────────────────┘
                     ▼
@@ -188,7 +188,7 @@ Later the SPA needs Node B (renders B's data / issues a B action):
 
 - **Disabled node:** its service tokens are rejected (`403`); it stays in the
   `Peers` table for one-click re-enable.
-- **Stolen cluster secret:** rotate `KGSM_API_CLUSTER_SECRET` across all nodes via
+- **Stolen cluster secret:** rotate `Api__ClusterSecret` across all nodes via
   the dual-secret overlap window (#9). The `Peers.enabled` gate is an operational
   on/off, **not** a cryptographic boundary against a stolen secret (a thief can set
   `iss` to any enabled peer) — rotation is the real remedy.
@@ -247,7 +247,7 @@ is entirely API-side — the assistant only learns the parameter.
 
 ### P0 — Peer foundation (membership + trust) · `planned`
 The trust half already exists (the message-bus foundation built the
-`KGSM_API_CLUSTER_SECRET` config + the `ClusterTokenService` mint/verify seam with
+`Api__ClusterSecret` config + the `ClusterTokenService` mint/verify seam with
 current+previous rotation). P0 adds the **membership** half — a manually-seeded
 mesh that works fully before gossip lands:
 - `Peers` table (id, url — the advertised client URL, gossipUrl?, nickname, nodeId,
@@ -565,7 +565,7 @@ The message-bus receive endpoint — one endpoint, typed envelope. Full contract
   to that peer (it already holds, or lazily vouches, a native session there); the
   source node drops out of the loop.
 - **CORS is a setup requirement:** for the browser to call a peer directly, that
-  peer's `KGSM_API_CORS_ORIGINS` must list the SPA origin. The Cluster page runs a
+  peer's `Api__CorsOrigins` must list the SPA origin. The Cluster page runs a
   browser-side preflight probe per peer and **warns** on a CORS/reachability
   mismatch rather than failing opaquely mid-install.
 

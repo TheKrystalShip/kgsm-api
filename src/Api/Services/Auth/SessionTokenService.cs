@@ -8,7 +8,7 @@ namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
 /// HMAC-SHA256 session tokens (see <see cref="ISessionTokenService"/>). The signing key is derived
-/// once from <c>KGSM_API_AUTH_SIGNING_KEY</c> (SHA-256 → a 256-bit key, so any-length secret works);
+/// once from <c>Api__SigningKey</c> (SHA-256 → a 256-bit key, so any-length secret works);
 /// when that is blank and auth is on, an ephemeral per-process key is generated and a loud warning is
 /// logged (tokens won't survive a restart — fine for dev/smoke, set a stable secret on a real host).
 /// </summary>
@@ -20,7 +20,7 @@ public sealed class SessionTokenService : ISessionTokenService
     // tokens) before a fresh Discord login is required. Deliberately long — this is a trusted,
     // role-restricted friends group, so the convenience of not re-authorizing for weeks outweighs
     // a strict refresh window (user directive 2026-06-23). ⚠ A refresh token only survives this
-    // long if the signing key is STABLE (KGSM_API_AUTH_SIGNING_KEY set) — an ephemeral per-process
+    // long if the signing key is STABLE (Api__SigningKey set) — an ephemeral per-process
     // key invalidates every token on restart, see the ctor warning below.
     //
     // M4·c: this is the MINT-side mirror of ApiOptions.SessionsRefreshAbsoluteDays — the two MUST
@@ -50,7 +50,7 @@ public sealed class SessionTokenService : ISessionTokenService
             keyBytes = RandomNumberGenerator.GetBytes(32);
             if (options.AuthEnabled)
                 logger.LogWarning(
-                    "KGSM_API_AUTH_SIGNING_KEY is not set — generated an EPHEMERAL signing key. "
+                    "Api__SigningKey is not set — generated an EPHEMERAL signing key. "
                     + "Sessions will not survive a restart. Set a stable secret on any real host.");
         }
 

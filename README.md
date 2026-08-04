@@ -44,17 +44,20 @@ deploy/setup.sh · deploy.sh        # provision the host once · (re)deploy the 
 
 ```bash
 dotnet build kgsm-api.slnx                  # build (Debug)
-dotnet run --project src/Api/Api.csproj     # run locally (binds KGSM_API_URLS, default :8080)
+dotnet run --project src/Api/Api.csproj     # run locally (binds Api__Urls, default :8080)
 dotnet test kgsm-api.slnx                    # xUnit suite (401/403/tier matrix, contracts, behavior)
 scripts/smoke.sh                             # build Release + run the HTTP/WS contract checks
 ./deploy/setup.sh                            # ONCE per host — asks for sudo; provisions the headless grant
 ./deploy/deploy.sh                           # build + (re)deploy the live systemd service (no sudo, no prompts)
 ```
 
-Runtime config lives in `src/Api/appsettings.json` (the documented schema + defaults for every
-`KGSM_API_*` key); each key is overridable by an **environment variable of the same name** (env wins —
-how the systemd unit and the smoke configure a host). A blank leaf endpoint reports its capability
-`absent`; **auth is ON by default** (`KGSM_API_AUTH_DISABLED=1` is the loudly-logged dev escape hatch).
+Runtime config lives in `src/Api/kgsm-api.settings.json`, which declares the whole configurable
+surface with its defaults. An **environment variable overrides one key** by spelling that key's path
+with `__` (`Api__DomainPollMs`) — env wins, which is how the systemd unit and the smoke configure a
+host — and a variable naming a key the file does not declare binds to nothing. A blank leaf endpoint
+reports its capability `absent`; **auth is ON by default** (`Api__AuthDisabled=true` is the
+loudly-logged dev escape hatch). Secrets are declared blank in that file and set for real only in the
+root-owned `/etc/kgsm-api/kgsm-api.env`.
 
 ## Versioning
 

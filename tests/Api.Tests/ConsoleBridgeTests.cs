@@ -24,10 +24,10 @@ public sealed class ConsoleBridgeTests
         ApiOptions.FromConfiguration(new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["KGSM_API_HOST_ID"] = "hotrod",
+                ["Api:HostId"] = "hotrod",
                 // A non-empty watchdog socket => WatchdogProvisioned (the bridge would run); the tests drive
                 // ReconcileAsync directly with a fake, so the path is never opened.
-                ["KGSM_API_WATCHDOG_SOCKET"] = "/run/test/watchdog.sock",
+                ["Api:WatchdogSocketPath"] = "/run/test/watchdog.sock",
             })
             .Build());
 

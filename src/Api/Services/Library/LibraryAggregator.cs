@@ -22,7 +22,7 @@ namespace TheKrystalShip.Api.Services.Library;
 /// <para>
 /// The RAWG-row read degrades <strong>independently</strong> of the blueprint read: a DB failure (or the
 /// table simply being empty) leaves cover/hero null while the catalog still renders. The absolute cover/hero
-/// URLs are built from a request-derived (or <c>KGSM_API_PUBLIC_BASE_URL</c>) base URL passed in by the
+/// URLs are built from a request-derived (or <c>Api__PublicBaseUrl</c>) base URL passed in by the
 /// controller — never reaching for <c>HttpContext</c> across the thread-pool boundary.
 /// </para>
 /// </remarks>
@@ -90,7 +90,7 @@ public sealed class LibraryAggregator
         {
             if (Interlocked.Exchange(ref _engineUnavailableLogged, 1) == 0)
                 _logger.LogWarning(
-                    "kgsm engine is not configured (KGSM_API_KGSM_PATH is empty) — /library will be empty.");
+                    "kgsm engine is not configured (Api__KgsmPath is empty) — /library will be empty.");
             return [];
         }
 

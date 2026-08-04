@@ -77,7 +77,7 @@ public sealed class HostIdentityTests
         JsonElement info = root.RootElement;
 
         Assert.Equal(ExpectedBuild, info.GetProperty("build").GetString());
-        // Label defaults to the host id when KGSM_API_HOST_LABEL is unset.
+        // Label defaults to the host id when Api__HostLabel is unset.
         Assert.Equal(AuthTestFactory.HostId, info.GetProperty("label").GetString());
         // The route version is still "v1" (a separate axis from the build version).
         Assert.Equal(ApiInfo.ApiVersion, info.GetProperty("version").GetString());
@@ -208,7 +208,7 @@ public sealed class HostIdentityTests
     public async Task Region_ConfigDefault_SurfacesUntilOverridden()
     {
         using var f = new RegionConfiguredFactory();
-        // The configured KGSM_API_REGION is the default on both the host card and the handshake.
+        // The configured Api__Region is the default on both the host card and the handshake.
         using JsonDocument list = await GetJson(Client(f, AuthTier.Viewer), "/api/v1/hosts");
         Assert.Equal("configured-region",
             list.RootElement.EnumerateArray().Single().GetProperty("identity").GetProperty("region").GetString());
@@ -239,7 +239,7 @@ public sealed class HostIdentityTests
         return JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
     }
 
-    /// <summary>An <see cref="AuthTestFactory"/> with KGSM_API_REGION configured — proves config seeds the
+    /// <summary>An <see cref="AuthTestFactory"/> with Api__Region configured — proves config seeds the
     /// default region (before any override).</summary>
     private sealed class RegionConfiguredFactory : AuthTestFactory
     {
@@ -247,7 +247,7 @@ public sealed class HostIdentityTests
         {
             base.ConfigureWebHost(builder);
             builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?> { ["KGSM_API_REGION"] = "configured-region" }));
+                config.AddInMemoryCollection(new Dictionary<string, string?> { ["Api:Region"] = "configured-region" }));
         }
     }
 }

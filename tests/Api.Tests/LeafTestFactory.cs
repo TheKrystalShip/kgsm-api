@@ -69,17 +69,17 @@ public class LeafTestFactory : AuthTestFactory
         builder.ConfigureAppConfiguration((_, config) =>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["KGSM_API_DB"] = _dbPath,
+                ["Api:DbPath"] = _dbPath,
                 // All four leaves start NOT provisioned (blank) → connect flips absent→provisioned.
-                ["KGSM_API_MONITOR_SOCKET"] = _monitorSocket,
-                ["KGSM_API_WATCHDOG_SOCKET"] = "",
-                ["KGSM_API_ASSISTANT_URL"] = "",
-                ["KGSM_API_FIREWALL_SOCKET"] = "",
-                ["KGSM_API_LEAF_OVERRIDES_DIR"] = OverridesDir,
-                ["KGSM_API_LEAF_DESCRIPTOR_DIR"] = DescriptorDir,
-                ["KGSM_API_LEAF_DROPIN_DIR"] = DropInDir,
+                ["Api:MonitorSocketPath"] = _monitorSocket,
+                ["Api:WatchdogSocketPath"] = "",
+                ["Api:AssistantBaseUrl"] = "",
+                ["Api:FirewallSocketPath"] = "",
+                ["Api:LeafOverridesDir"] = OverridesDir,
+                ["Api:LeafDescriptorDir"] = DescriptorDir,
+                ["Api:LeafDropInDir"] = DropInDir,
                 // Keep the canary short so a rollback test doesn't wait 15s.
-                ["KGSM_API_LEAF_APPLY_CANARY_MS"] = "2000",
+                ["Api:LeafApplyCanaryMs"] = "2000",
             }));
     }
 }

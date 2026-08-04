@@ -48,7 +48,7 @@ public sealed class ClusterTokenService : IClusterTokenService
         if (!_enabled)
         {
             logger.LogInformation(
-                "KGSM_API_CLUSTER_SECRET is not set — this node is not part of a cluster. " +
+                "Api__ClusterSecret is not set — this node is not part of a cluster. " +
                 "The cluster service-token seam (mint + validate) stays dormant.");
             return;
         }
@@ -71,7 +71,7 @@ public sealed class ClusterTokenService : IClusterTokenService
     {
         if (!_enabled || _signing is null)
             throw new InvalidOperationException(
-                "The cluster is not configured (KGSM_API_CLUSTER_SECRET is blank) — cannot mint a service token.");
+                "The cluster is not configured (Api__ClusterSecret is blank) — cannot mint a service token.");
 
         DateTime expires = DateTime.UtcNow.Add(ServiceTokenTtl);
         var descriptor = new SecurityTokenDescriptor

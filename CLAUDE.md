@@ -17,7 +17,7 @@ its leaves + this API. The API aggregates **only its own host's** leaves; cross-
 > live project is `src/Api/`, built per `PLAN.md`.
 
 **Status:** `PLAN.md` is the authority for what's built vs planned, per milestone.
-**Auth is ON by default** — `KGSM_API_AUTH_DISABLED=1` is the explicit, loudly-logged
+**Auth is ON by default** — `Api__AuthDisabled=true` is the explicit, loudly-logged
 dev escape hatch (synthetic admin). Trust `PLAN.md`'s per-milestone status, not assumptions.
 
 ## Read first (sources of truth)
@@ -40,7 +40,7 @@ dev escape hatch (synthetic admin). Trust `PLAN.md`'s per-milestone status, not 
 
 ```bash
 dotnet build kgsm-api.slnx                 # build (Debug)
-dotnet run --project src/Api/Api.csproj    # run locally (binds KGSM_API_URLS, default :8080)
+dotnet run --project src/Api/Api.csproj    # run locally (binds Api__Urls, default :8080)
 scripts/smoke.sh                           # build Release + run the HTTP contract checks (the "mock frontend")
 # self-contained deploy artifact (per-host drop-in, no runtime install):
 dotnet publish src/Api/Api.csproj -c Release -r linux-x64 --self-contained -p:PublishReadyToRun=true
@@ -68,7 +68,7 @@ reintroduce `sudo` into `deploy.sh`.
 steps by hand.** It publishes as the invoking (service-owning) user, bundles the SPA, refreshes the
 unit only if it changed, stops the unit, `rsync`s the binary tree into `/opt/kgsm-api`, starts it,
 and verifies with a real `HTTP 200` from `/health` (it does not claim success on the launch exit
-code alone). The health URL is **resolved from the configured `KGSM_API_URLS`**, not hardcoded — on
+code alone). The health URL is **resolved from the configured `Api__Urls`**, not hardcoded — on
 this host that is loopback `:8097`, while the unit's built-in default is `:8080`. Idempotent; the env
 file (`/etc/kgsm-api/kgsm-api.env`) and DB (`/var/lib/kgsm-api`) live outside `/opt` and are never
 touched. It opens with a `require_setup` assertion that fails **before building** — with *"run
@@ -89,7 +89,7 @@ a polkit-authorized D-Bus call to PID 1, not an in-process escalation). Full ref
 `deploy/leaf-config/README.md`.
 
 **What is configurable comes from the leaves, not from here.** Each leaf ships a config descriptor its
-own `deploy.sh` installs into `/var/lib/kgsm/leaves/` (`KGSM_API_LEAF_DESCRIPTOR_DIR`), declaring its
+own `deploy.sh` installs into `/var/lib/kgsm/leaves/` (`Api__LeafDescriptorDir`), declaring its
 full surface — every key, its type, bounds, coded default and `risk`. `LeafDescriptorStore` **scans that
 directory**, so a leaf that joins the ecosystem later becomes configurable, and appears on the Services
 board, with no rebuild here. `LeafConfigManifest` is the built-in fallback for a leaf that has not
@@ -99,7 +99,7 @@ Two consequences worth knowing before touching this code:
 
 - **Readable and editable are separate.** A descriptor makes a leaf's config visible with full
   provenance; editing also needs the leaf's override drop-in to exist on this host
-  (`KGSM_API_LEAF_DROPIN_DIR`), because without it a write renders a file nothing reads. `GET` reports
+  (`Api__LeafDropInDir`), because without it a write renders a file nothing reads. `GET` reports
   `editable:false` with the reason; `PUT` is a **409**, not a 400 — the request is fine, the host is not
   wired.
 - **`applied_unreachable` is a real outcome.** A `wiring`-risk change passes the liveness canary — the
@@ -114,7 +114,7 @@ Note the two polkit rules are separate on purpose: `48-kgsm-api-deploy.rules` le
 
 `scripts/smoke.sh` is the **stand-in for the frontend** until the SPA can reach a host —
 it asserts every M0/M1/M2/M3 contract (and the M4·a no-token sweep) — **31/31**. The M0–M3 checks
-run under `KGSM_API_AUTH_DISABLED=1` (the escape hatch — synthetic admin) so they exercise the domain
+run under `Api__AuthDisabled=true` (the escape hatch — synthetic admin) so they exercise the domain
 contracts unchanged; a dedicated **auth-ENABLED** instance then proves the no-token sweep (every
 protected endpoint `401`s with the frozen envelope, `/health`+`/api/v1` stay open, the login endpoint
 `503`s until Discord is configured). The 3 M3 checks prove the command gate/rejection
@@ -133,14 +133,24 @@ capability lifecycle (down flip + tick silence, then operational flip + ticks re
 `provisioned:true` throughout).
 Knobs: `SMOKE_PORT`, `SMOKE_SKIP_BUILD=1`, `SMOKE_DB`, `SMOKE_KGSM_PATH` (the engine on another
 host), `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A).
-**Runtime config lives in `appsettings.json`** — the documented schema + defaults
-for every `KGSM_API_*` key (host identity, the **kgsm engine path/socket**, the
-monitor/watchdog/assistant endpoints, bind `KGSM_API_URLS`, `KGSM_API_DB`,
-`KGSM_API_CORS_ORIGINS`, and the **M4·a auth keys** — `KGSM_API_AUTH_DISABLED`,
-`KGSM_API_AUTH_SIGNING_KEY`, the `KGSM_API_AUTH_DISCORD_*` app/bot/guild, the
-`KGSM_API_AUTH_ROLE_*` role→tier map). Each is **overridable by an env var
-of the same name** (env wins — that's how the systemd unit and smoke configure a host); a
-blank leaf endpoint reports its capability `absent`. The Discord app/guild/bot-token/role ids are
+**`kgsm-api.settings.json` declares the whole configurable surface** — every key with its
+default, under one `Api` section that `ApiSettings` binds 1:1. It covers host identity, the kgsm
+engine path/journal, the monitor/watchdog/assistant/scheduler/firewall endpoints, the bind address
+and DB path, the CORS allowlist, and the auth keys (the Discord app/bot/guild and the role→tier
+map). `ApiOptions.FromSettings` is the one place any of it is interpreted; nothing reads
+configuration by string key.
+
+An environment variable **overrides one key** by spelling that key's path with `__`
+(`Api__DomainPollMs`, `Logging__LogLevel__Default`, `Kestrel__Certificates__Default__Path`), and env
+wins because it is registered last — that is how the systemd unit and the smoke configure a host. A
+variable naming a key the file does not declare **binds to nothing**, and a test fails the build if
+the settings file, `ApiSettings` and the leaf descriptor disagree in any direction, or if
+`deploy/kgsm-api.env.example` sets a key the settings file never declared. A blank leaf endpoint
+reports its capability `absent`.
+
+Two consequences worth knowing: **secrets are declared blank here and set for real only in the
+root-owned `/etc/kgsm-api/kgsm-api.env`**, and the boolean knobs take **`true`/`false` only** — the
+older `1`/`0`/`yes`/`on` spellings are refused at startup with an error naming the key. The Discord app/guild/bot-token/role ids are
 **shared external config** (the same values the host's Discord bot uses) — configuration, not a
 process dependency on kgsm-bot (keystone §4). **`tests/Api.Tests/`** (xUnit + `WebApplicationFactory`,
 the Discord seam faked) stands up at M4·a — `dotnet test kgsm-api.slnx`; it owns the 401/403/tier
@@ -175,10 +185,10 @@ exactly one correct access path:
   `GET /servers` (`IInstanceService.GetAll` + `GetAllStatuses(fast:true)`) and at **M3** for the write
   path (`ILifecycleService.Start/Stop/Restart`, run off-request by the `CommandRunner` in its own DI
   scope — the verb routes native→watchdog, container→Docker inside the engine). kgsm-lib is **base,
-  not a leaf**: provisioned-by-default at `KGSM_API_KGSM_PATH` (`/usr/bin/kgsm`); an empty path is
+  not a leaf**: provisioned-by-default at `Api__KgsmPath` (`/usr/bin/kgsm`); an empty path is
   a surfaced misconfiguration (empty `/servers` + a one-time log), not a §4·b capability. The
   process-based `IInstanceService` is transient → resolved per-request from the provider. **M5** reads the
-  kgsm **event journal** (`KGSM_API_KGSM_JOURNAL`) via kgsm-lib's `IEventService` — `KgsmAuditConsumer`
+  kgsm **event journal** (`Api__KgsmJournalDir`) via kgsm-lib's `IEventService` — `KgsmAuditConsumer`
   tails a directory the engine writes and every consumer reads, so nothing is reserved here and nothing
   needs configuring on the engine side. It starts at the **tail with no cursor**: the API never persists
   an engine event, it publishes each one live (SSE + notifications), so a replay would re-announce what

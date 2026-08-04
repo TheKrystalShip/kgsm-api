@@ -43,8 +43,8 @@ public sealed class PeersControllerTests : IClassFixture<AuthTestFactory>
         {
             b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["KGSM_API_CLUSTER_SECRET"] = ClusterSecret,
-                ["KGSM_API_NODE_ID"] = NodeId,
+                ["Api:ClusterSecret"] = ClusterSecret,
+                ["Api:NodeId"] = NodeId,
             }));
             if (handshakeHandler is not null)
             {

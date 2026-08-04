@@ -22,7 +22,7 @@ public sealed class MetricsPump(StreamHub hub, MonitorClient monitor, ApiOptions
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Configurable (KGSM_API_METRICS_POLL_MS) but defaults to ~the monitor's own 1s self-tick: this is
+        // Configurable (Api__MetricsPollMs) but defaults to ~the monitor's own 1s self-tick: this is
         // the live resource feed, not the instance poll — keep it tight or the SPA's charts get choppy.
         string hostTopic = StreamProtocol.HostMetricsTopic(options.HostId);
         logger.LogInformation("metrics pump: started (interval={IntervalMs}ms — live monitor scrape)",

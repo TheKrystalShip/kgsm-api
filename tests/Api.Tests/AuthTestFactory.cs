@@ -27,23 +27,23 @@ public class AuthTestFactory : WebApplicationFactory<Program>
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["KGSM_API_HOST_ID"] = HostId,
-                ["KGSM_API_AUTH_SIGNING_KEY"] = SigningKey,
+                ["Api:HostId"] = HostId,
+                ["Api:SigningKey"] = SigningKey,
                 // DiscordConfigured = true so the callback path runs; the FAKE replaces the real HTTP.
-                ["KGSM_API_AUTH_DISCORD_CLIENT_ID"] = "test-client",
-                ["KGSM_API_AUTH_DISCORD_CLIENT_SECRET"] = "test-secret",
-                ["KGSM_API_AUTH_DISCORD_REDIRECT_URI"] = "https://host.test/auth/discord/callback",
-                ["KGSM_API_AUTH_DISCORD_BOT_TOKEN"] = "test-bot-token",
-                ["KGSM_API_AUTH_DISCORD_GUILD_ID"] = "1234567890",
+                ["Api:DiscordClientId"] = "test-client",
+                ["Api:DiscordClientSecret"] = "test-secret",
+                ["Api:DiscordRedirectUri"] = "https://host.test/auth/discord/callback",
+                ["Api:DiscordBotToken"] = "test-bot-token",
+                ["Api:DiscordGuildId"] = "1234567890",
                 // Callback returns JSON by default (the contract these tests assert). The fragment-
                 // handoff variant overrides this per-test. Pin it empty so a dev appsettings value
-                // (KGSM_API_AUTH_FRONTEND_URL) can't flip the base suite to redirect.
-                ["KGSM_API_AUTH_FRONTEND_URL"] = "",
+                // (Api__AuthFrontendUrl) can't flip the base suite to redirect.
+                ["Api:AuthFrontendUrl"] = "",
                 // No engine / monitor — reads degrade to 200, no external dependency.
-                ["KGSM_API_KGSM_PATH"] = "",
-                ["KGSM_API_MONITOR_SOCKET"] = "/tmp/kgsm-api-tests-no-monitor.sock",
-                ["KGSM_API_WATCHDOG_SOCKET"] = "",
-                ["KGSM_API_DB"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-{Guid.NewGuid():N}.db"),
+                ["Api:KgsmPath"] = "",
+                ["Api:MonitorSocketPath"] = "/tmp/kgsm-api-tests-no-monitor.sock",
+                ["Api:WatchdogSocketPath"] = "",
+                ["Api:DbPath"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-{Guid.NewGuid():N}.db"),
             });
         });
 

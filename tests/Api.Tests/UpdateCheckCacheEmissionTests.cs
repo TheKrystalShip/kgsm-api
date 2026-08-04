@@ -200,7 +200,7 @@ public sealed class UpdateCheckCacheEmissionTests
         ApiOptions.FromConfiguration(new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["KGSM_API_HOST_ID"] = HostId,
+                ["Api:HostId"] = HostId,
             })
             .Build());
 

@@ -11,7 +11,7 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
 - **Bearer = HMAC-SHA256 JWT.** Access ~15 min + refresh with a **30-day sliding window**: a session's
   `Expires` is `now + 30d` at login and slides to `now + 30d` on each successful refresh — a session used
   ≥once inside the window stays alive; an idle one dies 30d after its last use. The ~15-min access TTL bounds
-  privilege. ⚠ The multi-week refresh only survives if `KGSM_API_AUTH_SIGNING_KEY` is **stable** — an ephemeral
+  privilege. ⚠ The multi-week refresh only survives if `Api__SigningKey` is **stable** — an ephemeral
   per-process key invalidates every token on restart (the ctor logs a warning).
 - **The session registry is the revocation authority; the hot path stays cached.** A `SessionEntry` table
   (`Data/SessionEntry.cs` + `Services/Auth/SessionStore.cs`, on `AppDbContext` via `EnsureCreated`; UTC-ticks
@@ -31,7 +31,7 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
   TTL backstop; ~instant on the same node via `Evict`). The access token is not re-validated mid-life beyond the
   `sid` check the 5s cache bounds, so it stays valid up to its ~15-min TTL. Expired/revoked rows are hard-deleted
   by the 10-min `SessionCleanupWorker`. A token with no `sid` claim → `401` (no grandfathering).
-  `KGSM_API_SESSIONS_DISABLED=1` makes the whole registry inert — no per-request check, no revoke surface, no GC
+  `Api__SessionsDisabled=true` makes the whole registry inert — no per-request check, no revoke surface, no GC
   (the stateless-JWT escape hatch).
 - **`IDiscordIdentityResolver` is the seam — the one chokepoint to `discord.com`.** Everything that
   talks to Discord goes through it. **Never** call `discord.com` from anywhere else. This is exactly
@@ -41,7 +41,7 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
   (`architecture.html:570`). The Discord app/bot-token/guild/role-map are **shared external config**
   (the same values the host's Discord bot uses) — **NOT a process dependency on kgsm-bot** (keystone
   §4). Hold our own copy in config; never reach into the bot.
-- **Auth is ON by default.** `KGSM_API_AUTH_DISABLED=1` swaps in `DisabledAuthHandler` (synthetic
+- **Auth is ON by default.** `Api__AuthDisabled=true` swaps in `DisabledAuthHandler` (synthetic
   admin — the pre-M4 open window), loudly logged. Never enable it on an exposed host.
 
 ## Invariants when you touch this
@@ -74,11 +74,11 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
 `DiscordIdentityResolver` (the real HTTP impl) is now **live-validated** on the trusted host: a real
 Discord login resolved an in-guild member's roles → `admin`, minted the bearer, and that bearer passed
 live tier-gating end-to-end (PLAN.md §8 M4·b). The login endpoints `503` only until
-`KGSM_API_AUTH_DISCORD_*` are configured. **What's still owed for the *full* M4: only the frontend gate**
+the `Api__Discord*` settings are configured. **What's still owed for the *full* M4: only the frontend gate**
 (the per-host session state machine + tier-gated controls — the SPA, still `planned`). Op note: dev ran an
-**ephemeral** signing key (`KGSM_API_AUTH_SIGNING_KEY` blank → tokens die on restart) — set a stable secret
+**ephemeral** signing key (`Api__SigningKey` blank → tokens die on restart) — set a stable secret
 on any real host. To run with the dev creds, the env must be `Development` (`ASPNETCORE_ENVIRONMENT=Development`)
-or `appsettings.Development.json` is ignored and the login endpoints `503` as if unconfigured.
+or `kgsm-api.settings.Development.json` is ignored and the login endpoints `503` as if unconfigured.
 
 ## Session registry status — self-validated 2026-07-09; live OAuth soak owed
 
