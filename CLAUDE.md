@@ -143,10 +143,17 @@ configuration by string key.
 An environment variable **overrides one key** by spelling that key's path with `__`
 (`Api__DomainPollMs`, `Logging__LogLevel__Default`, `Kestrel__Certificates__Default__Path`), and env
 wins because it is registered last — that is how the systemd unit and the smoke configure a host. A
-variable naming a key the file does not declare **binds to nothing**, and a test fails the build if
-the settings file, `ApiSettings` and the leaf descriptor disagree in any direction, or if
-`deploy/kgsm-api.env.example` sets a key the settings file never declared. A blank leaf endpoint
-reports its capability `absent`.
+variable naming a key the file does not declare **binds to nothing**, and the build fails if the
+settings file and `ApiSettings` disagree in any direction, or if `deploy/kgsm-api.env.example` sets a
+key the settings file never declared. A blank leaf endpoint reports its capability `absent`.
+
+**`deploy/kgsm-api.leaf.json` is generated, not written.** `TheKrystalShip.KGSM.LeafConfig` rewrites
+it on every build from `[LeafField]` attributes and `<panel>` doc tags on `ApiSettings` — so edit the
+settings class, never the JSON, and commit what the build produces. A settings key nothing describes
+fails the build naming it; `MetricsThresholds` and `AllowedHosts` are declared exempt, the first
+because a list of rule objects is not something one variable can deliver. This API is the one leaf
+whose descriptor says `readOnly` — applying a change here means restarting the process serving the
+request. Mechanism: `../kgsm-leafconfig/README.md`.
 
 Two consequences worth knowing: **secrets are declared blank here and set for real only in the
 root-owned `/etc/kgsm-api/kgsm-api.env`**, and the boolean knobs take **`true`/`false` only** — the

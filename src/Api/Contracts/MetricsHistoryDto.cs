@@ -3,7 +3,7 @@ namespace TheKrystalShip.Api.Contracts;
 /// <summary>
 /// The frozen response shape for <c>GET /servers/{id}/metrics/history</c> and
 /// <c>GET /hosts/{id}/metrics/history</c> (M9 Increment 3). Tier selection is automatic:
-/// range &le; raw retention → raw (15s step); range &gt; raw retention → rollup (5min step).
+/// range ≤ raw retention → raw (15s step); range &gt; raw retention → rollup (5min step).
 /// Gaps are absent points (sparse series, no carry-forward).
 /// </summary>
 public sealed record MetricsHistoryResponse(

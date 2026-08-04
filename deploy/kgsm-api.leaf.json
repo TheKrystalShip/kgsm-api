@@ -91,43 +91,6 @@
   ],
   "fields": [
     {
-      "key": "logLevel",
-      "env": "Logging__LogLevel__Default",
-      "label": "Log level",
-      "description": "Minimum severity this API logs.",
-      "group": "general",
-      "type": "enum",
-      "default": "Information",
-      "values": [
-        "Trace",
-        "Debug",
-        "Information",
-        "Warning",
-        "Error",
-        "Critical"
-      ],
-      "risk": "safe"
-    },
-    {
-      "key": "bindAddress",
-      "env": "Api__Urls",
-      "label": "Listen address",
-      "description": "Addresses this API serves on. The Control Panel and every other surface reach it here.",
-      "group": "general",
-      "type": "string",
-      "default": "http://127.0.0.1:8080",
-      "risk": "wiring"
-    },
-    {
-      "key": "corsOrigins",
-      "env": "Api__CorsOrigins",
-      "label": "Allowed browser origins",
-      "description": "Exact origins a browser may call this API from. A panel served from an origin that is not listed is refused by the browser before the request arrives.",
-      "group": "general",
-      "type": "csv",
-      "risk": "wiring"
-    },
-    {
       "key": "hostId",
       "env": "Api__HostId",
       "label": "Host id",
@@ -820,6 +783,43 @@
       "type": "path",
       "default": "kgsm-api.db",
       "risk": "destructive"
+    },
+    {
+      "key": "logLevel",
+      "env": "Logging__LogLevel__Default",
+      "label": "Log level",
+      "description": "Minimum severity this API logs.",
+      "group": "general",
+      "type": "enum",
+      "values": [
+        "Trace",
+        "Debug",
+        "Information",
+        "Warning",
+        "Error",
+        "Critical"
+      ],
+      "default": "Information",
+      "risk": "safe"
+    },
+    {
+      "key": "bindAddress",
+      "env": "Api__Urls",
+      "label": "Listen address",
+      "description": "Addresses this API serves on. The Control Panel and every other surface reach it here.",
+      "group": "general",
+      "type": "string",
+      "default": "http://127.0.0.1:8080",
+      "risk": "wiring"
+    },
+    {
+      "key": "corsOrigins",
+      "env": "Api__CorsOrigins",
+      "label": "Allowed browser origins",
+      "description": "Exact origins a browser may call this API from. A panel served from an origin that is not listed is refused by the browser before the request arrives.",
+      "group": "general",
+      "type": "csv",
+      "risk": "wiring"
     }
   ]
 }

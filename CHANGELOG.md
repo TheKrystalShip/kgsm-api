@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the leaf config descriptor is generated, not written
+- **`deploy/kgsm-api.leaf.json` is now written by `TheKrystalShip.KGSM.LeafConfig` on every build**, from
+  `[LeafField]` attributes and `<panel>` doc tags on `ApiSettings`. A knob lives in two places —
+  the property and the settings-file key — instead of three, and the descriptor cannot describe a
+  variable this leaf does not read: the `env` name is derived from the property's position under its
+  bound section, and the default from the settings file itself. **Edit the settings class, not the
+  JSON.**
+- **A field's operator-facing prose comes from a `<panel>` tag**, falling back to `<summary>` with a
+  build message naming the field. The two are separate because they answer different questions: the
+  summary tells a developer what the value means to the code, the panel tells whoever runs the host
+  what changing it does.
+- **`LeafDescriptorTests` is gone.** Every check it made — settings coverage in both directions, the
+  field vocabulary, group and `dependsOn` references, enum values and defaults, bounds, floor-source
+  order — now runs in the generator, at the point the file is produced rather than after, and in one
+  implementation shared by every leaf instead of a copy per repo.
+- The package is **build-only** and declares no dependencies: the attributes arrive as source and the
+  generator reads this assembly's metadata in its own process, so nothing reaches the published
+  output and this leaf gains no reflection.
+
+- **The descriptor's field order now matches its own declared group order.** `general` was listed
+  first in the file while declaring `order: 13`, so the array and the ordering it published
+  disagreed; the panel renders by group order, which is where `general` was always meant to be.
+- **Three malformed XML doc comments fixed** — an undefined `&le;` entity, a stray `</see>`, and a
+  doubled `</item>` — each of which dropped its member from the generated documentation entirely.
+  The doc-completeness warnings (`CS1573`/`CS1574`/`CS1587`/`CS1734`) are suppressed for this project
+  because they do not affect that file; `CS1570`, which does, is deliberately still an error.
+
 ### Changed — configuration is typed, and the settings file declares all of it
 
 **This deploy renames every environment variable the API reads, and changes what the boolean knobs

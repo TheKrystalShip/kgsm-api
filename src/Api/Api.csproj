@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.42.0</Version>
+    <Version>0.43.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -47,7 +47,25 @@
          These three together match the host env file (DOTNET_gcServer=0 / GCConserveMemory=9 /
          GCRetainVM=0) the change was live-validated under on 2026-06-26. -->
     <ServerGarbageCollection>false</ServerGarbageCollection>
+
+    <!-- The leaf config descriptor is generated from ApiSettings. These name the two files the
+         generator works between; everything else comes with the package below. -->
+    <!-- Turning the documentation file on (the package does, so <panel> tags reach the generator) makes
+         the compiler check every doc comment in the project. The completeness and cref-resolution
+         warnings are escalated to errors here and there are ~100 of them, none of which affect the
+         documentation the panel reads. CS1570 — genuinely malformed XML, which drops a member from the
+         file entirely — is deliberately NOT suppressed. -->
+    <NoWarn>$(NoWarn);CS1573;CS1574;CS1587;CS1734</NoWarn>
+
+    <LeafSettingsFile>kgsm-api.settings.json</LeafSettingsFile>
+    <LeafDescriptorFile>$(MSBuildProjectDirectory)/../../deploy/kgsm-api.leaf.json</LeafDescriptorFile>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Build-only: the attributes arrive as source and the generator as a tool, and the package
+         declares no dependencies of its own. -->
+    <PackageReference Include="TheKrystalShip.KGSM.LeafConfig" Version="2.2.0" PrivateAssets="all" />
+  </ItemGroup>
 
   <!-- The test project drives the AlertEngine's internal Tick/timing seam directly (M6·a). -->
   <ItemGroup>

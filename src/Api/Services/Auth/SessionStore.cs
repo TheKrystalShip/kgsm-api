@@ -187,7 +187,7 @@ public sealed class SessionStore(
 
     /// <summary>
     /// M4·c Increment 8 — the session GC worker's delete. A permanent storage bound: any row whose
-    /// <see cref="SessionEntry.Expires"/> has passed is dead **regardless of <see cref="SessionEntry.Revoked"/></see>
+    /// <see cref="SessionEntry.Expires"/> has passed is dead <b>regardless of <see cref="SessionEntry.Revoked"/></b>
     /// (a revoked row would eventually age out anyway; an expired-but-never-revoked row is just as dead
     /// — the 30-day absolute cap already killed it, revoke or not) — so this deletes both. Uses EF Core's
     /// bulk <c>ExecuteDeleteAsync</c> (.NET 10) rather than load-then-remove: one indexed <c>DELETE FROM

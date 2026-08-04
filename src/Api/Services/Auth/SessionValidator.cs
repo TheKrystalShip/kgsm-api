@@ -25,7 +25,6 @@ namespace TheKrystalShip.Api.Services.Auth;
 /// DB-hammer every request for 5s. The next <see cref="Evict"/> OR the TTL expiry re-queries.</item>
 /// <item><see cref="Evict"/> drops the entry so the revoke path (Increment 5/6) makes the next access
 /// 401 ~instantly rather than waiting for the TTL backstop.</item>
-/// </item>
 /// </list>
 /// </remarks>
 public sealed class SessionValidator(
