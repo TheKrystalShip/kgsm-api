@@ -19,7 +19,11 @@ namespace TheKrystalShip.Api.Contracts;
 /// (online → unknown → offline → banned) then most recently seen first. Empty when no players have
 /// ever been observed (only meaningful when <see cref="Detection"/> is
 /// <see cref="PlayerDetection.Configured"/>).</param>
-public sealed record PlayersResponse(string Detection, IReadOnlyList<RosterPlayer> Players);
+/// <param name="Moderation">Which moderation actions this game supports, so a client renders the
+/// buttons it can actually offer. It rides on this response rather than a separate call so the
+/// roster and the actions available on it can never disagree.</param>
+public sealed record PlayersResponse(
+    string Detection, IReadOnlyList<RosterPlayer> Players, ModerationCapability Moderation);
 
 /// <summary>
 /// A player in the permanent roster (player-presence-contract.md §5), keyed on
@@ -68,3 +72,38 @@ public sealed record PlayerTransition(string ServerId, RosterPlayer Player);
 /// <summary>The <c>players.reset</c> WS payload: <c>{ serverId }</c> — no per-player data, the client
 /// marks all players for that server as offline.</summary>
 public sealed record PlayerReset(string ServerId);
+
+/// <summary>The closed moderation-action vocabulary — <c>POST /servers/{id}/players/{identity}/{action}</c>.</summary>
+public static class ModerationAction
+{
+    public const string Kick = "kick";
+    public const string Ban = "ban";
+    public const string Unban = "unban";
+}
+
+/// <summary>
+/// The result of a moderation action. Echoes what was done and — usefully for a client that wants
+/// to explain itself — <see cref="TargetKind"/>, the identity the game asked for.
+/// </summary>
+/// <remarks>The resolved token itself is deliberately absent: the caller named a roster entry, not
+/// an address, and handing the address back would invite a client to start sending it.</remarks>
+/// <param name="ServerId">The server the action ran against.</param>
+/// <param name="PlayerIdentity">The roster key that was moderated.</param>
+/// <param name="Action">One of <see cref="ModerationAction"/>.</param>
+/// <param name="TargetKind">The identity kind the game's template declared — <c>ip</c>, <c>name</c>
+/// or <c>id</c>.</param>
+public sealed record ModerationResult(
+    string ServerId, string PlayerIdentity, string Action, string TargetKind);
+
+/// <summary>
+/// Which moderation actions a game supports, derived from the templates its blueprint declares.
+/// Lets a client render the actions it can actually offer instead of discovering a <c>409</c> by
+/// pressing a button — and never claims support the blueprint did not declare.
+/// </summary>
+/// <param name="Kick">Whether the game declares a kick command.</param>
+/// <param name="Ban">Whether the game declares a ban command.</param>
+/// <param name="Unban">Whether the game declares an unban command.</param>
+/// <param name="TargetKind">The identity kind the declared commands address (<c>ip</c>, <c>name</c>
+/// or <c>id</c>), or <see langword="null"/> when the game declares no moderation at all. A client
+/// uses it to warn that a player without that identity cannot be moderated.</param>
+public sealed record ModerationCapability(bool Kick, bool Ban, bool Unban, string? TargetKind);

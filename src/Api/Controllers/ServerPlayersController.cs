@@ -5,8 +5,10 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Players;
+using TheKrystalShip.Api.Data;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
+using TheKrystalShip.KGSM.Core.Models.Enums;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -56,11 +58,136 @@ public sealed class ServerPlayersController(ServerAggregator aggregator, PlayerH
         if (instance is null)
             return NotFound();
 
+        // Moderation is reported on both branches: what a game CAN do is declared by its blueprint and
+        // is true whether or not this host can see who is connected. Suppressing it on `unknown` would
+        // conflate "we cannot see the players" with "this game cannot be moderated".
+        ModerationCapability moderation = ModerationTargetResolver.Describe(instance);
+
         bool unknown = string.IsNullOrEmpty(instance.PlayerJoinedRegex) && string.IsNullOrEmpty(instance.PlayerLeftRegex);
         if (unknown)
-            return Ok(new PlayersResponse(PlayerDetection.Unknown, []));
+            return Ok(new PlayersResponse(PlayerDetection.Unknown, [], moderation));
 
-        return Ok(new PlayersResponse(PlayerDetection.Configured, history.GetRoster(id)));
+        return Ok(new PlayersResponse(PlayerDetection.Configured, history.GetRoster(id), moderation));
+    }
+
+    /// <summary>
+    /// Disconnect a player. The action names a roster entry, never an address — see
+    /// <see cref="ModerateAsync"/> for why.
+    /// </summary>
+    [HttpPost("{playerIdentity}/kick")]
+    public Task<IActionResult> Kick(string id, string playerIdentity, [FromQuery] string? origin, CancellationToken ct)
+        => ModerateAsync(id, playerIdentity, ModerationAction.Kick, origin, ct);
+
+    /// <summary>Disconnect a player and block them from reconnecting.</summary>
+    [HttpPost("{playerIdentity}/ban")]
+    public Task<IActionResult> Ban(string id, string playerIdentity, [FromQuery] string? origin, CancellationToken ct)
+        => ModerateAsync(id, playerIdentity, ModerationAction.Ban, origin, ct);
+
+    /// <summary>
+    /// Lift a block. The selectable set is this server's roster entries with
+    /// <see cref="PlayerStatus.banned"/> — an unban's subject is by definition not connected, so it
+    /// cannot come from a live presence view, and it is scoped to this server because a ban is.
+    /// </summary>
+    [HttpPost("{playerIdentity}/unban")]
+    public Task<IActionResult> Unban(string id, string playerIdentity, [FromQuery] string? origin, CancellationToken ct)
+        => ModerateAsync(id, playerIdentity, ModerationAction.Unban, origin, ct);
+
+    /// <summary>
+    /// The one path all three actions take, so the target can only ever be resolved one way.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The caller does not name the target.</b> It names a roster entry by the roster's own opaque
+    /// key; every identity field that reaches the game comes from the record that key resolves to,
+    /// scoped to this server. A request carrying its own address or name would let any caller ban an
+    /// arbitrary address the roster never saw.
+    /// </para>
+    /// <para>
+    /// <b>The game decides which identity.</b> The blueprint's template declares it through its
+    /// placeholder, read by <see cref="ModerationTargetResolver"/>. A game that declares no command
+    /// for the action is refused (<c>409</c>) rather than sent a different one, and a player missing
+    /// the identity the game asks for is refused too — never substituted with whichever field happens
+    /// to be present.
+    /// </para>
+    /// <para>
+    /// <b>No audit row is written here.</b> kgsm emits <c>instance_player_kicked</c>/<c>_banned</c>/
+    /// <c>_unbanned</c> and the M5 consumer writes the row from that echo; this path stamps
+    /// <c>actor</c>+<c>origin</c> so the echo carries who did it. Writing one here too would double it.
+    /// </para>
+    /// <list type="bullet">
+    /// <item><c>400</c> — bad origin.</item>
+    /// <item><c>404</c> — unknown server, or a player this server has never seen.</item>
+    /// <item><c>409</c> — the game declares no command for this action, or the player carries no
+    /// identity of the kind it asks for.</item>
+    /// <item><c>502</c> — the engine refused the command (e.g. the server is not running).</item>
+    /// <item><c>503</c> — the kgsm engine is not provisioned on this host.</item>
+    /// <item><c>200</c> — <c>{ serverId, playerIdentity, action, targetKind }</c>.</item>
+    /// </list>
+    /// </remarks>
+    private async Task<IActionResult> ModerateAsync(
+        string id, string playerIdentity, string action, string? rawOrigin, CancellationToken ct)
+    {
+        if (!TryResolveOrigin(rawOrigin, out string origin))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "unknown origin; expected one of: ui, assistant, discord, api");
+
+        if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the kgsm engine is not provisioned on this host");
+
+        if (!await ExistsAsync(id, ct).ConfigureAwait(false))
+            return NotFound();
+
+        Instance? instance = instances.GetInstanceInfo(id);
+        if (instance is null)
+            return NotFound();
+
+        if (!history.TryGetPlayer(id, playerIdentity, out RosterPlayer player))
+            return Error(StatusCodes.Status404NotFound, "not_found",
+                $"no player '{playerIdentity}' has been seen on this server");
+
+        string? template = action switch
+        {
+            ModerationAction.Kick => instance.KickCommand,
+            ModerationAction.Ban => instance.BanCommand,
+            _ => instance.UnbanCommand
+        };
+
+        ModerationTargetResolver.Failure failure =
+            ModerationTargetResolver.TryResolve(template, player, out string target, out ModerationTargetKind kind);
+
+        if (failure == ModerationTargetResolver.Failure.Unsupported)
+            return Error(StatusCodes.Status409Conflict, "conflict",
+                $"this game declares no {action} command");
+
+        if (failure == ModerationTargetResolver.Failure.NoSuchIdentity)
+            return Error(StatusCodes.Status409Conflict, "conflict",
+                $"this game moderates by {kind.ToString().ToLowerInvariant()}, which this player has none of");
+
+        // actor = the bearer identity; it rides onto the kgsm event so the audit row the consumer
+        // writes from the echo names who caused it.
+        string? actor = AuditPrincipal.ActorString(User);
+
+        KgsmResult result = action switch
+        {
+            ModerationAction.Kick => instances.Kick(id, target, actor, origin),
+            ModerationAction.Ban => instances.Ban(id, target, actor, origin),
+            _ => instances.Unban(id, target, actor, origin)
+        };
+
+        if (!result.IsSuccess)
+            return Error(StatusCodes.Status502BadGateway, "engine_error",
+                string.IsNullOrWhiteSpace(result.Stderr)
+                    ? $"the engine refused the {action}"
+                    : result.Stderr.Trim());
+
+        return Ok(new ModerationResult(id, playerIdentity, action, kind.ToString().ToLowerInvariant()));
+    }
+
+    private static bool TryResolveOrigin(string? raw, out string origin)
+    {
+        origin = raw?.Trim().ToLowerInvariant() is { Length: > 0 } o ? o : AuditOrigin.Api;
+        return AuditOrigin.IsCallerDeclarable(origin);
     }
 
     private async Task<bool> ExistsAsync(string id, CancellationToken ct)

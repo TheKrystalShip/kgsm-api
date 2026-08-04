@@ -79,6 +79,12 @@ public static class MonitorEventShaping
             "instance_upnp_closed" => Map<InstanceUpnpClosedData>(item, d => AuditMapping.FromUpnpClosedEvent(d, hostId)),
             "instance_player_joined" => Map<InstancePlayerJoinedData>(item, d => AuditMapping.FromPlayerJoinedEvent(d, hostId)),
             "instance_player_left" => Map<InstancePlayerLeftData>(item, d => AuditMapping.FromPlayerLeftEvent(d, hostId)),
+            "instance_player_kicked" => Map<InstancePlayerKickedData>(item,
+                d => AuditMapping.FromPlayerModerationEvent(d, hostId, AuditAction.PlayerKick, "kicked")),
+            "instance_player_banned" => Map<InstancePlayerBannedData>(item,
+                d => AuditMapping.FromPlayerModerationEvent(d, hostId, AuditAction.PlayerBan, "banned")),
+            "instance_player_unbanned" => Map<InstancePlayerUnbannedData>(item,
+                d => AuditMapping.FromPlayerModerationEvent(d, hostId, AuditAction.PlayerUnban, "unbanned")),
             "instance_config_changed" => Map<InstanceConfigChangedData>(item, d => AuditMapping.FromConfigChangedEvent(d, hostId)),
             "instance_input_sent" => Map<InstanceInputSentData>(item, d => AuditMapping.FromInputSentEvent(d, hostId)),
             // The blueprint events are the first whose subject is NOT an instance, so they go through

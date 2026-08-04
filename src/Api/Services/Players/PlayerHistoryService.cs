@@ -426,6 +426,85 @@ public sealed class PlayerHistoryService(
             .ToArray();
     }
 
+    /// <summary>
+    /// Look one player up by the roster's own dedup key. This is how a moderation request resolves
+    /// its target: the caller names a <paramref name="playerIdentity"/> and the identity fields come
+    /// from <em>this</em> record, never from the request — a client-supplied address or name would
+    /// let a caller moderate someone the roster never saw.
+    /// </summary>
+    /// <returns><see langword="true"/> and the record when this server has seen this player;
+    /// otherwise <see langword="false"/>.</returns>
+    public bool TryGetPlayer(string serverId, string playerIdentity, out RosterPlayer player)
+    {
+        player = default!;
+
+        if (string.IsNullOrEmpty(serverId) || string.IsNullOrEmpty(playerIdentity))
+            return false;
+
+        if (_cache.TryGetValue(serverId, out var roster) && roster.TryGetValue(playerIdentity, out var found))
+        {
+            player = found;
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Find the roster key for the game-facing token a moderation event carries.
+    /// </summary>
+    /// <remarks>
+    /// The engine's event names a player the way the <em>game</em> does — an address, a name, or an
+    /// account id, whichever the blueprint's template declared — while the roster is keyed on its own
+    /// dedup identity. This matches the token against the identity fields this server has actually
+    /// observed, comparing an address without its ephemeral port because that is the form a game
+    /// moderates by.
+    /// </remarks>
+    /// <returns>The matching roster key, or <see langword="null"/> when no player on this server
+    /// carries that token — a real case (an address can be banned before it ever connected), and one
+    /// that must leave the roster alone rather than invent a member.</returns>
+    public string? FindIdentityByTarget(string serverId, string? target)
+    {
+        if (string.IsNullOrEmpty(serverId) || string.IsNullOrWhiteSpace(target)) return null;
+        if (!_cache.TryGetValue(serverId, out var roster)) return null;
+
+        foreach (var (identity, player) in roster)
+        {
+            if (string.Equals(player.PlayerId, target, StringComparison.Ordinal)
+                || string.Equals(player.PlayerName, target, StringComparison.Ordinal)
+                || string.Equals(ModerationTargetResolver.AddressOnly(player.PlayerAddr), target, StringComparison.Ordinal))
+            {
+                return identity;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Lift a ban. Returns the player to <c>offline</c> and clears the reason, publishing a
+    /// <c>players.ban</c> frame so a watching client sees the status change.</summary>
+    /// <remarks>
+    /// The player goes to <c>offline</c>, not <c>online</c>: lifting a block permits a connection, it
+    /// does not make one. A real join event is what moves them to <c>online</c>.
+    /// </remarks>
+    public void Unban(string serverId, string playerIdentity, DateTimeOffset at)
+    {
+        if (string.IsNullOrEmpty(serverId) || string.IsNullOrEmpty(playerIdentity)) return;
+
+        if (_cache.TryGetValue(serverId, out var roster) && roster.TryGetValue(playerIdentity, out var existing))
+        {
+            var lifted = existing with { Status = PlayerStatus.offline, BanReason = null, LastSeen = at };
+            roster[playerIdentity] = lifted;
+
+            _ = UpsertAsync(serverId, playerIdentity, existing.PlayerId, existing.PlayerName,
+                existing.PlayerAddr, PlayerStatus.offline, existing.FirstSeen, at, banReason: null);
+
+            hub.Publish(StreamProtocol.PlayersTopic, StreamProtocol.PlayerEntityKey(serverId, playerIdentity),
+                new StreamMessage(StreamProtocol.PlayersTopic, StreamProtocol.PlayersBan,
+                    new PlayerTransition(serverId, lifted)));
+        }
+    }
+
     /// <summary>Get a player's current status from the cache, or <c>unknown</c> if not tracked.</summary>
     public PlayerStatus GetStatus(string serverId, string playerIdentity)
     {

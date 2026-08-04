@@ -282,6 +282,44 @@ public sealed class KgsmAuditConsumer(
             return Task.CompletedTask;
         });
 
+        // player.kick / player.ban / player.unban — moderation echoes (kgsm-lib 2.1.0). Engine-owned →
+        // the row is written HERE from the echo, never by the endpoint that issued the command (the same
+        // no-double-write rule the lifecycle verbs follow). Ban/unban ALSO drive the roster's permanent
+        // status, composed here rather than as a second RegisterHandler for the same
+        // single-handler-per-type reason as the presence pair above.
+        //
+        // The roster is keyed on playerIdentity while the event carries the game-facing target token, so
+        // the row to move is found by matching that token against the identity fields this server has
+        // actually seen. A target that matches nobody (an address banned before it ever connected) still
+        // audits — the trail records what the operator did — but moves no roster row, because inventing
+        // one would put a player in the roster who was never here.
+        events.RegisterHandler<InstancePlayerKickedData>(d =>
+        {
+            PublishLive(AuditMapping.FromPlayerModerationEvent(
+                d, options.HostId, AuditAction.PlayerKick, "kicked"));
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<InstancePlayerBannedData>(d =>
+        {
+            string? identity = history.FindIdentityByTarget(d.InstanceName, d.Target);
+            if (identity is not null)
+                history.Ban(d.InstanceName, identity, reason: null, d.Timestamp ?? DateTimeOffset.UtcNow);
+
+            PublishLive(AuditMapping.FromPlayerModerationEvent(
+                d, options.HostId, AuditAction.PlayerBan, "banned"));
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<InstancePlayerUnbannedData>(d =>
+        {
+            string? identity = history.FindIdentityByTarget(d.InstanceName, d.Target);
+            if (identity is not null)
+                history.Unban(d.InstanceName, identity, d.Timestamp ?? DateTimeOffset.UtcNow);
+
+            PublishLive(AuditMapping.FromPlayerModerationEvent(
+                d, options.HostId, AuditAction.PlayerUnban, "unbanned"));
+            return Task.CompletedTask;
+        });
+
         // config.set — instance config edits (kgsm-lib 1.22.0). The PATCH /servers/{id}/config path stamps
         // actor+origin onto SetInstanceConfigValue, so this echo carries provenance; engine-owned → live
         // publish only (NOT WriteServerAndBridge — a config edit is not a recovery action). KEY ONLY in

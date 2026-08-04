@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — player moderation
+
+- **`POST /servers/{id}/players/{playerIdentity}/kick|ban|unban`** (operator-gated). Requires
+  kgsm-lib **2.1.0** and kgsm **3.7.0-rc1**.
+
+  **The client never names the target.** A request carries only the roster's opaque
+  `playerIdentity`; every identity field that reaches the game comes from the server-side
+  `PlayerRecord` that key resolves to, scoped to this server. A request that could supply its own
+  address or name would let any caller ban an arbitrary address the roster never saw — the browser
+  is a client, and a client does not choose who gets banned.
+
+  **The game decides which identity**, through the placeholder in its blueprint template
+  (`kick {ip}` asks for an IP), read via kgsm-lib's `ModerationCommand.TryGetTargetKind`. So the
+  game picks the kind, the roster supplies the value, and neither the client nor this API invents
+  either half. An `{ip}`-keyed game gets the address **without its port**: the roster stores
+  `ip:port` because that is what a connection log carries, but the port is ephemeral and addresses
+  a socket that no longer exists.
+
+  Refusals are honest rather than approximated: a game declaring no command for the action is a
+  `409` (never a different command sent in its place), and a player carrying no identity of the kind
+  the game asks for — a Steam-relay player on an `{ip}`-keyed game — is a `409` too, never
+  substituted with whichever field happens to be present. An engine refusal (the server is not
+  running) surfaces as `502` with its message, never a fabricated success. The resolved token is
+  deliberately absent from the response: handing it back would invite a client to start sending it.
+
+- **`GET /servers/{id}/players` now carries `moderation`** — `{ kick, ban, unban, targetKind }`,
+  derived from the templates the blueprint declares, so a client renders the actions that exist
+  instead of discovering a `409` by pressing a button. It rides on the roster response rather than a
+  separate call so the roster and the actions available on it can never disagree, and it is reported
+  on the `detection:"unknown"` branch too — "we cannot see who is connected" is not "this game
+  cannot be moderated". It never claims support the blueprint did not declare.
+
+- **`player.kick` / `player.ban` / `player.unban` audit rows**, written by the M5 event consumer
+  from kgsm's `instance_player_kicked`/`_banned`/`_unbanned` echo — the endpoints stamp
+  `actor`+`origin` onto the kgsm call and write no row themselves, the same no-double-write rule the
+  lifecycle verbs follow. Distinct from `player.leave`: a leave is an observation, these are
+  deliberate acts, and a reader asking "who was banned here" must not infer intent from a disconnect
+  reason. Kick and ban are `warn`, unban is `info` — removing access is the notable act. The target
+  and resolved command ride in `meta`; the target is **not** classified into a
+  playerId/playerName/playerAddr slot, because guessing would put an address in a name field.
+
+  Ban and unban also drive the roster's permanent `status`. The event carries the game-facing token
+  while the roster is keyed on its own identity, so the row is found by matching that token against
+  the identity fields this server has observed. A target matching nobody (an address banned before
+  it ever connected) still audits but moves no roster row — inventing one would put a player in the
+  roster who was never here.
+
 ### Changed — the leaf config descriptor is generated, not written
 - **`deploy/kgsm-api.leaf.json` is now written by `TheKrystalShip.KGSM.LeafConfig` on every build**, from
   `[LeafField]` attributes and `<panel>` doc tags on `ApiSettings`. A knob lives in two places —

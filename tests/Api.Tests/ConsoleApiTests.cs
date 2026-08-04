@@ -167,6 +167,9 @@ public sealed class ConsoleApiTests
                 : new KgsmResult(0, "", "");
 
         // --- unused by the console surface ---
+        public KgsmResult Kick(string instanceName, string target, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public KgsmResult Ban(string instanceName, string target, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public KgsmResult Unban(string instanceName, string target, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public Dictionary<string, Instance>? GetAllOrNull() => throw new NotImplementedException();
         public Dictionary<string, Instance> GetAll() => throw new NotImplementedException();
         public Dictionary<string, Reading<InstanceRuntimeStatus>> GetAllStatuses(bool fast = false) => throw new NotImplementedException();

@@ -71,6 +71,11 @@ public static class AuditQueries
         AuditAction.NetworkUpnpClose,
         AuditAction.PlayerJoin,
         AuditAction.PlayerLeave,
+        // The moderation trio is cleanly echo-only, like blueprint.*: the endpoints thread actor+origin
+        // into the kgsm call and the engine emits the event, so there is no second source to preserve.
+        AuditAction.PlayerKick,
+        AuditAction.PlayerBan,
+        AuditAction.PlayerUnban,
         AuditAction.ConfigSet,
         AuditAction.ConsoleInput,
         // blueprint.* is cleanly echo-only: the library editor's PUT/DELETE thread actor+origin into

@@ -117,6 +117,16 @@ public static class AuditAction
     public const string PlayerJoin = "player.join";
     public const string PlayerLeave = "player.leave";
 
+    // player.kick/ban/unban — moderation echoes, sourced from kgsm's instance_player_kicked/_banned/
+    // _unbanned (kgsm-lib 2.1.0). Distinct from player.leave: a leave is an observation, these are
+    // deliberate operator actions, and a reader asking "who was banned here" must not have to infer
+    // intent from a disconnect reason. Engine-owned echo (no API double-write — the moderation
+    // endpoints stamp actor+origin onto the kgsm call so this echo carries who did it). The target
+    // and the resolved command ride in meta; the row is scoped to the server, like the presence pair.
+    public const string PlayerKick = "player.kick";
+    public const string PlayerBan = "player.ban";
+    public const string PlayerUnban = "player.unban";
+
     // config.set — sourced from instance_config_changed (kgsm-lib 1.22.0). KEY ONLY in meta; the value is
     // never carried (secret hygiene). Engine-owned echo (no double-write — the PATCH /servers/{id}/config
     // path already stamps actor+origin onto SetInstanceConfigValue).

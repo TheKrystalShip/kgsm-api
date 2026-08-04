@@ -270,6 +270,46 @@ public static class AuditMapping
             d.PlayerId, d.PlayerName, d.PlayerAddr, d.SessionKey, d.Reason);
 
     /// <summary>
+    /// Map a kgsm moderation event (<c>instance_player_kicked</c>/<c>_banned</c>/<c>_unbanned</c>,
+    /// kgsm-lib 2.1.0) to a <c>player.kick</c>/<c>player.ban</c>/<c>player.unban</c> row at
+    /// <see cref="AuditSeverity.Warning"/> — an operator removing someone is a notable act, unlike
+    /// the informational presence pair.
+    /// </summary>
+    /// <remarks>
+    /// The subject is the <see cref="InstanceModerationDataBase.Target"/> the operator's request
+    /// resolved to, and it rides in <c>meta</c> alongside the resolved <c>command</c>. It is
+    /// deliberately <em>not</em> classified into a playerId/playerName/playerAddr slot: the blueprint
+    /// declares what kind of identity it is, and guessing here would put an address in a name field
+    /// on some game. Provenance comes off the envelope (the moderation endpoints stamp actor+origin
+    /// onto the kgsm call), so unlike the presence echoes this is attributable to a person.
+    /// </remarks>
+    public static AuditWrite FromPlayerModerationEvent(
+        InstanceModerationDataBase d, string hostId, string action, string verb)
+    {
+        string instance = Instance(d);
+        string target = string.IsNullOrWhiteSpace(d.Target) ? "a player" : d.Target;
+
+        Dictionary<string, string>? meta = null;
+        if (!string.IsNullOrWhiteSpace(d.Target)) (meta ??= [])["target"] = d.Target;
+        if (!string.IsNullOrWhiteSpace(d.Command)) (meta ??= [])["command"] = d.Command;
+
+        // Removing someone's access is the notable act; restoring it is ordinary news.
+        string severity = action == AuditAction.PlayerUnban ? AuditSeverity.Info : AuditSeverity.Warn;
+
+        return new AuditWrite(
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
+            Action: action,
+            Severity: severity,
+            Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
+            ServerId: instance,
+            HostId: hostId,
+            Summary: $"{verb} {target} on {Display(instance)}",
+            Meta: meta);
+    }
+
+    /// <summary>
     /// Map a kgsm <c>instance_config_changed</c> event (kgsm-lib 1.22.0) to a <c>config.set</c> row at
     /// <see cref="AuditSeverity.Info"/>. The PATCH <c>/servers/{id}/config</c> path stamps actor+origin
     /// onto <c>SetInstanceConfigValue</c>, so this echo carries provenance off the envelope (handled
