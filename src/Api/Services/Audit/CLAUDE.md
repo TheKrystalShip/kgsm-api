@@ -57,15 +57,22 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   derived from provider (`discord`→user, `api`→token, `system`→system); bare string = the OS-user fallback;
   unknown provider keeps the name but leaves provider `null` (never coerce). The load-bearing test is the
   **round-trip** (`discord:haru` → `{user,haru,discord}`) — keep it green when you touch the parser.
-- **kgsm-lib only / the listener owns its socket.** Events come through `IEventService`, never a raw socket.
-  `UnixSocketClient` **binds + deletes** its path, so `KGSM_API_KGSM_SOCKET` must be a **dedicated** path
-  (in kgsm's `config_event_socket_filenames`), never one another consumer owns.
+- **kgsm-lib only / the journal is shared and read-only.** Events come through `IEventService`, never a
+  raw file read. `KGSM_API_KGSM_JOURNAL` names a directory the engine writes and every consumer reads —
+  the API owns nothing there and nothing on the engine side needs configuring for it to arrive.
+- **The API starts at the TAIL and keeps no cursor.** It never *persists* an engine event: it shapes each
+  one into a live audit row, fans it out over SSE, and hands it to the notification bus. Replaying
+  history on restart would re-announce to Discord/Slack events that were already announced. Nothing is
+  lost by skipping the events emitted during a restart, because the durable record is **kgsm-monitor's**
+  and `GET /audit` merges it from there. **Do not give this consumer a cursor** without first moving the
+  notification publish behind something that can tell a replay from a new event.
 
 ## Degrade gracefully (don't crash startup)
 
 `KgsmAuditConsumer.StartAsync` always `EnsureCreated`s (so `GET /audit` + auth writes work with no engine),
-then wires events **only if** the engine is provisioned and `IEventService` resolves; a bad/absent socket is
-logged and skipped (the bind faults kgsm-lib's own fire-and-forget task, never throws here). An auth audit
+then wires events **only if** the engine is provisioned and `IEventService` resolves; an unreadable or
+absent journal is logged and skipped (the read loop is kgsm-lib's own fire-and-forget task, and it
+tolerates a directory that does not exist yet, so it never throws here). An auth audit
 write is best-effort — a failed write must never break login. **Honest boundary:** events emitted while the
 API isn't listening are **not** audited (stateless engine, no backfill) — state it, don't try to backfill.
 

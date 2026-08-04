@@ -96,13 +96,12 @@ public sealed class ApiOptions
     public required string KgsmPath { get; init; }
 
     /// <summary>
-    /// Path to the kgsm event socket. A <em>registration formality</em> for M1·b — kgsm-lib's
-    /// <c>IInstanceService</c> is process-based (it shells <see cref="KgsmPath"/>); only the
-    /// event consumer (M5) opens this socket. Default: <c>/run/kgsm-api/kgsm-events.sock</c>
-    /// (the API's own systemd <c>RuntimeDirectory=kgsm-api</c> — a DEDICATED path the listener
-    /// owns, matching the deployed unit).
+    /// Directory holding the engine's append-only event journal, which the audit consumer tails
+    /// for engine events. Read-only and shared: the engine is the sole writer, any number of
+    /// consumers read the same files, and nothing here belongs to the API.
+    /// Default: <c>/var/lib/kgsm/events</c>.
     /// </summary>
-    public required string KgsmSocketPath { get; init; }
+    public required string KgsmJournalDir { get; init; }
 
     // --- Library RAWG.io cover-art / metadata (the M8·a library increment) ------------------------
 
@@ -410,7 +409,7 @@ public sealed class ApiOptions
         "KGSM_API_ASSISTANT_URL" => AssistantBaseUrl,
         "KGSM_API_FIREWALL_SOCKET" => FirewallSocketPath,
         "KGSM_API_KGSM_PATH" => KgsmPath,
-        "KGSM_API_KGSM_SOCKET" => KgsmSocketPath,
+        "KGSM_API_KGSM_JOURNAL" => KgsmJournalDir,
         _ => Environment.GetEnvironmentVariable(envName),
     };
 
@@ -687,7 +686,7 @@ public sealed class ApiOptions
             // to /run/kgsm-scheduler/status.sock on a host that runs kgsm-scheduler.
             SchedulerSocketPath = Defaulted(configuration["KGSM_API_SCHEDULER_SOCKET"], ""),
             KgsmPath = Defaulted(configuration["KGSM_API_KGSM_PATH"], "/usr/bin/kgsm"),
-            KgsmSocketPath = Defaulted(configuration["KGSM_API_KGSM_SOCKET"], "/run/kgsm-api/kgsm-events.sock"),
+            KgsmJournalDir = Defaulted(configuration["KGSM_API_KGSM_JOURNAL"], "/var/lib/kgsm/events"),
 
             // Realtime pump cadences (M2). The domain (instance) poll is relaxed by default (5s) — it
             // spawns kgsm.sh and the roster changes rarely (the SPA also has a manual refresh); floored at

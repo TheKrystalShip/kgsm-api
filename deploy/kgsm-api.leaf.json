@@ -239,13 +239,13 @@
       "risk": "wiring"
     },
     {
-      "key": "kgsmSocket",
-      "env": "KGSM_API_KGSM_SOCKET",
-      "label": "KGSM event socket",
-      "description": "Socket the engine delivers events on, which is where the audit trail comes from. It must be listed in the engine's own event socket configuration, and belong to no other consumer.",
+      "key": "kgsmJournalDir",
+      "env": "KGSM_API_KGSM_JOURNAL",
+      "label": "KGSM event journal",
+      "description": "Directory holding the engine's append-only event journal, which the API reads to see what the engine did. Read-only and shared with every other consumer — nothing needs configuring on the engine side.",
       "group": "engine",
       "type": "path",
-      "default": "/run/kgsm-api/kgsm-events.sock",
+      "default": "/var/lib/kgsm/events",
       "risk": "wiring"
     },
     {

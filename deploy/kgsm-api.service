@@ -27,7 +27,7 @@ WorkingDirectory=/opt/kgsm-api
 # below, which is read AFTER these and therefore overrides them.
 Environment=KGSM_API_URLS=http://0.0.0.0:8080
 Environment=KGSM_API_KGSM_PATH=/usr/local/bin/kgsm
-Environment=KGSM_API_KGSM_SOCKET=/run/kgsm-api/kgsm-events.sock
+Environment=KGSM_API_KGSM_JOURNAL=/var/lib/kgsm/events
 Environment=KGSM_API_MONITOR_SOCKET=/run/kgsm-monitor/metrics.sock
 Environment=KGSM_API_DB=/var/lib/kgsm-api/kgsm-api.db
 # Production by default; a host may flip this to Development in the env file to load Discord

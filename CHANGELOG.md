@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — engine events come from the journal, not a socket
+
+- **`KGSM_API_KGSM_JOURNAL` replaces `KGSM_API_KGSM_SOCKET`.** The audit consumer tails the
+  engine's append-only event journal instead of binding a socket for the engine to connect to.
+  The API no longer owns a path anything else could collide with, and the engine no longer has
+  to be configured with this consumer's existence — a journal is a file that any number of
+  readers share. Every handler is unchanged; the swap happens below `IEventService`.
+
+  **The API starts at the tail and keeps no cursor**, deliberately. It never *persists* an engine
+  event: it shapes each into a live audit row, fans it out over SSE, and hands it to the
+  notification bus. Replaying history on restart would re-announce to Discord and Slack events
+  that were already announced. Nothing is lost by skipping what was emitted during a restart —
+  the durable record belongs to kgsm-monitor, and `GET /audit` merges it from there.
+
 ### Changed — scheduled backups have their own cadence
 
 - **`GET`/`PATCH /servers/{id}/settings` carry `backupSchedule`, `backupTime`, `backupDay` and

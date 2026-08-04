@@ -19,6 +19,7 @@ using TheKrystalShip.Api.Services.Integrations;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.Api.Services.Players;
+using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Extensions;
 
 namespace TheKrystalShip.Api;
@@ -112,13 +113,26 @@ public class Startup(IConfiguration configuration)
 
         // M1·b — the servers join. kgsm-lib is the engine chokepoint (base, not a leaf): registered
         // when the engine is provisioned (it is, by default, at the packaged path). IInstanceService
-        // is process-based — it shells KgsmPath — so the socket arg is only a registration formality
-        // here (the event consumer that opens it lands at M5); the kgsm-lib singletons are lazy, so a
-        // non-existent socket never blocks startup. The ServerAggregator resolves IInstanceService
-        // per-request and degrades to an empty list (logged once) if the engine is unconfigured.
+        // is process-based — it shells KgsmPath; engine events come from the journal, a file the API
+        // reads with nothing to bind and nothing to reserve. The kgsm-lib singletons are lazy, so a
+        // journal directory that does not exist yet never blocks startup. The ServerAggregator
+        // resolves IInstanceService per-request and degrades to an empty list (logged once) if the
+        // engine is unconfigured.
+        //
+        // Tail, with no cursor: the API never PERSISTS an engine event. It shapes each one into a
+        // live audit row, fans it out over SSE, and hands it to the notification bus — so replaying
+        // history on restart would re-announce to Discord/Slack events that were already announced.
+        // Nothing is lost by starting at the tail, because the durable record belongs to
+        // kgsm-monitor and GET /audit reads it from there.
         if (apiOptions.KgsmProvisioned)
         {
-            services.AddKgsmServices(apiOptions.KgsmPath, apiOptions.KgsmSocketPath);
+            services.AddKgsmServices(new KgsmOptions
+            {
+                KgsmPath = apiOptions.KgsmPath,
+                EventTransport = KgsmEventTransport.Journal,
+                EventJournalDirectory = apiOptions.KgsmJournalDir,
+                EventStartPosition = EventStartPosition.Tail
+            });
 
             // File browser (Tier 3 #12) — the jailed content I/O for GET/PUT /servers/{id}/files. No
             // capability axis of its own (engine-base, like config/backups): it's a thin status-mapping

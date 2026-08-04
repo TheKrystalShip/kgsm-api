@@ -23,7 +23,7 @@ public sealed class ClusterTokenServiceTests
     {
         HostId = "test", HostLabel = "test",
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
-        FirewallSocketPath = "", SchedulerSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmSocketPath = "",
+        FirewallSocketPath = "", SchedulerSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmJournalDir = "/var/lib/kgsm/events",
         BlueprintCacheTtlSeconds = 60,
         InstanceCacheTtlSeconds = 60,
         LogSources = [], JournalctlPath = "journalctl", SystemctlPath = "systemctl", LogReadTimeoutMs = 5000,

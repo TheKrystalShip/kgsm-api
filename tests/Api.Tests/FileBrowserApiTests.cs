@@ -234,7 +234,7 @@ public sealed class FileBrowserApiTests
                     // A per-factory temp path (never actually bound against — the socket-bind failure
                     // path is caught/logged, not thrown — but this avoids any attempt against the real
                     // /run default, which the test process may not have permission to touch).
-                    ["KGSM_API_KGSM_SOCKET"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-files-{Guid.NewGuid():N}.sock"),
+                    ["KGSM_API_KGSM_JOURNAL"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-journal-{Guid.NewGuid():N}"),
                 });
             });
             builder.ConfigureTestServices(services =>

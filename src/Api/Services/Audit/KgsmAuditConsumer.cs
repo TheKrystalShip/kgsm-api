@@ -83,7 +83,7 @@ public sealed class KgsmAuditConsumer(
             // listener's own fire-and-forget task (logged by kgsm-lib) without throwing here — so a bad
             // socket path degrades to "no engine events" rather than crashing the API.
             events.Initialize();
-            logger.LogInformation("Audit: listening for kgsm events on {Socket}", options.KgsmSocketPath);
+            logger.LogInformation("Audit: reading kgsm events from the journal at {Journal}", options.KgsmJournalDir);
         }
         catch (Exception ex)
         {

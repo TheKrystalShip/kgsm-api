@@ -177,11 +177,13 @@ exactly one correct access path:
   scope — the verb routes native→watchdog, container→Docker inside the engine). kgsm-lib is **base,
   not a leaf**: provisioned-by-default at `KGSM_API_KGSM_PATH` (`/usr/bin/kgsm`); an empty path is
   a surfaced misconfiguration (empty `/servers` + a one-time log), not a §4·b capability. The
-  process-based `IInstanceService` is transient → resolved per-request from the provider. **M5** opens
-  the kgsm **event socket** (`KGSM_API_KGSM_SOCKET`) via kgsm-lib's `IEventService` — `KgsmAuditConsumer`
-  binds + **listens** (kgsm connects outbound and pushes events; the listener deletes any file at its
-  path before binding, so this must be a **dedicated** socket path, listed in kgsm's
-  `config_event_socket_filenames`, never a path another consumer owns). M3's command path also **stamps**
+  process-based `IInstanceService` is transient → resolved per-request from the provider. **M5** reads the
+  kgsm **event journal** (`KGSM_API_KGSM_JOURNAL`) via kgsm-lib's `IEventService` — `KgsmAuditConsumer`
+  tails a directory the engine writes and every consumer reads, so nothing is reserved here and nothing
+  needs configuring on the engine side. It starts at the **tail with no cursor**: the API never persists
+  an engine event, it publishes each one live (SSE + notifications), so a replay would re-announce what
+  was already announced — and nothing is lost, because the durable record is kgsm-monitor's and
+  `GET /audit` merges it from there. M3's command path also **stamps**
   `(actor, origin)` on `ILifecycleService.Start/Stop/Restart` (kgsm-lib **1.8.0**) so the engine event —
   and the audit row M5 writes from it — carries who/through-what; the API never writes an audit row for
   its own command (kgsm owns `server.*` → no double-write, see §5 below).

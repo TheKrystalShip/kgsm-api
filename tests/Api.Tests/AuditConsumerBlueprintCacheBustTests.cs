@@ -143,7 +143,7 @@ public sealed class AuditConsumerBlueprintCacheBustTests : IClassFixture<AuditCo
                 // Unique socket path: Initialize() on the fake is a no-op and the path never binds,
                 // but the consumer logs it, so it must be a per-fixture unique path so parallel test
                 // classes don't share a real socket resource by accident.
-                ["KGSM_API_KGSM_SOCKET"] = Path.Combine(Path.GetTempPath(), $"bp-cache-bust-{Guid.NewGuid():N}.sock"),
+                ["KGSM_API_KGSM_JOURNAL"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-journal-{Guid.NewGuid():N}"),
             }));
 
             builder.ConfigureTestServices(services =>
@@ -175,7 +175,11 @@ public sealed class AuditConsumerBlueprintCacheBustTests : IClassFixture<AuditCo
         public Func<BlueprintUpdatedData, Task>? CapturedUpdatedHandler { get; private set; }
         public Func<BlueprintRemovedData, Task>? CapturedRemovedHandler { get; private set; }
 
-        public void Initialize() { /* no socket binding — the audit consumer's typing path stays owned by it */ }
+        public void Initialize() { /* no transport started — the audit consumer's typing path stays owned by it */ }
+
+        public void Initialize(EventStartPosition startPosition) { /* as above; the position is irrelevant with no journal behind it */ }
+
+        public void RegisterGapHandler(Func<EventJournalGap, Task> handler) { /* the API records no history, so it registers none */ }
 
         public void RegisterHandler<T>(Func<T, Task> handler) where T : KgsmEventDataBase
         {
