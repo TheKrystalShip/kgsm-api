@@ -25,7 +25,10 @@ namespace TheKrystalShip.Api.Contracts;
 /// <param name="Enabled">Starts on boot (null when N/A — static/masked — or unknown).</param>
 /// <param name="Since">When the unit last became active (uptime is derived from it).</param>
 /// <param name="MainPid">The main process pid (null when not running).</param>
-/// <param name="MemoryBytes">systemd cgroup memory accounting (null when idle/unavailable).</param>
+/// <param name="MemoryBytes">The memory charged to the cgroup this leaf's main process lives in, including
+/// that cgroup's descendants and (as cgroup accounting always does) reclaimable page cache. Null when the
+/// leaf isn't running or the cgroup couldn't be read. A workload the leaf supervises in a <em>sibling</em>
+/// cgroup is excluded — which is why this is not systemd's unit-wide <c>MemoryCurrent</c>.</param>
 /// <param name="Health">The api's deep-health view where it probes this leaf (null when it has no probe —
 /// distinct from a probed <c>down</c>/<c>unknown</c>).</param>
 public sealed record LeafService(

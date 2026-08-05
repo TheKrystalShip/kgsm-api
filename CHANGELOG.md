@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A leaf's `memoryBytes` on `GET /hosts/{id}/services` (and the `services` stream) is the memory charged
+  to the cgroup its main process lives in, read from `/proc/<pid>/cgroup` → `memory.current`, rather than
+  systemd's `MemoryCurrent`. cgroup v2 counters are recursive and `MemoryCurrent` covers the whole unit
+  subtree, so a unit that supervises other workloads in child cgroups reported theirs as its own:
+  `kgsm-watchdog` runs itself in a `supervisor` child and spawns each game server into a sibling, and the
+  Services board therefore showed it holding 8.5 GB when the daemon's own footprint was 56 MB. A leaf
+  whose main process sits directly in its unit cgroup — every other one — reads exactly as before. An
+  unreadable cgroup is `null`: the unit-wide total is a different quantity, not a fallback for this one.
+
 ### Added
 - `POST /assistant/conversations/{id}/turns/{turnId}/feedback` — relays the caller's verdict on one of
   their own answers to the assistant leaf. Viewer-tier: rating the reply you received is a personal

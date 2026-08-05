@@ -17,8 +17,10 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// <param name="Since">When the unit last became active (<c>ActiveEnterTimestamp</c>), null if never/unknown —
 /// the frontend derives uptime from it.</param>
 /// <param name="MainPid">The main process pid, null when not running.</param>
-/// <param name="MemoryBytes">systemd's cgroup memory accounting (<c>MemoryCurrent</c>), null when not running
-/// or unavailable (<c>[not set]</c>) — measured, never invented.</param>
+/// <param name="MemoryBytes">The memory charged to the cgroup the unit's main process lives in, read by
+/// <see cref="CgroupMemoryReader"/>; null when not running or unmeasurable — measured, never invented.
+/// <em>Not</em> systemd's <c>MemoryCurrent</c>, which is the whole unit subtree and therefore counts any
+/// workload the unit supervises in child cgroups as its own.</param>
 public sealed record UnitState(
     string State,
     string? SubState,
@@ -43,15 +45,23 @@ public sealed record UnitState(
 /// Reading unit state is unprivileged; any failure degrades every requested unit to <see cref="UnitState.Unknown"/>.
 /// Arguments go through <see cref="ProcessStartInfo.ArgumentList"/> (never a joined string — the ProcessRunner lesson).
 /// </para>
+/// <para>
+/// Liveness comes from systemd; <b>memory does not</b>. systemd only offers the unit subtree's total, which
+/// attributes a supervised workload's memory to its supervisor, so each running unit's figure is read from
+/// its main process's own cgroup instead — see <see cref="CgroupMemoryReader"/>. That read is per running
+/// unit, but it is two small kernel files against the one process spawn above, so it does not change the
+/// shape of this call's cost.
+/// </para>
 /// </summary>
 public sealed class SystemdReader
 {
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(4);
 
     // The properties we read per unit. Order is irrelevant (we index by name); each is a single-line scalar
-    // (none can contain a newline), so blank-line block splitting is unambiguous.
+    // (none can contain a newline), so blank-line block splitting is unambiguous. MemoryCurrent is absent on
+    // purpose — it is the unit subtree's total, and memory is read from the main process's own cgroup.
     private static readonly string[] Properties =
-        ["Id", "LoadState", "ActiveState", "SubState", "UnitFileState", "MainPID", "MemoryCurrent", "ActiveEnterTimestamp"];
+        ["Id", "LoadState", "ActiveState", "SubState", "UnitFileState", "MainPID", "ActiveEnterTimestamp"];
 
     private readonly ApiOptions _options;
     private readonly ILogger<SystemdReader> _logger;
@@ -108,6 +118,7 @@ public sealed class SystemdReader
             }
 
             MergeShowOutput(stdout, result);
+            FillOwnMemory(result);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -139,6 +150,23 @@ public sealed class SystemdReader
             if (!block.TryGetValue("Id", out string? id) || string.IsNullOrEmpty(id)) continue;
             if (!into.ContainsKey(id)) continue;   // only the units we asked for (defensive)
             into[id] = MapBlock(block);
+        }
+    }
+
+    /// <summary>
+    /// Fill in each running unit's <see cref="UnitState.MemoryBytes"/> from its main process's own cgroup.
+    /// A unit with no main pid keeps the null <see cref="MapBlock"/> left it — it isn't running, so there is
+    /// nothing to charge. A unit whose cgroup can't be read keeps it too: unmeasured is the honest answer,
+    /// and the unit-subtree total is a different quantity, not a fallback for this one.
+    /// </summary>
+    private static void FillOwnMemory(IDictionary<string, UnitState> states)
+    {
+        foreach (string unit in states.Keys.ToList())
+        {
+            UnitState st = states[unit];
+            if (st.MainPid is not { } pid)
+                continue;
+            states[unit] = st with { MemoryBytes = CgroupMemoryReader.TryRead(pid) };
         }
     }
 
@@ -190,7 +218,9 @@ public sealed class SystemdReader
             Enabled: enabled,
             Since: ParseUnixStamp(Get(b, "ActiveEnterTimestamp")),
             MainPid: ParsePid(Get(b, "MainPID")),
-            MemoryBytes: ParseMemory(Get(b, "MemoryCurrent")));
+            // Filled by FillOwnMemory from the main process's cgroup — systemd reports only the unit
+            // subtree's total, which is a different quantity for a unit that supervises other workloads.
+            MemoryBytes: null);
     }
 
     private static string Get(IReadOnlyDictionary<string, string> b, string key) =>
@@ -211,9 +241,4 @@ public sealed class SystemdReader
     // MainPID=0 means "no main process" → null (not running), never a fake pid.
     private static int? ParsePid(string v) =>
         int.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out int n) && n > 0 ? n : null;
-
-    // MemoryCurrent is a byte count when running; "[not set]" (idle) or the uint64-max sentinel → null
-    // (both fail the long parse), so an idle/unavailable unit reports null memory, never a fabricated 0.
-    private static long? ParseMemory(string v) =>
-        long.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out long n) && n >= 0 ? n : null;
 }

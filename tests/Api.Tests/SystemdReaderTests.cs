@@ -10,7 +10,9 @@ namespace Api.Tests;
 public class SystemdReaderTests
 {
     // As emitted by `systemctl show <units> --timestamp=unix --property=Id,LoadState,ActiveState,SubState,
-    // UnitFileState,MainPID,MemoryCurrent,ActiveEnterTimestamp` — blank-line separated blocks.
+    // UnitFileState,MainPID,ActiveEnterTimestamp` — blank-line separated blocks. Memory is deliberately not
+    // among the properties: systemd reports only the unit subtree's total, so it is read per unit from the
+    // main process's own cgroup instead (CgroupMemoryReaderTests covers that half).
     private const string Sample =
         "Id=kgsm-api.service\n" +
         "LoadState=loaded\n" +
@@ -19,7 +21,6 @@ public class SystemdReaderTests
         "UnitFileState=enabled\n" +
         "ActiveEnterTimestamp=@1782763729\n" +
         "MainPID=3271183\n" +
-        "MemoryCurrent=135106560\n" +
         "\n" +
         "Id=kgsm-firewall.service\n" +
         "LoadState=loaded\n" +
@@ -28,7 +29,6 @@ public class SystemdReaderTests
         "UnitFileState=static\n" +
         "ActiveEnterTimestamp=\n" +
         "MainPID=0\n" +
-        "MemoryCurrent=[not set]\n" +
         "\n" +
         "Id=does-not-exist.service\n" +
         "LoadState=not-found\n" +
@@ -36,8 +36,7 @@ public class SystemdReaderTests
         "SubState=dead\n" +
         "UnitFileState=\n" +
         "ActiveEnterTimestamp=\n" +
-        "MainPID=0\n" +
-        "MemoryCurrent=[not set]\n";
+        "MainPID=0\n";
 
     private static Dictionary<string, UnitState> Seed(params string[] units)
     {
@@ -57,8 +56,9 @@ public class SystemdReaderTests
         Assert.Equal("running", api.SubState);
         Assert.True(api.Enabled);
         Assert.Equal(3271183, api.MainPid);
-        Assert.Equal(135106560L, api.MemoryBytes);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1782763729), api.Since);
+        // Memory is not systemd's to give here — the parser leaves it for the cgroup read.
+        Assert.Null(api.MemoryBytes);
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class SystemdReaderTests
         Assert.Null(fw.Enabled);       // static -> enablement N/A, not false
         Assert.Null(fw.Since);         // never active -> null, never epoch-zero
         Assert.Null(fw.MainPid);       // MainPID=0 -> null, never a fake pid
-        Assert.Null(fw.MemoryBytes);   // "[not set]" -> null, never a fabricated 0
+        Assert.Null(fw.MemoryBytes);   // no main process -> nothing to charge, never a fabricated 0
     }
 
     [Fact]
