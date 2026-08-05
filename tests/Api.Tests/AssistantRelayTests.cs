@@ -134,4 +134,80 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
     }
+
+    // --- GET /admin/conversations… — the ADMIN-gated review relay (it reads OTHER users' chats). ---
+    // Every conversation endpoint above reads the CALLER'S OWN history and is viewer-gated. These read
+    // someone else's, so the tier is the load-bearing difference and is what these tests pin: a viewer or
+    // an operator — either of whom may chat, and an operator may even propose commands — is forbidden.
+
+    [Theory]
+    [InlineData("/api/v1/assistant/admin/conversations/users")]
+    [InlineData("/api/v1/assistant/admin/conversations?user=u1")]
+    [InlineData("/api/v1/assistant/admin/conversations/aGFuZGxl")]
+    public async Task Review_NoToken_401(string path)
+    {
+        HttpResponseMessage resp = await Client().GetAsync(path);
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        Assert.Contains("\"code\":\"unauthorized\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData("/api/v1/assistant/admin/conversations/users")]
+    [InlineData("/api/v1/assistant/admin/conversations?user=u1")]
+    [InlineData("/api/v1/assistant/admin/conversations/aGFuZGxl")]
+    public async Task Review_ViewerTier_403(string path)
+    {
+        // A viewer may chat with the assistant and read their OWN history — never anyone else's.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).GetAsync(path);
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/api/v1/assistant/admin/conversations/users")]
+    [InlineData("/api/v1/assistant/admin/conversations?user=u1")]
+    [InlineData("/api/v1/assistant/admin/conversations/aGFuZGxl")]
+    public async Task Review_OperatorTier_403(string path)
+    {
+        // Operator is the tier that may ACT on a server. Reading someone's conversation is a different
+        // power, and this is the assertion that keeps the two from being conflated later.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator)).GetAsync(path);
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("/api/v1/assistant/admin/conversations/users")]
+    [InlineData("/api/v1/assistant/admin/conversations?user=u1")]
+    [InlineData("/api/v1/assistant/admin/conversations/aGFuZGxl")]
+    public async Task Review_Admin_AssistantAbsent_404(string path)
+    {
+        // Admin clears authz; the unprovisioned assistant degrades to an honest 404, never a 500.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Admin)).GetAsync(path);
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Review_Admin_UnknownConversation_IsNotFound_NotBadGateway()
+    {
+        // A handle the leaf does not hold is an ANSWER ("no such conversation"), not a transport failure.
+        // Without the pass-through the client is told the assistant could not be reached — false, and it
+        // sends them looking for an outage instead of a stale link. Asserted here at the shape level: with
+        // no assistant provisioned the degrade 404 arrives instead, but both are 404 + not_found, which is
+        // exactly the contract this pins — this endpoint never answers a missing conversation with a 5xx.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Admin))
+            .GetAsync("/api/v1/assistant/admin/conversations/bm9wZQ");
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Review_Admin_MissingUser_400()
+    {
+        // The user to review is required, and validating it precedes the capability gate — same shape as
+        // the turn's prompt and the confirm's token.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Admin))
+            .GetAsync("/api/v1/assistant/admin/conversations");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
 }

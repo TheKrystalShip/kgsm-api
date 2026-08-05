@@ -178,6 +178,41 @@ public sealed class AssistantClient : HttpClient
         RelaySendAsync(HttpMethod.Post, $"/conversations/{Uri.EscapeDataString(chatId)}/compact", relayUserId, relayDisplayName, ct);
 
     /// <summary>
+    /// Lists everyone who has talked to this host's assistant: <c>GET /admin/conversations/users</c>, the
+    /// index an administrator picks from when reviewing how the assistant is answering. Carries
+    /// <c>X-Relay-Admin: true</c> — the assistant's review surface is fail-closed on that header, and this
+    /// API only ever sets it from a verified admin tier. The body is the assistant's JSON verbatim.
+    /// Returns <see langword="null"/> when the assistant isn't provisioned; the caller <strong>owns
+    /// disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> GetReviewUsersAsync(
+        string relayUserId, string relayDisplayName, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Get, "/admin/conversations/users", relayUserId, relayDisplayName, ct, admin: true);
+
+    /// <summary>
+    /// Lists one user's conversations for review: <c>GET /admin/conversations?user={userId}</c>. Unlike the
+    /// self-service listing, <paramref name="ofUserId"/> names SOMEONE ELSE — which is exactly why the call
+    /// carries <c>X-Relay-Admin</c> and why its controller is admin-gated. Soft-deleted conversations are
+    /// included, flagged, by the assistant. Returns <see langword="null"/> when the assistant isn't
+    /// provisioned; the caller <strong>owns disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> GetReviewConversationsAsync(
+        string relayUserId, string relayDisplayName, string ofUserId, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Get, $"/admin/conversations?user={Uri.EscapeDataString(ofUserId)}",
+            relayUserId, relayDisplayName, ct, admin: true);
+
+    /// <summary>
+    /// Reads one conversation's transcript for review: <c>GET /admin/conversations/{handle}</c>.
+    /// <paramref name="handle"/> is the OPAQUE id the assistant's listing minted — the API neither composes
+    /// nor interprets it, it forwards what the client was offered. Returns <see langword="null"/> when the
+    /// assistant isn't provisioned; the caller <strong>owns disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> GetReviewConversationAsync(
+        string relayUserId, string relayDisplayName, string handle, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Get, $"/admin/conversations/{Uri.EscapeDataString(handle)}",
+            relayUserId, relayDisplayName, ct, admin: true);
+
+    /// <summary>
     /// Finalizes a staged confirmation on the verified end-user's behalf (the blueprint-review Save, and
     /// any future confirm): <c>POST /confirm</c> with the trusted-relay identity + the forwarded body
     /// (<c>{ token, editedContent }</c>). The assistant validates the single-use token, re-derives action
@@ -233,7 +268,8 @@ public sealed class AssistantClient : HttpClient
     // Self-bounded to ReadTimeout via a linked token — these are short request/response calls, not the long
     // SSE stream or the minutes-long confirm (the class Timeout is now unbounded, so each call budgets itself).
     private async Task<HttpResponseMessage?> RelaySendAsync(
-        HttpMethod method, string path, string relayUserId, string relayDisplayName, CancellationToken ct)
+        HttpMethod method, string path, string relayUserId, string relayDisplayName, CancellationToken ct,
+        bool admin = false)
     {
         if (!IsProvisioned)
             return null;
@@ -246,6 +282,11 @@ public sealed class AssistantClient : HttpClient
         string displayName = HeaderSafe(relayDisplayName);
         if (!string.IsNullOrEmpty(displayName))
             request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
+        // Only the review calls set this, and only because their controller already required admin tier.
+        // Sent as a literal "true" rather than a formatted bool so it can never be spelled something the
+        // assistant's fail-closed check reads as false.
+        if (admin)
+            request.Headers.TryAddWithoutValidation("X-Relay-Admin", "true");
 
         using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timed.CancelAfter(ReadTimeout);

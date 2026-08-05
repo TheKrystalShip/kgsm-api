@@ -276,6 +276,54 @@ public sealed class AssistantController(
     public Task<IActionResult> CompactConversation(string id, CancellationToken ct) =>
         RelayAsync((ident, ct2) => assistant.CompactConversationAsync(ident.UserId, ident.Display, id, ct2), RelayedJson, ct);
 
+    /// <summary>
+    /// <c>GET /api/v1/assistant/admin/conversations/users</c> — everyone who has talked to this host's
+    /// assistant, <b>admin</b>-gated. The index an administrator picks from to review how the assistant is
+    /// answering and where it needs tuning.
+    /// <para>
+    /// <b>Admin, not operator:</b> every other conversation endpoint here reads the CALLER'S OWN history
+    /// and is viewer-gated; these three read other people's, which is a different power from acting on a
+    /// server. The API's verdict rides to the assistant as <c>X-Relay-Admin</c>, which that surface is
+    /// fail-closed on — so an unauthorized caller is stopped here, and a relay that never asserts admin is
+    /// stopped there.
+    /// </para>
+    /// <para>
+    /// <b>No audit row.</b> A review read is not recorded (decision, 2026-08-05). Users are told their
+    /// conversations may be reviewed — the SPA's assistant discloses it before the first message — and that
+    /// disclosure, not a log of each read, is how this is kept honest.
+    /// </para>
+    /// </summary>
+    [HttpGet("admin/conversations/users")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public Task<IActionResult> ReviewUsers(CancellationToken ct) =>
+        RelayAsync((id, ct2) => assistant.GetReviewUsersAsync(id.UserId, id.Display, ct2), RelayedJson, ct);
+
+    /// <summary>
+    /// <c>GET /api/v1/assistant/admin/conversations?user={userId}</c> — one user's conversations,
+    /// <b>admin</b>-gated. Soft-deleted ones are included and flagged by the assistant: the transcript was
+    /// never erased, and a conversation someone hid is exactly what a tuning review wants to see.
+    /// </summary>
+    [HttpGet("admin/conversations")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public Task<IActionResult> ReviewConversations([FromQuery] string? user, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(user))
+            return Task.FromResult<IActionResult>(Error(StatusCodes.Status400BadRequest, "bad_request", "user is required"));
+
+        return RelayAsync((id, ct2) => assistant.GetReviewConversationsAsync(id.UserId, id.Display, user, ct2), RelayedJson, ct);
+    }
+
+    /// <summary>
+    /// <c>GET /api/v1/assistant/admin/conversations/{handle}</c> — one conversation's transcript,
+    /// <b>admin</b>-gated. <paramref name="handle"/> is the opaque id the assistant's listing minted; the
+    /// API forwards it untouched (it is the leaf's id scheme, not this API's), and the assistant refuses one
+    /// that names anything it did not list. The transcript JSON is relayed verbatim.
+    /// </summary>
+    [HttpGet("admin/conversations/{handle}")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public Task<IActionResult> ReviewConversation(string handle, CancellationToken ct) =>
+        RelayAsync((id, ct2) => assistant.GetReviewConversationAsync(id.UserId, id.Display, handle, ct2), RelayedJson, ct);
+
     // Shared relay core: the same capability + identity gates as the turn, then the caller-supplied
     // projection of a SUCCESSFUL upstream response (verbatim JSON for the reads, 204 for the delete).
     // Unlike the SSE turn, nothing is committed before we know the upstream status, so a real status code
@@ -316,6 +364,13 @@ public sealed class AssistantController(
 
         using (upstream)
         {
+            // An upstream 404 is an ANSWER, not a transport failure: the assistant reached a verdict —
+            // it holds no such conversation. Flattening it into 502 would tell the client the leaf could
+            // not be reached, which is false and unactionable. Every other non-2xx really is the relay
+            // failing (a misconfigured secret, a rejected shape) and stays 502.
+            if (upstream.StatusCode == System.Net.HttpStatusCode.NotFound)
+                return Error(StatusCodes.Status404NotFound, "not_found", "no such conversation");
+
             if (!upstream.IsSuccessStatusCode)
             {
                 logger.LogWarning("assistant conversation relay: upstream returned {Status}", (int)upstream.StatusCode);

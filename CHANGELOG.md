@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — an administrator can review other users' assistant conversations
+
+Three admin-gated relays onto the assistant leaf's review surface, so the Control Panel can show who
+has talked to the assistant and what they were told — the read an operator needs to judge where the
+assistant is answering badly.
+
+- `GET /api/v1/assistant/admin/conversations/users` — everyone on this host's assistant.
+- `GET /api/v1/assistant/admin/conversations?user={userId}` — that user's conversations, soft-deleted
+  ones included and flagged by the leaf.
+- `GET /api/v1/assistant/admin/conversations/{handle}` — one transcript, addressed by the opaque
+  handle the leaf's listing minted. The API neither composes nor interprets it.
+
+**Admin, not operator.** Every other conversation endpoint here reads the caller's OWN history and is
+viewer-gated; these read someone else's, which is a different power from acting on a server — an
+operator is forbidden. The verdict rides to the leaf as `X-Relay-Admin`, which its review surface is
+fail-closed on, so an unauthorized caller is stopped here and a relay that never asserts admin is
+stopped there. Relayed verbatim through the existing core, so the degrade gate (absent → `404`,
+down → `503`, upstream reject → `502`) and the frozen error envelope come for free.
+
+**No audit row is written for a review read.** Users are told their conversations may be reviewed —
+the SPA discloses it before the first message — and that disclosure, not a log of each read, is how
+this is kept honest.
+
 ### Changed — the sourced-config fixture holds nothing a shell can act on
 
 `ServerNoteRoundTripTests` reads its file back by sourcing it in bash, so a fixture body carrying
