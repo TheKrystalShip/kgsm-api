@@ -142,7 +142,21 @@ public sealed record Server(
     // null is "not scanned yet" (cold cache, or the engine read failed and no prior reading exists). Keeping
     // those apart is what lets a surface say "no backups yet" only when that is actually known, and show an
     // honest unknown otherwise.
-    int? BackupCount = null);
+    int? BackupCount = null,
+    // The long-running operation that currently owns this instance (an update downloading and deploying, a
+    // backup being taken), or null when nothing is in flight. This is the `jobs` topic's own record — the
+    // one JobRegistry holds — carried on the server so a surface learns "this instance is busy" from a plain
+    // read instead of only from the transition frame: a browser that reloads mid-update, or one that
+    // connects after the job started, sees it. It rides the list, the detail AND the `servers` stream for
+    // that reason, and DomainPump diffs it, so start and finish reach every open panel within a tick.
+    //
+    // Two sources, both measured, never fabricated: a job this API issued, and — via
+    // instance_update_started/finished — an update kgsm is running for some OTHER entrypoint (the CLI, the
+    // assistant, the bot). They share one slot, so this is at most one record whoever started it.
+    //
+    // It is NOT a status. Status stays the run-state vocabulary above; a surface that wants to render
+    // "updating" joins the two itself, exactly as it joins status with metrics.
+    Job? ActiveJob = null);
 
 /// <summary>
 /// A server's operator-authored note — free text an Operator writes for players and teammates

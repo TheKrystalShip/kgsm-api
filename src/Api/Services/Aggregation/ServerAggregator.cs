@@ -31,6 +31,7 @@ public sealed class ServerAggregator
     private readonly InstanceCache _cache;
     private readonly UpdateCheckCache _updateChecks;
     private readonly BackupCache _backups;
+    private readonly Commands.JobRegistry _jobs;
     private readonly ILogger<ServerAggregator> _logger;
 
     public ServerAggregator(
@@ -41,6 +42,7 @@ public sealed class ServerAggregator
         InstanceCache cache,
         UpdateCheckCache updateChecks,
         BackupCache backups,
+        Commands.JobRegistry jobs,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
@@ -50,6 +52,7 @@ public sealed class ServerAggregator
         _cache = cache;
         _updateChecks = updateChecks;
         _backups = backups;
+        _jobs = jobs;
         _logger = logger;
     }
 
@@ -111,7 +114,7 @@ public sealed class ServerAggregator
 
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshotTask.Result);
         Server server = BuildServer(id, instance, _cache.Statuses, _updateChecks.Readings, _backups.Readings,
-            metricsById, _options.HostId, _cache.IsStarting);
+            metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -168,7 +171,7 @@ public sealed class ServerAggregator
         var servers = new List<Server>(roster.Count);
         foreach ((string id, Instance instance) in roster)
             servers.Add(BuildServer(id, instance, statuses, updateReadings, backupReadings, metricsById,
-                _options.HostId, _cache.IsStarting));
+                _options.HostId, _cache.IsStarting, _jobs.InFlightFor));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -188,6 +191,9 @@ public sealed class ServerAggregator
     // Build one Server (the shared list/detail element — detail adds the network block on top). status,
     // version and metrics are all independent + honest: a non-measured reading is "unknown", a missing
     // metrics row is null — never inferred from one another. Internal static so DomainPump can reuse it.
+    // `activeJob` is JobRegistry.InFlightFor — the long-running operation that owns this instance right
+    // now (an update, a backup), carried so a plain read tells a surface the instance is busy. It is kept
+    // strictly beside status, never folded into it: status is run-state, this is what is being done to it.
     // `isStarting` is InstanceCache.IsStarting — the ONE place the starting-latch tri-state (see
     // InstanceCache's remarks) folds into the DTO's status; only consulted when the boolean reading
     // itself is already "up" (a stopped/crashed instance is never reported starting, even if the latch
@@ -200,7 +206,8 @@ public sealed class ServerAggregator
         IReadOnlyDictionary<string, BackupReading> backupReadings,
         IReadOnlyDictionary<string, Snap.ServerMetrics> metricsById,
         string hostId,
-        Func<string, bool> isStarting)
+        Func<string, bool> isStarting,
+        Func<string, Job?> activeJob)
     {
         string status = ServerStatus.Unknown;
         string? version = null;
@@ -269,7 +276,8 @@ public sealed class ServerAggregator
             ConnectPort: ConnectPortOf(instance.Ports),
             Note: NoteOf(instance),
             LastBackup: backups.Latest,
-            BackupCount: backups.Count);
+            BackupCount: backups.Count,
+            ActiveJob: activeJob(id));
     }
 
     // The operator-authored note, or null when the instance has no note. kgsm-lib decodes the body

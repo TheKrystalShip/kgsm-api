@@ -133,6 +133,7 @@ public sealed class KgsmAuditConsumer(
             instanceCache.MarkStarting(d.InstanceName);
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
+            SettleObserved(d.InstanceName);
             return WriteServerAndBridge(d, AuditAction.ServerStart, "started");
         });
         // instance_ready (kgsm-lib 1.35.0) — the watchdog's readiness signal: its log-scrape confirms the
@@ -153,6 +154,7 @@ public sealed class KgsmAuditConsumer(
             instanceCache.UpdateStatus(d.InstanceName, false);
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
+            SettleObserved(d.InstanceName);
             return WriteServer(d, AuditAction.ServerStop, AuditSeverity.Info, "stopped");
         });
         events.RegisterHandler<InstanceRestartedData>(d =>
@@ -160,6 +162,7 @@ public sealed class KgsmAuditConsumer(
             instanceCache.UpdateStatus(d.InstanceName, true);
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
+            SettleObserved(d.InstanceName);
             return WriteServerAndBridge(d, AuditAction.ServerRestart, "restarted");
         });
         events.RegisterHandler<InstanceUninstalledData>(d =>
@@ -178,8 +181,31 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceVersionUpdatedData>(d =>
         {
             updateCheckCache.MarkUpdated(d.InstanceName);
+            SettleObserved(d.InstanceName);
             return WriteServer(d, AuditAction.ServerUpdate, AuditSeverity.Info, "updated",
                 Meta(("oldVersion", d.OldVersion), ("newVersion", d.NewVersion)));
+        });
+
+        // instance_update_started / instance_update_finished — kgsm brackets an update run with these
+        // whoever drove it, which is what lets a surface show an instance as busy for the whole
+        // minutes-long download-and-deploy instead of only learning the version moved at the end.
+        // AUDIT-SILENT by design, like instance_ready: server.update (written from the version event
+        // above) is the fact worth an append-only row; "a run is in progress" is live state, not history.
+        //
+        // What they do is claim and release this instance's ONE in-flight job slot, so an update run from
+        // the CLI, the assistant or the bot rides the same job record — and the same server.activeJob
+        // field — as one this API issued. When this API issued it, its own job already holds the slot: the
+        // claim returns null and the release leaves it alone, because CommandRunner settles its own job
+        // when the engine process exits, which is the honest end of THAT run.
+        events.RegisterHandler<InstanceUpdateStartedData>(d =>
+        {
+            ObserveUpdateStarted(d.InstanceName);
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<InstanceUpdateFinishedData>(d =>
+        {
+            SettleObserved(d.InstanceName);
+            return Task.CompletedTask;
         });
 
         // server.install — carries the blueprint it was installed from.
@@ -387,6 +413,50 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceDownloadStartedData>(d => PublishPhase(d.InstanceName, "downloading"));
         events.RegisterHandler<InstanceDeployStartedData>(d => PublishPhase(d.InstanceName, "deploying"));
     }
+
+    // Claim this instance's in-flight slot for an update the ENGINE started (see the handler above).
+    // A slot already taken means this API issued the very command the event echoes — its own job is the
+    // better record (it knows the actor, the origin and the settle), so nothing is minted.
+    private void ObserveUpdateStarted(string instanceName)
+    {
+        if (string.IsNullOrWhiteSpace(instanceName))
+            return;
+
+        Job? job = jobRegistry.TryStartObserved(
+            "job_" + Guid.NewGuid().ToString("N")[..8], instanceName, CommandVerb.Update, DateTimeOffset.UtcNow);
+        if (job is null)
+            return;
+
+        logger.LogInformation("observed a kgsm update of {ServerId} (job {JobId})", instanceName, job.Id);
+        PublishJob(job);
+    }
+
+    // Release an OBSERVED job's slot. Called on the update's own finish event and on every later engine
+    // event that is evidence the run is over (the version moved; the instance started/stopped/restarted) —
+    // an observed slot must never outlive the run it describes, because it also gates every subsequent
+    // command for that server. A job this API issued is never touched here: CommandRunner settles its own.
+    private void SettleObserved(string instanceName)
+    {
+        if (string.IsNullOrWhiteSpace(instanceName))
+            return;
+
+        Job? job = jobRegistry.InFlightFor(instanceName);
+        if (job is null || !jobRegistry.IsObserved(job.Id))
+            return;
+
+        // Succeeded means "the run ended", not "the version moved" — kgsm emits its finish event on every
+        // outcome and this API did not run the command, so it has no exit code to claim otherwise. The
+        // version event is what records whether anything actually changed.
+        PublishJob(jobRegistry.Update(job with
+        {
+            State = JobState.Succeeded,
+            SettledAt = DateTimeOffset.UtcNow,
+        }));
+    }
+
+    private void PublishJob(Job job) =>
+        hub.Publish(StreamProtocol.JobsTopic, StreamProtocol.JobEntityKey(job.Id),
+            new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, job));
 
     private Task PublishPhase(string instanceName, string phase)
     {

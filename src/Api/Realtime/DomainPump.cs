@@ -31,6 +31,7 @@ public sealed class DomainPump(
     UpdateCheckCache updateChecks,
     BackupCache backups,
     MonitorClient monitor,
+    Services.Commands.JobRegistry jobs,
     ApiOptions options,
     ILogger<DomainPump> logger)
     : BackgroundService
@@ -83,7 +84,7 @@ public sealed class DomainPump(
                     var byId = new Dictionary<string, Server>(StringComparer.Ordinal);
                     foreach ((string id, var instance) in roster)
                         byId[id] = ServerAggregator.BuildServer(id, instance, statuses, updateChecks.Readings,
-                            backups.Readings, metricsById, options.HostId, cache.IsStarting);
+                            backups.Readings, metricsById, options.HostId, cache.IsStarting, jobs.InFlightFor);
 
                     if (!primed)
                     {
@@ -136,6 +137,10 @@ public sealed class DomainPump(
     // costs nothing on this topic, and carrying it is what lets a backup taken from the CLI (or by another
     // operator) reach every open panel — the SPA's backup KPIs update without a refresh. `record` equality
     // compares the whole manifest record structurally, so a re-scan that changes nothing emits nothing.
+    // The active job rides here too, and it is the reason a surface can show an instance as busy for the
+    // whole of a long operation: an update that starts or finishes flips this field, so the transition
+    // reaches every open panel on the servers topic, not just the client that happened to be listening to
+    // `jobs` when the command was issued. Its cadence is the operation's, not the metric firehose's.
     private static bool CoreChanged(Server a, Server b) =>
         a.Status != b.Status || a.Version != b.Version || a.Name != b.Name
         || a.Blueprint != b.Blueprint || a.Runtime != b.Runtime
@@ -144,5 +149,6 @@ public sealed class DomainPump(
         || a.UpdateCheckedAt != b.UpdateCheckedAt
         || a.Note != b.Note
         || a.LastBackup != b.LastBackup
-        || a.BackupCount != b.BackupCount;
+        || a.BackupCount != b.BackupCount
+        || a.ActiveJob != b.ActiveJob;
 }

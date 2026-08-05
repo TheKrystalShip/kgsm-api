@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `activeJob` on the `Server` DTO — the long-running operation that owns an instance right now (an update
+  downloading and deploying, a backup being taken), or `null` when it is idle. It rides `GET /servers`,
+  `GET /servers/{id}` and the `servers` stream, and `DomainPump` diffs it, so a surface learns "this
+  instance is busy" from a plain read instead of only from the `jobs` transition frame: a panel opened or
+  reloaded mid-update sees the state, and so does a second operator. It is not a status — `status` stays
+  the run-state vocabulary and a surface joins the two itself.
+- Updates kgsm runs for **another entrypoint** (the CLI, the assistant, the bot) are tracked too. The
+  `instance_update_started`/`instance_update_finished` events (kgsm 3.7.2-rc1) claim and release the same
+  one-in-flight-per-server slot an issued command uses, so one record describes the run whoever started
+  it. An observed slot ages out if the engine is killed before reporting the run finished, since a slot
+  held forever would both freeze the surface and make the gate refuse every later command for that server.
+  The two events stay out of the audit feed, beside the install-phase signals they are the counterpart of:
+  `server.update` (from the version event) is the fact worth a row, "a run is in progress" is live state.
 - `GET /hosts/{id}/services/{leafId}/metrics/history` — one leaf's resource history, the same verbatim
   proxy to kgsm-monitor the server and host routes are, for the `leaf` entity kind the monitor persists
   its per-leaf samples under (kgsm-monitor 1.11.0 / Contracts 1.4.0). The path mirrors the Services board

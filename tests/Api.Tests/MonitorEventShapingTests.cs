@@ -91,6 +91,8 @@ public sealed class MonitorEventShapingTests
     [InlineData("instance_installation_started")]
     [InlineData("instance_download_started")]
     [InlineData("instance_deploy_started")]
+    [InlineData("instance_update_started")]
+    [InlineData("instance_update_finished")]
     public void Shape_SilentType_ReturnsNull(string type)
     {
         var item = new MonitorEventItem("evt_x", Ts, type, "mc", null, null, Data(new { InstanceName = "mc" }));
