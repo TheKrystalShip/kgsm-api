@@ -19,9 +19,11 @@ public interface ISessionValidator
 {
     /// <summary>
     /// Is the session <paramref name="sid"/> still alive (row exists, not revoked, not past the
-    /// 30-day absolute cap)? Cached. Checked per-request by the JwtBearer pipeline (REST + SSE —
-    /// the bearer rides the Authorization header or <c>?access_token=</c> on the SSE handshake; the
-    /// <c>OnTokenValidated</c> event fires for both).
+    /// 30-day absolute cap)? Cached. Checked per-request by the JwtBearer pipeline (REST + SSE alike —
+    /// both carry the bearer as an <c>Authorization</c> header, so <c>OnTokenValidated</c> fires for
+    /// both), and again every 20s by an OPEN SSE connection
+    /// (<see cref="Realtime.StreamConnection"/>) — one request that lasts hours would otherwise be
+    /// gated only at connect.
     /// </summary>
     Task<bool> IsValidAsync(string sid, CancellationToken ct);
 

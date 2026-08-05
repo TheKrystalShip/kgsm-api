@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
@@ -21,6 +22,7 @@ namespace TheKrystalShip.Api.Controllers;
 public sealed class StreamController(
     StreamHub hub,
     IAuthorizationService authorization,
+    ISessionValidator sessions,
     IHostApplicationLifetime lifetime,
     ILogger<StreamController> logger) : ControllerBase
 {
@@ -52,7 +54,18 @@ public sealed class StreamController(
         Response.Headers["X-Accel-Buffering"] = "no";
         HttpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
 
-        var connection = new StreamConnection(Response.Body, topics, hub.Json, logger);
+        // The session behind this connection, re-checked for as long as it streams. [Authorize] gates
+        // the CONNECT; nothing in the framework re-runs it on a request that lasts hours, so without
+        // this a revoked session keeps its live channel until the tab closes while every REST call it
+        // makes 401s within 5s. `sid` is absent on an auth-disabled host's synthetic principal → no
+        // probe, and the stream behaves exactly as before. The validator is a singleton that opens its
+        // own DI scope per cache miss, so holding it for the connection's lifetime is safe.
+        string? sid = User.Identity is ClaimsIdentity ci ? SessionClaims.ReadSessionId(ci) : null;
+        Func<CancellationToken, ValueTask<bool>>? sessionAlive = string.IsNullOrEmpty(sid)
+            ? null
+            : async (ct) => await sessions.IsValidAsync(sid, ct).ConfigureAwait(false);
+
+        var connection = new StreamConnection(Response.Body, topics, hub.Json, logger, sessionAlive);
         hub.Add(connection);
         try
         {

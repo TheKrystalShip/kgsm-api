@@ -29,7 +29,9 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
 - **Revocation is ≤5s; the live access token is a ≤15-min hard ceiling.** A revoke (logout / self-revoke /
   admin cross-user) soft-deletes the row (`Revoked=true`) and evicts the cache → effective within ≤5s (the cache
   TTL backstop; ~instant on the same node via `Evict`). The access token is not re-validated mid-life beyond the
-  `sid` check the 5s cache bounds, so it stays valid up to its ~15-min TTL. Expired/revoked rows are hard-deleted
+  `sid` check the 5s cache bounds, so it stays valid up to its ~15-min TTL. **An already-open SSE stream is
+  covered too** — it re-checks its own `sid` every 20s, so a revoke cuts the live channel within ≤20s
+  rather than leaving it pushing until the tab closes. Expired/revoked rows are hard-deleted
   by the 10-min `SessionCleanupWorker`. A token with no `sid` claim → `401` (no grandfathering).
   `Api__SessionsDisabled=true` makes the whole registry inert — no per-request check, no revoke surface, no GC
   (the stateless-JWT escape hatch).
@@ -57,8 +59,14 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
   failed role lookup is **never** silently downgraded to a softer tier.
 - **A refresh token is never an access bearer.** `OnTokenValidated` rejects `tkn != "access"` on
   protected calls; only `/auth/session/refresh` reads a refresh token (from the `Authorization` header).
-- **WS bearer rides `?access_token=`** (a handshake can't set a header) — read in JwtBearer's
-  `OnMessageReceived` for the `/stream` path. Don't tear down a live socket on mid-stream expiry.
+- **The SSE bearer is a normal `Authorization` header**, so `/stream` authenticates through the standard
+  JwtBearer pipeline like every other request — a query-string token authenticates nothing
+  (`Stream_Sse_QueryTokenIgnored`). Because that pipeline runs **once per request** and a stream is one
+  request lasting hours, the connection re-asks the registry whether its `sid` is still alive every 20s
+  and ends itself when it isn't (`Realtime/StreamConnection.cs`). **The re-check is on the SESSION, not
+  on the access token's expiry** — a token lapses every ~15 min by design and the client rotates it
+  reactively, so ending a stream on that would churn every client four times an hour and cost the panel
+  a visible reconnect each time. A live stream is never torn down for mid-stream token expiry.
 - **`/auth/session` returns the login-time profile snapshot** embedded in the token claims, NOT a live
   re-fetch — the Discord token is discarded at callback, so "fetched live" can't hold (a §6 divergence).
 

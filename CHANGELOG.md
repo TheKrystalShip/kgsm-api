@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security — a revoked session loses its live stream too
+
+- **An open `/api/v1/stream` connection re-checks its own session every 20s** and ends when the `sid`
+  stops being valid. Authorization is evaluated per *request*, and this stream is one request that lasts
+  hours — so `[Authorize]` gated only the connect. Every REST call a revoked session made already `401`ed
+  within ≤5s, while its SSE channel kept pushing the host's roster, metrics, console lines and audit rows
+  until the tab closed. "Log this device out" now reaches the channel that carries the data, in ≤20s.
+
+  Two properties of the check are deliberate. It runs on the **write loop's own clock**, not inside the
+  heartbeat branch: a busy stream is woken by frames faster than the 20s delay ever completes, so a check
+  living there would never fire on exactly the connections carrying the most data. And it checks the
+  **session, not the access token's expiry** — a token lapses every ~15 minutes by design and the client
+  rotates it reactively, so ending a stream on that would churn every client four times an hour, and cost
+  the panel a visible reconnect banner each time, for a credential that is about to be renewed. A check
+  that throws also ends the stream: "couldn't measure" is not "still valid", and the redial re-runs the
+  full auth pipeline, which is the authority.
+
+  A host with auth disabled has no `sid` on its synthetic principal, gets no probe, and streams unchanged.
+
+  The keepalive moved to its own clock in the same loop, so a saturated stream now also emits the
+  documented 20s comment instead of only ever emitting it while idle.
+
 ### Fixed
 - **A leaf's boolean settings no longer read as off in the Control Panel when they are on.** A JSON
   boolean in a leaf's settings file was flattened with `JsonElement.ToString()`, which produces `True` —

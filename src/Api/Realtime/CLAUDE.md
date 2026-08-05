@@ -59,6 +59,18 @@ client-side expiry prediction. SSE exposes a **readable `401`** so the stream he
 reactive rotate-on-401 path as every REST call — **don't reintroduce client-side expiry math for this
 endpoint.**
 
+**The connection re-checks its own session every 20s.** `[Authorize]` gates the CONNECT and nothing in
+the framework re-runs it on a request that lasts hours, so `StreamController` hands the connection a
+probe over `ISessionValidator` and the write loop ends the stream once the `sid` stops being valid —
+a revoke reaches the live channel in ≤20s, the same order as REST's ≤5s. Two things about it are
+load-bearing: it runs on the **loop's own clock**, not inside the heartbeat branch (a busy stream is
+woken by frames faster than any delay completes, so a duty hung off that branch never fires on the
+connections carrying the most data), and it checks the **session, not the token's `exp`** — tearing a
+stream down when the access token lapses would churn every client four times an hour and surface a
+reconnect banner each time, for a credential the client is about to rotate anyway. A check that
+THROWS ends the stream too: "couldn't measure" is not "still valid", and the redial re-runs the full
+auth pipeline, which is the authority. No `sid` (auth-disabled) → no probe, unchanged behaviour.
+
 **Operator-only topics** (`hosts/{id}/logs`) requested by a non-operator are **silently dropped** from
 the connection's subscription set at connect (`StreamController` filters via
 `StreamProtocol.RequiresOperator`) — never a 403 on the whole stream.
