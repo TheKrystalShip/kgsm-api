@@ -277,6 +277,27 @@ public sealed class AssistantController(
         RelayAsync((ident, ct2) => assistant.CompactConversationAsync(ident.UserId, ident.Display, id, ct2), RelayedJson, ct);
 
     /// <summary>
+    /// <c>POST /api/v1/assistant/conversations/{id}/turns/{turnId}/feedback</c> — how the caller judged
+    /// one of their OWN answers, <b>viewer</b>-gated. Rating the reply you received is a personal action
+    /// on your own conversation, exactly like reading, deleting or compacting it.
+    /// <para>
+    /// Note the tier deliberately: the admin review surface next door reads OTHER people's conversations
+    /// and is read-only. This is the opposite direction — the person the answer was for, saying whether
+    /// it helped — which is why it lives here rather than there, and why a reviewer's opinion is not
+    /// collected through it. The assistant scopes <c>{id}</c> under the forwarded user id AND checks the
+    /// turn belongs to it, so a tampered <c>turnId</c> answers <c>404</c> rather than rating a stranger's
+    /// turn. No audit row: it is neither an engine action nor a host mutation.
+    /// </para>
+    /// </summary>
+    [HttpPost("conversations/{id}/turns/{turnId:long}/feedback")]
+    public Task<IActionResult> SetTurnFeedback(
+        string id, long turnId, [FromBody] TurnFeedbackRequest? body, CancellationToken ct) =>
+        RelayAsync(
+            (ident, ct2) => assistant.SetTurnFeedbackAsync(
+                ident.UserId, ident.Display, id, turnId, body?.Rating, body?.Note, ct2),
+            _ => Task.FromResult<IActionResult>(NoContent()), ct);
+
+    /// <summary>
     /// <c>GET /api/v1/assistant/admin/conversations/users</c> — everyone who has talked to this host's
     /// assistant, <b>admin</b>-gated. The index an administrator picks from to review how the assistant is
     /// answering and where it needs tuning.

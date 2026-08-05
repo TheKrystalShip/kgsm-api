@@ -42,3 +42,15 @@ public sealed record AssistantTurnRequest(
 public sealed record AssistantConfirmRequest(
     string? Token,
     string? EditedContent = null);
+
+/// <summary>
+/// The turn-feedback request body (<c>POST /api/v1/assistant/conversations/{id}/turns/{turnId}/feedback</c>)
+/// — how the caller judged one of their own answers, forwarded verbatim to the assistant.
+/// <see cref="Rating"/> is <c>"up"</c>, <c>"down"</c>, or <c>null</c> to withdraw a verdict already left.
+/// <see cref="Note"/> is the optional "what went wrong" behind a thumbs-down; the assistant discards one
+/// sent with a thumbs-up, since a complaint filed against an answer its reader called fine is not
+/// something any reader could act on.
+/// </summary>
+public sealed record TurnFeedbackRequest(
+    string? Rating,
+    string? Note = null);

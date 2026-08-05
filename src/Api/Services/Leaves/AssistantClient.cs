@@ -178,6 +178,25 @@ public sealed class AssistantClient : HttpClient
         RelaySendAsync(HttpMethod.Post, $"/conversations/{Uri.EscapeDataString(chatId)}/compact", relayUserId, relayDisplayName, ct);
 
     /// <summary>
+    /// Records how the verified end-user judged one of their own answers:
+    /// <c>POST /conversations/{chatId}/turns/{turnId}/feedback</c> on their behalf with the trusted-relay
+    /// identity. Deliberately NOT an admin call — this is satisfaction, written by the person the answer
+    /// was for, so it carries the ordinary forwarded identity and the assistant scopes it to that user's
+    /// own conversation. The assistant additionally verifies the turn belongs to that conversation, so a
+    /// tampered <paramref name="turnId"/> cannot reach a stranger's turn; it answers <c>204</c>, or
+    /// <c>404</c> when the turn is not the caller's. Returns <see langword="null"/> when the assistant
+    /// isn't provisioned; the caller <strong>owns disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> SetTurnFeedbackAsync(
+        string relayUserId, string relayDisplayName, string chatId, long turnId,
+        string? rating, string? note, CancellationToken ct) =>
+        RelaySendAsync(
+            HttpMethod.Post,
+            $"/conversations/{Uri.EscapeDataString(chatId)}/turns/{turnId}/feedback",
+            relayUserId, relayDisplayName, ct,
+            body: JsonContent.Create(new { rating, note }));
+
+    /// <summary>
     /// Lists everyone who has talked to this host's assistant: <c>GET /admin/conversations/users</c>, the
     /// index an administrator picks from when reviewing how the assistant is answering. Carries
     /// <c>X-Relay-Admin: true</c> — the assistant's review surface is fail-closed on that header, and this
@@ -281,12 +300,12 @@ public sealed class AssistantClient : HttpClient
     // SSE stream or the minutes-long confirm (the class Timeout is now unbounded, so each call budgets itself).
     private async Task<HttpResponseMessage?> RelaySendAsync(
         HttpMethod method, string path, string relayUserId, string relayDisplayName, CancellationToken ct,
-        bool admin = false)
+        bool admin = false, HttpContent? body = null)
     {
         if (!IsProvisioned)
             return null;
 
-        var request = new HttpRequestMessage(method, path);
+        var request = new HttpRequestMessage(method, path) { Content = body };
         request.Headers.Accept.ParseAdd("application/json");
         if (!string.IsNullOrEmpty(_relaySecret))
             request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);

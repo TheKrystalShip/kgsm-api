@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `POST /assistant/conversations/{id}/turns/{turnId}/feedback` — relays the caller's verdict on one of
+  their own answers to the assistant leaf. Viewer-tier: rating the reply you received is a personal
+  action on your own conversation, like reading or deleting it. The admin review surface next door
+  stays read-only.
+- The relayed review stats now carry the feedback roll-up (rated/positive/negative counts, the
+  satisfaction rate, per-prompt-version verdicts, and the thumbs-down notes).
+
+
 ### Added — the assistant's corpus roll-up, relayed for the operator overview
 
 `GET /api/v1/assistant/admin/conversations/stats` (admin-gated, like the rest of the review surface)

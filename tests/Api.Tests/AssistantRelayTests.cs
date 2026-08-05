@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text;
 
 using TheKrystalShip.Api.Services.Auth;
@@ -227,5 +228,39 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
             .GetAsync("/api/v1/assistant/admin/conversations");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Feedback_ViewerTier_ReachesTheCapabilityGate()
+    {
+        // Rating the answer YOU received is a personal action on your own conversation, like reading or
+        // deleting it — so viewer must reach it. If this ever starts 403ing, the endpoint has been
+        // conflated with the admin review surface next door, which reads OTHER people's conversations.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer))
+            .PostAsJsonAsync("/api/v1/assistant/conversations/chatA/turns/42/feedback",
+                new { rating = "down", note = "wrong port" });
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);   // the unprovisioned assistant degrades
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Feedback_Unauthenticated_401()
+    {
+        HttpResponseMessage resp = await factory.CreateClient()
+            .PostAsJsonAsync("/api/v1/assistant/conversations/chatA/turns/42/feedback", new { rating = "up" });
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Feedback_TurnIdMustBeANumber()
+    {
+        // The route constrains turnId to a long. A non-numeric segment must not fall through to some other
+        // template and be read as part of a conversation key.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer))
+            .PostAsJsonAsync("/api/v1/assistant/conversations/chatA/turns/not-a-turn/feedback",
+                new { rating = "up" });
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 }
