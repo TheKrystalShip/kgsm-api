@@ -42,11 +42,34 @@ public sealed class ServerNoteRoundTripTests : IClassFixture<ServerNoteRoundTrip
         { "quotes-dollars-ticks-newline", "smoke: mods v1 — quotes \" $dollars `ticks`\nand a second line" },
         { "double-quote-run", "he said \"no griefing\" and meant it" },
         { "shell-expansion-shaped", "Rules live in $HOME/rules.txt — ${NOT_A_VAR} stays literal" },
-        { "command-substitution-shaped", "Do not run $(rm -rf /) or `reboot` on this box" },
+        { "command-substitution-shaped", "backup names use $(date +%F) and `hostname` — keep them literal" },
         { "config-line-shaped", "note=\"already set\"\nport=9999" },
         { "backslashes-and-unicode", "path C:\\servers\\mc — 日本語 — emoji 🎮" },
         { "leading-hash-comment", "# this is not a comment, it is the note" },
     };
+
+    /// <summary>
+    /// Fixture bodies reach a file that gets <c>source</c>d, so one carrying command substitution is
+    /// executable in any path where the encoding is absent. <see cref="InstanceNote.Encode"/> and the
+    /// emptied PATH in <see cref="SourcedConfigFactory.SourceKey"/> are what make it inert; this holds
+    /// the fixture data itself to commands that change nothing, so the suite stays harmless even with
+    /// both of those out of the way. It is a denylist of destructive verbs, not a sandbox.
+    /// </summary>
+    [Fact]
+    public void FixtureBodiesNameNoDestructiveCommand()
+    {
+        string[] destructive = ["rm -", "rmdir", "reboot", "shutdown", "poweroff", "mkfs", "dd if=", ":(){"];
+
+        foreach (object[] row in HostileBodies())
+        {
+            var label = (string)row[0];
+            var body = (string)row[1];
+            foreach (string verb in destructive)
+                Assert.False(
+                    body.Contains(verb, StringComparison.OrdinalIgnoreCase),
+                    $"fixture '{label}' names '{verb.Trim()}' — a sourced file would run it");
+        }
+    }
 
     [Theory]
     [MemberData(nameof(HostileBodies))]
@@ -192,12 +215,23 @@ public sealed class ServerNoteRoundTripTests : IClassFixture<ServerNoteRoundTrip
         /// </summary>
         public static string SourceKey(string configPath, string key)
         {
-            var psi = new ProcessStartInfo("bash")
+            // bash is named by absolute path because the child's PATH is emptied below.
+            string bash = File.Exists("/usr/bin/bash") ? "/usr/bin/bash" : "/bin/bash";
+
+            var psi = new ProcessStartInfo(bash)
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
             };
+
+            // This helper sources a file built from fixture data, so a body carrying command
+            // substitution is executable the moment it reaches that file unencoded. An empty PATH
+            // means no external binary resolves, so such a substitution expands to nothing instead
+            // of running. `source` and `printf` are builtins and are unaffected. HOME stays intact —
+            // AnUnencodedBodyIsMangledByTheSourcing asserts on its expansion.
+            psi.Environment["PATH"] = "";
+
             psi.ArgumentList.Add("-c");
             psi.ArgumentList.Add($"set -a; source \"$1\"; printf '%s' \"${{{key}-}}\"");
             psi.ArgumentList.Add("kgsm-note-test");   // $0

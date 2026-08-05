@@ -37,6 +37,13 @@ disk, and a suite that records into a dictionary cannot see it:
   back **by sourcing it in bash** — the way kgsm does. A note body carrying `"`, `$`, a backtick or a
   newline is inert only because it is base64; unencoded, bash expands it and the note silently becomes
   a different sentence (the suite's last test writes one raw to demonstrate exactly that).
+  ⚠ **That read is a real `source`, so fixture data here is executable code whenever the encoding is
+  out of the path** — which a mutation check proving the encoding matters will do deliberately. Three
+  things keep it inert and all three are load-bearing: the bodies name only commands that change
+  nothing, `SourceKey` runs bash with an **empty `PATH`** so no external binary resolves (`source` and
+  `printf` are builtins; `HOME` stays set for the expansion assertion), and
+  `FixtureBodiesNameNoDestructiveCommand` fails when a destructive verb enters the bodies. Don't drop
+  the `PATH` line as dead code.
 - **`AuditJournalRelayTests`** points `Api__KgsmJournalDir` at a temp directory and appends real NDJSON
   lines, so kgsm-lib's journal reader → `KgsmAuditConsumer` → the `audit` SSE topic runs end to end.
   It also locks the other half: an engine-sourced event is published live but **never persisted** as a

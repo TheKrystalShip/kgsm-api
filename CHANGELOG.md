@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the sourced-config fixture holds nothing a shell can act on
+
+`ServerNoteRoundTripTests` reads its file back by sourcing it in bash, so a fixture body carrying
+command substitution is executable code in any path where the encoding is absent — a mutation check
+that lifts `InstanceNote.Encode` out of the write is enough to reach it. Three independent things now
+keep the suite inert:
+
+- The fixture bodies name only commands that change nothing, so the substitution-shaped case still
+  proves the encoding is load-bearing without carrying a destructive verb.
+- `SourcedConfigFactory.SourceKey` runs bash with an empty `PATH`, so no external binary resolves and
+  a substitution that reaches the file expands to nothing. `source` and `printf` are builtins and are
+  unaffected; `HOME` stays intact for the test that asserts on its expansion.
+- `FixtureBodiesNameNoDestructiveCommand` fails when a destructive verb enters the fixture data.
+
 ### Added — two on-disk test fixtures for contracts an in-memory fake can't see
 
 Both cover behaviour kgsm-web's live smoke used to prove by writing to the real host, which put a
