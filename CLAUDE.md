@@ -95,6 +95,15 @@ directory**, so a leaf that joins the ecosystem later becomes configurable, and 
 board, with no rebuild here. `LeafConfigManifest` is the built-in fallback for a leaf that has not
 shipped a descriptor yet, not the authority. Format: `../leaf-config-descriptor.md`.
 
+**What a leaf answers to comes from the leaf too.** A leaf that takes typed commands ships a manifest
+into `commands/` **below** the descriptor directory — one level down because the descriptor scan globs
+`*.json` at the top and would read it as a malformed descriptor. `LeafCommandStore` scans that
+subdirectory and `GET /hosts/{id}/services/{leaf}/commands` serves it **verbatim**: the API holds no
+idea what any command does, and passes the leaf's own `gate` through without restating it, because it
+cannot verify a check it does not implement. A leaf that ships no manifest is a **404**, not an empty
+list — most take no commands, and that is a different statement. Read-only reference material, so it
+sits at operator with the rest of `ServicesController`. Format: `../leaf-command-manifest.md`.
+
 Two consequences worth knowing before touching this code:
 
 - **Readable and editable are separate.** A descriptor makes a leaf's config visible with full

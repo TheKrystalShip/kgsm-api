@@ -57,6 +57,15 @@ public class LeafTestFactory : AuthTestFactory
         File.WriteAllText(Path.Combine(DescriptorDir, leafId + ".json"), json);
     }
 
+    /// <summary>Install a command manifest for a leaf, as that leaf's own deploy would — one directory below
+    /// the descriptors, which is where the manifest scan looks and the descriptor scan does not.</summary>
+    public void InstallCommands(string leafId, string json)
+    {
+        string dir = Path.Combine(DescriptorDir, "commands");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, leafId + ".json"), json);
+    }
+
     /// <summary>Remove a leaf's override drop-in, modelling a host that never ran setup-leaf-config.sh.</summary>
     public void UnwireDropIn(string unit) =>
         File.Delete(Path.Combine(DropInDir, unit + ".d", LeafConfigCatalog.OverrideDropInName));

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a leaf's own command catalog, served from the file it ships
+
+- **`GET /hosts/{id}/services/{leaf}/commands`** returns the commands a leaf answers to, read from
+  `/var/lib/kgsm/leaves/commands/<leaf>.json` — the manifest that leaf's own `deploy.sh` installs, one
+  directory below the config descriptors. `LeafCommandStore` **scans** the subdirectory on the same 30s
+  TTL the descriptors use, so a leaf that grows a command surface is documented in the Control Panel by
+  landing one file: this API holds no list of command-taking leaves, and needs no rebuild to learn one.
+  The producer today is kgsm-bot, whose build generates the manifest from its own assembly. Format:
+  `../leaf-command-manifest.md`.
+
+  Served **verbatim**. This API has no idea what any command does, and it passes the leaf's `gate` — what
+  the leaf checks before running a command that acts — through without restating it, because it cannot
+  verify a check it does not implement. A leaf that ships no manifest is a **404**, not an empty list:
+  most leaves take no commands, and "takes none" is a different statement from "takes some and has none
+  right now". A malformed, unknown-version or mis-installed file is skipped whole with its reason logged
+  once per revision — a half-read command list would tell an operator to type something that does not
+  exist.
+
+  Gated at **operator**, with the rest of the read-only Services surface rather than behind the admin
+  config gate: it is reference material about a leaf and nothing here mutates.
+
+  The subdirectory is not cosmetic. The descriptor scan globs `*.json` at the level above, so a manifest
+  sitting beside the descriptors would be read as a malformed one and logged as such on every deploy.
+
 ### Security — a revoked session loses its live stream too
 
 - **An open `/api/v1/stream` connection re-checks its own session every 20s** and ends when the `sid`

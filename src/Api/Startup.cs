@@ -379,6 +379,7 @@ public class Startup(IConfiguration configuration)
         // verdict a wiring change needs: the liveness canary passes when a leaf restarts cleanly on a socket
         // path this API can no longer reach.
         services.AddSingleton<LeafDescriptorStore>();
+        services.AddSingleton<LeafCommandStore>();
         services.AddSingleton<LeafConfigCatalog>();
         services.AddSingleton<LeafOverrideStore>();
         services.AddSingleton<LeafOverrideRenderer>();
