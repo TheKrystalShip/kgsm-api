@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instance is busy" from a plain read instead of only from the `jobs` transition frame: a panel opened or
   reloaded mid-update sees the state, and so does a second operator. It is not a status — `status` stays
   the run-state vocabulary and a surface joins the two itself.
+- **A shutdown kgsm runs for another entrypoint is tracked the same way an update is** — the CLI, the
+  assistant, the bot. kgsm brackets a stop with `instance_stop_started`/`instance_stop_finished`
+  (3.7.3-rc1, typed in kgsm-lib 2.2.0), and those claim and release the same one-in-flight-per-server
+  slot, so `activeJob` reports the shutdown whoever asked for it and every panel shows the server as
+  stopping for as long as the game takes to drain. Both events stay out of the audit feed: `server.stop`
+  (from `instance_stopped`) is the fact worth a row.
 - Updates kgsm runs for **another entrypoint** (the CLI, the assistant, the bot) are tracked too. The
   `instance_update_started`/`instance_update_finished` events (kgsm 3.7.2-rc1) claim and release the same
   one-in-flight-per-server slot an issued command uses, so one record describes the run whoever started
@@ -29,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exists, its history doesn't" is a different fact from "no such leaf".
 
 ### Fixed
+- **A run-state change the engine announces reaches subscribers immediately**, instead of up to a poll
+  interval later. `DomainPump` now runs its diff pass on demand as well as on its interval, and the
+  engine's event consumer asks for one whenever an instance starts, becomes ready, stops or restarts.
+  Without it a server stopped from the CLI kept reading `online` for a moment after it was already
+  down — the one moment someone is watching it. The pass is the same one the tick does, gated on
+  subscribers exactly as before, and several changes arriving together collapse into one.
 - **A server that started no longer reads "Starting" until the safety timeout when its readiness signal
   arrives first.** `instance_ready` is emitted by the watchdog as soon as it observes the run ready,
   while `instance_started` is emitted by the kgsm command that asked for the start — so a game ready as

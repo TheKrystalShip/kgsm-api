@@ -27,6 +27,8 @@ public static class MonitorEventShaping
         "instance_deploy_started",           // job.patch phase signal only
         "instance_update_started",           // claims the in-flight job slot; server.update is the fact
         "instance_update_finished",          // releases it — "the run ended", not "the version moved"
+        "instance_stop_started",             // same bracket for a shutdown; server.stop is the fact
+        "instance_stop_finished",            // releases it — "the run ended", not "the instance is down"
     };
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General)

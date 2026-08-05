@@ -275,7 +275,11 @@ public class Startup(IConfiguration configuration)
         // an idle stream costs nothing. The /stream SSE endpoint lives in StreamController.
         services.AddSingleton<StreamHub>();
         services.AddHostedService<MetricsPump>();        // ~1s monitor scrape -> servers/{id}/metrics + hosts/{id}/metrics
-        services.AddHostedService<DomainPump>();         // cache-backed diff -> servers (status/roster)
+        // Singleton + hosted-service (the InstanceCache pattern): the engine's event consumer holds a
+        // reference so it can ask for a diff pass the moment a run-state change is announced, instead of
+        // leaving the panel on the previous state until the next tick.
+        services.AddSingleton<DomainPump>();
+        services.AddHostedService(sp => sp.GetRequiredService<DomainPump>());  // cache-backed diff -> servers (status/roster)
         services.AddHostedService<ServicesPump>();        // ~5s systemd poll -> hosts/{id}/services (service.patch)
         // The leaf health monitor is ALWAYS-ON (not gated on subscribers): it polls each provisioned
         // leaf's /health every ~2s as the canonical liveness signal, serves the cached capability block

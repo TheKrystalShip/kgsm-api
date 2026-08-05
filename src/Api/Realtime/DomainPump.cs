@@ -36,6 +36,25 @@ public sealed class DomainPump(
     ILogger<DomainPump> logger)
     : BackgroundService
 {
+    // Raised when something has just changed a server's state and the next tick is too late to say so.
+    // Capacity one: several changes arriving together need one pass, not one each — the pass diffs the
+    // whole roster anyway.
+    private readonly SemaphoreSlim _nudge = new(0, 1);
+
+    /// <summary>
+    /// Run a diff pass now rather than at the next tick. Called when the engine has just announced a
+    /// run-state change (<see cref="Services.Audit.KgsmAuditConsumer"/>), because a poll interval of
+    /// silence right then reads as the PREVIOUS state — a server stopped from the CLI keeps saying
+    /// "online" for a moment, which is the one moment someone is watching it. Everything else still
+    /// rides the interval; this only moves the announcement earlier, and never publishes anything the
+    /// tick wouldn't have.
+    /// </summary>
+    public void Nudge()
+    {
+        try { _nudge.Release(); }
+        catch (SemaphoreFullException) { /* a pass is already pending — that pass covers this too */ }
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Configurable (Api__DomainPollMs, default 5s): reads are now free (cache reference),
@@ -51,8 +70,26 @@ public sealed class DomainPump(
         using var timer = new PeriodicTimer(interval);
         try
         {
-            while (await timer.WaitForNextTickAsync(stoppingToken).ConfigureAwait(false))
+            // The tick task is held across iterations because a PeriodicTimer allows only one waiter:
+            // a nudge-driven pass leaves it pending and the next iteration waits on the same one, so
+            // the interval keeps its own cadence instead of restarting on every nudge.
+            Task<bool> tick = timer.WaitForNextTickAsync(stoppingToken).AsTask();
+            while (!stoppingToken.IsCancellationRequested)
             {
+                using (var pending = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken))
+                {
+                    Task nudged = _nudge.WaitAsync(pending.Token);
+                    if (await Task.WhenAny(tick, nudged).ConfigureAwait(false) == tick)
+                    {
+                        if (!await tick.ConfigureAwait(false))
+                            break; // the timer was disposed — shutting down
+                        tick = timer.WaitForNextTickAsync(stoppingToken).AsTask();
+                        // Cancel the waiter we are abandoning: left queued, it would consume the next
+                        // Nudge and nobody would act on it.
+                        await pending.CancelAsync().ConfigureAwait(false);
+                    }
+                }
+
                 try
                 {
                     if (!hub.HasSubscribers(StreamProtocol.ServersTopic))

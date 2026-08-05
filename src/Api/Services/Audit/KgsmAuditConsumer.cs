@@ -44,6 +44,7 @@ public sealed class KgsmAuditConsumer(
     Aggregation.BackupCache backupCache,
     ApiOptions options,
     StreamHub hub,
+    Realtime.DomainPump domainPump,
     JobRegistry jobRegistry,
     ILogger<KgsmAuditConsumer> logger) : IHostedService
 {
@@ -134,6 +135,7 @@ public sealed class KgsmAuditConsumer(
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
             SettleObserved(d.InstanceName);
+            domainPump.Nudge();
             return WriteServerAndBridge(d, AuditAction.ServerStart, "started");
         });
         // instance_ready (kgsm-lib 1.35.0) — the watchdog's readiness signal: its log-scrape confirms the
@@ -147,6 +149,8 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceReadyData>(d =>
         {
             instanceCache.MarkReady(d.InstanceName);
+            // starting -> running is a state change like any other: say it now, not up to a poll later.
+            domainPump.Nudge();
             return Task.CompletedTask;
         });
         events.RegisterHandler<InstanceStoppedData>(d =>
@@ -155,6 +159,7 @@ public sealed class KgsmAuditConsumer(
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
             SettleObserved(d.InstanceName);
+            domainPump.Nudge();
             return WriteServer(d, AuditAction.ServerStop, AuditSeverity.Info, "stopped");
         });
         events.RegisterHandler<InstanceRestartedData>(d =>
@@ -163,6 +168,7 @@ public sealed class KgsmAuditConsumer(
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
             SettleObserved(d.InstanceName);
+            domainPump.Nudge();
             return WriteServerAndBridge(d, AuditAction.ServerRestart, "restarted");
         });
         events.RegisterHandler<InstanceUninstalledData>(d =>
@@ -199,10 +205,31 @@ public sealed class KgsmAuditConsumer(
         // when the engine process exits, which is the honest end of THAT run.
         events.RegisterHandler<InstanceUpdateStartedData>(d =>
         {
-            ObserveUpdateStarted(d.InstanceName);
+            ObserveStarted(d.InstanceName, CommandVerb.Update);
             return Task.CompletedTask;
         });
         events.RegisterHandler<InstanceUpdateFinishedData>(d =>
+        {
+            SettleObserved(d.InstanceName);
+            return Task.CompletedTask;
+        });
+
+        // instance_stop_started / instance_stop_finished — the same bracket for a shutdown (kgsm
+        // 3.7.3-rc1). A stop is not instant either: the supervisor asks the game to stop and waits for it
+        // to drain, which is seconds to a minute for a game that saves its world and the whole stop
+        // timeout for one that ignores its stop command. Same discipline as the update pair — audit-silent
+        // (server.stop, written from instance_stopped, is the fact), claims and releases the one in-flight
+        // slot, and mints nothing when this API issued the stop itself.
+        //
+        // The finish is BOTH events: instance_stop_finished ends the run whatever its outcome, and
+        // instance_stopped (handled above, on success only) settles it too — either is honest evidence
+        // the run is over, and whichever lands first releases the slot.
+        events.RegisterHandler<InstanceStopStartedData>(d =>
+        {
+            ObserveStarted(d.InstanceName, CommandVerb.Stop);
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<InstanceStopFinishedData>(d =>
         {
             SettleObserved(d.InstanceName);
             return Task.CompletedTask;
@@ -417,17 +444,17 @@ public sealed class KgsmAuditConsumer(
     // Claim this instance's in-flight slot for an update the ENGINE started (see the handler above).
     // A slot already taken means this API issued the very command the event echoes — its own job is the
     // better record (it knows the actor, the origin and the settle), so nothing is minted.
-    private void ObserveUpdateStarted(string instanceName)
+    private void ObserveStarted(string instanceName, string verb)
     {
         if (string.IsNullOrWhiteSpace(instanceName))
             return;
 
         Job? job = jobRegistry.TryStartObserved(
-            "job_" + Guid.NewGuid().ToString("N")[..8], instanceName, CommandVerb.Update, DateTimeOffset.UtcNow);
+            "job_" + Guid.NewGuid().ToString("N")[..8], instanceName, verb, DateTimeOffset.UtcNow);
         if (job is null)
             return;
 
-        logger.LogInformation("observed a kgsm update of {ServerId} (job {JobId})", instanceName, job.Id);
+        logger.LogInformation("observed a kgsm {Verb} of {ServerId} (job {JobId})", verb, instanceName, job.Id);
         PublishJob(job);
     }
 

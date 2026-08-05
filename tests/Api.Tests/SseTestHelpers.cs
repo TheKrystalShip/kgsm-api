@@ -75,6 +75,14 @@ internal sealed class SseFrameReader(Stream body) : IDisposable
         {
             return null; // the deadline passed with nothing matching
         }
+        catch (IOException ex) when (ex.InnerException is OperationCanceledException)
+        {
+            // Same fact, surfaced through the transport: cancelling a read that is parked mid-byte on
+            // the TestServer's response stream comes back as an IOException wrapping the cancellation
+            // rather than as the bare one. A caller polling across a deadline must see "nothing arrived
+            // in time" either way, or it fails on where the timeout happened to land.
+            return null;
+        }
     }
 
     /// <summary>Read one <c>\n\n</c>-delimited block; returns its parsed <c>data:</c> JSON, or <c>null</c>

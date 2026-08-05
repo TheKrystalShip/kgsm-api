@@ -122,10 +122,17 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         public string JournalDir { get; } =
             Path.Combine(Path.GetTempPath(), $"kgsm-journal-relay-{Guid.NewGuid():N}");
 
+        /// <summary>Today's segment — the one file kgsm writes to and the reader tails.</summary>
+        private string SegmentPath => Path.Combine(JournalDir, $"{DateTime.UtcNow:yyyy-MM-dd}.ndjson");
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             base.ConfigureWebHost(builder);
             Directory.CreateDirectory(JournalDir);
+            // Create today's segment EMPTY, before the host starts. The reader attaches at the tail of
+            // what exists when it starts; letting the first append create the file makes the test a race
+            // between that append and the reader's attach, which it loses often enough to be flaky.
+            File.AppendAllText(SegmentPath, "", BomlessUtf8);
             builder.ConfigureAppConfiguration((_, config) =>
             {
                 config.AddInMemoryCollection(new Dictionary<string, string?>
@@ -153,11 +160,9 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
                 KGSMVersion = "0.0.0-test",
             });
 
-            string segment = Path.Combine(JournalDir,
-                $"{DateTime.UtcNow:yyyy-MM-dd}.ndjson");
             // NO BOM. Encoding.UTF8 emits one when it creates the file, and the reader would hand
             // kgsm-lib a first line starting 0xEF — an unparseable event, silently dropped.
-            File.AppendAllText(segment, line + "\n", BomlessUtf8);
+            File.AppendAllText(SegmentPath, line + "\n", BomlessUtf8);
         }
 
         public new void Dispose()
