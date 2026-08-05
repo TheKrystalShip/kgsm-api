@@ -21,6 +21,7 @@ namespace TheKrystalShip.Api.Controllers;
 public sealed class MetricsHistoryController(
     IMonitorHistoryClient monitor,
     ServerAggregator serverAggregator,
+    ServicesAggregator services,
     ApiOptions options) : ControllerBase
 {
     [HttpGet("servers/{id}/metrics/history")]
@@ -43,6 +44,27 @@ public sealed class MetricsHistoryController(
             return NotFound();
 
         return await ProxyAsync("host", id, range, ct);
+    }
+
+    /// <summary>
+    /// One leaf's resource history — the same proxy, for the <c>leaf</c> entity kind the monitor persists
+    /// its per-leaf samples under. The path mirrors the Services board a leaf is opened from
+    /// (<c>/hosts/{id}/services</c>), so the URL addressing a leaf is the same one everywhere.
+    /// <para>
+    /// A leaf this host doesn't have is a 404, checked against the same catalog the board is built from. A
+    /// leaf it <em>does</em> have but which has no rows yet — never running since the monitor started, or a
+    /// monitor too old to sample leaves — is an honest empty series, not a 404: the leaf exists, its history
+    /// doesn't.
+    /// </para>
+    /// </summary>
+    [HttpGet("hosts/{id}/services/{leafId}/metrics/history")]
+    public async Task<IActionResult> GetLeafHistory(
+        string id, string leafId, [FromQuery] string? range, CancellationToken ct)
+    {
+        if (id != options.HostId || !services.Knows(leafId))
+            return NotFound();
+
+        return await ProxyAsync("leaf", leafId, range, ct);
     }
 
     private async Task<IActionResult> ProxyAsync(string kind, string id, string? range, CancellationToken ct)

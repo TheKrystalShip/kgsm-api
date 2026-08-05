@@ -54,6 +54,15 @@ public sealed class ServicesAggregator(
     }
 
     /// <summary>
+    /// Whether this host has a leaf by that id — the identity check a caller addressing one leaf needs,
+    /// answered from the in-memory catalog + descriptor scan with no <c>systemctl</c> spawn. Membership is
+    /// the same set <see cref="SnapshotAsync"/> reports on, so a leaf visible on the board is addressable
+    /// and one that is not, is not.
+    /// </summary>
+    public bool Knows(string leafId) =>
+        BuildCatalog().Any(l => string.Equals(l.Id, leafId, StringComparison.Ordinal));
+
+    /// <summary>
     /// The built-in catalog, plus any leaf that shipped a config descriptor this API has never heard of.
     /// A host that runs a leaf added after this API was built still shows it on the board — with its systemd
     /// liveness, which is universal, and no deep health, which is honest: this API has no probe for a leaf

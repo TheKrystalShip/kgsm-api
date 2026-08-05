@@ -247,7 +247,8 @@ public sealed class MetricsThresholdAlertTests
             Io: new Snap.DiskIo(0, 0)),
         Net: new Snap.NetworkMetrics(Ifaces: []),
         Sensors: [new Snap.SensorReading("k10temp", "Tctl", 30.0)],
-        Servers: []);
+        Servers: [],
+        Leaves: []);
 
     private static Snap.Snapshot MemAt(double usedPct)
     {

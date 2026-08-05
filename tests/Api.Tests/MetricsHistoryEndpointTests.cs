@@ -88,6 +88,71 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         Assert.Empty(series.EnumerateObject()); // no fabricated curve when the monitor is absent
     }
 
+    // --- Leaf history: same proxy, the `leaf` entity kind ---
+
+    [Fact]
+    public async Task LeafHistory_NoToken_401()
+    {
+        HttpResponseMessage r = await factory.CreateClient()
+            .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/services/monitor/metrics/history");
+        Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task LeafHistory_UnknownLeaf_404()
+    {
+        HttpResponseMessage r = await Viewer()
+            .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/services/not-a-leaf/metrics/history");
+        Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task LeafHistory_UnknownHost_404()
+    {
+        HttpResponseMessage r = await Viewer()
+            .GetAsync("/api/v1/hosts/nonexistent/services/monitor/metrics/history");
+        Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
+    }
+
+    [Fact]
+    public async Task LeafHistory_KnownLeafWithNoRows_200_EmptySeries_NotA404()
+    {
+        // The leaf exists; its history doesn't (never running since the monitor started, or a monitor too
+        // old to sample leaves). Those are different facts and the second one is not a missing entity.
+        HttpResponseMessage r = await Viewer()
+            .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/services/monitor/metrics/history?range=1h");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+
+        JsonElement body = await Json(r);
+        Assert.Equal("monitor", body.GetProperty("entityId").GetString());
+        Assert.Equal("leaf", body.GetProperty("kind").GetString());
+        Assert.Empty(body.GetProperty("series").EnumerateObject());
+    }
+
+    [Fact]
+    public async Task LeafHistory_RelaysMonitorBodyVerbatim()
+    {
+        // The monitor stores leaf samples under the SERVER metric names on purpose — same quantities, same
+        // units — so one chart component renders either without knowing which it was handed.
+        string monitorBody =
+            "{\"entityId\":\"watchdog\",\"kind\":\"leaf\",\"range\":\"1h\",\"step\":15,\"tier\":\"raw\"," +
+            "\"series\":{\"memBytes\":[" +
+            "{\"ts\":\"2026-08-05T00:00:00+00:00\",\"value\":99676160,\"min\":null,\"max\":null,\"n\":null}]}}";
+
+        using WebApplicationFactoryWithFake fakeFactory = new(monitorBody);
+        HttpClient client = fakeFactory.Factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", AuthTestFactory.MintTokenWithRow(fakeFactory.Factory.Services, AuthTier.Viewer, access: true));
+
+        HttpResponseMessage r = await client.GetAsync(
+            $"/api/v1/hosts/{AuthTestFactory.HostId}/services/watchdog/metrics/history?range=1h");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+
+        JsonElement body = await Json(r);
+        Assert.Equal("leaf", body.GetProperty("kind").GetString());
+        Assert.Equal(99676160, body.GetProperty("series").GetProperty("memBytes")[0].GetProperty("value").GetInt64());
+    }
+
     // --- Verbatim relay of the monitor's body ---
 
     [Fact]

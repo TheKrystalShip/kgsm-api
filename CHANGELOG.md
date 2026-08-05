@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `GET /hosts/{id}/services/{leafId}/metrics/history` — one leaf's resource history, the same verbatim
+  proxy to kgsm-monitor the server and host routes are, for the `leaf` entity kind the monitor persists
+  its per-leaf samples under (kgsm-monitor 1.11.0 / Contracts 1.4.0). The path mirrors the Services board
+  a leaf is opened from, so the URL addressing a leaf is the same one everywhere. A leaf this host
+  doesn't have is a 404; a leaf it has with no rows yet is an honest empty series, because "the leaf
+  exists, its history doesn't" is a different fact from "no such leaf".
+
 ### Fixed
 - A leaf's `memoryBytes` on `GET /hosts/{id}/services` (and the `services` stream) is the memory charged
   to the cgroup its main process lives in, read from `/proc/<pid>/cgroup` → `memory.current`, rather than
