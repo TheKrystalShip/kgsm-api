@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A leaf's boolean settings no longer read as off in the Control Panel when they are on.** A JSON
+  boolean in a leaf's settings file was flattened with `JsonElement.ToString()`, which produces `True` —
+  a spelling no other tier uses. The panel compares tiers as strings, so a floor of `True` against a
+  default of `true` rendered a switch the leaf has enabled as **Disabled**, and showed the two tiers as
+  disagreeing when they agree. Booleans now flatten to the canonical `true`/`false` the descriptor
+  declares, the leaf's own parser writes, and this API writes when it renders an override. Surfaced by
+  kgsm-bot's fourteen announcement switches, nine of which ship on.
+
 ### Removed — the Discord notification provider
 
 - **`/integrations/discord` is gone**, along with `DiscordNotificationProvider`, the

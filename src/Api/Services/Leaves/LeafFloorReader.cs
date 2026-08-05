@@ -240,6 +240,16 @@ public sealed class LeafFloorReader(
             case JsonValueKind.Null or JsonValueKind.Undefined:
                 break;
 
+            // A JSON boolean, spelled the way the descriptor and every other tier spell one. Left to
+            // JsonElement.ToString() it arrives as "True", which is not a value any leaf's parser writes
+            // and not what this field's default says — so the panel compares a floor of "True" against a
+            // default of "true", finds them different, and renders a switch that is ON as off. That is the
+            // panel misreporting what a leaf is running with, which is the one thing it exists not to do.
+            case JsonValueKind.True or JsonValueKind.False:
+                if (prefix.Length > 0)
+                    into[prefix] = element.ValueKind == JsonValueKind.True ? "true" : "false";
+                break;
+
             default:
                 if (prefix.Length > 0)
                     into[prefix] = element.ToString();
