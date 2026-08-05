@@ -38,8 +38,8 @@ public static class NotificationCadence
     public static bool IsKnown(string? cadence) => cadence is Every or Once or Digest;
 }
 
-/// <summary>A server-defined catalog event (architecture.html §3·e): the events Discord can announce.
-/// The user only configures <see cref="NotificationRule"/> over this fixed catalog.</summary>
+/// <summary>A server-defined catalog event (architecture.html §3·e): the events a notification provider
+/// can announce. The user only configures <see cref="NotificationRule"/> over this fixed catalog.</summary>
 public sealed record CatalogEvent(string Id, string Title, string Description);
 
 /// <summary>
@@ -116,9 +116,9 @@ public sealed record NotificationEvent(
 public sealed record NotificationDeliveryResult(bool Ok, string? Error);
 
 /// <summary>
-/// The thin provider seam (M8·c). One implementation per channel (Discord first; Slack/Telegram later —
-/// the abstraction gets validated/adjusted when provider #2 actually lands). Resolved by
-/// <see cref="ProviderId"/> from the registered <c>IEnumerable&lt;INotificationProvider&gt;</c>.
+/// The thin provider seam. One implementation per channel, resolved by <see cref="ProviderId"/> from the
+/// registered <c>IEnumerable&lt;INotificationProvider&gt;</c>. Discord is not among them: it is kgsm-bot's
+/// channel, and a second path to it from here would double-post every event.
 /// </summary>
 public interface INotificationProvider
 {

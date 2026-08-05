@@ -3,12 +3,10 @@ using TheKrystalShip.Api.Contracts;
 namespace TheKrystalShip.Api.Services.Integrations;
 
 /// <summary>
-/// The Slack notification provider (M8·c Increment C) — the second <see cref="WebhookNotificationProvider"/>,
-/// added to validate the webhook-family abstraction. One-way outbound delivery via a Slack
-/// <b>incoming webhook</b> (<c>https://hooks.slack.com/services/…</c>): the secret IS the URL, exactly like
-/// Discord, so it shares the base's POST/test/send/masking and supplies only the Slack specifics — the host
-/// validation, the GET view (no <c>bot</c> block — Slack incoming webhooks have no Discord-style two-way
-/// control bot, so inventing one would be dishonest), and the mrkdwn message payload.
+/// The Slack notification provider — a <see cref="WebhookNotificationProvider"/>. One-way outbound
+/// delivery via a Slack <b>incoming webhook</b> (<c>https://hooks.slack.com/services/…</c>): the secret IS
+/// the URL, so it shares the base's POST/test/send/masking and supplies only the Slack specifics — the host
+/// validation, the GET view, and the mrkdwn message payload.
 /// </summary>
 public sealed class SlackNotificationProvider(HttpClient http, ILogger<SlackNotificationProvider> logger)
     : WebhookNotificationProvider(http, logger)
@@ -68,7 +66,7 @@ public sealed class SlackNotificationProvider(HttpClient http, ILogger<SlackNoti
     }
 
     // Slack mrkdwn: *bold* (single asterisk). The server name / summary are escaped (Slack parses <…> as
-    // links/mentions and treats & specially) — the Slack analog of Discord's allowed_mentions care.
+    // links/mentions and treats & specially), so a server name can never smuggle in markup or a mention.
     private static string FormatMessage(NotificationEvent ev)
     {
         string server = SlackEscape(string.IsNullOrEmpty(ev.ServerId) ? "a server" : ev.ServerId);

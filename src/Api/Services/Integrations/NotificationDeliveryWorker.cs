@@ -12,8 +12,8 @@ namespace TheKrystalShip.Api.Services.Integrations;
 /// are accepted in the A contract but their delivery is deferred to Increment C — they deliver <b>zero</b>
 /// here (not fewer); the skip is logged at Information so a mis-set cadence is never a silent black hole.</para>
 /// <para><b>Anti-spam suppression.</b> A crash-looping server re-emits <c>server.crash</c> every watchdog
-/// backoff cycle; without a guard, B would fire a Discord post each cycle and self-DoS the webhook
-/// (Discord rate-limits ~30/min) exactly when a server is dying. So a per-<c>(provider,server,catalog)</c>
+/// backoff cycle; without a guard, the worker would fire a post each cycle and self-DoS the webhook
+/// (an incoming webhook is rate-limited in the tens per minute) exactly when a server is dying. So a per-<c>(provider,server,catalog)</c>
 /// window (<see cref="SuppressWindow"/>) coalesces repeats: the first fires immediately, repeats inside the
 /// window are skipped (logged). The window counts the <b>attempt</b>, not just a success, so a failing
 /// webhook is not hammered either. <b>Honest boundary:</b> a mass reboot autostarts N servers → N

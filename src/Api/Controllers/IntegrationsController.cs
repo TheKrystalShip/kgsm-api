@@ -7,16 +7,19 @@ using TheKrystalShip.Api.Services.Integrations;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// <c>/integrations/{provider}</c> — outbound notification routing (architecture.html §3·e, M8·c).
-/// Provider-agnostic: Discord is the first <see cref="INotificationProvider"/>, Slack/Telegram can be
-/// added later. <b>Admin-gated</b> (settings/integrations = admin, M4·a). The webhook secret is never
-/// echoed (masked hint on read, write-only on PATCH).
+/// <c>/integrations/{provider}</c> — outbound notification routing (architecture.html §3·e).
+/// Provider-agnostic: a provider is resolved by id out of the registered
+/// <see cref="INotificationProvider"/> set, and one that is not registered is a 404. <b>Admin-gated</b>
+/// (settings/integrations = admin). The webhook secret is never echoed (masked hint on read, write-only
+/// on PATCH).
 /// </summary>
 /// <remarks>
-/// M8·c Increment A is config + a real <c>/test</c> send; the delivery worker (live notifications on
-/// real events) is Increment B. <c>cadence</c> (<c>every|once|digest</c>) is accepted in the contract but
-/// only <c>every</c> is enforced once delivery lands — accepted-but-inert, documented (the reserved-field
-/// pattern). One-way webhook only: the Discord view's <c>bot</c> is honestly null.
+/// Every provider here is a one-way outbound webhook. <b>Discord is deliberately not one of them</b> —
+/// it is the channel this ecosystem ships a real bot for, and kgsm-bot holds that connection, its
+/// per-server channels and its own announcement switches. Routing Discord from here as well would post
+/// each event twice and split one integration's configuration across two components.
+/// <c>cadence</c> (<c>every|once|digest</c>) is accepted in the contract but only <c>every</c> is
+/// enforced — accepted-but-inert, documented (the reserved-field pattern).
 /// </remarks>
 [ApiController]
 [Route("api/v1/integrations")]

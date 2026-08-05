@@ -696,7 +696,7 @@ migrated WebSocket→SSE 2026-07-02, `sse-migration-plan.md`; frontend gate pend
   falls back to an auto-generated `blueprint-suffix` if it isn't a usable unique name) — a true free-text
   *display* name is deferred upstream (blueprint metadata curation), not silently dropped.
 
-**M8·c — Config surfaces (`/me` · `/settings` · `/integrations/{discord,slack}`).** · `partial` (`/me` built 2026-06-19; `/integrations` **Increments A + B + C built & self-validated 2026-06-19** — config + a real test-send, the always-on delivery worker, and **Slack as a second provider** validating the webhook-family abstraction (live-validate with real webhooks owed); `/settings` NOT started)
+**M8·c — Config surfaces (`/me` · `/settings` · `/integrations/{provider}`).** · `partial` (`/me` built 2026-06-19; `/integrations` **Increments A + B + C built & self-validated 2026-06-19** — config + a real test-send, the always-on delivery worker, and **Slack as a second provider** validating the webhook-family abstraction (live-validate with real webhooks owed); `/settings` NOT started)
 - **Goal:** the panel's per-host config/identity reads — the last M8 surfaces. Split from the install/library
   write+catalog work because they're a different shape (identity + preferences + a connected integration).
 - **`GET /me` — DONE (built & self-validated 2026-06-19).** The caller's identity + tier + scopes, a pure
@@ -713,6 +713,13 @@ migrated WebSocket→SSE 2026-07-02, `sse-migration-plan.md`; frontend gate pend
   with a real source (the §3·d "Assistant endpoint & general preferences"). The assistant endpoint URL is a real
   config value; "general preferences" hit the **same no-preference-store wall** as `/me`'s PATCH half. Scope the
   honest, persistable subset before building — don't ship a settings surface backed by a store that doesn't exist.
+- **The Discord provider was later removed; Slack is the registered one.** Everything below describes the
+  subsystem as built, and all of it still stands except the provider itself: the bus, the delivery worker,
+  the catalog, the anti-spam window, the masked-secret contract and the admin gate are unchanged and
+  provider-agnostic. Discord is kgsm-bot's channel — the bot holds the connection, the per-server channels
+  and the per-event switches — so this API offers no second route to it and `/integrations/discord` is a
+  404. The subsystem's provider-agnostic tests run through Slack.
+
 - **`/integrations/discord` — a provider-agnostic notification subsystem (§3·e). DECIDED + Increment A built.**
   §3·e is a **notification-routing integration** (NOT an endpoint wire — the M4 `ApiOptions.Discord*` is **auth
   role-resolution only**; a grep of `src/` confirmed zero notification backing, the only EF entity was `AuditEntry`):

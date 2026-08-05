@@ -239,25 +239,21 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<LibraryHydrationWorker>();
         services.AddHostedService(sp => sp.GetRequiredService<LibraryHydrationWorker>());
 
-        // M8·c — outbound-notification integrations (§3·e). The store persists per-provider config (a
-        // second EF entity in AppDbContext, created by the same EnsureCreated). Providers are a THIN seam
-        // (INotificationProvider) resolved by id from the registered set — Discord is the first; Slack/
-        // Telegram are just another AddHttpClient<INotificationProvider, X> later. One-way webhook delivery
-        // only (the Discord view's `bot` is null — the two-way control bot stays kgsm-bot's). Increment A
-        // is config + a real /test send; Increment B (below) is the delivery worker that fires on real events.
+        // Outbound-notification integrations (§3·e). The store persists per-provider config (a second EF
+        // entity in AppDbContext, created by the same EnsureCreated). Providers are a THIN seam
+        // (INotificationProvider) resolved by id from the registered set, so a new one — Telegram, a
+        // generic webhook — is another AddHttpClient<INotificationProvider, X> and nothing else.
+        //
+        // There is deliberately NO Discord provider here. Discord is the one channel this ecosystem ships
+        // a real bot for, and kgsm-bot is the component that holds the connection, the per-server channels
+        // and the announcement switches. A second Discord path from the API would post the same events
+        // twice and split the configuration across two components.
         services.AddSingleton<IntegrationStore>();
-        // RemoveAllLoggers is load-bearing, NOT cosmetic: the provider POSTs to the webhook URL, and a
-        // Discord webhook URL *is* the secret (.../webhooks/{id}/{token}). The default IHttpClientFactory
-        // logging handler logs "Start processing HTTP request POST {uri}" at Information — i.e. it would
-        // write the token to the app log on every send. Stripping the loggers for this client keeps the
-        // "secret is never exposed" invariant on the log channel too (a regression test pins it).
-        services.AddHttpClient<INotificationProvider, DiscordNotificationProvider>(
-                c => c.Timeout = TimeSpan.FromSeconds(10))
-            .RemoveAllLoggers();
-        // M8·c Increment C — Slack, the second provider (validates the webhook-family abstraction). Same
-        // INotificationProvider seam, registered the same way; the worker/catalog/controller are already
-        // provider-agnostic, so it is picked up with no other change. RemoveAllLoggers for the same reason
-        // (a Slack incoming-webhook URL is also the secret).
+        // RemoveAllLoggers is load-bearing, NOT cosmetic: the provider POSTs to the webhook URL, and an
+        // incoming-webhook URL *is* the secret. The default IHttpClientFactory logging handler logs
+        // "Start processing HTTP request POST {uri}" at Information — i.e. it would write the token to the
+        // app log on every send. Stripping the loggers for this client keeps the "secret is never exposed"
+        // invariant on the log channel too (a regression test pins it).
         services.AddHttpClient<INotificationProvider, SlackNotificationProvider>(
                 c => c.Timeout = TimeSpan.FromSeconds(10))
             .RemoveAllLoggers();

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — the Discord notification provider
+
+- **`/integrations/discord` is gone**, along with `DiscordNotificationProvider`, the
+  `DiscordIntegrationView`/`BotConnection` DTOs and the registration. Requesting it is a 404 like any other
+  unregistered provider.
+
+  Discord is the one channel this ecosystem ships a real bot for. **kgsm-bot** holds the connection, the
+  per-server channels and — as of its announcement switches — the per-event configuration, sourced from
+  engine events it already reads off the journal. A second Discord path from here posted the same events
+  through a webhook and put the configuration for one integration in two components, on a page that also
+  had to disclaim the half it could not do (`bot: null`, an illustrative slash-command list).
+
+  The notification subsystem itself is untouched and stays provider-agnostic: the bus, the delivery worker,
+  the catalog, the anti-spam window and the admin-gated controller all remain, with **Slack** as the
+  registered provider and a new one still being one `AddHttpClient<INotificationProvider, X>`. The
+  subsystem's provider-agnostic tests now run through Slack rather than Discord, so none of that coverage
+  was lost; `update_available` also stays in the catalog, since this API's probe is its only honest source.
+
 ### Added
 - `activeJob` on the `Server` DTO — the long-running operation that owns an instance right now (an update
   downloading and deploying, a backup being taken), or `null` when it is idle. It rides `GET /servers`,

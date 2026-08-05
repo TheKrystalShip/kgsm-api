@@ -4,7 +4,7 @@ namespace TheKrystalShip.Api.Services.Integrations;
 
 /// <summary>
 /// Shared base for the <b>webhook-secret-URL</b> family of notification providers (M8·c) — providers whose
-/// stored secret <em>is</em> the POST endpoint (Discord, Slack). It captures the genuinely-common logic so a
+/// stored secret <em>is</em> the POST endpoint. It captures the genuinely-common logic so a
 /// new webhook provider is reduced to its specifics: the honest webhook POST, the <c>/test</c>+send
 /// orchestration, the catalog⋈rules event overlay, and the secret-masking hint. A concrete provider supplies
 /// only <see cref="ProviderId"/>, secret validation, the GET view shape, and the test/message payloads.
@@ -25,8 +25,7 @@ public abstract class WebhookNotificationProvider(HttpClient http, ILogger logge
 
     public abstract object Describe(IntegrationRecord record);
 
-    /// <summary>The provider-shaped <c>/test</c> payload (e.g. Discord's <c>{content,allowed_mentions}</c>
-    /// or Slack's <c>{text}</c>).</summary>
+    /// <summary>The provider-shaped <c>/test</c> payload (e.g. Slack's <c>{text}</c>).</summary>
     protected abstract object TestPayload();
 
     /// <summary>The provider-shaped payload for a real event, honoring the rule (e.g. a ping).</summary>
@@ -52,8 +51,8 @@ public abstract class WebhookNotificationProvider(HttpClient http, ILogger logge
     }
 
     /// <summary>The single webhook POST, shared by Test and Send. Honest failure — the provider's non-2xx
-    /// status or an unreachable webhook, never a fabricated ok. (Discord returns <c>204</c>, Slack <c>200</c>
-    /// with body <c>ok</c>; both are <c>IsSuccessStatusCode</c>.) The secret (the webhook URL) is never logged
+    /// status or an unreachable webhook, never a fabricated ok. (Slack returns <c>200</c> with body
+    /// <c>ok</c>; any <c>IsSuccessStatusCode</c> counts.) The secret (the webhook URL) is never logged
     /// here; the typed client also has its loggers stripped at the DI seam (Startup <c>.RemoveAllLoggers()</c>).</summary>
     protected async Task<(bool Ok, string? Error)> PostAsync(string webhook, object payload, CancellationToken ct)
     {
@@ -85,8 +84,8 @@ public abstract class WebhookNotificationProvider(HttpClient http, ILogger logge
     }
 
     /// <summary>Mask a webhook URL to a non-secret hint: the path from <paramref name="marker"/> onward with
-    /// the final (secret) token truncated to its first 3 chars. Discord uses marker <c>webhooks</c>
-    /// (<c>…/webhooks/{id}/{tok}***</c>), Slack <c>services</c> (<c>…/services/{team}/{app}/{tok}***</c>).
+    /// the final (secret) token truncated to its first 3 chars. Slack uses marker <c>services</c>
+    /// (<c>…/services/{team}/{app}/{tok}***</c>).
     /// <see langword="null"/> for an empty secret; <c>"***"</c> for an unparseable URL or one with fewer than
     /// two segments after the marker (never the raw secret).</summary>
     protected static string? MaskWebhook(string? url, string marker)

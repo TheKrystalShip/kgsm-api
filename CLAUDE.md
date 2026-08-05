@@ -290,8 +290,8 @@ of leaves present.
   fabricated) outside a git checkout. **Full reference: `README.md` §Versioning.**
 - **Logging:** the ecosystem convention (`../logging-convention.md`) — the host does
   `ConfigureLogging(ClearProviders → AddSystemdConsole)`; levels come from the `appsettings.json`
-  `Logging` section + env (`Logging__LogLevel__Default`). ⚠ The Discord/Slack webhook `HttpClient`s
-  keep `.RemoveAllLoggers()` (Startup) — that's load-bearing secret-redaction, never drop it.
+  `Logging` section + env (`Logging__LogLevel__Default`). ⚠ The notification-webhook `HttpClient`
+  keeps `.RemoveAllLoggers()` (Startup) — that's load-bearing secret-redaction, never drop it.
 - **Validation model:** each milestone ends at a **frontend gate** — agree the wire shapes
   first (`§6`), build + self-prove (smoke + a live leaf), then the frontend swaps its store
   mock → real. Caution on the wiring; this is the first time frontend + backend + leaves

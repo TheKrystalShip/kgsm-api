@@ -10,11 +10,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// M8·c Increment C — Slack, the second provider, validating the webhook-family abstraction
-/// (<see cref="WebhookNotificationProvider"/>). <see cref="SlackProviderTests"/> proves the Slack specifics
-/// in isolation (mask/validate/format/send, the mrkdwn + escaping care, the subteam ping) with a recording
-/// HTTP handler; <see cref="SlackApiTests"/> proves it through the real pipeline (the provider list now
-/// shows both, the §-shaped view with no `bot` block, the admin gate, the masked round-trip).
+/// Slack, a <see cref="WebhookNotificationProvider"/>. <see cref="SlackProviderTests"/> proves the Slack
+/// specifics in isolation (mask/validate/format/send, the mrkdwn + escaping care, the subteam ping) with a
+/// recording HTTP handler; <see cref="SlackApiTests"/> proves it through the real pipeline (the registered
+/// provider list, the §-shaped view, the admin gate, the masked round-trip).
 /// </summary>
 public sealed class SlackProviderTests
 {
@@ -123,7 +122,7 @@ public sealed class SlackProviderTests
 }
 
 /// <summary>The Slack provider through the real pipeline — proving the abstraction is wired (the provider
-/// list now shows both Discord and Slack from the real Startup) and the §-shaped Slack view + admin gate.
+/// list reflects what the real Startup registers) and the §-shaped Slack view + admin gate.
 /// Uses <see cref="AuthTestFactory"/> directly (no provider/HTTP swap): every assertion here is reachable
 /// without an outbound call (list/describe/patch + the unconfigured-`/test` 409 short-circuits before HTTP).</summary>
 public sealed class SlackApiTests
@@ -139,13 +138,14 @@ public sealed class SlackApiTests
         JsonDocument.Parse(await r.Content.ReadAsStringAsync()).RootElement;
 
     [Fact]
-    public async Task List_IncludesBothDiscordAndSlack()
+    public async Task List_IncludesSlack_AndNotDiscord()
     {
         using var f = new AuthTestFactory();
         JsonElement rows = await Json(await Admin(f).GetAsync("/api/v1/integrations"));
         List<string?> ids = rows.EnumerateArray().Select(e => e.GetProperty("provider").GetString()).ToList();
-        Assert.Contains("discord", ids); // the abstraction is wired: both real providers are registered & listed
         Assert.Contains("slack", ids);
+        // Discord is kgsm-bot's channel; this API offers no second route to it.
+        Assert.DoesNotContain("discord", ids);
     }
 
     [Fact]

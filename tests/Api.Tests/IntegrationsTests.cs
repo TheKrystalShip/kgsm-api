@@ -10,111 +10,26 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Integrations;
 
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// M8·c Increment A — the outbound-notification integration (`/integrations/{provider}`). Two layers:
-/// (1) <see cref="DiscordProviderTests"/> proves the real <see cref="DiscordNotificationProvider"/> in
-/// isolation (mask/validate/test-send with a faked HttpMessageHandler — no real Discord); (2)
-/// <see cref="IntegrationsApiTests"/> drives the real pipeline (store + admin gate + the envelope) with
-/// the provider's HTTP faked. Load-bearing honesty: the webhook secret is NEVER echoed, the catalog lists
-/// only deliverable events, `bot` is null, and `/test` is honest (no faked ok).
+/// The `/integrations/{provider}` HTTP surface through the real pipeline — admin gate, store, envelope —
+/// with the provider's outbound webhook POST faked so no real service is called. Everything asserted here
+/// is <b>provider-agnostic</b> (the gate, the envelope, the sparse-PATCH semantics, the catalog validation,
+/// the never-echoed secret); a provider's own specifics live beside it, in <see cref="SlackProviderTests"/>.
+/// Slack is simply the provider these run through.
 /// </summary>
-public sealed class DiscordProviderTests
-{
-    private static DiscordNotificationProvider Provider(HttpStatusCode sendStatus) =>
-        new(new HttpClient(new StubHandler(sendStatus)), NullLogger<DiscordNotificationProvider>.Instance);
-
-    private static IntegrationRecord Configured() =>
-        IntegrationRecord.Empty("discord") with
-        {
-            Secret = "https://discord.com/api/webhooks/123456789/abcXYZsecrettoken",
-            ChannelLabel = "#krystal-ops",
-            Enabled = true,
-        };
-
-    [Fact]
-    public void Describe_MasksTheSecret_BotNull_OnlyDeliverableEvents()
-    {
-        var view = (DiscordIntegrationView)Provider(HttpStatusCode.NoContent).Describe(Configured());
-
-        Assert.True(view.Webhook.Configured);
-        Assert.Equal("…/webhooks/123456789/abc***", view.Webhook.Hint);
-        Assert.DoesNotContain("secrettoken", view.Webhook.Hint);   // the token is never echoed
-        Assert.Null(view.Bot);                                      // one-way webhook only (honest)
-        Assert.Equal("#krystal-ops", view.ChannelLabel);
-        Assert.True(view.Enabled);
-
-        Assert.Equal(NotificationCatalog.Events.Count, view.Events.Count);
-        Assert.Contains(view.Events, e => e.Id == "online");
-        Assert.Contains(view.Events, e => e.Id == "crash");
-        Assert.DoesNotContain(view.Events, e => e.Id is "resource" or "join");  // no honest source → omitted
-        // Default overlay for an unconfigured event: enabled, every, no ping.
-        IntegrationEventView online = view.Events.Single(e => e.Id == "online");
-        Assert.True(online.Enabled);
-        Assert.Equal("every", online.Cadence);
-        Assert.False(online.Ping);
-    }
-
-    [Fact]
-    public void Describe_Unconfigured_WebhookNotConfigured_NoHint()
-    {
-        var view = (DiscordIntegrationView)Provider(HttpStatusCode.NoContent).Describe(IntegrationRecord.Empty("discord"));
-        Assert.False(view.Webhook.Configured);
-        Assert.Null(view.Webhook.Hint);
-    }
-
-    [Theory]
-    [InlineData("https://discord.com/api/webhooks/1/tok", true)]
-    [InlineData("https://discordapp.com/api/webhooks/1/tok", true)]
-    [InlineData("http://discord.com/api/webhooks/1/tok", false)]   // not https
-    [InlineData("https://evil.example.com/api/webhooks/1/tok", false)] // wrong host
-    [InlineData("https://discord.com/channels/1/2", false)]        // not a webhook path
-    [InlineData("not a url", false)]
-    public void TryNormalizeSecret_ValidatesWebhookUrls(string raw, bool valid)
-    {
-        bool ok = Provider(HttpStatusCode.NoContent).TryNormalizeSecret(raw, out string? normalized, out string? error);
-        Assert.Equal(valid, ok);
-        if (valid) { Assert.Equal(raw, normalized); Assert.Null(error); }
-        else { Assert.Null(normalized); Assert.NotNull(error); }
-    }
-
-    [Fact]
-    public async Task TestAsync_Success_PostsAndReportsOk()
-    {
-        NotificationTestResult r = await Provider(HttpStatusCode.NoContent).TestAsync(Configured(), default);
-        Assert.True(r.Ok);
-        Assert.Equal("test", r.Posted);
-        Assert.Equal("#krystal-ops", r.ChannelLabel);
-    }
-
-    [Fact]
-    public async Task TestAsync_DiscordRejects_HonestFailure()
-    {
-        NotificationTestResult r = await Provider(HttpStatusCode.InternalServerError).TestAsync(Configured(), default);
-        Assert.False(r.Ok);          // never a fabricated ok
-        Assert.NotNull(r.Error);
-        Assert.Null(r.Posted);
-    }
-
-    [Fact]
-    public async Task TestAsync_NoSecret_HonestFailure()
-    {
-        NotificationTestResult r = await Provider(HttpStatusCode.NoContent).TestAsync(IntegrationRecord.Empty("discord"), default);
-        Assert.False(r.Ok);
-        Assert.Equal("no webhook configured", r.Error);
-    }
-}
-
-/// <summary>The `/integrations` HTTP surface through the real pipeline (admin gate, store, envelope),
-/// with the Discord provider's outbound HTTP faked (a 204 webhook) so no real Discord is hit.</summary>
+/// <remarks>
+/// There is no Discord provider to test here. Discord is kgsm-bot's channel — it holds the connection, the
+/// per-server channels and the announcement switches — so a second path to it from this API would post
+/// every event twice and split one integration's configuration across two components.
+/// </remarks>
 public sealed class IntegrationsApiTests
 {
-    private const string Webhook = "https://discord.com/api/webhooks/987654321/realsecrettoken";
+    private const string Webhook = "https://hooks.slack.com/services/T98765432/B98765432/realsecrettoken";
 
     private static IntegrationsTestFactory NewFactory() => new();
 
@@ -133,7 +48,7 @@ public sealed class IntegrationsApiTests
     public async Task NoToken_401()
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpResponseMessage r = await Client(f, null).GetAsync("/api/v1/integrations/discord");
+        HttpResponseMessage r = await Client(f, null).GetAsync("/api/v1/integrations/slack");
         Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
         Assert.Contains("\"code\":\"unauthorized\"", await r.Content.ReadAsStringAsync());
     }
@@ -144,27 +59,34 @@ public sealed class IntegrationsApiTests
     public async Task BelowAdmin_403(AuthTier tier)
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpResponseMessage r = await Client(f, tier).GetAsync("/api/v1/integrations/discord");
+        HttpResponseMessage r = await Client(f, tier).GetAsync("/api/v1/integrations/slack");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
     [Fact]
-    public async Task Admin_List_200_DiscordPresent_Unconfigured()
+    public async Task Admin_List_200_ProviderPresent_Unconfigured()
     {
         using IntegrationsTestFactory f = NewFactory();
         HttpResponseMessage r = await Client(f, AuthTier.Admin).GetAsync("/api/v1/integrations");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
         JsonElement[] rows = (await Json(r)).EnumerateArray().ToArray();
-        JsonElement discord = rows.Single(e => e.GetProperty("provider").GetString() == "discord");
-        Assert.False(discord.GetProperty("configured").GetBoolean());
-        Assert.False(discord.GetProperty("enabled").GetBoolean());
+        JsonElement slack = rows.Single(e => e.GetProperty("provider").GetString() == "slack");
+        Assert.False(slack.GetProperty("configured").GetBoolean());
+        Assert.False(slack.GetProperty("enabled").GetBoolean());
     }
 
-    [Fact]
-    public async Task UnknownProvider_404_Envelope()
+    /// <summary>
+    /// A provider id nothing is registered under is a 404 in the frozen envelope. <c>discord</c> is
+    /// deliberately one of those: the bot owns that channel, and this asserts the API really has stopped
+    /// offering a second route to it rather than merely leaving it unconfigured.
+    /// </summary>
+    [Theory]
+    [InlineData("telegram")]
+    [InlineData("discord")]
+    public async Task UnknownProvider_404_Envelope(string provider)
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpResponseMessage r = await Client(f, AuthTier.Admin).GetAsync("/api/v1/integrations/telegram");
+        HttpResponseMessage r = await Client(f, AuthTier.Admin).GetAsync($"/api/v1/integrations/{provider}");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await r.Content.ReadAsStringAsync());
     }
@@ -175,7 +97,7 @@ public sealed class IntegrationsApiTests
         using IntegrationsTestFactory f = NewFactory();
         HttpClient c = Client(f, AuthTier.Admin);
 
-        HttpResponseMessage patch = await c.PatchAsJsonAsync("/api/v1/integrations/discord", new
+        HttpResponseMessage patch = await c.PatchAsJsonAsync("/api/v1/integrations/slack", new
         {
             webhook = Webhook,
             channelLabel = "#krystal-ops",
@@ -186,14 +108,13 @@ public sealed class IntegrationsApiTests
         // The PATCH response itself must not leak the raw secret.
         Assert.DoesNotContain("realsecrettoken", await patch.Content.ReadAsStringAsync());
 
-        JsonElement body = await Json(await c.GetAsync("/api/v1/integrations/discord"));
+        JsonElement body = await Json(await c.GetAsync("/api/v1/integrations/slack"));
         Assert.True(body.GetProperty("webhook").GetProperty("configured").GetBoolean());
         string hint = body.GetProperty("webhook").GetProperty("hint").GetString()!;
-        Assert.StartsWith("…/webhooks/987654321/", hint);
+        Assert.StartsWith("…/services/T98765432/B98765432/", hint);
         Assert.DoesNotContain("realsecrettoken", hint);            // never echoed
         Assert.Equal("#krystal-ops", body.GetProperty("channelLabel").GetString());
         Assert.True(body.GetProperty("enabled").GetBoolean());
-        Assert.True(body.TryGetProperty("bot", out JsonElement bot) && bot.ValueKind == JsonValueKind.Null);
 
         JsonElement backup = body.GetProperty("events").EnumerateArray().Single(e => e.GetProperty("id").GetString() == "backup");
         Assert.False(backup.GetProperty("enabled").GetBoolean());   // the sparse change stuck
@@ -205,7 +126,7 @@ public sealed class IntegrationsApiTests
     {
         using IntegrationsTestFactory f = NewFactory();
         HttpResponseMessage r = await Client(f, AuthTier.Admin)
-            .PatchAsJsonAsync("/api/v1/integrations/discord", new { webhook = "https://evil.example.com/x" });
+            .PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = "https://evil.example.com/x" });
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await r.Content.ReadAsStringAsync());
     }
@@ -216,7 +137,7 @@ public sealed class IntegrationsApiTests
     public async Task Patch_UnknownEventOrCadence_400(string json)
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpResponseMessage r = await Client(f, AuthTier.Admin).PatchAsync("/api/v1/integrations/discord",
+        HttpResponseMessage r = await Client(f, AuthTier.Admin).PatchAsync("/api/v1/integrations/slack",
             new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await r.Content.ReadAsStringAsync());
@@ -226,7 +147,7 @@ public sealed class IntegrationsApiTests
     public async Task Test_Unconfigured_409()
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpResponseMessage r = await Client(f, AuthTier.Admin).PostAsync("/api/v1/integrations/discord/test", null);
+        HttpResponseMessage r = await Client(f, AuthTier.Admin).PostAsync("/api/v1/integrations/slack/test", null);
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Contains("\"code\":\"not_configured\"", await r.Content.ReadAsStringAsync());
     }
@@ -236,22 +157,22 @@ public sealed class IntegrationsApiTests
     {
         using IntegrationsTestFactory f = NewFactory();
         HttpClient c = Client(f, AuthTier.Admin);
-        await c.PatchAsJsonAsync("/api/v1/integrations/discord", new { webhook = Webhook, channelLabel = "#krystal-ops" });
+        await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, channelLabel = "#krystal-ops" });
 
-        HttpResponseMessage r = await c.PostAsync("/api/v1/integrations/discord/test", null);
-        Assert.Equal(HttpStatusCode.Accepted, r.StatusCode);   // 202 (the faked webhook returned 204)
+        HttpResponseMessage r = await c.PostAsync("/api/v1/integrations/slack/test", null);
+        Assert.Equal(HttpStatusCode.Accepted, r.StatusCode);   // 202 (the faked webhook returned 200)
         JsonElement body = await Json(r);
         Assert.True(body.GetProperty("ok").GetBoolean());
         Assert.Equal("test", body.GetProperty("posted").GetString());
         Assert.Equal("#krystal-ops", body.GetProperty("channelLabel").GetString());
     }
 
-    // A Discord webhook URL *is* the secret (.../webhooks/{id}/{token}). The provider POSTs to it through
-    // the IHttpClientFactory client, whose DEFAULT logging handler logs "POST {uri}" at Information — i.e.
-    // it would leak the token to the app log. Production strips those loggers (Startup .RemoveAllLoggers()).
-    // This pins the invariant on the channel the body-asserting tests can't see: run the real production
-    // client pipeline (only the outbound HTTP is stubbed) at Information level and assert the token never
-    // appears in the captured logs. (Drop RemoveAllLoggers and this fails — the regression guard.)
+    // An incoming-webhook URL *is* the secret. The provider POSTs to it through the IHttpClientFactory
+    // client, whose DEFAULT logging handler logs "POST {uri}" at Information — i.e. it would leak the token
+    // to the app log. Production strips those loggers (Startup .RemoveAllLoggers()). This pins the invariant
+    // on the channel the body-asserting tests can't see: run the real production client pipeline (only the
+    // outbound HTTP is stubbed) at Information level and assert the token never appears in the captured
+    // logs. (Drop RemoveAllLoggers and this fails — the regression guard.)
     [Fact]
     public async Task Test_Send_DoesNotLeakWebhookSecretToLogs()
     {
@@ -260,18 +181,19 @@ public sealed class IntegrationsApiTests
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(AuthTier.Admin));
 
         const string secretToken = "TOPSECRETtoken99999";
-        await c.PatchAsJsonAsync("/api/v1/integrations/discord",
-            new { webhook = $"https://discord.com/api/webhooks/424242/{secretToken}" });
+        await c.PatchAsJsonAsync("/api/v1/integrations/slack",
+            new { webhook = $"https://hooks.slack.com/services/T424242/B424242/{secretToken}" });
 
-        HttpResponseMessage r = await c.PostAsync("/api/v1/integrations/discord/test", null);
-        Assert.Equal(HttpStatusCode.Accepted, r.StatusCode);   // proves the primary-handler stub took (no real Discord)
+        HttpResponseMessage r = await c.PostAsync("/api/v1/integrations/slack/test", null);
+        Assert.Equal(HttpStatusCode.Accepted, r.StatusCode);   // proves the primary-handler stub took (no real send)
         Assert.DoesNotContain(f.Capture.Messages, m => m.Contains(secretToken, StringComparison.Ordinal));
     }
 }
 
-/// <summary>A boot of the real app with the Discord provider's OUTBOUND HTTP swapped for a fixed-status
-/// stub (no real Discord), so the full store+controller path is exercised. Its provider keeps the real
-/// Describe/validate logic — only the webhook POST is faked. Fresh DB per instance (per-test isolation).</summary>
+/// <summary>A boot of the real app with the provider's OUTBOUND HTTP swapped for a fixed-status stub, so
+/// the full store+controller path is exercised with nothing leaving the process. The provider keeps its
+/// real Describe/validate logic — only the webhook POST is faked. Fresh DB per instance (per-test
+/// isolation).</summary>
 public sealed class IntegrationsTestFactory : AuthTestFactory
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -280,9 +202,9 @@ public sealed class IntegrationsTestFactory : AuthTestFactory
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<INotificationProvider>();
-            services.AddSingleton<INotificationProvider>(new DiscordNotificationProvider(
-                new HttpClient(new StubHandler(HttpStatusCode.NoContent)),
-                NullLogger<DiscordNotificationProvider>.Instance));
+            services.AddSingleton<INotificationProvider>(new SlackNotificationProvider(
+                new HttpClient(new StubHandler(HttpStatusCode.OK)),
+                NullLogger<SlackNotificationProvider>.Instance));
         });
     }
 }
@@ -295,7 +217,7 @@ internal sealed class StubHandler(HttpStatusCode status) : HttpMessageHandler
 }
 
 /// <summary>Boots the app keeping the REAL production notification HttpClient (so its
-/// <c>.RemoveAllLoggers()</c> is under test), swapping ONLY the primary handler so no real Discord call
+/// <c>.RemoveAllLoggers()</c> is under test), swapping ONLY the primary handler so no real outbound call
 /// is made (the named client is "INotificationProvider" — the AddHttpClient&lt;INotificationProvider,…&gt;
 /// type name). Captures all logs at Information so a test can assert the webhook token never appears.</summary>
 public sealed class IntegrationsLoggingFactory : AuthTestFactory
@@ -307,7 +229,7 @@ public sealed class IntegrationsLoggingFactory : AuthTestFactory
         base.ConfigureWebHost(builder);
         builder.ConfigureTestServices(services =>
             services.Configure<HttpClientFactoryOptions>("INotificationProvider", o =>
-                o.HttpMessageHandlerBuilderActions.Add(b => b.PrimaryHandler = new StubHandler(HttpStatusCode.NoContent))));
+                o.HttpMessageHandlerBuilderActions.Add(b => b.PrimaryHandler = new StubHandler(HttpStatusCode.OK))));
         builder.ConfigureLogging(lb =>
         {
             lb.AddProvider(Capture);

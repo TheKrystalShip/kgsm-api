@@ -17,14 +17,14 @@ using TheKrystalShip.Api.Services.Integrations;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// M8·c Increment B — the notification delivery worker (the always-on audit tap → providers). Three
-/// layers: (1) <see cref="NotificationMappingTests"/> pins the audit-action→catalog map (pure); (2)
-/// <see cref="DiscordSendTests"/> proves <see cref="DiscordNotificationProvider.SendAsync"/> formats and
-/// posts (faked + recording HTTP); (3) <see cref="NotificationDeliveryE2ETests"/> drives the real
-/// pipeline — an audit row appended through <see cref="AuditService"/> reaches a recording webhook — and
-/// proves the routing gates (rule-disabled, once/digest, anti-spam suppression) <b>deterministically</b>
-/// via a barrier event (a gated event followed by a delivered one; the worker is sequential, so the
-/// delivered POST proves the gated one was already processed — no sleeps).
+/// The notification delivery worker (the always-on audit tap → providers). Two layers:
+/// (1) <see cref="NotificationMappingTests"/> pins the audit-action→catalog map (pure);
+/// (2) <see cref="NotificationDeliveryE2ETests"/> drives the real pipeline — an audit row appended through
+/// <see cref="AuditService"/> reaches a recording webhook — and proves the routing gates (rule-disabled,
+/// once/digest, anti-spam suppression) <b>deterministically</b> via a barrier event (a gated event
+/// followed by a delivered one; the worker is sequential, so the delivered POST proves the gated one was
+/// already processed — no sleeps). A provider's own send formatting is tested beside it, in
+/// <see cref="SlackProviderTests"/>.
 /// </summary>
 public sealed class NotificationMappingTests
 {
@@ -64,91 +64,11 @@ public sealed class NotificationMappingTests
     }
 }
 
-/// <summary>The real <see cref="DiscordNotificationProvider.SendAsync"/> with its outbound HTTP recorded —
-/// proves the message formatting, the honest failure, and the ops-role ping / allowed_mentions scoping.</summary>
-public sealed class DiscordSendTests
-{
-    private const string Webhook = "https://discord.com/api/webhooks/1/tok";
-
-    private static DiscordNotificationProvider Provider(RecordingHandler handler) =>
-        new(new HttpClient(handler), NullLogger<DiscordNotificationProvider>.Instance);
-
-    private static IntegrationRecord Configured(IReadOnlyDictionary<string, string>? settings = null) =>
-        IntegrationRecord.Empty("discord") with { Secret = Webhook, Enabled = true, Settings = settings ?? new Dictionary<string, string>() };
-
-    private static NotificationEvent CrashEvent(string server) =>
-        new("crash", AuditAction.ServerCrash, server, AuditSeverity.Warn, $"{server} crashed — auto-restarting", DateTimeOffset.UtcNow, "evt_x");
-
-    private static NotificationRule Rule(bool ping = false) => new("crash", Enabled: true, NotificationCadence.Every, ping);
-
-    [Fact]
-    public async Task SendAsync_PostsToWebhook_WithServerNameAndSuppressedMentions()
-    {
-        var handler = new RecordingHandler(HttpStatusCode.NoContent);
-        NotificationDeliveryResult r = await Provider(handler).SendAsync(CrashEvent("factorio-01"), Rule(), Configured(), default);
-
-        Assert.True(r.Ok);
-        Assert.True(handler.Requests.TryDequeue(out RecordedRequest? req));
-        Assert.Equal(Webhook, req!.Uri);
-        Assert.Contains("factorio-01", req.Body);
-        Assert.Contains("crashed", req.Body);
-        Assert.Contains("\"allowed_mentions\":{\"parse\":[]}", req.Body); // no role array → nothing is pinged
-        Assert.DoesNotContain("<@&", req.Body);
-    }
-
-    [Fact]
-    public async Task SendAsync_Ping_MentionsConfiguredRole_AndScopesAllowedMentions()
-    {
-        var handler = new RecordingHandler(HttpStatusCode.NoContent);
-        IntegrationRecord rec = Configured(new Dictionary<string, string> { [DiscordNotificationProvider.PingRoleSetting] = "555" });
-
-        NotificationDeliveryResult r = await Provider(handler).SendAsync(CrashEvent("factorio-01"), Rule(ping: true), rec, default);
-
-        Assert.True(r.Ok);
-        Assert.True(handler.Requests.TryDequeue(out RecordedRequest? req));
-        // Parse the JSON (STJ escapes <, >, & as </>/& — harmless, Discord decodes them).
-        JsonElement body = JsonDocument.Parse(req!.Body).RootElement;
-        Assert.Contains("<@&555>", body.GetProperty("content").GetString());        // the role is mentioned
-        Assert.Equal("555", body.GetProperty("allowed_mentions").GetProperty("roles")[0].GetString()); // scoped to it
-    }
-
-    [Fact]
-    public async Task SendAsync_Ping_NoRoleConfigured_DoesNotMention()
-    {
-        var handler = new RecordingHandler(HttpStatusCode.NoContent);
-        // Ping requested but no pingRoleId in Settings → we can't ping a role we don't have (honest, never invented).
-        NotificationDeliveryResult r = await Provider(handler).SendAsync(CrashEvent("factorio-01"), Rule(ping: true), Configured(), default);
-
-        Assert.True(r.Ok);
-        Assert.True(handler.Requests.TryDequeue(out RecordedRequest? req));
-        JsonElement body = JsonDocument.Parse(req!.Body).RootElement;
-        Assert.DoesNotContain("<@&", body.GetProperty("content").GetString());
-    }
-
-    [Fact]
-    public async Task SendAsync_DiscordRejects_HonestFailure()
-    {
-        NotificationDeliveryResult r = await Provider(new RecordingHandler(HttpStatusCode.InternalServerError))
-            .SendAsync(CrashEvent("factorio-01"), Rule(), Configured(), default);
-        Assert.False(r.Ok);          // never a fabricated ok
-        Assert.NotNull(r.Error);
-    }
-
-    [Fact]
-    public async Task SendAsync_NoSecret_HonestFailure()
-    {
-        NotificationDeliveryResult r = await Provider(new RecordingHandler(HttpStatusCode.NoContent))
-            .SendAsync(CrashEvent("factorio-01"), Rule(), IntegrationRecord.Empty("discord"), default);
-        Assert.False(r.Ok);
-        Assert.Equal("no webhook configured", r.Error);
-    }
-}
-
 /// <summary>End-to-end: an audit row appended through the real always-on <see cref="AuditService"/> reaches
 /// a recording webhook through the bus + worker + provider — and the routing gates hold.</summary>
 public sealed class NotificationDeliveryE2ETests
 {
-    private const string Webhook = "https://discord.com/api/webhooks/777/e2esecrettoken";
+    private const string Webhook = "https://hooks.slack.com/services/T777/B777/e2esecrettoken";
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
     private static HttpClient AdminClient(NotificationDeliveryFactory f)
@@ -177,7 +97,7 @@ public sealed class NotificationDeliveryE2ETests
     {
         using var f = new NotificationDeliveryFactory();
         HttpClient c = AdminClient(f);
-        await c.PatchAsJsonAsync("/api/v1/integrations/discord", new { webhook = Webhook, enabled = true });
+        await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, enabled = true });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
         await audit.AppendAsync(CrashWrite("factorio-01"));
@@ -198,7 +118,7 @@ public sealed class NotificationDeliveryE2ETests
         // provider, so prove the gate the deterministic way: the disabled provider is enabled mid-flight is a
         // race, so instead we assert no delivery within a generous bound (the positive test shows sub-second
         // latency). This is the one timing-bounded check; every other gate below is barrier-deterministic.
-        await c.PatchAsJsonAsync("/api/v1/integrations/discord", new { webhook = Webhook, enabled = false });
+        await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, enabled = false });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
         await audit.AppendAsync(CrashWrite("factorio-01"));
@@ -212,7 +132,7 @@ public sealed class NotificationDeliveryE2ETests
     {
         using var f = new NotificationDeliveryFactory();
         HttpClient c = AdminClient(f);
-        await c.PatchAsJsonAsync("/api/v1/integrations/discord", new
+        await c.PatchAsJsonAsync("/api/v1/integrations/slack", new
         {
             webhook = Webhook,
             enabled = true,
@@ -234,7 +154,7 @@ public sealed class NotificationDeliveryE2ETests
     {
         using var f = new NotificationDeliveryFactory();
         HttpClient c = AdminClient(f);
-        await c.PatchAsJsonAsync("/api/v1/integrations/discord", new
+        await c.PatchAsJsonAsync("/api/v1/integrations/slack", new
         {
             webhook = Webhook,
             enabled = true,
@@ -256,7 +176,7 @@ public sealed class NotificationDeliveryE2ETests
     {
         using var f = new NotificationDeliveryFactory();
         HttpClient c = AdminClient(f);
-        await c.PatchAsJsonAsync("/api/v1/integrations/discord", new { webhook = Webhook, enabled = true });
+        await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, enabled = true });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
         await audit.AppendAsync(CrashWrite("srv-c")); // crash#1 → delivers
@@ -271,13 +191,13 @@ public sealed class NotificationDeliveryE2ETests
     }
 }
 
-/// <summary>Boots the real app with the Discord provider's OUTBOUND HTTP swapped for a recording handler
-/// (no real Discord) so the full bus → worker → provider delivery path is exercised end-to-end. The
-/// provider keeps its real formatting/validation; only the webhook POST is recorded. Singleton so every
-/// scope-per-event resolution hits the same recorder.</summary>
+/// <summary>Boots the real app with the provider's OUTBOUND HTTP swapped for a recording handler, so the
+/// full bus → worker → provider delivery path is exercised end-to-end with nothing leaving the process.
+/// The provider keeps its real formatting/validation; only the webhook POST is recorded. Singleton so
+/// every scope-per-event resolution hits the same recorder.</summary>
 public sealed class NotificationDeliveryFactory : AuthTestFactory
 {
-    public readonly RecordingHandler Webhook = new(HttpStatusCode.NoContent);
+    public readonly RecordingHandler Webhook = new(HttpStatusCode.OK);
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -285,8 +205,8 @@ public sealed class NotificationDeliveryFactory : AuthTestFactory
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<INotificationProvider>();
-            services.AddSingleton<INotificationProvider>(sp => new DiscordNotificationProvider(
-                new HttpClient(Webhook), sp.GetRequiredService<ILogger<DiscordNotificationProvider>>()));
+            services.AddSingleton<INotificationProvider>(sp => new SlackNotificationProvider(
+                new HttpClient(Webhook), sp.GetRequiredService<ILogger<SlackNotificationProvider>>()));
         });
     }
 }

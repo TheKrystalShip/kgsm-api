@@ -19,24 +19,9 @@ public sealed record WebhookView(bool Configured,
 public sealed record IntegrationEventView(
     string Id, string Title, string Description, bool Enabled, string Cadence, bool Ping);
 
-/// <summary>The Discord two-way control-bot block. <b>Always null in M8·c</b> — this integration is
-/// one-way webhook delivery only; the control bot + slash-commands are kgsm-bot's interactive surface
-/// (a deliberate, frozen honesty boundary). The shape exists so the field reads as a real "webhook-only"
-/// signal rather than being absent.</summary>
-public sealed record BotConnection(bool Connected, string? OpsRole);
-
-/// <summary>GET/PATCH /integrations/discord — the §3·e record. <see cref="Bot"/> is null (webhook-only).</summary>
-public sealed record DiscordIntegrationView(
-    string Provider,
-    WebhookView Webhook,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ChannelLabel,
-    BotConnection? Bot,
-    bool Enabled,
-    IReadOnlyList<IntegrationEventView> Events);
-
-/// <summary>GET/PATCH /integrations/slack — Slack's webhook-only record (M8·c Increment C). <b>No <c>bot</c>
-/// block:</b> Slack incoming webhooks have no Discord-style two-way control bot, so inventing one would be
-/// dishonest — the frontend renders per <c>provider</c>. Same masked-webhook + catalog-events shape otherwise.</summary>
+/// <summary>GET/PATCH /integrations/slack — Slack's webhook-only record. Every provider here delivers
+/// one way, over an incoming webhook: an interactive two-way surface is a bot, and the one bot this
+/// ecosystem ships is kgsm-bot, which owns its own connection and its own announcement switches.</summary>
 public sealed record SlackIntegrationView(
     string Provider,
     WebhookView Webhook,
