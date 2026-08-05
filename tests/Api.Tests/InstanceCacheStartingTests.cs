@@ -281,6 +281,66 @@ public sealed class InstanceCacheStartingTests
 
     // --- helpers -----------------------------------------------------------------------------------
 
+    // --- the two events racing: ready can reach this consumer BEFORE started ------------------------
+
+    [Fact]
+    public void ReadyBeforeStarted_ResolvesToRunning_NeverStuckStarting()
+    {
+        // The watchdog emits instance_ready as soon as it observes the run ready; kgsm emits
+        // instance_started from the command that asked for the start. A game that is ready as fast as
+        // it spawns produces this order — and the naive handling (ready no-ops, started then opens a
+        // window) pins the instance on "starting" until the safety timeout, with nothing left to close
+        // it. That is a display bug an operator sees as a server that started but never went online.
+        InstanceCache cache = NewCache();
+
+        cache.MarkReady("factorio-1");
+        cache.MarkStarting("factorio-1");
+
+        Assert.False(cache.IsStarting("factorio-1"));
+        Assert.True(cache.Statuses["factorio-1"].Value!.Status);
+    }
+
+    [Fact]
+    public void ReadyIsConsumedOnce_TheNextStartOpensItsOwnWindow()
+    {
+        // The memory answers the start it raced and nothing later: a restart still gets its honest
+        // booting window.
+        InstanceCache cache = NewCache();
+
+        cache.MarkReady("factorio-1");
+        cache.MarkStarting("factorio-1");
+        Assert.False(cache.IsStarting("factorio-1"));
+
+        cache.MarkStarting("factorio-1");
+
+        Assert.True(cache.IsStarting("factorio-1"));
+    }
+
+    [Fact]
+    public void AStopBetweenReadyAndStart_LeavesTheNextStartItsWindow()
+    {
+        // Going down ends the run the remembered ready belonged to.
+        InstanceCache cache = NewCache();
+
+        cache.MarkReady("factorio-1");
+        cache.UpdateStatus("factorio-1", running: false);
+        cache.MarkStarting("factorio-1");
+
+        Assert.True(cache.IsStarting("factorio-1"));
+    }
+
+    [Fact]
+    public void AnOldReadyDoesNotAnswerAMuchLaterStart()
+    {
+        // The grace only covers event-delivery skew between the two halves of ONE spawn.
+        InstanceCache cache = NewCache();
+
+        cache.MarkReady("factorio-1");
+        cache.MarkStartingAt("factorio-1", DateTimeOffset.UtcNow + InstanceCache.ReadyGrace + TimeSpan.FromSeconds(5));
+
+        Assert.True(cache.IsStarting("factorio-1"));
+    }
+
     private static InstanceCache NewCache(MutableFakeInstanceService? fake = null)
     {
         fake ??= new MutableFakeInstanceService();

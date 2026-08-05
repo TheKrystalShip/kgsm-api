@@ -43,6 +43,16 @@ namespace TheKrystalShip.Api.Services.Aggregation;
 /// the DTO's <c>starting</c> status.
 /// </para>
 /// <para>
+/// <b>The pair can arrive in either order.</b> <c>instance_ready</c> is emitted by the watchdog the
+/// moment it observes the run become ready, while <c>instance_started</c> is emitted by the kgsm
+/// command that asked for the start — so a game that is ready as fast as it spawns produces a ready
+/// that reaches this consumer FIRST. Handling only the ordered case would open a window nothing is
+/// left to close, pinning the instance on "starting" until the safety timeout. A ready with no open
+/// window is therefore REMEMBERED for <see cref="ReadyGrace"/>, and the next
+/// <see cref="MarkStarting"/> inside that window consumes it instead of opening one. The memory is
+/// short and single-use on purpose: it answers the start it raced, never a later one.
+/// </para>
+/// <para>
 /// The background boolean reconcile (<see cref="RefreshAsync"/>, every <see cref="_ttl"/>) is the
 /// hazard: while an instance is genuinely still starting, the process IS up, so
 /// <c>GetAllStatuses(fast:true)</c> reports <c>Status:true</c> — identical to a fully running instance.
@@ -69,6 +79,14 @@ public sealed class InstanceCache : IHostedService, IDisposable
     /// </summary>
     internal static readonly TimeSpan StartingTimeout = TimeSpan.FromMinutes(5);
 
+    /// <summary>
+    /// How long a <c>instance_ready</c> that arrived with no open window stays able to answer the
+    /// <c>instance_started</c> it raced (see the class remarks). The two events describe the same
+    /// spawn and reach this consumer milliseconds apart, so this only has to cover event-delivery
+    /// skew — short enough that it can never suppress a genuine later boot window.
+    /// </summary>
+    internal static readonly TimeSpan ReadyGrace = TimeSpan.FromSeconds(30);
+
     private readonly IServiceProvider _services;
     private readonly ILogger<InstanceCache> _logger;
     private readonly TimeSpan _ttl;
@@ -86,6 +104,8 @@ public sealed class InstanceCache : IHostedService, IDisposable
     // itself (that dictionary is wholesale-replaced by RefreshAsync; this one needs its own reconcile pass).
     private readonly object _startingGate = new();
     private readonly Dictionary<string, DateTimeOffset> _startingSince = new(StringComparer.Ordinal);
+    // instance -> when a ready arrived with no window open (see ReadyGrace). Guarded by _startingGate.
+    private readonly Dictionary<string, DateTimeOffset> _readyBefore = new(StringComparer.Ordinal);
 
     // Latch so a persistent engine misconfiguration is logged once, not on every refresh.
     private int _engineUnavailableLogged;
@@ -197,10 +217,24 @@ public sealed class InstanceCache : IHostedService, IDisposable
 
         UpdateStatus(instanceName, running: true);
 
+        bool answeredAlready;
         lock (_startingGate)
-            _startingSince[instanceName] = since;
+        {
+            // A ready that raced ahead of this start already answered it — opening a window now would
+            // leave one nothing is left to close (see the class remarks).
+            answeredAlready = _readyBefore.TryGetValue(instanceName, out DateTimeOffset readyAt)
+                && since - readyAt <= ReadyGrace;
+            _readyBefore.Remove(instanceName);
+            if (!answeredAlready)
+                _startingSince[instanceName] = since;
+        }
 
-        _logger.LogDebug("Instance cache: {Instance} entered the starting window (event-driven).", instanceName);
+        if (answeredAlready)
+            _logger.LogDebug(
+                "Instance cache: {Instance} was already reported ready for this start — reporting running, "
+                + "not starting (the two events raced).", instanceName);
+        else
+            _logger.LogDebug("Instance cache: {Instance} entered the starting window (event-driven).", instanceName);
     }
 
     /// <summary>
@@ -216,7 +250,14 @@ public sealed class InstanceCache : IHostedService, IDisposable
 
         bool wasStarting;
         lock (_startingGate)
+        {
             wasStarting = _startingSince.Remove(instanceName);
+            // No window yet: either this ready raced the start that will open one (remember it, so that
+            // start doesn't open a window nothing can close), or nothing about this instance is in
+            // flight and the memory simply expires unused.
+            if (!wasStarting)
+                _readyBefore[instanceName] = DateTimeOffset.UtcNow;
+        }
 
         if (!wasStarting)
             UpdateStatus(instanceName, running: true);
@@ -236,10 +277,15 @@ public sealed class InstanceCache : IHostedService, IDisposable
             return _startingSince.ContainsKey(instanceName);
     }
 
+    // Called when the instance goes down: whatever run a remembered ready belonged to is over, so the
+    // next start opens its window normally.
     private void ClearStartingLatch(string instanceName)
     {
         lock (_startingGate)
+        {
             _startingSince.Remove(instanceName);
+            _readyBefore.Remove(instanceName);
+        }
     }
 
     /// <summary>

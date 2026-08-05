@@ -29,6 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exists, its history doesn't" is a different fact from "no such leaf".
 
 ### Fixed
+- **A server that started no longer reads "Starting" until the safety timeout when its readiness signal
+  arrives first.** `instance_ready` is emitted by the watchdog as soon as it observes the run ready,
+  while `instance_started` is emitted by the kgsm command that asked for the start — so a game ready as
+  fast as it spawns produces a ready that reaches the consumer FIRST. The ready then found no window to
+  close and the start opened one nothing was left to close, pinning the instance on `starting` for the
+  full five-minute bound. A ready with no open window is now remembered briefly and consumed by the
+  start it raced; the memory is single-use and cleared when the instance goes down, so a genuine later
+  boot still gets its honest window.
 - A leaf's `memoryBytes` on `GET /hosts/{id}/services` (and the `services` stream) is the memory charged
   to the cgroup its main process lives in, read from `/proc/<pid>/cgroup` → `memory.current`, rather than
   systemd's `MemoryCurrent`. cgroup v2 counters are recursive and `MemoryCurrent` covers the whole unit
