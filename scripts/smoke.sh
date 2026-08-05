@@ -113,6 +113,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# How long a launched instance gets to answer /health, in 0.1s ticks. Startup is NOT just a bind:
+# hosted services reconcile the player roster (a watchdog probe with its own 5s ceiling), open the DB,
+# and spawn kgsm subprocesses to warm the blueprint/instance caches — all BEFORE Kestrel listens. A
+# tight budget here doesn't measure the API, it measures how loaded the box is, and fails a phase whose
+# instance was seconds from ready (its log says "Now listening" right after the harness gave up).
+HEALTH_WAIT_TICKS=300
+
 # start_api MONITOR_SOCKET — launch the API with the given monitor socket; wait for /health.
 start_api() {
   Api__Urls="$BASE" Api__DbPath="$DB" \
@@ -121,7 +128,7 @@ start_api() {
   Api__UpdateCheckDisabled=true \
     dotnet "$DLL" >/tmp/kgsm-api-smoke.log 2>&1 &
   SRV=$!; PIDS+=("$SRV")
-  for _ in $(seq 1 80); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
+  for _ in $(seq 1 $HEALTH_WAIT_TICKS); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
   return 1
 }
 stop_api() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
@@ -136,7 +143,7 @@ start_api_auth() {
     KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
     dotnet "$DLL" >/tmp/kgsm-api-smoke-auth.log 2>&1 &
   SRV=$!; PIDS+=("$SRV")
-  for _ in $(seq 1 80); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
+  for _ in $(seq 1 $HEALTH_WAIT_TICKS); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
   return 1
 }
 
@@ -173,7 +180,7 @@ start_api_assistant() {
   Api__AssistantBaseUrl="$1" Api__AssistantRelaySecret="$2" \
     dotnet "$DLL" >/tmp/kgsm-api-smoke-m7.log 2>&1 &
   SRV=$!; PIDS+=("$SRV")
-  for _ in $(seq 1 80); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
+  for _ in $(seq 1 $HEALTH_WAIT_TICKS); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
   return 1
 }
 
@@ -386,7 +393,7 @@ if [[ "$CODE" == 200 ]] && EXP="$HOST_ID" python3 -c "
 import json,os,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 if not (isinstance(d,list) and len(d)>=1): sys.exit(2)   # empty roster -> can't prove a real read
-keys={'id','name','blueprint','status','version','runtime','hostId','steamAppId','clientSteamAppId','isSteamAccountRequired','metrics','updateAvailable','latestVersion','updateCheckedAt','startedAt','connectPort','note','lastBackup','backupCount'}
+keys={'id','name','blueprint','status','version','runtime','hostId','steamAppId','clientSteamAppId','isSteamAccountRequired','metrics','updateAvailable','latestVersion','updateCheckedAt','startedAt','connectPort','note','lastBackup','backupCount','activeJob'}
 for s in d:
     if set(s)!=keys: sys.exit(3)
     if s['status'] not in ('running','stopped','unknown'): sys.exit(4)
@@ -1264,63 +1271,65 @@ sys.exit(0 if (d.get('tier')=='admin' and u.get('id')=='discord:dev'
   else bad "/me shape (code=$CODE body=$BODY)"; fi
 
   # --- M8·c integrations: outbound-notification config (admin; here the AUTH_DISABLED synthetic admin) ---
-  echo "==> M8·c integrations checks — /integrations (discord + slack; config + masked secret; NO real post)"
+  echo "==> M8·c integrations checks — /integrations (slack; config + masked secret; NO real post)"
 
-  # 40. GET /integrations lists BOTH providers (the Increment C abstraction is wired — discord + slack),
-  #     each unconfigured initially.
+  # 40. GET /integrations lists the registered providers, unconfigured initially. Discord is NOT one of
+  #     them: kgsm-bot owns that channel, so this API ships no Discord provider, and the list is the
+  #     place that has to say so — a provider quietly reappearing here is the regression to catch.
   req GET /api/v1/integrations
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 by={x.get('provider'): x for x in d}
-sys.exit(0 if ('discord' in by and 'slack' in by
-               and all(by[p].get('configured') is False and by[p].get('enabled') is False for p in ('discord','slack'))) else 1)
+sys.exit(0 if ('slack' in by and 'discord' not in by
+               and by['slack'].get('configured') is False and by['slack'].get('enabled') is False) else 1)
 " 2>/dev/null; then
-    ok "/integrations 200 + discord AND slack present, unconfigured (the abstraction is wired)"
+    ok "/integrations 200 + slack present and unconfigured, discord absent (the bot owns that channel)"
   else bad "/integrations list shape (code=$CODE body=$BODY)"; fi
 
-  # 41. GET /integrations/discord -> the §3·e record: webhook unconfigured, bot:null (one-way only),
-  #     catalog lists only deliverable events (online/crash present; resource/join honestly omitted).
-  req GET /api/v1/integrations/discord
-  if [[ "$CODE" == 200 ]] && python3 -c "
-import json,sys
-d=json.load(open('/tmp/kgsm-api-smoke.body'))
-ids={e['id'] for e in d.get('events',[])}
-sys.exit(0 if (d.get('webhook',{}).get('configured') is False and d.get('bot') is None
-               and 'online' in ids and 'crash' in ids
-               and 'resource' not in ids and 'join' not in ids) else 1)
-" 2>/dev/null; then
-    ok "/integrations/discord 200 + bot:null + honest catalog (resource/join omitted)"
-  else bad "/integrations/discord shape (code=$CODE body=$BODY)"; fi
+  # 41. An unregistered provider is a plain 404 on every verb — not a 500, not a half-alive record.
+  #     Discord is the concrete case (its provider was removed), and the frozen {error} envelope is
+  #     what the SPA renders, so assert the envelope and not just the status.
+  unregistered_404=true
+  check_404() {   # method path [curl args…] — records the first verb that answered anything else
+    req "$@"
+    [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" \
+      || { unregistered_404=false; UNREG="${UNREG:-$1 $2 -> $CODE $BODY}"; }
+  }
+  check_404 GET /api/v1/integrations/discord
+  check_404 POST /api/v1/integrations/discord/test
+  check_404 PATCH /api/v1/integrations/discord -H 'Content-Type: application/json' -d '{"channelLabel":"#nope"}'
+  $unregistered_404 \
+    && ok "unregistered provider (discord): GET/POST-test/PATCH all → 404 + {error} envelope" \
+    || bad "M8·c unregistered provider 404 ($UNREG)"
 
-  # 42. POST /test with nothing configured -> 409 not_configured (honest; no real Discord call, no faked ok).
-  req POST /api/v1/integrations/discord/test
+  # 42. POST /test with nothing configured -> 409 not_configured (honest; no real post, no faked ok).
+  #     MUST run before check 45 configures slack's webhook, or there is nothing unconfigured left to test.
+  req POST /api/v1/integrations/slack/test
   [[ "$CODE" == 409 ]] && grep -q '"code":"not_configured"' <<<"$BODY" \
-    && ok "POST /integrations/discord/test unconfigured → 409 not_configured (honest, no faked send)" \
+    && ok "POST /integrations/slack/test unconfigured → 409 not_configured (honest, no faked send)" \
     || bad "M8·c test unconfigured 409 (code=$CODE body=$BODY)"
 
-  # 43. PATCH a (fake) webhook + label + a sparse event change -> 200; the raw secret is NEVER echoed
-  #     and the masked hint is returned. (A fake webhook URL: we never call /test after this, so no post.)
-  req PATCH /api/v1/integrations/discord -H 'Content-Type: application/json' \
-    -d '{"webhook":"https://discord.com/api/webhooks/111222333/SMOKEfaketoken","channelLabel":"#smoke-ops","events":[{"id":"backup","enabled":false}]}'
-  PATCH_CODE=$CODE; PATCH_BODY=$BODY
-  req GET /api/v1/integrations/discord
-  if [[ "$PATCH_CODE" == 200 ]] && [[ "$CODE" == 200 ]] \
-     && ! grep -q 'SMOKEfaketoken' <<<"$PATCH_BODY" && ! grep -q 'SMOKEfaketoken' <<<"$BODY" \
-     && python3 -c "
+  # 43. A sparse event change round-trips: the catalog's per-event enabled flag persists on its own,
+  #     without the caller resending the webhook. (The masked-secret half of the old discord check is
+  #     check 45's job — same webhook-family abstraction, one provider left to prove it on.)
+  req PATCH /api/v1/integrations/slack -H 'Content-Type: application/json' \
+    -d '{"events":[{"id":"backup","enabled":false}]}'
+  PATCH_CODE=$CODE
+  req GET /api/v1/integrations/slack
+  if [[ "$PATCH_CODE" == 200 ]] && [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
-wh=d.get('webhook',{})
 backup=[e for e in d.get('events',[]) if e['id']=='backup']
-sys.exit(0 if (wh.get('configured') is True and wh.get('hint','').startswith('…/webhooks/111222333/')
-               and d.get('channelLabel')=='#smoke-ops'
-               and len(backup)==1 and backup[0].get('enabled') is False) else 1)
+sys.exit(0 if (len(backup)==1 and backup[0].get('enabled') is False
+               and d.get('webhook',{}).get('configured') is False) else 1)
 " 2>/dev/null; then
-    ok "PATCH /integrations/discord persists + masks the secret (hint only, raw never echoed)"
-  else bad "M8·c PATCH round-trip (patch=$PATCH_CODE get=$CODE body=$BODY)"; fi
+    ok "PATCH /integrations/slack persists a sparse event change (webhook untouched, still unconfigured)"
+  else bad "M8·c sparse event PATCH round-trip (patch=$PATCH_CODE get=$CODE body=$BODY)"; fi
 
-  # 44. GET /integrations/slack (Increment C, the second provider) -> the webhook-only record: NO `bot`
-  #     block (Slack has no Discord-style control bot — honest), same masked-webhook + honest catalog shape.
+  # 44. GET /integrations/slack — the webhook-only record: no `bot` block (a webhook provider has no
+  #     control channel to describe), plus the honest catalog (only deliverable events are listed:
+  #     online/crash present, resource/join omitted rather than advertised and silently undelivered).
   req GET /api/v1/integrations/slack
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys

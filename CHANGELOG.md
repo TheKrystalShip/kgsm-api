@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the contract smoke asserts the contract that exists
+
+- **`scripts/smoke.sh` is 89/89 again.** Five checks had drifted from the surface they describe, which
+  costs more than it looks: a suite that is permanently red is one nobody can read a real break out of.
+  - `/servers` does an exact key-set match (that strictness is the point — it catches DTO drift), and the
+    shape gained `activeJob`. The key set now includes it.
+  - The four Discord-integration checks asserted a provider this API no longer registers. The list check
+    now asserts the opposite and stronger fact — **slack present, discord absent** — so a provider
+    reappearing here is caught, and a new check pins what an unregistered provider does on every verb:
+    `GET` / `POST …/test` / `PATCH` → `404` with the frozen `{error}` envelope. The unconfigured-`/test`
+    `409` and the event round-trip moved onto slack, the provider that still exists to prove them on.
+- **The per-instance health wait is 30s, from 8s** (`HEALTH_WAIT_TICKS`). Startup is not just a bind:
+  hosted services probe the watchdog (5s ceiling of its own), open the DB and spawn kgsm subprocesses to
+  warm the caches, all before Kestrel listens. The old budget measured how loaded the box was and failed
+  the assistant-relay phase on an instance whose log read `Now listening` moments after the harness gave up.
+
 ### Added — a leaf's own command catalog, served from the file it ships
 
 - **`GET /hosts/{id}/services/{leaf}/commands`** returns the commands a leaf answers to, read from
