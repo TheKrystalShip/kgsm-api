@@ -142,6 +142,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
 
     [Theory]
     [InlineData("/api/v1/assistant/admin/conversations/users")]
+    [InlineData("/api/v1/assistant/admin/conversations/stats")]
     [InlineData("/api/v1/assistant/admin/conversations?user=u1")]
     [InlineData("/api/v1/assistant/admin/conversations/aGFuZGxl")]
     public async Task Review_NoToken_401(string path)
@@ -153,6 +154,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
 
     [Theory]
     [InlineData("/api/v1/assistant/admin/conversations/users")]
+    [InlineData("/api/v1/assistant/admin/conversations/stats")]
     [InlineData("/api/v1/assistant/admin/conversations?user=u1")]
     [InlineData("/api/v1/assistant/admin/conversations/aGFuZGxl")]
     public async Task Review_ViewerTier_403(string path)
@@ -164,6 +166,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
 
     [Theory]
     [InlineData("/api/v1/assistant/admin/conversations/users")]
+    [InlineData("/api/v1/assistant/admin/conversations/stats")]
     [InlineData("/api/v1/assistant/admin/conversations?user=u1")]
     [InlineData("/api/v1/assistant/admin/conversations/aGFuZGxl")]
     public async Task Review_OperatorTier_403(string path)
@@ -176,6 +179,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
 
     [Theory]
     [InlineData("/api/v1/assistant/admin/conversations/users")]
+    [InlineData("/api/v1/assistant/admin/conversations/stats")]
     [InlineData("/api/v1/assistant/admin/conversations?user=u1")]
     [InlineData("/api/v1/assistant/admin/conversations/aGFuZGxl")]
     public async Task Review_Admin_AssistantAbsent_404(string path)
@@ -196,6 +200,20 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
         // exactly the contract this pins — this endpoint never answers a missing conversation with a 5xx.
         HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Admin))
             .GetAsync("/api/v1/assistant/admin/conversations/bm9wZQ");
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task ReviewStats_IsNotShadowedByTheTranscriptRoute()
+    {
+        // "stats" is a literal segment sharing a template shape with admin/conversations/{handle}. If the
+        // parameter route ever won, this would be relayed as a conversation handle and quietly 404 — so the
+        // assertion is that an ADMIN reaches the capability gate (404 "not_found" from the unprovisioned
+        // assistant) rather than being rejected as a bad handle by some other path.
+        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Admin))
+            .GetAsync("/api/v1/assistant/admin/conversations/stats");
+
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
     }

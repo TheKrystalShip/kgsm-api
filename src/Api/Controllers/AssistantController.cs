@@ -299,6 +299,18 @@ public sealed class AssistantController(
         RelayAsync((id, ct2) => assistant.GetReviewUsersAsync(id.UserId, id.Display, ct2), RelayedJson, ct);
 
     /// <summary>
+    /// <c>GET /api/v1/assistant/admin/conversations/stats</c> — the corpus roll-up behind the assistant's
+    /// operator overview, <b>admin</b>-gated like the rest of the review surface: outcome mix, answer-time
+    /// distribution, per-tool behaviour, prompt-version buckets, context occupancy, daily volume, and the
+    /// leaf's live runtime. Relayed verbatim — the assistant owns the schema, and it derives every figure
+    /// from the same log the transcripts come from.
+    /// </summary>
+    [HttpGet("admin/conversations/stats")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public Task<IActionResult> ReviewStats(CancellationToken ct) =>
+        RelayAsync((id, ct2) => assistant.GetReviewStatsAsync(id.UserId, id.Display, ct2), RelayedJson, ct);
+
+    /// <summary>
     /// <c>GET /api/v1/assistant/admin/conversations?user={userId}</c> — one user's conversations,
     /// <b>admin</b>-gated. Soft-deleted ones are included and flagged by the assistant: the transcript was
     /// never erased, and a conversation someone hid is exactly what a tuning review wants to see.

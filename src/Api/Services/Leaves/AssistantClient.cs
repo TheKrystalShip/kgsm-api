@@ -190,6 +190,18 @@ public sealed class AssistantClient : HttpClient
         RelaySendAsync(HttpMethod.Get, "/admin/conversations/users", relayUserId, relayDisplayName, ct, admin: true);
 
     /// <summary>
+    /// Reads the corpus roll-up behind the assistant's operator overview:
+    /// <c>GET /admin/conversations/stats</c> — outcome mix, answer-time distribution, per-tool behaviour,
+    /// prompt-version buckets and daily volume, plus the leaf's live runtime. Admin-gated for the same
+    /// reason the transcripts are: it describes other people's conversations, in aggregate. The body is
+    /// the assistant's JSON verbatim. Returns <see langword="null"/> when the assistant isn't provisioned;
+    /// the caller <strong>owns disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> GetReviewStatsAsync(
+        string relayUserId, string relayDisplayName, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Get, "/admin/conversations/stats", relayUserId, relayDisplayName, ct, admin: true);
+
+    /// <summary>
     /// Lists one user's conversations for review: <c>GET /admin/conversations?user={userId}</c>. Unlike the
     /// self-service listing, <paramref name="ofUserId"/> names SOMEONE ELSE — which is exactly why the call
     /// carries <c>X-Relay-Admin</c> and why its controller is admin-gated. Soft-deleted conversations are

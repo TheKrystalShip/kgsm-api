@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the assistant's corpus roll-up, relayed for the operator overview
+
+`GET /api/v1/assistant/admin/conversations/stats` (admin-gated, like the rest of the review surface)
+relays the assistant leaf's whole-corpus roll-up verbatim: outcome mix, answer-time distribution,
+per-tool call counts / durations / failures, prompt-version buckets, context occupancy, daily volume,
+and the leaf's live runtime (model, window, iteration cap, actions on/off). The leaf owns the schema
+and derives every figure from the same append-only log the transcripts come from; this API owns auth
+and the degrade gate only.
+
+`stats` is a literal segment sharing a template shape with `admin/conversations/{handle}`; a test
+pins that it is not shadowed by the parameter route, which would otherwise relay it as a conversation
+handle and 404 in a way that looks like a missing conversation.
+
 ### Added — an administrator can review other users' assistant conversations
 
 Three admin-gated relays onto the assistant leaf's review surface, so the Control Panel can show who
