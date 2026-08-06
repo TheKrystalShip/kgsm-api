@@ -72,17 +72,17 @@ public sealed class AssistantController(
         if (identity is null)
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no verified identity");
 
-        // Resolve this turn's two action AUTHORITIES — the decision the API owns and the assistant
-        // trusts (it never does its own Discord lookup on the relay path). Both are derived from the
-        // caller's VERIFIED tier, never from the request body alone:
-        //   • canAct  = may the assistant PROPOSE a command? operator+ (toggle-independent — proposing
-        //               is a tier capability; the user still confirms each via the M3 command path).
-        //   • autoAct = may it AUTO-RUN lifecycle commands with no confirmation? admin ONLY, AND the
-        //               user turned the toggle on. This is the real gate: an operator (or a tampered
-        //               SPA forcing actions:true) is zeroed here — autoAct requires admin tier.
-        // body.Actions is the toggle INTENT; it can only ever narrow autoAct, never widen authority.
+        // The caller's VERIFIED tier travels with their identity, and it is the assistant's whole
+        // authority on the relay path — that surface does no Discord lookup for a relayed caller.
+        // Proposing a command is a tier capability (operator+, toggle-independent; the user still
+        // confirms each one), so nothing here needs to pre-compute it.
+        //
+        // autoAct is the exception and stays its own decision: may the assistant AUTO-RUN lifecycle
+        // commands with no confirmation? admin ONLY, AND the user turned the toggle on. body.Actions is
+        // the toggle INTENT — it can only ever narrow this, never widen authority, so an operator (or a
+        // tampered SPA forcing actions:true) is zeroed here.
         KgsmTier tier = ci is not null ? SessionClaims.ReadTier(ci) : KgsmTier.None;
-        bool canAct = tier >= KgsmTier.Operator;
+        var caller = RelayPrincipal.From(identity, tier);
         bool autoAct = (body.Actions ?? false) && tier >= KgsmTier.Admin;
 
         // The per-chat conversation id from the SPA (the "new chat" identity). Forwarded to the assistant
@@ -95,7 +95,7 @@ public sealed class AssistantController(
         HttpResponseMessage? upstream;
         try
         {
-            upstream = await assistant.OpenTurnStreamAsync(turnBody, identity.UserId, identity.Display, canAct, autoAct, conversationId, ct);
+            upstream = await assistant.OpenTurnStreamAsync(turnBody, caller, autoAct, conversationId, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -183,10 +183,14 @@ public sealed class AssistantController(
         if (identity is null)
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no verified identity");
 
+        // This action is operator-gated, so the forwarded tier is operator or better — but it is read,
+        // never assumed, so an admin confirming is relayed as an admin.
+        var caller = RelayPrincipal.From(identity, SessionClaims.ReadTier(ci!));
+
         HttpResponseMessage? upstream;
         try
         {
-            upstream = await assistant.ConfirmAsync(identity.UserId, identity.Display, body, ct);
+            upstream = await assistant.ConfirmAsync(caller, body, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -247,7 +251,7 @@ public sealed class AssistantController(
     /// </summary>
     [HttpGet("conversations")]
     public Task<IActionResult> Conversations(CancellationToken ct) =>
-        RelayAsync((id, ct2) => assistant.GetConversationsAsync(id.UserId, id.Display, ct2), RelayedJson, ct);
+        RelayAsync((c, ct2) => assistant.GetConversationsAsync(c, ct2), RelayedJson, ct);
 
     /// <summary>
     /// <c>GET /api/v1/assistant/conversations/{id}</c> — one of the caller's chats, full transcript,
@@ -256,7 +260,7 @@ public sealed class AssistantController(
     /// </summary>
     [HttpGet("conversations/{id}")]
     public Task<IActionResult> Conversation(string id, CancellationToken ct) =>
-        RelayAsync((ident, ct2) => assistant.GetConversationAsync(ident.UserId, ident.Display, id, ct2), RelayedJson, ct);
+        RelayAsync((c, ct2) => assistant.GetConversationAsync(c, id, ct2), RelayedJson, ct);
 
     /// <summary>
     /// <c>DELETE /api/v1/assistant/conversations/{id}</c> — soft-deletes one of the caller's chats,
@@ -266,7 +270,7 @@ public sealed class AssistantController(
     /// </summary>
     [HttpDelete("conversations/{id}")]
     public Task<IActionResult> DeleteConversation(string id, CancellationToken ct) =>
-        RelayAsync((ident, ct2) => assistant.DeleteConversationAsync(ident.UserId, ident.Display, id, ct2),
+        RelayAsync((c, ct2) => assistant.DeleteConversationAsync(c, id, ct2),
             _ => Task.FromResult<IActionResult>(NoContent()), ct);
 
     /// <summary>
@@ -279,7 +283,7 @@ public sealed class AssistantController(
     /// </summary>
     [HttpPost("conversations/{id}/compact")]
     public Task<IActionResult> CompactConversation(string id, CancellationToken ct) =>
-        RelayAsync((ident, ct2) => assistant.CompactConversationAsync(ident.UserId, ident.Display, id, ct2), RelayedJson, ct);
+        RelayAsync((c, ct2) => assistant.CompactConversationAsync(c, id, ct2), RelayedJson, ct);
 
     /// <summary>
     /// <c>POST /api/v1/assistant/conversations/{id}/turns/{turnId}/feedback</c> — how the caller judged
@@ -298,8 +302,8 @@ public sealed class AssistantController(
     public Task<IActionResult> SetTurnFeedback(
         string id, long turnId, [FromBody] TurnFeedbackRequest? body, CancellationToken ct) =>
         RelayAsync(
-            (ident, ct2) => assistant.SetTurnFeedbackAsync(
-                ident.UserId, ident.Display, id, turnId, body?.Rating, body?.Note, ct2),
+            (c, ct2) => assistant.SetTurnFeedbackAsync(
+                c, id, turnId, body?.Rating, body?.Note, ct2),
             _ => Task.FromResult<IActionResult>(NoContent()), ct);
 
     /// <summary>
@@ -309,7 +313,7 @@ public sealed class AssistantController(
     /// <para>
     /// <b>Admin, not operator:</b> every other conversation endpoint here reads the CALLER'S OWN history
     /// and is viewer-gated; these three read other people's, which is a different power from acting on a
-    /// server. The API's verdict rides to the assistant as <c>X-Relay-Admin</c>, which that surface is
+    /// server. The caller's verified tier rides to the assistant as <c>X-Relay-Tier</c>, which that surface is
     /// fail-closed on — so an unauthorized caller is stopped here, and a relay that never asserts admin is
     /// stopped there.
     /// </para>
@@ -322,7 +326,7 @@ public sealed class AssistantController(
     [HttpGet("admin/conversations/users")]
     [Authorize(Policy = AuthPolicy.Admin)]
     public Task<IActionResult> ReviewUsers(CancellationToken ct) =>
-        RelayAsync((id, ct2) => assistant.GetReviewUsersAsync(id.UserId, id.Display, ct2), RelayedJson, ct);
+        RelayAsync((c, ct2) => assistant.GetReviewUsersAsync(c, ct2), RelayedJson, ct);
 
     /// <summary>
     /// <c>GET /api/v1/assistant/admin/conversations/stats</c> — the corpus roll-up behind the assistant's
@@ -334,7 +338,7 @@ public sealed class AssistantController(
     [HttpGet("admin/conversations/stats")]
     [Authorize(Policy = AuthPolicy.Admin)]
     public Task<IActionResult> ReviewStats(CancellationToken ct) =>
-        RelayAsync((id, ct2) => assistant.GetReviewStatsAsync(id.UserId, id.Display, ct2), RelayedJson, ct);
+        RelayAsync((c, ct2) => assistant.GetReviewStatsAsync(c, ct2), RelayedJson, ct);
 
     /// <summary>
     /// <c>GET /api/v1/assistant/admin/conversations?user={userId}</c> — one user's conversations,
@@ -348,7 +352,7 @@ public sealed class AssistantController(
         if (string.IsNullOrWhiteSpace(user))
             return Task.FromResult<IActionResult>(Error(StatusCodes.Status400BadRequest, "bad_request", "user is required"));
 
-        return RelayAsync((id, ct2) => assistant.GetReviewConversationsAsync(id.UserId, id.Display, user, ct2), RelayedJson, ct);
+        return RelayAsync((c, ct2) => assistant.GetReviewConversationsAsync(c, user, ct2), RelayedJson, ct);
     }
 
     /// <summary>
@@ -360,14 +364,14 @@ public sealed class AssistantController(
     [HttpGet("admin/conversations/{handle}")]
     [Authorize(Policy = AuthPolicy.Admin)]
     public Task<IActionResult> ReviewConversation(string handle, CancellationToken ct) =>
-        RelayAsync((id, ct2) => assistant.GetReviewConversationAsync(id.UserId, id.Display, handle, ct2), RelayedJson, ct);
+        RelayAsync((c, ct2) => assistant.GetReviewConversationAsync(c, handle, ct2), RelayedJson, ct);
 
     // Shared relay core: the same capability + identity gates as the turn, then the caller-supplied
     // projection of a SUCCESSFUL upstream response (verbatim JSON for the reads, 204 for the delete).
     // Unlike the SSE turn, nothing is committed before we know the upstream status, so a real status code
     // is returned on every branch.
     private async Task<IActionResult> RelayAsync(
-        Func<DiscordIdentity, CancellationToken, Task<HttpResponseMessage?>> call,
+        Func<RelayPrincipal, CancellationToken, Task<HttpResponseMessage?>> call,
         Func<HttpResponseMessage, Task<IActionResult>> onSuccess,
         CancellationToken ct)
     {
@@ -382,10 +386,15 @@ public sealed class AssistantController(
         if (identity is null)
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no verified identity");
 
+        // Read the tier here rather than at each call site: the relayed calls are a mix of self-service
+        // and admin-gated, and picking the authority per call is how one of them ends up asserting an
+        // authority its own action does not require.
+        var caller = RelayPrincipal.From(identity, SessionClaims.ReadTier(ci!));
+
         HttpResponseMessage? upstream;
         try
         {
-            upstream = await call(identity, ct);
+            upstream = await call(caller, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

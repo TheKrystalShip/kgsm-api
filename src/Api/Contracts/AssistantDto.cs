@@ -12,10 +12,11 @@ public sealed record AssistantTurnRequest(
     string? Prompt,
     bool? Think = null,
     IReadOnlyList<string>? Tools = null,
-    // The per-turn "let the assistant act" toggle from the SPA chat. INTENT only — the API folds it
-    // with the caller's verified tier (operator+) and forwards a single trusted decision to the
-    // assistant (X-Relay-Can-Act). A viewer setting this true cannot escalate: the tier gate zeroes it,
-    // and command execution itself is still the operator-gated M3 path (fork (a)).
+    // The per-turn "let the assistant act" toggle from the SPA chat. INTENT only — the API folds it with
+    // the caller's verified tier and forwards the result as X-Relay-Auto-Act, the authority to run a
+    // lifecycle command with no confirmation. A viewer or operator setting this true cannot escalate: the
+    // tier gate zeroes it (auto-run is admin-only), and command execution is still the operator-gated
+    // path. Proposing a command needs no toggle at all — the forwarded tier is the whole authority.
     bool? Actions = null,
     // The per-CHAT conversation id from the SPA ("new chat" = new id). Forwarded to the assistant as a
     // SUB-scope of the verified caller's memory key (web:<userId>:<conversationId>) so each chat is a

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — one relay header carries the caller's authority
+
+- **`X-Relay-Tier` replaces `X-Relay-Can-Act` and `X-Relay-Admin`.** The assistant does no Discord
+  lookup for a relayed caller, so the forwarded tier is its entire authority; two booleans meant two
+  places to get that wrong, and the review calls each asserted a literal `admin: true` that was only
+  correct for as long as every one of them stayed behind an admin-gated action.
+- **`RelayPrincipal` bundles the forwarded identity with the tier**, so a call site cannot forward a
+  person while hand-picking what they may do. Every relay call writes its headers through one helper.
+- `X-Relay-Auto-Act` is unchanged: admin tier **∧** the user's per-turn toggle is a preference riding
+  a permission, and cannot be re-derived from the tier alone.
+- `AssistantRelayHeaderTests` captures what actually goes on the wire against a stub assistant. The
+  rest of the relay suite runs with the assistant unprovisioned, so until now no test had ever seen a
+  relay request leave the process.
+
 ### Changed — sessions move to the shared package
 
 - **`ISessionTokenService`, `SessionValidator`, `SessionCleanupWorker` and the claim readers now come

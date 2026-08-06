@@ -2,8 +2,31 @@ using System.Net.Http.Json;
 using System.Net.Sockets;
 
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Discord;
 
 namespace TheKrystalShip.Api.Services.Leaves;
+
+/// <summary>
+/// The verified end-user a relay call acts for: who they are, and what this API resolved they may do.
+/// </summary>
+/// <remarks>
+/// Identity and authority travel together deliberately. They were separate arguments, and a call site
+/// could forward a person while forgetting — or hand-picking — what they were allowed to do; the
+/// review calls each passed a literal <c>true</c> for admin, which is only correct for as long as
+/// every one of them stays behind an admin-gated action. Bundling them means a caller cannot express
+/// "this user, with somebody else's authority".
+/// </remarks>
+/// <param name="Tier">
+/// The tier read from the caller's own verified session. The assistant trusts it because the relay
+/// secret matched, so it must never be anything but what this API measured.
+/// </param>
+public sealed record RelayPrincipal(string UserId, string DisplayName, KgsmTier Tier)
+{
+    /// <summary>The caller as forwarded on their own behalf.</summary>
+    public static RelayPrincipal From(DiscordIdentity identity, KgsmTier tier) =>
+        new(identity.UserId, identity.Display, tier);
+}
 
 /// <summary>
 /// The kgsm-assistant leaf client: a typed <see cref="HttpClient"/> onto the assistant's HTTP
@@ -73,10 +96,10 @@ public sealed class AssistantClient : HttpClient
     /// Opens the assistant's <c>POST /turn</c> as an SSE stream on a verified end-user's behalf (M7):
     /// posts <paramref name="turnBody"/> with <c>Accept: text/event-stream</c> and the trusted-relay
     /// headers — the shared <c>X-Relay-Secret</c>, the forwarded Discord identity (<c>X-Relay-User</c>
-    /// / <c>X-Relay-User-Name</c>), and the API's per-turn action-authority decision
-    /// (<c>X-Relay-Can-Act</c>, from <paramref name="canAct"/>, the authority to PROPOSE; and
-    /// <c>X-Relay-Auto-Act</c>, from <paramref name="autoAct"/>, the admin-only authority to AUTO-RUN
-    /// lifecycle commands without confirmation), and the optional per-chat <c>X-Relay-Conversation-Id</c>
+    /// / <c>X-Relay-User-Name</c>), the caller's verified tier (<c>X-Relay-Tier</c>, which is the
+    /// authority to PROPOSE a command), the per-turn <c>X-Relay-Auto-Act</c> (from
+    /// <paramref name="autoAct"/>, the admin-only authority to AUTO-RUN lifecycle commands without
+    /// confirmation), and the optional per-chat <c>X-Relay-Conversation-Id</c>
     /// (from <paramref name="conversationId"/>) that sub-scopes the user's assistant memory so each SPA
     /// chat is a fresh context window — and returns the upstream response
     /// with <em>headers read only</em>, so
@@ -91,7 +114,7 @@ public sealed class AssistantClient : HttpClient
     /// <paramref name="ct"/> and tears the whole chain down.
     /// </remarks>
     public async Task<HttpResponseMessage?> OpenTurnStreamAsync(
-        object turnBody, string relayUserId, string relayDisplayName, bool canAct, bool autoAct,
+        object turnBody, RelayPrincipal caller, bool autoAct,
         string? conversationId, CancellationToken ct)
     {
         if (!IsProvisioned)
@@ -102,22 +125,12 @@ public sealed class AssistantClient : HttpClient
             Content = JsonContent.Create(turnBody),
         };
         request.Headers.Accept.ParseAdd("text/event-stream");
-        if (!string.IsNullOrEmpty(_relaySecret))
-            request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
-        // The API's PROPOSE authority for this turn (operator+ tier). The assistant trusts it ONLY
-        // because X-Relay-Secret matched; "false" (or absent) never grants.
-        request.Headers.TryAddWithoutValidation("X-Relay-Can-Act", canAct ? "true" : "false");
+        AddRelayHeaders(request, caller);
         // The API's AUTO-ACCEPT authority (admin tier ∧ the user's toggle): when "true" the assistant
-        // runs lifecycle commands immediately instead of staging them. Strictly stronger than can-act;
-        // same trust basis and same fail-closed default.
+        // runs lifecycle commands immediately instead of staging them. Strictly stronger than the tier
+        // alone, which is why it stays its own header — it is a preference riding a permission, not a
+        // permission. Same trust basis and same fail-closed default: anything but "true" is no.
         request.Headers.TryAddWithoutValidation("X-Relay-Auto-Act", autoAct ? "true" : "false");
-        // The user id is a Discord snowflake the API set at login (not free text); the display name is a
-        // user-controlled Discord value crossing a trust boundary, so strip control chars (CR/LF) — defense
-        // in depth against header injection, and it also avoids a weird display name throwing on send.
-        request.Headers.TryAddWithoutValidation("X-Relay-User", HeaderSafe(relayUserId));
-        string displayName = HeaderSafe(relayDisplayName);
-        if (!string.IsNullOrEmpty(displayName))
-            request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
         // The per-chat conversation id — a SUB-scope of THIS user's assistant memory
         // (web:<userId>:<id>), so a "new chat" in the SPA is a fresh context window. NOT an identity:
         // the assistant always prefixes the verified X-Relay-User, so this can only partition the
@@ -138,8 +151,8 @@ public sealed class AssistantClient : HttpClient
     /// <see langword="null"/> when the assistant isn't provisioned; the caller <strong>owns disposal</strong>.
     /// </summary>
     public Task<HttpResponseMessage?> GetConversationsAsync(
-        string relayUserId, string relayDisplayName, CancellationToken ct) =>
-        RelaySendAsync(HttpMethod.Get, "/conversations", relayUserId, relayDisplayName, ct);
+        RelayPrincipal caller, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Get, "/conversations", caller, ct);
 
     /// <summary>
     /// Loads one of the verified end-user's conversations: <c>GET /conversations/{chatId}</c> on their
@@ -149,8 +162,8 @@ public sealed class AssistantClient : HttpClient
     /// <see langword="null"/> when the assistant isn't provisioned; the caller <strong>owns disposal</strong>.
     /// </summary>
     public Task<HttpResponseMessage?> GetConversationAsync(
-        string relayUserId, string relayDisplayName, string chatId, CancellationToken ct) =>
-        RelaySendAsync(HttpMethod.Get, $"/conversations/{Uri.EscapeDataString(chatId)}", relayUserId, relayDisplayName, ct);
+        RelayPrincipal caller, string chatId, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Get, $"/conversations/{Uri.EscapeDataString(chatId)}", caller, ct);
 
     /// <summary>
     /// Soft-deletes one of the verified end-user's conversations: <c>DELETE /conversations/{chatId}</c> on
@@ -161,8 +174,8 @@ public sealed class AssistantClient : HttpClient
     /// isn't provisioned; the caller <strong>owns disposal</strong>.
     /// </summary>
     public Task<HttpResponseMessage?> DeleteConversationAsync(
-        string relayUserId, string relayDisplayName, string chatId, CancellationToken ct) =>
-        RelaySendAsync(HttpMethod.Delete, $"/conversations/{Uri.EscapeDataString(chatId)}", relayUserId, relayDisplayName, ct);
+        RelayPrincipal caller, string chatId, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Delete, $"/conversations/{Uri.EscapeDataString(chatId)}", caller, ct);
 
     /// <summary>
     /// Compacts one of the verified end-user's conversations: <c>POST /conversations/{chatId}/compact</c> on
@@ -174,8 +187,8 @@ public sealed class AssistantClient : HttpClient
     /// <strong>owns disposal</strong>.
     /// </summary>
     public Task<HttpResponseMessage?> CompactConversationAsync(
-        string relayUserId, string relayDisplayName, string chatId, CancellationToken ct) =>
-        RelaySendAsync(HttpMethod.Post, $"/conversations/{Uri.EscapeDataString(chatId)}/compact", relayUserId, relayDisplayName, ct);
+        RelayPrincipal caller, string chatId, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Post, $"/conversations/{Uri.EscapeDataString(chatId)}/compact", caller, ct);
 
     /// <summary>
     /// Records how the verified end-user judged one of their own answers:
@@ -188,25 +201,25 @@ public sealed class AssistantClient : HttpClient
     /// isn't provisioned; the caller <strong>owns disposal</strong>.
     /// </summary>
     public Task<HttpResponseMessage?> SetTurnFeedbackAsync(
-        string relayUserId, string relayDisplayName, string chatId, long turnId,
+        RelayPrincipal caller, string chatId, long turnId,
         string? rating, string? note, CancellationToken ct) =>
         RelaySendAsync(
             HttpMethod.Post,
             $"/conversations/{Uri.EscapeDataString(chatId)}/turns/{turnId}/feedback",
-            relayUserId, relayDisplayName, ct,
+            caller, ct,
             body: JsonContent.Create(new { rating, note }));
 
     /// <summary>
     /// Lists everyone who has talked to this host's assistant: <c>GET /admin/conversations/users</c>, the
     /// index an administrator picks from when reviewing how the assistant is answering. Carries
-    /// <c>X-Relay-Admin: true</c> — the assistant's review surface is fail-closed on that header, and this
-    /// API only ever sets it from a verified admin tier. The body is the assistant's JSON verbatim.
+    /// the caller's verified tier — the assistant's review surface is fail-closed on it, and this action is
+    /// admin-gated, so anyone reaching here forwards an admin tier. The body is the assistant's JSON verbatim.
     /// Returns <see langword="null"/> when the assistant isn't provisioned; the caller <strong>owns
     /// disposal</strong>.
     /// </summary>
     public Task<HttpResponseMessage?> GetReviewUsersAsync(
-        string relayUserId, string relayDisplayName, CancellationToken ct) =>
-        RelaySendAsync(HttpMethod.Get, "/admin/conversations/users", relayUserId, relayDisplayName, ct, admin: true);
+        RelayPrincipal caller, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Get, "/admin/conversations/users", caller, ct);
 
     /// <summary>
     /// Reads the corpus roll-up behind the assistant's operator overview:
@@ -217,20 +230,20 @@ public sealed class AssistantClient : HttpClient
     /// the caller <strong>owns disposal</strong>.
     /// </summary>
     public Task<HttpResponseMessage?> GetReviewStatsAsync(
-        string relayUserId, string relayDisplayName, CancellationToken ct) =>
-        RelaySendAsync(HttpMethod.Get, "/admin/conversations/stats", relayUserId, relayDisplayName, ct, admin: true);
+        RelayPrincipal caller, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Get, "/admin/conversations/stats", caller, ct);
 
     /// <summary>
     /// Lists one user's conversations for review: <c>GET /admin/conversations?user={userId}</c>. Unlike the
     /// self-service listing, <paramref name="ofUserId"/> names SOMEONE ELSE — which is exactly why the call
-    /// carries <c>X-Relay-Admin</c> and why its controller is admin-gated. Soft-deleted conversations are
+    /// needs an admin tier forwarded and why its controller is admin-gated. Soft-deleted conversations are
     /// included, flagged, by the assistant. Returns <see langword="null"/> when the assistant isn't
     /// provisioned; the caller <strong>owns disposal</strong>.
     /// </summary>
     public Task<HttpResponseMessage?> GetReviewConversationsAsync(
-        string relayUserId, string relayDisplayName, string ofUserId, CancellationToken ct) =>
+        RelayPrincipal caller, string ofUserId, CancellationToken ct) =>
         RelaySendAsync(HttpMethod.Get, $"/admin/conversations?user={Uri.EscapeDataString(ofUserId)}",
-            relayUserId, relayDisplayName, ct, admin: true);
+            caller, ct);
 
     /// <summary>
     /// Reads one conversation's transcript for review: <c>GET /admin/conversations/{handle}</c>.
@@ -239,16 +252,16 @@ public sealed class AssistantClient : HttpClient
     /// assistant isn't provisioned; the caller <strong>owns disposal</strong>.
     /// </summary>
     public Task<HttpResponseMessage?> GetReviewConversationAsync(
-        string relayUserId, string relayDisplayName, string handle, CancellationToken ct) =>
+        RelayPrincipal caller, string handle, CancellationToken ct) =>
         RelaySendAsync(HttpMethod.Get, $"/admin/conversations/{Uri.EscapeDataString(handle)}",
-            relayUserId, relayDisplayName, ct, admin: true);
+            caller, ct);
 
     /// <summary>
     /// Finalizes a staged confirmation on the verified end-user's behalf (the blueprint-review Save, and
     /// any future confirm): <c>POST /confirm</c> with the trusted-relay identity + the forwarded body
     /// (<c>{ token, editedContent }</c>). The assistant validates the single-use token, re-derives action
-    /// authority from the forwarded <c>X-Relay-Can-Act</c> (this endpoint is operator-gated, so the header
-    /// is unconditionally the verified tier), and runs the whole finalize pipeline.
+    /// authority from the forwarded <c>X-Relay-Tier</c> (this endpoint is operator-gated, so any caller
+    /// reaching it forwards operator or better), and runs the whole finalize pipeline.
     /// <para>
     /// A blueprint finalize is <em>minutes</em> of test-install → verify → repair, so — like the turn — the
     /// caller asks for it <c>text/event-stream</c> and the assistant STREAMS it: <c>progress</c> steps +
@@ -261,7 +274,7 @@ public sealed class AssistantClient : HttpClient
     /// </para>
     /// </summary>
     public async Task<HttpResponseMessage?> ConfirmAsync(
-        string relayUserId, string relayDisplayName, AssistantConfirmRequest body, CancellationToken ct)
+        RelayPrincipal caller, AssistantConfirmRequest body, CancellationToken ct)
     {
         if (!IsProvisioned)
             return null;
@@ -275,18 +288,11 @@ public sealed class AssistantClient : HttpClient
         // Opt into the streamed finalize (progress + heartbeats + terminal `result`). The assistant falls
         // back to a buffered ConfirmResponse for any caller that doesn't ask for the stream.
         request.Headers.Accept.ParseAdd("text/event-stream");
-        if (!string.IsNullOrEmpty(_relaySecret))
-            request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
-        request.Headers.TryAddWithoutValidation("X-Relay-User", HeaderSafe(relayUserId));
-        string displayName = HeaderSafe(relayDisplayName);
-        if (!string.IsNullOrEmpty(displayName))
-            request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
         // The confirm EXECUTES a mutation (blueprint finalize install/verify), so the assistant re-derives
-        // action authority the same way it did when it PROPOSED — from X-Relay-Can-Act. This endpoint is
-        // already [Authorize(Operator)], so any caller reaching here is action-authorized: forward the
-        // verified tier decision as the header (the turn relay does the same for the propose side). Without
-        // it a Discord-less relay host has no authority source and denies the finalize.
-        request.Headers.TryAddWithoutValidation("X-Relay-Can-Act", "true");
+        // action authority the same way it did when it PROPOSED — from the forwarded tier. A relay host
+        // with no Discord config of its own has no other authority source, so without this the finalize
+        // is denied.
+        AddRelayHeaders(request, caller);
 
         // ResponseHeadersRead: return the stream as soon as the headers land so the minutes-long finalize
         // body isn't HttpClient.Timeout-bound (the class Timeout is Infinite; see the ctor). The heartbeats
@@ -294,34 +300,51 @@ public sealed class AssistantClient : HttpClient
         return await SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
     }
 
-    // Shared relay-on-the-user's-behalf (GET read / DELETE soft-delete / compact): forwards the secret +
-    // forwarded identity (these endpoints need no can-act/auto-act decision), reads the small body fully.
-    // Self-bounded to ReadTimeout via a linked token — these are short request/response calls, not the long
-    // SSE stream or the minutes-long confirm (the class Timeout is now unbounded, so each call budgets itself).
+    // Shared relay-on-the-user's-behalf (GET read / DELETE soft-delete / compact / review): forwards the
+    // secret and the caller, reads the small body fully. Self-bounded to ReadTimeout via a linked token —
+    // these are short request/response calls, not the long SSE stream or the minutes-long confirm (the
+    // class Timeout is unbounded, so each call budgets itself).
     private async Task<HttpResponseMessage?> RelaySendAsync(
-        HttpMethod method, string path, string relayUserId, string relayDisplayName, CancellationToken ct,
-        bool admin = false, HttpContent? body = null)
+        HttpMethod method, string path, RelayPrincipal caller, CancellationToken ct,
+        HttpContent? body = null)
     {
         if (!IsProvisioned)
             return null;
 
         var request = new HttpRequestMessage(method, path) { Content = body };
         request.Headers.Accept.ParseAdd("application/json");
-        if (!string.IsNullOrEmpty(_relaySecret))
-            request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
-        request.Headers.TryAddWithoutValidation("X-Relay-User", HeaderSafe(relayUserId));
-        string displayName = HeaderSafe(relayDisplayName);
-        if (!string.IsNullOrEmpty(displayName))
-            request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
-        // Only the review calls set this, and only because their controller already required admin tier.
-        // Sent as a literal "true" rather than a formatted bool so it can never be spelled something the
-        // assistant's fail-closed check reads as false.
-        if (admin)
-            request.Headers.TryAddWithoutValidation("X-Relay-Admin", "true");
+        AddRelayHeaders(request, caller);
 
         using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timed.CancelAfter(ReadTimeout);
         return await SendAsync(request, timed.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes the trusted-relay headers: the shared secret, the forwarded identity, and the caller's
+    /// verified tier.
+    /// </summary>
+    /// <remarks>
+    /// One place, so identity and authority cannot be forwarded apart. The tier is the assistant's whole
+    /// authority on this path — it does no Discord lookup for a relayed caller — and it is trusted there
+    /// only because the secret matched. It is written as the canonical wire spelling, which the assistant
+    /// parses fail-closed: anything it does not recognise, including this header being absent, is
+    /// <see cref="KgsmTier.None"/>, never a softer grant.
+    /// </remarks>
+    private void AddRelayHeaders(HttpRequestMessage request, RelayPrincipal caller)
+    {
+        if (!string.IsNullOrEmpty(_relaySecret))
+            request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
+
+        // The user id is a Discord snowflake set at login (not free text); the display name is a
+        // user-controlled Discord value crossing a trust boundary, so strip control chars (CR/LF) —
+        // defence in depth against header injection, and it also avoids a weird display name throwing.
+        request.Headers.TryAddWithoutValidation("X-Relay-User", HeaderSafe(caller.UserId));
+        string displayName = HeaderSafe(caller.DisplayName);
+        if (!string.IsNullOrEmpty(displayName))
+            request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
+
+        request.Headers.TryAddWithoutValidation("X-Relay-Tier", KgsmTiers.ToWire(caller.Tier));
     }
 
     // Drop control chars (incl. CR/LF) so a user-controlled value can never split a header.
