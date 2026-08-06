@@ -6,6 +6,8 @@ using TheKrystalShip.Api.Infrastructure;
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth.Sessions;
+
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>

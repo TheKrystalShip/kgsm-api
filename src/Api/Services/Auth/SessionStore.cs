@@ -2,6 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Data;
 
+using TheKrystalShip.KGSM.Auth.Sessions;
+
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
@@ -23,9 +25,36 @@ namespace TheKrystalShip.Api.Services.Auth;
 /// </remarks>
 public sealed class SessionStore(
     IServiceScopeFactory scopeFactory,
-    ILogger<SessionStore> logger)
+    ILogger<SessionStore> logger) : ISessionRegistry
 {
     private readonly SemaphoreSlim _writeGate = new(1, 1);
+
+    // ── ISessionRegistry ────────────────────────────────────────────────────
+    // The shared contract every KGSM surface's sessions satisfy. This store also keeps a richer
+    // surface below (listing a user's devices, revoking all of them) that belongs to this API's admin
+    // endpoints rather than to the ecosystem, which is why the interface is the narrower of the two.
+
+    Task ISessionRegistry.CreateAsync(SessionRegistration session, CancellationToken ct) =>
+        CreateAsync(session.SessionId, session.UserId, session.HostId, session.Created,
+                    session.Expires, session.UserAgent, session.CurrentJti, ct);
+
+    Task<bool> ISessionRegistry.RotateAsync(
+        string sessionId, string presentedJti, string newJti, DateTimeOffset newExpires, CancellationToken ct) =>
+        UpdateForRefreshAsync(sessionId, presentedJti, newJti, newExpires, ct);
+
+    /// <summary>
+    /// The per-request liveness check, uncached — the cache lives in the validator above this. Reads
+    /// through its own DI scope because this store is a singleton and the DbContext is scoped.
+    /// </summary>
+    public async Task<bool> IsAliveAsync(string sessionId, CancellationToken ct = default)
+    {
+        using IServiceScope scope = scopeFactory.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        return await db.Sessions.AsNoTracking()
+            .AnyAsync(s => s.Id == sessionId && !s.Revoked && s.Expires > now, ct)
+            .ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Insert a new session row minted at the OAuth callback. Called once per login — this row IS

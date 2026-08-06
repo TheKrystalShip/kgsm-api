@@ -6,6 +6,9 @@ using Microsoft.Extensions.Logging;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth.Sessions;
+using Microsoft.Extensions.Hosting;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -119,25 +122,59 @@ public sealed class SessionCleanupTests(AuthTestFactory factory) : IClassFixture
         // A second, manually-driven worker instance (same SessionStore/ApiOptions the app uses) so the
         // test controls start/stop directly rather than waiting on the real hosted service's internal
         // timing — StartAsync kicks off ExecuteAsync's startup catch-up pass, which is what's under test.
-        var store = services.GetRequiredService<SessionStore>();
-        var options = services.GetRequiredService<ApiOptions>();
+        var registry = services.GetRequiredService<ISessionRegistry>();
         var logger = services.GetRequiredService<ILogger<SessionCleanupWorker>>();
-        var worker = new SessionCleanupWorker(store, options, logger);
+        var worker = new SessionCleanupWorker(registry, TimeSpan.FromMinutes(10), logger);
 
         await worker.StartAsync(CancellationToken.None);
-        await Task.Delay(300); // let the async startup catch-up pass complete
+        // Poll for the outcome rather than sleeping a guessed interval: the catch-up pass is async,
+        // and a fixed wait either flakes on a slow machine or wastes time on a fast one.
+        bool swept = await WaitUntilAsync(async () => !await RowExistsAsync(services, expired));
         await worker.StopAsync(CancellationToken.None);
 
-        Assert.False(await RowExistsAsync(services, expired));
+        Assert.True(swept, "the startup catch-up pass did not delete the expired row");
         Assert.True(await RowExistsAsync(services, inWindow));
+    }
+
+    /// <summary>
+    /// <c>Api__SessionsDisabled=true</c> composes no GC worker at all, so nothing sweeps and an expired
+    /// row survives. The switch decides what is built rather than being a flag the shared worker checks
+    /// on every tick — a registry that is off has nothing to collect, and a worker that runs only to
+    /// skip its own work is a spinning no-op.
+    /// </summary>
+    /// <summary>Polls <paramref name="condition"/> until it holds or the budget elapses.</summary>
+    private static async Task<bool> WaitUntilAsync(Func<Task<bool>> condition, int timeoutMs = 5000)
+    {
+        DateTime deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (await condition())
+                return true;
+            await Task.Delay(25);
+        }
+        return await condition();
+    }
+
+    [Fact]
+    public void Worker_IsNotComposedWhenSessionsDisabled()
+    {
+        WebApplicationFactory<Program> disabled = factory.WithWebHostBuilder(b =>
+            b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(
+                new Dictionary<string, string?> { ["Api:SessionsDisabled"] = "true" })));
+
+        Assert.DoesNotContain(
+            disabled.Services.GetServices<IHostedService>(),
+            svc => svc is SessionCleanupWorker);
+
+        // And the validator answers without a registry, so nothing downstream branches on the switch.
+        Assert.IsType<InertSessionValidator>(disabled.Services.GetRequiredService<ISessionValidator>());
     }
 
     [Fact]
     public async Task Worker_InertWhenSessionsDisabled_ExpiredRowSurvives()
     {
-        // Api__SessionsDisabled=true → ExecuteAsync logs + returns immediately, no timer, no delete.
-        // Seed the expired row BEFORE constructing/starting the worker (CreateAsync itself doesn't care
-        // about the master switch — it's a plain table write) and confirm the disabled worker leaves it.
+        // The end-to-end half of the above: with the switch on, a row past its expiry is still there
+        // after the app has been up long enough for a catch-up pass to have run had one been composed.
         WebApplicationFactory<Program> disabled = factory.WithWebHostBuilder(b =>
             b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(
                 new Dictionary<string, string?> { ["Api:SessionsDisabled"] = "true" })));
@@ -145,14 +182,7 @@ public sealed class SessionCleanupTests(AuthTestFactory factory) : IClassFixture
 
         string expired = await SeedRowAsync(services, DateTimeOffset.UtcNow.AddMinutes(-1));
 
-        var store = services.GetRequiredService<SessionStore>();
-        var options = services.GetRequiredService<ApiOptions>();
-        var logger = services.GetRequiredService<ILogger<SessionCleanupWorker>>();
-        var worker = new SessionCleanupWorker(store, options, logger);
-
-        await worker.StartAsync(CancellationToken.None);
         await Task.Delay(200);
-        await worker.StopAsync(CancellationToken.None);
 
         Assert.True(await RowExistsAsync(services, expired));
     }

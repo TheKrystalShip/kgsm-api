@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — sessions move to the shared package
+
+- **`ISessionTokenService`, `SessionValidator`, `SessionCleanupWorker` and the claim readers now come
+  from `TheKrystalShip.KGSM.Auth.Sessions`.** `SessionStore` stays and implements the package's
+  `ISessionRegistry` — storage is this API's, the session model is the ecosystem's.
+- **One session lifetime.** `Api__SessionsRefreshAbsoluteDays` now drives both the refresh token's
+  expiry and the registry row's; the hardcoded 30-day constant that had to be kept in lockstep with it
+  by hand is gone.
+- **`Api__SessionsDisabled` is composed rather than branched** — an `InertSessionValidator` and no GC
+  worker, instead of a flag the shared types check on every call.
+- The JWT issuer stays `kgsm-api`, explicitly. It is validated, so changing it would invalidate every
+  token already issued.
+
 ### Changed — the Discord seam and the tier model are the ecosystem's
 
 - **`IDiscordDirectory` (from `TheKrystalShip.KGSM.Auth.Discord`) replaces this API's own Discord

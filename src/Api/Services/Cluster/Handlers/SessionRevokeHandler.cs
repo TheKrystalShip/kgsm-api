@@ -1,6 +1,8 @@
 using System.Text.Json;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth.Sessions;
+
 namespace TheKrystalShip.Api.Services.Cluster.Handlers;
 
 /// <summary>

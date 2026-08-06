@@ -10,6 +10,8 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 
+using TheKrystalShip.KGSM.Auth.Sessions;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>

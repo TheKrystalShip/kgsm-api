@@ -3,6 +3,8 @@ using TheKrystalShip.Api.Contracts;
 
 using TheKrystalShip.KGSM.Auth.Discord;
 
+using TheKrystalShip.KGSM.Auth.Sessions;
+
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>

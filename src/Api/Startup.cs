@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -24,6 +25,8 @@ using TheKrystalShip.KGSM.Extensions;
 
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
+
+using TheKrystalShip.KGSM.Auth.Sessions;
 
 namespace TheKrystalShip.Api;
 
@@ -334,13 +337,30 @@ public class Startup(IConfiguration configuration)
         // D2, no cross-node coherence). Registered as a singleton + the IMemoryCache it depends on
         // (AddMemoryCache is the standard Microsoft.Extensions.Caching.Memory registration).
         services.AddMemoryCache();
-        services.AddSingleton<SessionValidator>();
-        services.AddSingleton<ISessionValidator>(sp => sp.GetRequiredService<SessionValidator>());
+        services.AddSingleton<ISessionRegistry>(sp => sp.GetRequiredService<SessionStore>());
 
-        // M4·c Increment 8 — the session GC worker: deletes expired rows (revoked or not) on a timer
-        // (Api__SessionsGcMs, default 10min) so the sessions table stays permanently bounded.
-        // A startup catch-up pass + PeriodicTimer. Inert (no timer at all) when SessionsEnabled is false.
-        services.AddHostedService<SessionCleanupWorker>();
+        // Api__SessionsDisabled makes the whole registry inert — the stateless-JWT posture, a debugging
+        // escape hatch. That switch is THIS API's, not the session package's: rather than teaching the
+        // shared validator and GC worker about a flag only one surface has, the switch decides what
+        // gets composed. Disabled means a validator that answers "alive" without asking anyone, and no
+        // GC worker at all — a genuinely inert registry rather than a live one that skips its work.
+        if (apiOptions.SessionsEnabled)
+        {
+            services.AddSingleton<ISessionValidator>(sp => new SessionValidator(
+                sp.GetRequiredService<ISessionRegistry>(),
+                sp.GetRequiredService<IMemoryCache>(),
+                TimeSpan.FromMilliseconds(apiOptions.SessionsCacheTtlMs)));
+
+            // Deletes expired rows (revoked or not) on a timer so the table stays permanently bounded.
+            services.AddHostedService(sp => new SessionCleanupWorker(
+                sp.GetRequiredService<ISessionRegistry>(),
+                TimeSpan.FromMilliseconds(apiOptions.SessionsGcMs),
+                sp.GetRequiredService<ILogger<SessionCleanupWorker>>()));
+        }
+        else
+        {
+            services.AddSingleton<ISessionValidator, InertSessionValidator>();
+        }
 
         // Player-presence live roster (player-presence-contract.md §5) — an in-memory projection driven
         // FROM KgsmAuditConsumer's own player.join/player.leave (+ start/stop reset) handlers, never via a
@@ -469,7 +489,9 @@ public class Startup(IConfiguration configuration)
         // in-process with a fake and no two surfaces can resolve a person differently. The token
         // service mints/validates the host-scoped JWTs; the tier handler grants a hierarchical
         // viewer/operator/admin policy from the 'tier' claim.
-        services.AddSingleton<ISessionTokenService, SessionTokenService>();
+        services.AddSingleton<ISessionTokenService>(sp => new SessionTokenService(
+            sp.GetRequiredService<ApiOptions>().ToSessionTokenOptions(),
+            sp.GetRequiredService<ILogger<SessionTokenService>>()));
         // The callback URL is this surface's own; the app, guild, token and role map are the host's.
         // All of it is projected from ApiOptions rather than re-read from configuration: ApiOptions is
         // the single place any key is interpreted, and a second reader is how two halves of one

@@ -10,6 +10,8 @@ using TheKrystalShip.KGSM.Core.Models;
 
 using TheKrystalShip.KGSM.Auth;
 
+using TheKrystalShip.KGSM.Auth.Sessions;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>

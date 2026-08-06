@@ -13,6 +13,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 using TheKrystalShip.KGSM.Auth.Discord;
 
+using TheKrystalShip.KGSM.Auth.Sessions;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>

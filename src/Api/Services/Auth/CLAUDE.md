@@ -40,6 +40,16 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
   Discord goes through it. **Never** call `discord.com` from anywhere else. This is what makes the
   whole 401/403/tier matrix testable in-process with a fake (`tests/Api.Tests`), and what keeps two
   surfaces from resolving the same person differently.
+- **The session machinery is the ecosystem's too.** `ISessionTokenService`, `SessionValidator`,
+  `SessionCleanupWorker`, `ISessionRegistry` and the claim readers come from
+  `TheKrystalShip.KGSM.Auth.Sessions`. `SessionStore` stays here — it IS this API's `ISessionRegistry`
+  (EF/SQLite, beside the audit log) and keeps a richer surface on top for the admin endpoints.
+  ⚠ **`Issuer` stays `"kgsm-api"`** (`ApiOptions.ToSessionTokenOptions`): it is validated, so adopting
+  the package's neutral default would 401 every token already issued and log everyone out.
+  ⚠ **`SessionsRefreshAbsoluteDays` is the only session lifetime.** The token's expiry and the
+  registry row's are both derived from it; never reintroduce a constant beside it.
+- **`Api__SessionsDisabled` is composed, not branched.** Startup registers `InertSessionValidator` and
+  no GC worker instead of teaching the shared types about a flag only this surface has.
 - **The tier vocabulary is the ecosystem's.** `KgsmTier`/`KgsmTiers`/`KgsmAuthClaims`/`KgsmTokenKind`
   come from `TheKrystalShip.KGSM.Auth`; this project keeps only `AuthPolicy` (ASP.NET policy names)
   and `TierAuthorizationHandler` (how this surface enforces them). There is no local tier enum to

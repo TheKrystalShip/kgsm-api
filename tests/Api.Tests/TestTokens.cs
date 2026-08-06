@@ -10,6 +10,8 @@ using TheKrystalShip.Api.Services.Auth;
 
 using TheKrystalShip.KGSM.Auth;
 
+using TheKrystalShip.KGSM.Auth.Sessions;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>Mints tokens with an arbitrary signing key/host — used to forge a validly-shaped but
@@ -26,7 +28,7 @@ internal static class TestTokens
                 ["Api:SigningKey"] = signingKey,
             })
             .Build();
-        var tokens = new SessionTokenService(ApiOptions.FromConfiguration(config), NullLogger<SessionTokenService>.Instance);
+        var tokens = new SessionTokenService(ApiOptions.FromConfiguration(config).ToSessionTokenOptions(), NullLogger<SessionTokenService>.Instance);
         return tokens.MintAccess(FakeDiscordResolver.Identity, tier, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
     }
 

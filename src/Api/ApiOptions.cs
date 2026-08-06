@@ -1,5 +1,6 @@
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Sessions;
 
 namespace TheKrystalShip.Api;
 
@@ -677,6 +678,22 @@ public sealed class ApiOptions
     /// <summary>Whether the OAuth callback redirects the session back to the SPA (fragment handoff)
     /// rather than returning JSON. True iff a frontend URL is configured.</summary>
     public bool FrontendRedirectEnabled => !string.IsNullOrWhiteSpace(AuthFrontendUrl);
+
+    /// <summary>
+    /// How this host mints session tokens. Projected here so <see cref="SessionsRefreshAbsoluteDays"/>
+    /// is the ONE place the session lifetime is written: the token's expiry and the registry row's
+    /// expiry are both derived from it, and a second copy would drift until a token outlived its own
+    /// row or the reverse.
+    /// </summary>
+    public SessionTokenOptions ToSessionTokenOptions() => new(
+        HostId,
+        SigningKey,
+        AccessLifetime: TimeSpan.FromMinutes(15),
+        RefreshLifetime: TimeSpan.FromDays(SessionsRefreshAbsoluteDays),
+        // "kgsm-api", not the package's neutral default: this host has been minting tokens under it,
+        // and the issuer is validated. Adopting a tidier value would 401 every token already out
+        // there and force every signed-in person to log in again.
+        Issuer: "kgsm-api");
 
     public static ApiOptions FromConfiguration(IConfiguration configuration) =>
         FromSettings(

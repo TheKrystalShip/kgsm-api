@@ -10,6 +10,8 @@ using TheKrystalShip.Api.Services.Cluster;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
 
+using TheKrystalShip.KGSM.Auth.Sessions;
+
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
