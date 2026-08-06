@@ -302,7 +302,7 @@ public sealed class LibraryAggregatorTests
         DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000, UpdateCheckPollMs = 600000,
         AuthDisabled = true, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
         DiscordRedirectUri = "", DiscordBotToken = "", DiscordGuildId = "", AuthFrontendUrl = "",
-        RoleAdminIds = [], RoleOperatorIds = [], RoleViewerIds = [],
+        RoleAdminIds = [], RoleOperatorIds = [],
         SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
         ClusterSecret = "", ClusterSecretPrevious = "", NodeId = "test",
     };

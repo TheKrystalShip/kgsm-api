@@ -149,6 +149,13 @@ and DB path, the CORS allowlist, and the auth keys (the Discord app/bot/guild an
 map). `ApiOptions.FromSettings` is the one place any of it is interpreted; nothing reads
 configuration by string key.
 
+**Who may do what is the ecosystem's, not this API's.** The Discord application, guild, role-lookup
+token and role→tier map live once, in `/etc/kgsm/discord-auth.env`, bound from the shared `KgsmAuth`
+section that `TheKrystalShip.KGSM.Auth` owns. Every unit loads that file *before* its own env file, so
+a leaf can still override deliberately — and doing so is exactly how one person ends up with different
+authority on different surfaces, so prefer the shared file. This host's own OAuth callback is **not**
+shared and stays `Api__DiscordRedirectUri`.
+
 An environment variable **overrides one key** by spelling that key's path with `__`
 (`Api__DomainPollMs`, `Logging__LogLevel__Default`, `Kestrel__Certificates__Default__Path`), and env
 wins because it is registered last — that is how the systemd unit and the smoke configure a host. A

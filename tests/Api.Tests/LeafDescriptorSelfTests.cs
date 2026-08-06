@@ -3,6 +3,8 @@ using System.Text.RegularExpressions;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Leaves;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -101,11 +103,19 @@ public class LeafDescriptorSelfTests
     }
 
     /// <summary>The env-var spelling of every property the API binds.</summary>
+    /// <summary>
+    /// Every key the settings file can bind, across BOTH bound types. The <c>Api</c> section is this
+    /// API's own; <c>KgsmAuth</c> is the ecosystem's shared authorization block, bound from the same
+    /// file to a type in <c>TheKrystalShip.KGSM.Auth</c> so every surface on the host reads the same
+    /// keys. A section declared in the file but not bound anywhere would silently drop.
+    /// </summary>
     private static HashSet<string> SettingsPropertyKeys() =>
-        typeof(ApiSettings)
-            .GetProperties()
-            .Select(p => $"{ApiSettings.Section}__{p.Name}")
-            .ToHashSet(StringComparer.Ordinal);
+    [
+        .. typeof(ApiSettings).GetProperties().Select(p => $"{ApiSettings.Section}__{p.Name}"),
+        .. typeof(KgsmAuthOptions).GetProperties()
+            .Where(p => p.CanWrite)
+            .Select(p => $"{KgsmAuthOptions.Section}__{p.Name}"),
+    ];
 
     /// <summary>The declared value of one <c>Api</c> key, rendered the way a descriptor default is
     /// (always a string), or null when it is blank — which the descriptor spells as no default.</summary>
@@ -303,8 +313,8 @@ public class LeafDescriptorSelfTests
         string[] mustBeSecret =
         [
             "Api__SigningKey",
-            "Api__DiscordClientSecret",
-            "Api__DiscordBotToken",
+            "KgsmAuth__ClientSecret",
+            "KgsmAuth__BotToken",
             "Api__AssistantRelaySecret",
             "Api__ClusterSecret",
             "Api__ClusterSecretPrevious",

@@ -1,4 +1,5 @@
 using TheKrystalShip.Api.Services.Alerts;
+using TheKrystalShip.KGSM.Auth;
 
 namespace TheKrystalShip.Api;
 
@@ -575,18 +576,18 @@ public sealed class ApiOptions
     /// logged loudly). Set a stable secret on a real host.</summary>
     public required string SigningKey { get; init; }
 
-    /// <summary>Discord OAuth application client id (<c>Api__DiscordClientId</c>).</summary>
+    /// <summary>Discord OAuth application client id (<c>KgsmAuth__ClientId</c>).</summary>
     public required string DiscordClientId { get; init; }
-    /// <summary>Discord OAuth application client secret (<c>Api__DiscordClientSecret</c>).</summary>
+    /// <summary>Discord OAuth application client secret (<c>KgsmAuth__ClientSecret</c>).</summary>
     public required string DiscordClientSecret { get; init; }
     /// <summary>The host's OAuth redirect URI — this host's <c>/auth/discord/callback</c>
     /// (<c>Api__DiscordRedirectUri</c>).</summary>
     public required string DiscordRedirectUri { get; init; }
     /// <summary>Bot token used to read guild member roles via the Discord REST API
-    /// (<c>Api__DiscordBotToken</c>) — the only path to roles, since the
+    /// (<c>KgsmAuth__BotToken</c>) — the only path to roles, since the
     /// <c>identify guilds</c> user scopes don't carry them. Same token the host's bot uses.</summary>
     public required string DiscordBotToken { get; init; }
-    /// <summary>The Discord guild whose roles authorize this host (<c>Api__DiscordGuildId</c>).</summary>
+    /// <summary>The Discord guild whose roles authorize this host (<c>KgsmAuth__GuildId</c>).</summary>
     public required string DiscordGuildId { get; init; }
 
     /// <summary>
@@ -600,13 +601,11 @@ public sealed class ApiOptions
     public required string AuthFrontendUrl { get; init; }
 
     /// <summary>Discord role ids granting the <c>admin</c> tier (comma-separated;
-    /// <c>Api__RoleAdminIds</c>).</summary>
+    /// <c>KgsmAuth__RoleAdminIds</c>).</summary>
     public required IReadOnlyList<string> RoleAdminIds { get; init; }
-    /// <summary>Discord role ids granting the <c>operator</c> tier (<c>Api__RoleOperatorIds</c>);
-    /// the natural mapping for the bot's existing Ops <c>ActionRoleId</c>.</summary>
+    /// <summary>Discord role ids granting the <c>operator</c> tier
+    /// (<c>KgsmAuth__RoleOperatorIds</c>).</summary>
     public required IReadOnlyList<string> RoleOperatorIds { get; init; }
-    /// <summary>Discord role ids granting the <c>viewer</c> tier (<c>Api__RoleViewerIds</c>).</summary>
-    public required IReadOnlyList<string> RoleViewerIds { get; init; }
 
     /// <summary>Auth is on unless the dev escape hatch is set.</summary>
     public bool AuthEnabled => !AuthDisabled;
@@ -682,7 +681,8 @@ public sealed class ApiOptions
     public static ApiOptions FromConfiguration(IConfiguration configuration) =>
         FromSettings(
             configuration.GetSection(ApiSettings.Section).Get<ApiSettings>() ?? new ApiSettings(),
-            LoadThresholdPolicy(configuration));
+            LoadThresholdPolicy(configuration),
+            configuration.GetSection(KgsmAuthOptions.Section).Get<KgsmAuthOptions>() ?? new KgsmAuthOptions());
 
     /// <summary>
     /// Validates what configuration supplied and produces the form the API runs on: clamps every
@@ -698,8 +698,16 @@ public sealed class ApiOptions
     /// that difference; <see cref="BlankFallback"/> deliberately collapses it, for the few paths an
     /// empty string would make <c>Path.*</c> throw on.
     /// </remarks>
-    public static ApiOptions FromSettings(ApiSettings s, MetricsThresholdPolicy policy)
+    public static ApiOptions FromSettings(
+        ApiSettings s, MetricsThresholdPolicy policy, KgsmAuthOptions? auth = null)
     {
+        // The Discord app, guild, bot token and role map are the ECOSYSTEM's, not this API's: the bot
+        // and the assistant authorize against the same values, and a host that sets them per-leaf ends
+        // up granting one person different authority depending on which surface they reach it through.
+        // They arrive from the shared KgsmAuth section. The redirect URI is not among them — each
+        // surface has its own callback.
+        auth ??= new KgsmAuthOptions();
+        KgsmRoleMap roleMap = auth.ToRoleMap();
         string hostId = Clean(s.HostId) ?? Environment.MachineName;
 
         // Computed ahead of the object initializer so ClusterRetentionDays's floor can reference it
@@ -827,15 +835,14 @@ public sealed class ApiOptions
             // Auth. On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = s.AuthDisabled ?? false,
             SigningKey = Defaulted(s.SigningKey, ""),
-            DiscordClientId = Defaulted(s.DiscordClientId, ""),
-            DiscordClientSecret = Defaulted(s.DiscordClientSecret, ""),
+            DiscordClientId = auth.ClientId,
+            DiscordClientSecret = auth.ClientSecret,
             DiscordRedirectUri = Defaulted(s.DiscordRedirectUri, ""),
-            DiscordBotToken = Defaulted(s.DiscordBotToken, ""),
-            DiscordGuildId = Defaulted(s.DiscordGuildId, ""),
+            DiscordBotToken = auth.BotToken,
+            DiscordGuildId = auth.GuildId,
             AuthFrontendUrl = Defaulted(s.AuthFrontendUrl, ""),
-            RoleAdminIds = Csv(s.RoleAdminIds),
-            RoleOperatorIds = Csv(s.RoleOperatorIds),
-            RoleViewerIds = Csv(s.RoleViewerIds),
+            RoleAdminIds = roleMap.AdminRoleIds,
+            RoleOperatorIds = roleMap.OperatorRoleIds,
 
             // Sessions. SessionsEnabled is the default-ON twin of the written SessionsDisabled
             // (a disable-flag with inverted polarity). The cache TTL bounds the revocation lag;

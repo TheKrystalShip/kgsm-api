@@ -72,6 +72,42 @@ else
     ENV_SEEDED=0
 fi
 
+# ── 2a. The shared authorization file ─────────────────────────────────────────
+# Who may do what on this host, in one place: the Discord application, the guild, the role-lookup
+# token and the role map. Every KGSM surface authorizes against these, and a host that sets them
+# per-leaf ends up granting the same person different authority depending on which surface they
+# reach it through — which is the drift this file exists to prevent.
+#
+# Created by whichever project's setup.sh runs first, seeded blank, and NEVER overwritten: a
+# re-run on a configured host must not wipe the operator's values. Owned by the deploying user so
+# it can be edited without privilege; 0600 because it holds two secrets.
+if [[ ! -f "$SHARED_AUTH_FILE" ]]; then
+    log "seeding ${SHARED_AUTH_FILE} — EDIT IT: until the role ids are set, nobody can act"
+    $SUDO install -d -m 0755 "$(dirname "$SHARED_AUTH_FILE")"
+    $SUDO install -m 0600 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" /dev/null "$SHARED_AUTH_FILE"
+    $SUDO tee "$SHARED_AUTH_FILE" >/dev/null <<'SHARED_AUTH'
+# ── KGSM shared authorization — read by every surface on this host ────────────
+# The Discord application, the guild, the role-lookup token and the role map. Loaded by each leaf's
+# unit BEFORE its own env file, so a leaf can still override deliberately — but doing so is how one
+# person ends up with different authority on different surfaces. Prefer changing it here.
+#
+# Guild membership is the access gate and floors a member at VIEWER (they can read).
+# The role ids below elevate. Both lists empty means nobody can act, from any surface.
+# Roles are read with the BOT TOKEN — the sign-in scopes never carry them — so a surface that
+# resolves authority needs it even when it runs no bot of its own.
+
+KgsmAuth__GuildId=
+KgsmAuth__ClientId=
+KgsmAuth__ClientSecret=
+KgsmAuth__BotToken=
+
+# Comma-separated Discord role ids.
+KgsmAuth__RoleAdminIds=
+KgsmAuth__RoleOperatorIds=
+SHARED_AUTH
+    $SUDO chown "${DEPLOY_USER}:${DEPLOY_GROUP}" "$SHARED_AUTH_FILE"
+fi
+
 # ── 2b. The shared leaf-descriptor directory ──────────────────────────────────
 # Where this leaf declares its configurable surface for the Control Panel. Shared by every leaf
 # and scanned by kgsm-api, so it is created once by whichever project's setup.sh runs first and

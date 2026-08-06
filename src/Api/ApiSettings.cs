@@ -195,31 +195,6 @@ public sealed class ApiSettings
         Risk = LeafRisk.Wiring, NoDefault = true)]
     public string? SigningKey { get; set; }
 
-    /// <summary>Discord OAuth application id.</summary>
-    /// <panel>The Discord application users sign in through.</panel>
-    [LeafField("discordClientId", "Discord application id", Group = "auth", Risk = LeafRisk.Wiring,
-        NoDefault = true)]
-    public string? DiscordClientId { get; set; }
-
-    /// <summary>Discord OAuth application secret.</summary>
-    /// <panel>Secret for that application, used to complete a sign-in server-side.</panel>
-    [LeafField("discordClientSecret", "Discord client secret", Group = "auth", Type = LeafType.Secret,
-        Risk = LeafRisk.Wiring, NoDefault = true)]
-    public string? DiscordClientSecret { get; set; }
-
-    /// <summary>Bot token used to read guild member roles, the only path to them.</summary>
-    /// <panel>Token for the same application, used to read whether someone is in the server and which
-    /// roles they hold.</panel>
-    [LeafField("discordBotToken", "Discord bot token", Group = "auth", Type = LeafType.Secret,
-        Risk = LeafRisk.Wiring, NoDefault = true)]
-    public string? DiscordBotToken { get; set; }
-
-    /// <summary>The guild whose roles authorize this host.</summary>
-    /// <panel>The Discord server whose membership decides who may sign in. Everyone in it can at least
-    /// look; roles decide the rest.</panel>
-    [LeafField("discordGuildId", "Discord server id", Group = "auth", Risk = LeafRisk.Wiring, NoDefault = true)]
-    public string? DiscordGuildId { get; set; }
-
     /// <summary>This host's OAuth redirect URI; must match the app registry.</summary>
     /// <panel>Where Discord sends someone back to after they approve. It has to match the redirect
     /// registered on the Discord application exactly.</panel>
@@ -231,24 +206,6 @@ public sealed class ApiSettings
     /// <panel>Where to send someone once sign-in completes. Empty returns them to where they started.</panel>
     [LeafField("authFrontendUrl", "Panel URL", Group = "auth", NoDefault = true)]
     public string? AuthFrontendUrl { get; set; }
-
-    /// <summary>Comma-separated Discord role ids granting admin.</summary>
-    /// <panel>Discord roles granted full control, including configuring leaves and connecting hosts.</panel>
-    [LeafField("roleAdmin", "Administrator roles", Group = "auth", Type = LeafType.Csv,
-        Risk = LeafRisk.Destructive, NoDefault = true)]
-    public string? RoleAdminIds { get; set; }
-
-    /// <summary>Comma-separated Discord role ids granting operator.</summary>
-    /// <panel>Discord roles allowed to run and change servers, but not to administer the host itself.</panel>
-    [LeafField("roleOperator", "Operator roles", Group = "auth", Type = LeafType.Csv,
-        Risk = LeafRisk.Destructive, NoDefault = true)]
-    public string? RoleOperatorIds { get; set; }
-
-    /// <summary>Comma-separated Discord role ids granting viewer.</summary>
-    /// <panel>Discord roles allowed to look but not act. Anyone in the server can already look, so this is
-    /// only worth setting to name it explicitly.</panel>
-    [LeafField("roleViewer", "Viewer roles", Group = "auth", Type = LeafType.Csv, NoDefault = true)]
-    public string? RoleViewerIds { get; set; }
 
 
     // ── Sessions ──────────────────────────────────────────────────────

@@ -77,24 +77,10 @@
       "AuthDisabled": false,
       // HMAC signing key for session JWTs. Blank generates an ephemeral per-process key.
       "SigningKey": "",
-      // Discord OAuth application id.
-      "DiscordClientId": "",
-      // Discord OAuth application secret.
-      "DiscordClientSecret": "",
-      // Bot token used to read guild member roles, the only path to them.
-      "DiscordBotToken": "",
-      // The guild whose roles authorize this host.
-      "DiscordGuildId": "",
       // This host's OAuth redirect URI; must match the app registry.
       "DiscordRedirectUri": "",
       // SPA origin the OAuth callback hands the session back to. Blank returns JSON.
       "AuthFrontendUrl": "",
-      // Comma-separated Discord role ids granting admin.
-      "RoleAdminIds": "",
-      // Comma-separated Discord role ids granting operator.
-      "RoleOperatorIds": "",
-      // Comma-separated Discord role ids granting viewer.
-      "RoleViewerIds": "",
 
       // ── Sessions ──
       // Turns the session registry inert, leaving revocation unenforceable.
@@ -179,6 +165,24 @@
       "Urls": "http://127.0.0.1:8080",
       // Comma-separated CORS origin allowlist. Blank allows any origin, which is a dev-only posture.
       "CorsOrigins": ""
+  },
+
+  // ── Who may do what, shared across every surface on this host ────────────────────────────
+  // The Discord application, the guild, the role-lookup token and the role map are the ECOSYSTEM's,
+  // not this API's: the Discord bot and the assistant authorize against the same values, and setting
+  // them per-leaf is how one person ends up with different authority depending on which surface they
+  // reach KGSM through. On a provisioned host these arrive from /etc/kgsm/discord-auth.env, which
+  // every leaf's unit loads first, and a per-leaf env file can still override deliberately.
+  // Guild membership is the access gate and floors a member at viewer; the role ids elevate.
+  // Owned by TheKrystalShip.KGSM.Auth. This host's own callback URL is NOT here — it is per-surface,
+  // and stays as Api:DiscordRedirectUri.
+  "KgsmAuth": {
+    "GuildId": "",
+    "ClientId": "",
+    "ClientSecret": "",
+    "BotToken": "",
+    "RoleAdminIds": "",
+    "RoleOperatorIds": ""
   },
 
   "MetricsThresholds": {

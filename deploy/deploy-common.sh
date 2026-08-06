@@ -124,6 +124,10 @@ PUBLISH_DIR="${REPO_DIR}/artifacts/publish"
 # Where every leaf drops its config descriptor. Shared across projects and scanned by kgsm-api —
 # the API holds no list of leaves, so a new leaf becomes configurable by landing a file here.
 LEAF_DESCRIPTOR_DIR="${KGSM_LEAF_DESCRIPTOR_DIR:-/var/lib/kgsm/leaves}"
+# Where this host declares who may do what — the Discord app, guild, role-lookup token and role map
+# every KGSM surface authorizes against. One file, so a person cannot hold different authority on
+# different surfaces. Each unit loads it before its own env file; setup.sh seeds it blank.
+SHARED_AUTH_FILE="${KGSM_SHARED_AUTH_FILE:-/etc/kgsm/discord-auth.env}"
 
 # Privileged-call indirection, used by setup.sh ONLY. deploy.sh never calls this. An automated
 # run can set SUDO='sudo -A' + SUDO_ASKPASS=… to provision without an interactive prompt; no

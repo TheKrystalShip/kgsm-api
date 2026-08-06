@@ -30,11 +30,13 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 ["Api:HostId"] = HostId,
                 ["Api:SigningKey"] = SigningKey,
                 // DiscordConfigured = true so the callback path runs; the FAKE replaces the real HTTP.
-                ["Api:DiscordClientId"] = "test-client",
-                ["Api:DiscordClientSecret"] = "test-secret",
+                // The app, guild and role-lookup token live in the ecosystem's shared KgsmAuth section;
+                // the redirect URI is this surface's own and stays on Api.
+                ["KgsmAuth:ClientId"] = "test-client",
+                ["KgsmAuth:ClientSecret"] = "test-secret",
+                ["KgsmAuth:BotToken"] = "test-bot-token",
+                ["KgsmAuth:GuildId"] = "1234567890",
                 ["Api:DiscordRedirectUri"] = "https://host.test/auth/discord/callback",
-                ["Api:DiscordBotToken"] = "test-bot-token",
-                ["Api:DiscordGuildId"] = "1234567890",
                 // Callback returns JSON by default (the contract these tests assert). The fragment-
                 // handoff variant overrides this per-test. Pin it empty so a dev appsettings value
                 // (Api__AuthFrontendUrl) can't flip the base suite to redirect.

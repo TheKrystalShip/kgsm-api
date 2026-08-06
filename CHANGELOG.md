@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — one shared source for who may do what
+
+- **The Discord app, guild, role-lookup token and role map move to the shared `KgsmAuth` section**,
+  bound from `/etc/kgsm/discord-auth.env` and owned by `TheKrystalShip.KGSM.Auth`. Every KGSM surface
+  on the host reads the same values, so a person cannot hold operator in Discord and viewer in the
+  Control Panel. The unit loads the shared file *before* `kgsm-api.env`, so a per-leaf override still
+  works and is still a deliberate act.
+- `Api__DiscordRedirectUri` stays — the callback is per-surface, not shared.
+- **`Api__RoleViewerIds` is gone.** Guild membership already grants viewer, so the key named a tier it
+  could not change.
+
 ### Changed — the contract smoke asserts the contract that exists
 
 - **`scripts/smoke.sh` is 89/89 again.** Five checks had drifted from the surface they describe, which

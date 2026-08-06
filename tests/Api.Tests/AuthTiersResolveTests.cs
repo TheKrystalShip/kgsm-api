@@ -1,4 +1,5 @@
 using TheKrystalShip.Api.Services.Auth;
+using TheKrystalShip.KGSM.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -32,7 +33,7 @@ public sealed class AuthTiersResolveTests
         DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000, UpdateCheckPollMs = 600000,
         AuthDisabled = false, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
         DiscordRedirectUri = "", DiscordBotToken = "", DiscordGuildId = "", AuthFrontendUrl = "",
-        RoleAdminIds = [AdminRole], RoleOperatorIds = [OpsRole], RoleViewerIds = [],
+        RoleAdminIds = [AdminRole], RoleOperatorIds = [OpsRole],
         SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
         ClusterSecret = "", ClusterSecretPrevious = "", NodeId = "test",
     };
@@ -74,5 +75,34 @@ public sealed class AuthTiersResolveTests
     {
         // Holding both → the highest tier (admin ⊇ operator).
         Assert.Equal(AuthTier.Admin, AuthTiers.Resolve([OpsRole, AdminRole], Options()));
+    }
+
+    /// <summary>
+    /// This API's verdict must equal the ecosystem's, for every combination of roles. Both sides now
+    /// read the same configured role ids, but reading the same configuration is not the same as
+    /// reaching the same conclusion — and a person who is an operator in Discord and a viewer in the
+    /// Control Panel is exactly the failure the shared model exists to prevent.
+    /// </summary>
+    /// <remarks>
+    /// Two implementations of one decision is a temporary state: this API's resolver is replaced by
+    /// the shared one, at which point this test has nothing left to compare and goes with it. Until
+    /// then it is what stops them drifting.
+    /// </remarks>
+    [Theory]
+    [InlineData(null, AuthTier.None)]                       // not a member
+    [InlineData("", AuthTier.Viewer)]                       // member, only @everyone
+    [InlineData(OpsRole, AuthTier.Operator)]
+    [InlineData(AdminRole, AuthTier.Admin)]
+    [InlineData(AdminRole + "," + OpsRole, AuthTier.Admin)] // the higher wins
+    [InlineData("999999999999999999", AuthTier.Viewer)]     // a role this host does not name
+    public void AgreesWithTheSharedRoleMap(string? roles, AuthTier expected)
+    {
+        string[]? roleIds = roles?.Split(',', StringSplitOptions.RemoveEmptyEntries);
+
+        AuthTier mine = AuthTiers.Resolve(roleIds, Options());
+        KgsmTier shared = new KgsmRoleMap([AdminRole], [OpsRole]).Resolve(roleIds);
+
+        Assert.Equal(expected, mine);
+        Assert.Equal(KgsmTiers.ToWire(shared), AuthTiers.ToWire(mine));
     }
 }
