@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — nginx terminates TLS; this service listens on loopback only
+
+The host runs nginx as its public multiplexer (`../nginx-ingress-plan.md`), routing by hostname to
+this API and to the assistant. Kestrel no longer binds `0.0.0.0:443` and no longer holds a
+certificate.
+
+- **`deploy/nginx/kgsm-api.conf`** is this leaf's own vhost, installed into `/etc/nginx/conf.d/` by
+  `deploy/setup.sh` when the host runs nginx and skipped cleanly when it does not. Each leaf owns its
+  server block; the `:80` ACME block and the certificate lifecycle stay host-level.
+- **`deploy/certbot-deploy-hook.sh` is deleted.** It existed only because an unprivileged Kestrel
+  could not read root-owned cert files, so every renewal copied the cert and **restarted this
+  service** — dropping open SSE streams and in-flight assistant turns roughly every two months. nginx
+  reads `/etc/letsencrypt/live/` directly, so the renewal hook is now a zero-downtime
+  `systemctl reload nginx`.
+- Set `Api__Urls` to the loopback port alone and drop `Kestrel__Certificates__Default__*` on a host
+  behind the proxy. `Api__PublicBaseUrl` is unchanged, so Discord redirect URIs, cluster peers and
+  the SPA are unaffected.
+
 ### Added — the app trusts a reverse proxy on this machine about the client
 
 `UseForwardedHeaders`, restricted to a proxy on loopback. Groundwork for putting nginx in front
