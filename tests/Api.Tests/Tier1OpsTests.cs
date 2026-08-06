@@ -11,6 +11,8 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -44,7 +46,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigGet_Known_200_EditableMap()
     {
-        HttpResponseMessage resp = await Client(_engine, AuthTier.Viewer).GetAsync($"/api/v1/servers/{Server}/config");
+        HttpResponseMessage resp = await Client(_engine, KgsmTier.Viewer).GetAsync($"/api/v1/servers/{Server}/config");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -69,7 +71,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigGet_Unknown_404()
     {
-        HttpResponseMessage resp = await Client(_engine, AuthTier.Viewer).GetAsync("/api/v1/servers/nope/config");
+        HttpResponseMessage resp = await Client(_engine, KgsmTier.Viewer).GetAsync("/api/v1/servers/nope/config");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
@@ -83,7 +85,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigGet_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Client(_noEngine, AuthTier.Viewer).GetAsync($"/api/v1/servers/{Server}/config");
+        HttpResponseMessage resp = await Client(_noEngine, KgsmTier.Viewer).GetAsync($"/api/v1/servers/{Server}/config");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
         Assert.Contains("\"code\":\"unavailable\"", await resp.Content.ReadAsStringAsync());
     }
@@ -93,7 +95,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_Valid_200_AppliedAndFreshConfig()
     {
-        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, Server,
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, Server,
             "{\"values\":{\"auto_update\":\"false\",\"level_name\":\"newworld\"}}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -110,7 +112,7 @@ public sealed class Tier1OpsTests
     public async Task ConfigPatch_ProtectedKey_400_NothingApplied()
     {
         // A protected key trips the pre-check → 400 before any write (stricter than the engine, not a bypass).
-        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, Server,
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, Server,
             "{\"values\":{\"auto_update\":\"true\",\"install_dir\":\"/evil\"}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         string body = await resp.Content.ReadAsStringAsync();
@@ -124,7 +126,7 @@ public sealed class Tier1OpsTests
         // The fake refuses the sentinel value "BOOM" (an engine refusal that passes the key pre-check). The
         // first key applies, the second is refused → 400 surfacing the real stderr AND the already-applied key
         // (honest about the non-atomic partial state).
-        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, Server,
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, Server,
             "{\"values\":{\"level_name\":\"ok\",\"save_command\":\"BOOM\"}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         string body = await resp.Content.ReadAsStringAsync();
@@ -135,7 +137,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_EmptyBody_400()
     {
-        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, Server, "{\"values\":{}}");
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, Server, "{\"values\":{}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("at least one", await resp.Content.ReadAsStringAsync());
     }
@@ -143,7 +145,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_BadOrigin_400()
     {
-        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, Server,
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, Server,
             "{\"values\":{\"auto_update\":\"true\"},\"origin\":\"hacker\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
@@ -151,7 +153,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_Unknown_404()
     {
-        HttpResponseMessage resp = await Patch(_engine, AuthTier.Operator, "nope",
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "nope",
             "{\"values\":{\"auto_update\":\"true\"}}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -159,7 +161,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_Viewer_403()
     {
-        HttpResponseMessage resp = await Patch(_engine, AuthTier.Viewer, Server,
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Viewer, Server,
             "{\"values\":{\"auto_update\":\"true\"}}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -167,7 +169,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Patch(_noEngine, AuthTier.Operator, Server,
+        HttpResponseMessage resp = await Patch(_noEngine, KgsmTier.Operator, Server,
             "{\"values\":{\"auto_update\":\"true\"}}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
@@ -178,7 +180,7 @@ public sealed class Tier1OpsTests
     public async Task Update_Valid_202_UpdateJob_NoAuditDoubleWrite()
     {
         // factorio-1 is reported STOPPED → admissible. 202 + an update job.
-        HttpResponseMessage resp = await Command(_engine, AuthTier.Operator, Server, "{\"verb\":\"update\"}");
+        HttpResponseMessage resp = await Command(_engine, KgsmTier.Operator, Server, "{\"verb\":\"update\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
         JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
@@ -187,7 +189,7 @@ public sealed class Tier1OpsTests
 
         // No double-write: update is the echo path (kgsm owns server.update). The fake emits no event and the
         // runner writes no row directly, so /audit stays empty — a stray direct write would surface here.
-        HttpResponseMessage audit = await Client(_engine, AuthTier.Viewer).GetAsync("/api/v1/audit");
+        HttpResponseMessage audit = await Client(_engine, KgsmTier.Viewer).GetAsync("/api/v1/audit");
         using JsonDocument page = JsonDocument.Parse(await audit.Content.ReadAsStringAsync());
         Assert.Empty(page.RootElement.GetProperty("data").EnumerateArray());
     }
@@ -197,7 +199,7 @@ public sealed class Tier1OpsTests
     {
         // valheim-1 is reported RUNNING → kgsm refuses an update on a running instance; the gate 409s it
         // synchronously rather than accepting a doomed job.
-        HttpResponseMessage resp = await Command(_engine, AuthTier.Operator, Running, "{\"verb\":\"update\"}");
+        HttpResponseMessage resp = await Command(_engine, KgsmTier.Operator, Running, "{\"verb\":\"update\"}");
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
         Assert.Contains("must be stopped", await resp.Content.ReadAsStringAsync());
     }
@@ -205,7 +207,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task Update_Viewer_403()
     {
-        HttpResponseMessage resp = await Command(_engine, AuthTier.Viewer, Server, "{\"verb\":\"update\"}");
+        HttpResponseMessage resp = await Command(_engine, KgsmTier.Viewer, Server, "{\"verb\":\"update\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -213,7 +215,7 @@ public sealed class Tier1OpsTests
     public async Task Update_UnknownVerb_400_StillRejected()
     {
         // Sanity that the closed set didn't widen: a junk verb is still 400.
-        HttpResponseMessage resp = await Command(_engine, AuthTier.Operator, Server, "{\"verb\":\"frobnicate\"}");
+        HttpResponseMessage resp = await Command(_engine, KgsmTier.Operator, Server, "{\"verb\":\"frobnicate\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 
@@ -222,7 +224,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupsList_Known_200_CarriesManifestDetail()
     {
-        HttpResponseMessage resp = await Client(_engine, AuthTier.Viewer).GetAsync($"/api/v1/servers/{Server}/backups");
+        HttpResponseMessage resp = await Client(_engine, KgsmTier.Viewer).GetAsync($"/api/v1/servers/{Server}/backups");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -255,7 +257,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupsList_Unknown_404()
     {
-        HttpResponseMessage resp = await Client(_engine, AuthTier.Viewer).GetAsync("/api/v1/servers/nope/backups");
+        HttpResponseMessage resp = await Client(_engine, KgsmTier.Viewer).GetAsync("/api/v1/servers/nope/backups");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
@@ -269,7 +271,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupsList_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Client(_noEngine, AuthTier.Viewer).GetAsync($"/api/v1/servers/{Server}/backups");
+        HttpResponseMessage resp = await Client(_noEngine, KgsmTier.Viewer).GetAsync($"/api/v1/servers/{Server}/backups");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
 
@@ -278,7 +280,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupCreate_Valid_202_CreateJob()
     {
-        HttpResponseMessage resp = await PostJson(_engine, AuthTier.Operator, $"/api/v1/servers/{Server}/backups", "{}");
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Operator, $"/api/v1/servers/{Server}/backups", "{}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
         JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
@@ -289,21 +291,21 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupCreate_Unknown_404()
     {
-        HttpResponseMessage resp = await PostJson(_engine, AuthTier.Operator, "/api/v1/servers/nope/backups", "{}");
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Operator, "/api/v1/servers/nope/backups", "{}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task BackupCreate_Viewer_403()
     {
-        HttpResponseMessage resp = await PostJson(_engine, AuthTier.Viewer, $"/api/v1/servers/{Server}/backups", "{}");
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Viewer, $"/api/v1/servers/{Server}/backups", "{}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task BackupCreate_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await PostJson(_noEngine, AuthTier.Operator, $"/api/v1/servers/{Server}/backups", "{}");
+        HttpResponseMessage resp = await PostJson(_noEngine, KgsmTier.Operator, $"/api/v1/servers/{Server}/backups", "{}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
 
@@ -312,7 +314,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupRestore_Valid_202_RestoreJob()
     {
-        HttpResponseMessage resp = await PostJson(_engine, AuthTier.Operator,
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Operator,
             $"/api/v1/servers/{Server}/backups/restore", "{\"backup\":\"factorio-01-20260621T100000Z-aaaaaa\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
@@ -324,7 +326,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupRestore_MissingBackupName_400()
     {
-        HttpResponseMessage resp = await PostJson(_engine, AuthTier.Operator,
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Operator,
             $"/api/v1/servers/{Server}/backups/restore", "{}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("backup name is required", await resp.Content.ReadAsStringAsync());
@@ -333,7 +335,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupRestore_Unknown_404()
     {
-        HttpResponseMessage resp = await PostJson(_engine, AuthTier.Operator,
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Operator,
             "/api/v1/servers/nope/backups/restore", "{\"backup\":\"x.bak\"}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -341,14 +343,14 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupRestore_Viewer_403()
     {
-        HttpResponseMessage resp = await PostJson(_engine, AuthTier.Viewer,
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Viewer,
             $"/api/v1/servers/{Server}/backups/restore", "{\"backup\":\"x.bak\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     // ===== helpers =================================================================================
 
-    private static HttpClient Client(AuthTestFactory factory, AuthTier? tier)
+    private static HttpClient Client(AuthTestFactory factory, KgsmTier? tier)
     {
         HttpClient c = factory.CreateClient();
         if (tier is { } t)
@@ -356,15 +358,15 @@ public sealed class Tier1OpsTests
         return c;
     }
 
-    private static Task<HttpResponseMessage> Patch(AuthTestFactory f, AuthTier? tier, string id, string json) =>
+    private static Task<HttpResponseMessage> Patch(AuthTestFactory f, KgsmTier? tier, string id, string json) =>
         Client(f, tier).PatchAsync($"/api/v1/servers/{id}/config",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
-    private static Task<HttpResponseMessage> Command(AuthTestFactory f, AuthTier? tier, string id, string json) =>
+    private static Task<HttpResponseMessage> Command(AuthTestFactory f, KgsmTier? tier, string id, string json) =>
         Client(f, tier).PostAsync($"/api/v1/servers/{id}/commands",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
-    private static Task<HttpResponseMessage> PostJson(AuthTestFactory f, AuthTier? tier, string path, string json) =>
+    private static Task<HttpResponseMessage> PostJson(AuthTestFactory f, KgsmTier? tier, string path, string json) =>
         Client(f, tier).PostAsync(path, new StringContent(json, Encoding.UTF8, "application/json"));
 
     /// <summary><see cref="AuthTestFactory"/> with a fake <see cref="IInstanceService"/> registered so the

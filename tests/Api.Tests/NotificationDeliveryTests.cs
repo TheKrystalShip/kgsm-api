@@ -14,6 +14,8 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Integrations;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -74,7 +76,7 @@ public sealed class NotificationDeliveryE2ETests
     private static HttpClient AdminClient(NotificationDeliveryFactory f)
     {
         HttpClient c = f.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(AuthTier.Admin));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(KgsmTier.Admin));
         return c;
     }
 

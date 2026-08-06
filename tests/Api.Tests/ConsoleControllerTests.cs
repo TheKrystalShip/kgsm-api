@@ -8,6 +8,8 @@ using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -33,7 +35,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     // goes through the derived pipeline, whose SessionValidator queries the derived DB), so the token is
     // minted + inserted via the derived factory's Services (AuthTestFactory.MintTokenWithRow), NOTfactory.AccessToken
     // (which uses the base factory's Services + DB — the row would be invisible to the derived validator → 401).
-    private HttpClient ClientWithWatchdog(IWatchdogClient watchdog, AuthTier tier)
+    private HttpClient ClientWithWatchdog(IWatchdogClient watchdog, KgsmTier tier)
     {
         var derived = factory.WithWebHostBuilder(b =>
             b.ConfigureTestServices(s =>
@@ -58,7 +60,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task NoneTier_403()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.None)).GetAsync("/api/v1/servers/mc/console");
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.None)).GetAsync("/api/v1/servers/mc/console");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -66,7 +68,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     public async Task Viewer_WatchdogAbsent_200_EmptyLines_NotA500()
     {
         // The AuthTestFactory leaves the watchdog unprovisioned → no IWatchdogClient → honest empty, never 500.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).GetAsync("/api/v1/servers/mc/console");
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).GetAsync("/api/v1/servers/mc/console");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal(Array.Empty<string>(), await ReadLines(resp));
     }
@@ -75,7 +77,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     public async Task Viewer_Tail_HappyPath_ReturnsLines()
     {
         var wd = new FakeTailWatchdog(["[server] starting", "[server] ready", "player joined"]);
-        HttpResponseMessage resp = await ClientWithWatchdog(wd, AuthTier.Viewer)
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
             .GetAsync("/api/v1/servers/mc/console?tail=3");
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -88,7 +90,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     public async Task Viewer_NoTailParam_DefaultsTo200()
     {
         var wd = new FakeTailWatchdog([]);
-        HttpResponseMessage resp = await ClientWithWatchdog(wd, AuthTier.Viewer).GetAsync("/api/v1/servers/mc/console");
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer).GetAsync("/api/v1/servers/mc/console");
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal(200, wd.LastLines); // default tail when ?tail= omitted
@@ -99,7 +101,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     {
         // Provisioned but unreachable: GetConsoleTailAsync throws (transport) → controller degrades to empty.
         var wd = new FakeTailWatchdog(throws: true);
-        HttpResponseMessage resp = await ClientWithWatchdog(wd, AuthTier.Viewer).GetAsync("/api/v1/servers/mc/console?tail=50");
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer).GetAsync("/api/v1/servers/mc/console?tail=50");
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal(Array.Empty<string>(), await ReadLines(resp));

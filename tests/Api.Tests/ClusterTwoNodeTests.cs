@@ -13,6 +13,8 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -215,7 +217,7 @@ public sealed class ClusterTwoNodeTests
                 "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
 
             using HttpClient clientA = factoryA.CreateClient();
-            string adminToken = AuthTestFactory.MintTokenWithRow(factoryA.Services, AuthTier.Admin, access: true);
+            string adminToken = AuthTestFactory.MintTokenWithRow(factoryA.Services, KgsmTier.Admin, access: true);
 
             var addRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/peers")
             {

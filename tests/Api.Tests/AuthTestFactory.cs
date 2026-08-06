@@ -7,6 +7,9 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using TheKrystalShip.Api;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Discord;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -51,8 +54,8 @@ public class AuthTestFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
-            services.RemoveAll<IDiscordIdentityResolver>();
-            services.AddSingleton<IDiscordIdentityResolver, FakeDiscordResolver>();
+            services.RemoveAll<IDiscordDirectory>();
+            services.AddSingleton<IDiscordDirectory, FakeDiscordResolver>();
         });
     }
 
@@ -63,11 +66,11 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     /// production path (valid session → validator passes → tier check is what differs). A fresh random
     /// sid per call keeps the matrix parallel-safe. Sync-over-async in a test helper only — production
     /// never does this.</summary>
-    public string AccessToken(AuthTier tier) => MintTokenWithRow(Services, tier, access: true);
+    public string AccessToken(KgsmTier tier) => MintTokenWithRow(Services, tier, access: true);
 
     /// <summary>Mint a real refresh token (30d cap) at <paramref name="tier"/> + insert its session
     /// row (same rationale as <see cref="AccessToken"/> — the validator honors the sid on refresh).</summary>
-    public string RefreshToken(AuthTier tier) => MintTokenWithRow(Services, tier, access: false);
+    public string RefreshToken(KgsmTier tier) => MintTokenWithRow(Services, tier, access: false);
 
     /// <summary>
     /// Shared mint+insert behind <see cref="AccessToken"/>/<see cref="RefreshToken"/>. Takes an
@@ -77,7 +80,7 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     /// request will go through. The validator runs on the request's service provider; the row must
     /// land in the request's DB, not the base factory's.
     /// </summary>
-    internal static string MintTokenWithRow(IServiceProvider services, AuthTier tier, bool access)
+    internal static string MintTokenWithRow(IServiceProvider services, KgsmTier tier, bool access)
     {
         var tokens = services.GetRequiredService<ISessionTokenService>();
         var store = services.GetRequiredService<SessionStore>();

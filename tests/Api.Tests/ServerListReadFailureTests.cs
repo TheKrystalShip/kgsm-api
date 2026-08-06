@@ -10,6 +10,8 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -46,7 +48,7 @@ public sealed class ServerListReadFailureTests
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(AuthTier.Viewer));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Viewer));
         return c;
     }
 

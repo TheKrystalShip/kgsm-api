@@ -11,6 +11,8 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -381,7 +383,7 @@ public sealed class LibraryEndpointTests(AuthTestFactory factory) : IClassFixtur
     [Fact]
     public async Task NoneTier_403()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.None)).GetAsync("/api/v1/library");
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.None)).GetAsync("/api/v1/library");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -389,7 +391,7 @@ public sealed class LibraryEndpointTests(AuthTestFactory factory) : IClassFixtur
     public async Task Viewer_EngineUnprovisioned_200_EmptyArray()
     {
         // Engine unprovisioned → an honest empty catalog, never a 500 (degrade-gracefully).
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).GetAsync("/api/v1/library");
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).GetAsync("/api/v1/library");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal("[]", (await resp.Content.ReadAsStringAsync()).Trim());
     }

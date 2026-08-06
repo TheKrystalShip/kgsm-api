@@ -7,6 +7,12 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
+using Microsoft.Extensions.DependencyInjection;
+
+using TheKrystalShip.KGSM.Auth.Discord;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -194,7 +200,7 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     public async Task Session_WithBearer_ReturnsProfileSnapshot()
     {
         HttpClient c = factory.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(AuthTier.Viewer));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Viewer));
         HttpResponseMessage resp = await c.GetAsync("/auth/session");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         JsonElement body = await Json(resp);
@@ -212,7 +218,7 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     public async Task Refresh_FromRefreshToken_MintsUsableAccess()
     {
         HttpClient c = factory.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.RefreshToken(AuthTier.Operator));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.RefreshToken(KgsmTier.Operator));
         HttpResponseMessage resp = await c.PostAsync("/auth/session/refresh", content: null);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         JsonElement body = await Json(resp);
@@ -234,7 +240,7 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     public async Task Refresh_IncludesExpiresAt_NearFifteenMinutes()
     {
         HttpClient c = factory.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.RefreshToken(AuthTier.Operator));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.RefreshToken(KgsmTier.Operator));
         HttpResponseMessage resp = await c.PostAsync("/auth/session/refresh", content: null);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -250,7 +256,7 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     {
         // An access token is not a refresh token — refresh must reject it.
         HttpClient c = factory.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(AuthTier.Operator));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Operator));
         Assert.Equal(HttpStatusCode.Unauthorized, (await c.PostAsync("/auth/session/refresh", content: null)).StatusCode);
     }
 
@@ -275,4 +281,87 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task Logout_204() =>
         Assert.Equal(HttpStatusCode.NoContent, (await factory.CreateClient().PostAsync("/auth/logout", content: null)).StatusCode);
+
+    // --- PKCE + the browser-bound state -----------------------------------------------------------
+    // The two halves defend different attacks: `state` stops login CSRF, PKCE stops code interception.
+    // Both ride one HttpOnly cookie, which is what lets this API run PKCE with no server-side store.
+
+    /// <summary>
+    /// This API's half of PKCE: mint a handshake and hand the seam a real challenge. How that challenge
+    /// is spelled into Discord's authorize URL (<c>code_challenge_method=S256</c> and the rest) belongs
+    /// to the seam and is pinned in the auth package — asserting it here would only test the fake.
+    /// </summary>
+    [Fact]
+    public async Task Start_SendsAPkceChallenge_AndNeverTheVerifier()
+    {
+        HttpClient c = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        HttpResponseMessage start = await c.GetAsync("/auth/discord/start");
+
+        string url = start.Headers.Location!.ToString();
+        string challenge = Uri.UnescapeDataString(url.Split('&')
+            .First(kv => kv.StartsWith("code_challenge=")).Substring("code_challenge=".Length));
+        Assert.NotEmpty(challenge);
+
+        // The verifier is the secret the challenge stands in for; a URL is exactly where it must not be.
+        Assert.DoesNotContain("code_verifier", url);
+    }
+
+    [Fact]
+    public async Task Callback_PresentsTheVerifierMatchingTheChallenge()
+    {
+        HttpClient c = factory.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        HttpResponseMessage start = await c.GetAsync("/auth/discord/start");
+
+        string query = start.Headers.Location!.Query.TrimStart('?');
+        string state = query.Split('&').First(kv => kv.StartsWith("state=")).Substring("state=".Length);
+        string challenge = Uri.UnescapeDataString(
+            query.Split('&').First(kv => kv.StartsWith("code_challenge=")).Substring("code_challenge=".Length));
+
+        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=operator&state={state}");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        // The exchange must present the verifier for the challenge sent at /start. If the cookie
+        // carried them independently, or the halves came from different handshakes, Discord would
+        // reject the exchange in production and nothing here would have noticed.
+        var fake = (FakeDiscordResolver)factory.Services.GetRequiredService<IDiscordDirectory>();
+        Assert.NotNull(fake.LastCodeVerifier);
+
+        string expected = Convert.ToBase64String(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.ASCII.GetBytes(fake.LastCodeVerifier!)))
+            .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        Assert.Equal(expected, challenge);
+    }
+
+    [Fact]
+    public async Task Callback_RejectsAnotherBrowsersState()
+    {
+        // The login-CSRF attack in full: an attacker starts their own legitimate login and feeds the
+        // victim a callback link carrying the attacker's code and state. The victim's browser holds a
+        // DIFFERENT cookie, so the state cannot match and the login dies here. A server-side set of
+        // issued states would accept this — the attacker's state is genuinely in it.
+        (HttpClient attacker, string attackerState) = await BeginLogin();
+        (HttpClient victim, string _) = await BeginLogin();
+        Assert.NotNull(attacker);
+
+        HttpResponseMessage resp = await victim.GetAsync(
+            $"/auth/discord/callback?code=admin&state={attackerState}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"invalid_state\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Callback_StateCookieIsOneTime()
+    {
+        // Replay: the same state twice. The cookie is cleared on the first callback whatever the
+        // outcome, so the second has nothing to validate against.
+        (HttpClient c, string state) = await BeginLogin();
+
+        Assert.Equal(HttpStatusCode.OK,
+            (await c.GetAsync($"/auth/discord/callback?code=operator&state={state}")).StatusCode);
+
+        HttpResponseMessage replay = await c.GetAsync($"/auth/discord/callback?code=operator&state={state}");
+        Assert.Equal(HttpStatusCode.BadRequest, replay.StatusCode);
+    }
 }

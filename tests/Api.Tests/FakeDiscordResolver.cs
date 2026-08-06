@@ -1,5 +1,8 @@
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Discord;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -14,25 +17,44 @@ namespace TheKrystalShip.Api.Tests;
 /// <item><c>boom</c> → throws <see cref="DiscordAuthException"/> (Discord unreachable → 502).</item>
 /// </list>
 /// </summary>
-public sealed class FakeDiscordResolver : IDiscordIdentityResolver
+public sealed class FakeDiscordResolver : IDiscordDirectory
 {
     public static readonly DiscordIdentity Identity =
         new("198772043", "haru", "haru", "https://cdn.discordapp.com/avatars/198772043/abc.png",
             ["identify", "guilds"]);
 
-    public string BuildAuthorizeUrl(string state, string prompt) =>
-        $"https://discord.test/authorize?state={state}&prompt={prompt}";
+    public string BuildAuthorizeUrl(string state, string codeChallenge, string prompt) =>
+        $"https://discord.test/authorize?state={state}&code_challenge={codeChallenge}&prompt={prompt}";
 
-    public Task<ResolvedPrincipal?> ResolveAsync(string code, CancellationToken ct) => code switch
+    /// <summary>
+    /// Records the verifier the callback presented, so a test can assert the PKCE half of the
+    /// handshake actually round-tripped rather than trusting that it was built.
+    /// </summary>
+    public string? LastCodeVerifier { get; private set; }
+
+    /// <summary>
+    /// Not reached by the login path — this surface resolves the tier inside <see cref="ResolveAsync"/>
+    /// — so it answers "not a member" rather than pretending to a roster it does not have.
+    /// </summary>
+    public Task<IReadOnlyList<string>?> GetGuildRolesAsync(string userId, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<string>?>(null);
+
+    public Task<ResolvedPrincipal?> ResolveAsync(string code, string codeVerifier, CancellationToken ct)
     {
-        "viewer" => Ok(AuthTier.Viewer),
-        "operator" => Ok(AuthTier.Operator),
-        "admin" => Ok(AuthTier.Admin),
-        "none" => Ok(AuthTier.None),
+        LastCodeVerifier = codeVerifier;
+        return Resolve(code);
+    }
+
+    private static Task<ResolvedPrincipal?> Resolve(string code) => code switch
+    {
+        "viewer" => Ok(KgsmTier.Viewer),
+        "operator" => Ok(KgsmTier.Operator),
+        "admin" => Ok(KgsmTier.Admin),
+        "none" => Ok(KgsmTier.None),
         "boom" => throw new DiscordAuthException("simulated Discord outage"),
         _ => Task.FromResult<ResolvedPrincipal?>(null), // "bad" / anything else
     };
 
-    private static Task<ResolvedPrincipal?> Ok(AuthTier tier) =>
+    private static Task<ResolvedPrincipal?> Ok(KgsmTier tier) =>
         Task.FromResult<ResolvedPrincipal?>(new ResolvedPrincipal(Identity, tier));
 }

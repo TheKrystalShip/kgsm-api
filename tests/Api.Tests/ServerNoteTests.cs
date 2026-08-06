@@ -11,6 +11,8 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -45,14 +47,14 @@ public sealed class ServerNoteTests
     [Fact]
     public async Task Get_NoneTier_403()
     {
-        HttpResponseMessage resp = await Get(_engine, AuthTier.None, "noted");
+        HttpResponseMessage resp = await Get(_engine, KgsmTier.None, "noted");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task Get_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Get(_noEngine, AuthTier.Viewer, "noted");
+        HttpResponseMessage resp = await Get(_noEngine, KgsmTier.Viewer, "noted");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
         Assert.Contains("\"code\":\"unavailable\"", await resp.Content.ReadAsStringAsync());
     }
@@ -60,7 +62,7 @@ public sealed class ServerNoteTests
     [Fact]
     public async Task Get_UnknownServer_404()
     {
-        HttpResponseMessage resp = await Get(_engine, AuthTier.Viewer, "does-not-exist");
+        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "does-not-exist");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
@@ -68,7 +70,7 @@ public sealed class ServerNoteTests
     public async Task Get_Viewer_ReadsNoteWithAttribution()
     {
         // A viewer can READ the note (only writing is operator-gated) — it is player-facing content.
-        HttpResponseMessage resp = await Get(_engine, AuthTier.Viewer, "noted");
+        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "noted");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -83,7 +85,7 @@ public sealed class ServerNoteTests
     public async Task Get_ServerWithoutNote_NoteIsNull()
     {
         // Honest "nothing written" — not an empty-string placeholder.
-        HttpResponseMessage resp = await Get(_engine, AuthTier.Viewer, "blank");
+        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "blank");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -95,7 +97,7 @@ public sealed class ServerNoteTests
     {
         // Someone typed a plain note into .config.ini: the body still renders, and the author is an
         // honest null rather than a fabricated one.
-        HttpResponseMessage resp = await Get(_engine, AuthTier.Viewer, "handwritten");
+        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "handwritten");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -109,7 +111,7 @@ public sealed class ServerNoteTests
     public async Task Get_NoteAlsoRidesTheServerListDto()
     {
         // The dashboard tile renders the note, so a list row must carry it without a detail fetch.
-        HttpClient client = Client(_engine, AuthTier.Viewer);
+        HttpClient client = Client(_engine, KgsmTier.Viewer);
         HttpResponseMessage resp = await client.GetAsync("/api/v1/servers");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -132,28 +134,28 @@ public sealed class ServerNoteTests
     public async Task Put_Viewer_403()
     {
         // Operator-gated: a viewer reads the note but cannot rewrite a player-facing message.
-        HttpResponseMessage resp = await Put(_engine, AuthTier.Viewer, "noted", "{\"body\":\"hi\"}");
+        HttpResponseMessage resp = await Put(_engine, KgsmTier.Viewer, "noted", "{\"body\":\"hi\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task Put_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Put(_noEngine, AuthTier.Operator, "noted", "{\"body\":\"hi\"}");
+        HttpResponseMessage resp = await Put(_noEngine, KgsmTier.Operator, "noted", "{\"body\":\"hi\"}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
 
     [Fact]
     public async Task Put_UnknownServer_404()
     {
-        HttpResponseMessage resp = await Put(_engine, AuthTier.Operator, "does-not-exist", "{\"body\":\"hi\"}");
+        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "does-not-exist", "{\"body\":\"hi\"}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task Put_BadOrigin_400()
     {
-        HttpResponseMessage resp = await Put(_engine, AuthTier.Operator, "noted",
+        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "noted",
             "{\"body\":\"hi\",\"origin\":\"hacker\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -167,7 +169,7 @@ public sealed class ServerNoteTests
     public async Task Put_EmptyBody_400_PointsAtDelete(string json)
     {
         // Clearing is DELETE — an accidentally-emptied editor must not silently wipe the note.
-        HttpResponseMessage resp = await Put(_engine, AuthTier.Operator, "noted", json);
+        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "noted", json);
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("DELETE", await resp.Content.ReadAsStringAsync());
     }
@@ -176,7 +178,7 @@ public sealed class ServerNoteTests
     public async Task Put_OverTheCap_400_NotTruncated()
     {
         string body = new('a', InstanceNote.MaxLength + 1);
-        HttpResponseMessage resp = await Put(_engine, AuthTier.Operator, "noted",
+        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "noted",
             JsonSerializer.Serialize(new { body }));
 
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
@@ -189,7 +191,7 @@ public sealed class ServerNoteTests
     public async Task Put_AtTheCap_IsAccepted()
     {
         string body = new('a', InstanceNote.MaxLength);
-        HttpResponseMessage resp = await Put(_engine, AuthTier.Operator, "noted",
+        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "noted",
             JsonSerializer.Serialize(new { body }));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
     }
@@ -200,7 +202,7 @@ public sealed class ServerNoteTests
         // Control characters are stripped before storage, so they must not cost the operator characters
         // against the cap.
         string body = new string('a', InstanceNote.MaxLength) + "\t\t\t";
-        HttpResponseMessage resp = await Put(_engine, AuthTier.Operator, "noted",
+        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "noted",
             JsonSerializer.Serialize(new { body }));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
     }
@@ -210,7 +212,7 @@ public sealed class ServerNoteTests
     {
         // The note must go through SetInstanceNote (which owns the encoding + the attribution stamp),
         // never a raw config-set that would drop an unencoded body into a sourced file.
-        HttpResponseMessage resp = await Put(_engine, AuthTier.Operator, "writable",
+        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "writable",
             "{\"body\":\"Rules: be nice\",\"origin\":\"ui\"}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -226,7 +228,7 @@ public sealed class ServerNoteTests
     {
         // kgsm writes one key per call, so a mid-sequence refusal is a genuine partial state — the
         // response says which keys landed rather than implying nothing changed.
-        HttpResponseMessage resp = await Put(_engine, AuthTier.Operator, "refuses", "{\"body\":\"hi\"}");
+        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "refuses", "{\"body\":\"hi\"}");
         Assert.Equal(HttpStatusCode.InternalServerError, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -244,14 +246,14 @@ public sealed class ServerNoteTests
     [Fact]
     public async Task Delete_Viewer_403()
     {
-        HttpResponseMessage resp = await Delete(_engine, AuthTier.Viewer, "noted");
+        HttpResponseMessage resp = await Delete(_engine, KgsmTier.Viewer, "noted");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task Delete_UnknownServer_404()
     {
-        HttpResponseMessage resp = await Delete(_engine, AuthTier.Operator, "does-not-exist");
+        HttpResponseMessage resp = await Delete(_engine, KgsmTier.Operator, "does-not-exist");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
@@ -259,7 +261,7 @@ public sealed class ServerNoteTests
     public async Task Delete_ClearsTheBodyButStaysAttributable()
     {
         // The clear is an empty-body write: attribution still records who removed the note and when.
-        HttpResponseMessage resp = await Delete(_engine, AuthTier.Operator, "writable");
+        HttpResponseMessage resp = await Delete(_engine, KgsmTier.Operator, "writable");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         RecordingInstanceService fake = _engine.Fake;
@@ -269,7 +271,7 @@ public sealed class ServerNoteTests
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static HttpClient Client(AuthTestFactory factory, AuthTier? tier)
+    private static HttpClient Client(AuthTestFactory factory, KgsmTier? tier)
     {
         HttpClient c = factory.CreateClient();
         if (tier is { } t)
@@ -277,14 +279,14 @@ public sealed class ServerNoteTests
         return c;
     }
 
-    private static Task<HttpResponseMessage> Get(AuthTestFactory factory, AuthTier? tier, string id) =>
+    private static Task<HttpResponseMessage> Get(AuthTestFactory factory, KgsmTier? tier, string id) =>
         Client(factory, tier).GetAsync($"/api/v1/servers/{id}/note");
 
-    private static Task<HttpResponseMessage> Put(AuthTestFactory factory, AuthTier? tier, string id, string json) =>
+    private static Task<HttpResponseMessage> Put(AuthTestFactory factory, KgsmTier? tier, string id, string json) =>
         Client(factory, tier).PutAsync($"/api/v1/servers/{id}/note",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
-    private static Task<HttpResponseMessage> Delete(AuthTestFactory factory, AuthTier? tier, string id) =>
+    private static Task<HttpResponseMessage> Delete(AuthTestFactory factory, KgsmTier? tier, string id) =>
         Client(factory, tier).DeleteAsync($"/api/v1/servers/{id}/note");
 
     /// <summary>

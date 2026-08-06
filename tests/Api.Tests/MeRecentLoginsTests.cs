@@ -4,6 +4,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -74,7 +76,7 @@ public sealed class MeRecentLoginsTests_FreshActor(AuthTestFactory factory) : IC
         // /auth/discord/callback entirely), so it never writes an auth.login audit row for this
         // factory's fresh DB -> the actor honestly has no login history yet.
         HttpClient c = factory.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(AuthTier.Admin));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Admin));
         HttpResponseMessage resp = await c.GetAsync("/api/v1/me");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Empty((await Json(resp)).GetProperty("recentLogins").EnumerateArray());

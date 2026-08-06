@@ -7,6 +7,8 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -27,7 +29,7 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
     // own DB. Returns (token, sid) so the test can revoke/expire/evict that specific row. The factory
     // variant (base vs WithWebHostBuilder-derived) determines which DB + service provider the row must
     // land in — the request goes through that factory's pipeline, whose SessionValidator queries that DB.
-    private static (string Token, string Sid) MintWithKnownSid(IServiceProvider services, AuthTier tier)
+    private static (string Token, string Sid) MintWithKnownSid(IServiceProvider services, KgsmTier tier)
     {
         var tokens = services.GetRequiredService<ISessionTokenService>();
         var store = services.GetRequiredService<SessionStore>();
@@ -87,7 +89,7 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
         // A freshly-minted token + row → the validator's first check hits the DB, finds the live row,
         // caches true → 200. (The 56 existing tier-matrix tests exercise this implicitly; this test
         // pins the validator's happy path explicitly.)
-        (string token, _) = MintWithKnownSid(factory.Services, AuthTier.Viewer);
+        (string token, _) = MintWithKnownSid(factory.Services, KgsmTier.Viewer);
         Assert.Equal(HttpStatusCode.OK, await Me(token));
     }
 
@@ -97,7 +99,7 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
         // Mint+insert (row valid, Revoked=false). NO request before the revoke → the cache is cold.
         // Revoke the row directly (Revoked=true), THEN request → validator: cache miss → DB →
         // Revoked=true → false → 401. The cold cache means no stale-true to fight through.
-        (string token, string sid) = MintWithKnownSid(factory.Services, AuthTier.Viewer);
+        (string token, string sid) = MintWithKnownSid(factory.Services, KgsmTier.Viewer);
         RevokeRow(sid);
         Assert.Equal(HttpStatusCode.Unauthorized, await Me(token));
     }
@@ -107,7 +109,7 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
     {
         // The Expires > now check is INDEPENDENT of Revoked — a non-revoked but past-the-30d-cap session
         // is dead. Mint+insert (valid), move Expires to the past, request → 401.
-        (string token, string sid) = MintWithKnownSid(factory.Services, AuthTier.Viewer);
+        (string token, string sid) = MintWithKnownSid(factory.Services, KgsmTier.Viewer);
         ExpireRow(sid);
         Assert.Equal(HttpStatusCode.Unauthorized, await Me(token));
     }
@@ -119,7 +121,7 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
         // `sid`. JwtBearer accepts the signature; OnTokenValidated reaches the `string.IsNullOrEmpty(sid)`
         // check → ctx.Fail("no session id (pre-M4·c token)") → 401. No grandfather path.
         string token = TestTokens.MintAccessWithoutSidClaim(
-            AuthTestFactory.SigningKey, AuthTestFactory.HostId, AuthTier.Admin);
+            AuthTestFactory.SigningKey, AuthTestFactory.HostId, KgsmTier.Admin);
         Assert.Equal(HttpStatusCode.Unauthorized, await Me(token));
     }
 
@@ -138,7 +140,7 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
         // Mint WITHOUT inserting a row — just the token, no SessionStore call. Under sessions-ON this
         // would 401 (no row → validator false); under sessions-OFF the bypass makes it pass.
         var tokens = disabled.Services.GetRequiredService<ISessionTokenService>();
-        string token = tokens.MintAccess(FakeDiscordResolver.Identity, AuthTier.Viewer,
+        string token = tokens.MintAccess(FakeDiscordResolver.Identity, KgsmTier.Viewer,
             "sid_no_row_" + Guid.NewGuid().ToString("N")).Token;
 
         HttpClient c = disabled.CreateClient();
@@ -160,7 +162,7 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
             b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(
                 new Dictionary<string, string?> { ["Api:SessionsCacheTtlMs"] = "600" })));
 
-        (string token, string sid) = MintWithKnownSid(fast.Services, AuthTier.Viewer);
+        (string token, string sid) = MintWithKnownSid(fast.Services, KgsmTier.Viewer);
         HttpClient c = fast.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
@@ -195,7 +197,7 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
         // would otherwise serve stale `true`), calling Evict drops the entry so the next request
         // re-queries → finds Revoked=true → 401 ~instantly, no TTL wait. Uses the production-default
         // 5s TTL (the lag Evict collapses) to prove the real default paths are covered.
-        (string token, string sid) = MintWithKnownSid(factory.Services, AuthTier.Viewer);
+        (string token, string sid) = MintWithKnownSid(factory.Services, KgsmTier.Viewer);
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 

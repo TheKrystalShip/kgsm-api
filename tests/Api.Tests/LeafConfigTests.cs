@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.Json;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -55,7 +57,7 @@ public sealed class LeafConfigTests
     public async Task GetConfig_Operator_403()
     {
         using var f = new LeafConfigTestFactory();
-        HttpResponseMessage resp = await Client(f, AuthTier.Operator).GetAsync($"/api/v1/hosts/{Host}/services/monitor/config");
+        HttpResponseMessage resp = await Client(f, KgsmTier.Operator).GetAsync($"/api/v1/hosts/{Host}/services/monitor/config");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -214,14 +216,14 @@ public sealed class LeafConfigTests
     public async Task PutConfig_Operator_403()
     {
         using var f = new LeafConfigTestFactory();
-        HttpResponseMessage resp = await Put(Client(f, AuthTier.Operator), "monitor", """{"values":{"logLevel":"Debug"}}""");
+        HttpResponseMessage resp = await Put(Client(f, KgsmTier.Operator), "monitor", """{"values":{"logLevel":"Debug"}}""");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     // ---- helpers ----------------------------------------------------------------------------------
-    private static HttpClient Admin(LeafConfigTestFactory f) => Client(f, AuthTier.Admin);
+    private static HttpClient Admin(LeafConfigTestFactory f) => Client(f, KgsmTier.Admin);
 
-    private static HttpClient Client(LeafConfigTestFactory factory, AuthTier? tier)
+    private static HttpClient Client(LeafConfigTestFactory factory, KgsmTier? tier)
     {
         HttpClient c = factory.CreateClient();
         if (tier is { } t)

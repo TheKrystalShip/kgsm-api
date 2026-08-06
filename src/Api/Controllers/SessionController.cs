@@ -7,6 +7,9 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 
+using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Discord;
+
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
@@ -79,11 +82,11 @@ public sealed class SessionController(
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no session");
 
         string callerUserId = $"discord:{caller.UserId}";
-        AuthTier tier = SessionClaims.ReadTier(ci);
+        KgsmTier tier = SessionClaims.ReadTier(ci);
         string? callerSid = SessionClaims.ReadSessionId(ci);
 
         // Admin override: only an admin's ?userId= is honored (D4 — admin is a session operator).
-        string targetUserId = tier == AuthTier.Admin && !string.IsNullOrWhiteSpace(userId)
+        string targetUserId = tier == KgsmTier.Admin && !string.IsNullOrWhiteSpace(userId)
             ? userId!
             : callerUserId;
 

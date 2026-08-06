@@ -6,6 +6,8 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -141,7 +143,7 @@ public sealed class ClusterResourceRelayTests
             await using var node = new ClusterNodeFactory("node-a", "host-a", Secret, dbPath: db);
             using HttpClient client = node.CreateClient();
             var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/does-not-exist/resources");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(AuthTier.Admin));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(KgsmTier.Admin));
 
             HttpResponseMessage resp = await client.SendAsync(request);
 
@@ -166,7 +168,7 @@ public sealed class ClusterResourceRelayTests
 
             using HttpClient client = node.CreateClient();
             var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/peer-b/resources");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(AuthTier.Admin));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(KgsmTier.Admin));
             HttpResponseMessage resp = await client.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
@@ -194,7 +196,7 @@ public sealed class ClusterResourceRelayTests
 
             using HttpClient client = node.CreateClient();
             var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/peer-b/resources");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(AuthTier.Admin));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(KgsmTier.Admin));
             HttpResponseMessage resp = await client.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.BadGateway, resp.StatusCode);
@@ -213,7 +215,7 @@ public sealed class ClusterResourceRelayTests
             await using var node = new ClusterNodeFactory("node-a", "host-a", Secret, dbPath: db);
             using HttpClient client = node.CreateClient();
             var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/peer-b/resources");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(AuthTier.Viewer));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(KgsmTier.Viewer));
 
             HttpResponseMessage resp = await client.SendAsync(request);
 
@@ -248,7 +250,7 @@ public sealed class ClusterResourceRelayTests
 
             using HttpClient clientA = factoryA.CreateClient();
             var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/peer-b/resources");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", factoryA.AccessToken(AuthTier.Admin));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", factoryA.AccessToken(KgsmTier.Admin));
             HttpResponseMessage resp = await clientA.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.OK, resp.StatusCode);

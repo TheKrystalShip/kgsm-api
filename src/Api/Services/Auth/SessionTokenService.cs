@@ -4,6 +4,9 @@ using System.Text;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
+using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Discord;
+
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
@@ -71,13 +74,13 @@ public sealed class SessionTokenService : ISessionTokenService
         };
     }
 
-    public MintedToken MintAccess(DiscordIdentity identity, AuthTier tier, string sessionId) =>
-        Mint(identity, tier, TokenKind.Access, AccessTtl, sessionId);
+    public MintedToken MintAccess(DiscordIdentity identity, KgsmTier tier, string sessionId) =>
+        Mint(identity, tier, KgsmTokenKind.Access, AccessTtl, sessionId);
 
-    public MintedToken MintRefresh(DiscordIdentity identity, AuthTier tier, string sessionId) =>
-        Mint(identity, tier, TokenKind.Refresh, RefreshTtl, sessionId);
+    public MintedToken MintRefresh(DiscordIdentity identity, KgsmTier tier, string sessionId) =>
+        Mint(identity, tier, KgsmTokenKind.Refresh, RefreshTtl, sessionId);
 
-    private MintedToken Mint(DiscordIdentity identity, AuthTier tier, string kind, TimeSpan ttl, string sessionId)
+    private MintedToken Mint(DiscordIdentity identity, KgsmTier tier, string kind, TimeSpan ttl, string sessionId)
     {
         // M4·c rotation — a fresh jti per mint (per-token JWT ID). For refresh tokens this is the
         // reuse-detection key: the session row stores the CURRENT refresh's jti, /refresh rejects a
@@ -88,20 +91,20 @@ public sealed class SessionTokenService : ISessionTokenService
         var claims = new List<Claim>
         {
             new("sub", $"discord:{identity.UserId}"),
-            new(AuthClaims.Tier, AuthTiers.ToWire(tier)),
-            new(AuthClaims.Host, _host),
-            new(AuthClaims.TokenKind, kind),
+            new(KgsmAuthClaims.Tier, KgsmTiers.ToWire(tier)),
+            new(KgsmAuthClaims.Host, _host),
+            new(KgsmAuthClaims.TokenKind, kind),
             // M4·c — the session id, stable across a session's lifetime (carried by access + refresh;
             // survives access rotation). Absent on a pre-M4·c token (the D10 validator rejects those).
-            new(AuthClaims.SessionId, sessionId),
+            new(KgsmAuthClaims.SessionId, sessionId),
             // M4·c rotation — a unique jti per token (see comment above).
-            new(AuthClaims.Jti, jti),
-            new(AuthClaims.Username, identity.Username),
-            new(AuthClaims.Display, identity.Display),
+            new(KgsmAuthClaims.Jti, jti),
+            new(KgsmAuthClaims.Username, identity.Username),
+            new(KgsmAuthClaims.Display, identity.Display),
             new("scope", string.Join(' ', identity.Scopes)),
         };
         if (identity.AvatarUrl is not null)
-            claims.Add(new Claim(AuthClaims.Avatar, identity.AvatarUrl));
+            claims.Add(new Claim(KgsmAuthClaims.Avatar, identity.AvatarUrl));
 
         DateTime expires = DateTime.UtcNow.Add(ttl);
         var descriptor = new SecurityTokenDescriptor
@@ -124,7 +127,7 @@ public sealed class SessionTokenService : ISessionTokenService
             return null;
 
         ClaimsIdentity ci = result.ClaimsIdentity;
-        if (ci.FindFirst(AuthClaims.TokenKind)?.Value != TokenKind.Refresh)
+        if (ci.FindFirst(KgsmAuthClaims.TokenKind)?.Value != KgsmTokenKind.Refresh)
             return null;
 
         DiscordIdentity? identity = SessionClaims.ReadIdentity(ci);

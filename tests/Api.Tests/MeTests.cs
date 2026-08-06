@@ -3,6 +3,8 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -37,7 +39,7 @@ public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFac
     [Fact]
     public async Task Viewer_200_ProjectsTheIdentitySnapshotAndScopes()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).GetAsync("/api/v1/me");
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).GetAsync("/api/v1/me");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         JsonElement body = await Json(resp);
@@ -55,10 +57,10 @@ public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFac
 
     // The tier is the honest delta /me adds over /auth/session — reflected verbatim from the bearer.
     [Theory]
-    [InlineData(AuthTier.Viewer, "viewer")]
-    [InlineData(AuthTier.Operator, "operator")]
-    [InlineData(AuthTier.Admin, "admin")]
-    public async Task Tier_ReflectedVerbatim(AuthTier tier, string wire)
+    [InlineData(KgsmTier.Viewer, "viewer")]
+    [InlineData(KgsmTier.Operator, "operator")]
+    [InlineData(KgsmTier.Admin, "admin")]
+    public async Task Tier_ReflectedVerbatim(KgsmTier tier, string wire)
     {
         JsonElement body = await Json(await Client(factory.AccessToken(tier)).GetAsync("/api/v1/me"));
         Assert.Equal(wire, body.GetProperty("tier").GetString());
@@ -70,7 +72,7 @@ public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFac
     [Fact]
     public async Task NoneTier_200_HonestlyReportsNone()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.None)).GetAsync("/api/v1/me");
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.None)).GetAsync("/api/v1/me");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal("none", (await Json(resp)).GetProperty("tier").GetString());
     }
@@ -79,7 +81,7 @@ public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFac
     public async Task RefreshToken_AsAccessBearer_401()
     {
         // A refresh token must never authenticate a protected call (the pipeline rejects tkn != access).
-        HttpResponseMessage resp = await Client(factory.RefreshToken(AuthTier.Admin)).GetAsync("/api/v1/me");
+        HttpResponseMessage resp = await Client(factory.RefreshToken(KgsmTier.Admin)).GetAsync("/api/v1/me");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
@@ -87,7 +89,7 @@ public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFac
     public async Task WrongSignature_401()
     {
         string forged = TestTokens.MintAccessWithKey(
-            "a-totally-different-signing-key", AuthTestFactory.HostId, AuthTier.Admin);
+            "a-totally-different-signing-key", AuthTestFactory.HostId, KgsmTier.Admin);
         HttpResponseMessage resp = await Client(forged).GetAsync("/api/v1/me");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }

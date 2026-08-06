@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using TheKrystalShip.Api.Contracts;
 
+using TheKrystalShip.KGSM.Auth.Discord;
+
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>

@@ -8,6 +8,8 @@ using Microsoft.Extensions.Configuration;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -33,7 +35,7 @@ public sealed class HostIdentityTests
     public async Task Host_Identity_RuntimeFields_Present_OnListAndDetail()
     {
         using var f = new AuthTestFactory();
-        HttpClient c = Client(f, AuthTier.Viewer);
+        HttpClient c = Client(f, KgsmTier.Viewer);
 
         using JsonDocument list = await GetJson(c, "/api/v1/hosts");
         AssertIdentityShape(list.RootElement.EnumerateArray().Single().GetProperty("identity"));
@@ -91,7 +93,7 @@ public sealed class HostIdentityTests
         // The host's panelVersion (route version) and the handshake version still agree; build is additive.
         using var f = new AuthTestFactory();
         using JsonDocument root = await GetJson(f.CreateClient(), "/api/v1");
-        using JsonDocument hosts = await GetJson(Client(f, AuthTier.Viewer), "/api/v1/hosts");
+        using JsonDocument hosts = await GetJson(Client(f, KgsmTier.Viewer), "/api/v1/hosts");
 
         string handshakeVersion = root.RootElement.GetProperty("version").GetString()!;
         JsonElement host = hosts.RootElement.EnumerateArray().Single();
@@ -107,7 +109,7 @@ public sealed class HostIdentityTests
     public async Task Patch_Admin_SetsRegionAndLabel_ReflectedEverywhere()
     {
         using var f = new AuthTestFactory();
-        HttpClient admin = Client(f, AuthTier.Admin);
+        HttpClient admin = Client(f, KgsmTier.Admin);
 
         HttpResponseMessage patch = await admin.PatchAsJsonAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "eu-west", label = "Hotrod" });
@@ -119,7 +121,7 @@ public sealed class HostIdentityTests
         Assert.Equal("eu-west", patched.GetProperty("identity").GetProperty("region").GetString());
 
         // And it persists / is visible to a fresh viewer read.
-        using JsonDocument list = await GetJson(Client(f, AuthTier.Viewer), "/api/v1/hosts");
+        using JsonDocument list = await GetJson(Client(f, KgsmTier.Viewer), "/api/v1/hosts");
         JsonElement host = list.RootElement.EnumerateArray().Single();
         Assert.Equal("Hotrod", host.GetProperty("label").GetString());
         Assert.Equal("eu-west", host.GetProperty("identity").GetProperty("region").GetString());
@@ -134,7 +136,7 @@ public sealed class HostIdentityTests
     public async Task Patch_Sparse_OnlyPresentFieldsChange()
     {
         using var f = new AuthTestFactory();
-        HttpClient admin = Client(f, AuthTier.Admin);
+        HttpClient admin = Client(f, KgsmTier.Admin);
 
         await admin.PatchAsJsonAsync($"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "us-east", label = "Box" });
         // A second patch touching only region must leave the label intact.
@@ -149,7 +151,7 @@ public sealed class HostIdentityTests
     public async Task Patch_BlankString_ClearsOverride_BackToConfigDefault()
     {
         using var f = new AuthTestFactory();
-        HttpClient admin = Client(f, AuthTier.Admin);
+        HttpClient admin = Client(f, KgsmTier.Admin);
 
         await admin.PatchAsJsonAsync($"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "eu-west", label = "Hotrod" });
         // Empty string clears: region -> null (no config default), label -> the host id (config default).
@@ -171,9 +173,9 @@ public sealed class HostIdentityTests
     }
 
     [Theory]
-    [InlineData(AuthTier.Viewer)]
-    [InlineData(AuthTier.Operator)]
-    public async Task Patch_BelowAdmin_403(AuthTier tier)
+    [InlineData(KgsmTier.Viewer)]
+    [InlineData(KgsmTier.Operator)]
+    public async Task Patch_BelowAdmin_403(KgsmTier tier)
     {
         using var f = new AuthTestFactory();
         HttpResponseMessage r = await Client(f, tier).PatchAsJsonAsync(
@@ -185,7 +187,7 @@ public sealed class HostIdentityTests
     public async Task Patch_UnknownHostId_404()
     {
         using var f = new AuthTestFactory();
-        HttpResponseMessage r = await Client(f, AuthTier.Admin).PatchAsJsonAsync(
+        HttpResponseMessage r = await Client(f, KgsmTier.Admin).PatchAsJsonAsync(
             "/api/v1/hosts/not-this-host", new { region = "eu-west" });
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await r.Content.ReadAsStringAsync());
@@ -196,7 +198,7 @@ public sealed class HostIdentityTests
     {
         using var f = new AuthTestFactory();
         string tooLong = new('x', 101);   // MaxIdentityLength is 100
-        HttpResponseMessage r = await Client(f, AuthTier.Admin).PatchAsJsonAsync(
+        HttpResponseMessage r = await Client(f, KgsmTier.Admin).PatchAsJsonAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = tooLong });
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await r.Content.ReadAsStringAsync());
@@ -209,23 +211,23 @@ public sealed class HostIdentityTests
     {
         using var f = new RegionConfiguredFactory();
         // The configured Api__Region is the default on both the host card and the handshake.
-        using JsonDocument list = await GetJson(Client(f, AuthTier.Viewer), "/api/v1/hosts");
+        using JsonDocument list = await GetJson(Client(f, KgsmTier.Viewer), "/api/v1/hosts");
         Assert.Equal("configured-region",
             list.RootElement.EnumerateArray().Single().GetProperty("identity").GetProperty("region").GetString());
         using JsonDocument root = await GetJson(f.CreateClient(), "/api/v1");
         Assert.Equal("configured-region", root.RootElement.GetProperty("region").GetString());
 
         // An override wins over the config default.
-        await Client(f, AuthTier.Admin).PatchAsJsonAsync(
+        await Client(f, KgsmTier.Admin).PatchAsJsonAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "override-region" });
-        using JsonDocument after = await GetJson(Client(f, AuthTier.Viewer), "/api/v1/hosts");
+        using JsonDocument after = await GetJson(Client(f, KgsmTier.Viewer), "/api/v1/hosts");
         Assert.Equal("override-region",
             after.RootElement.EnumerateArray().Single().GetProperty("identity").GetProperty("region").GetString());
     }
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static HttpClient Client(AuthTestFactory f, AuthTier tier)
+    private static HttpClient Client(AuthTestFactory f, KgsmTier tier)
     {
         HttpClient c = f.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(tier));

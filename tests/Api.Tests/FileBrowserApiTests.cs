@@ -12,6 +12,8 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -49,14 +51,14 @@ public sealed class FileBrowserApiTests
     public async Task List_Viewer_403_ReadIsOperatorPlus()
     {
         // Even LISTING is operator+ (file contents routinely hold secrets) — a viewer is forbidden.
-        HttpResponseMessage r = await Client(_engine, AuthTier.Viewer).GetAsync($"/api/v1/servers/{Server}/files");
+        HttpResponseMessage r = await Client(_engine, KgsmTier.Viewer).GetAsync($"/api/v1/servers/{Server}/files");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
     [Fact]
     public async Task Save_Viewer_403()
     {
-        HttpResponseMessage r = await Put(_engine, AuthTier.Viewer, "edit.cfg", "{\"content\":\"x\"}");
+        HttpResponseMessage r = await Put(_engine, KgsmTier.Viewer, "edit.cfg", "{\"content\":\"x\"}");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
@@ -65,14 +67,14 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task List_UnknownServer_404()
     {
-        HttpResponseMessage r = await Client(_engine, AuthTier.Operator).GetAsync("/api/v1/servers/nope/files");
+        HttpResponseMessage r = await Client(_engine, KgsmTier.Operator).GetAsync("/api/v1/servers/nope/files");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
     [Fact]
     public async Task List_EngineUnprovisioned_503()
     {
-        HttpResponseMessage r = await Client(_noEngine, AuthTier.Operator).GetAsync($"/api/v1/servers/{Server}/files");
+        HttpResponseMessage r = await Client(_noEngine, KgsmTier.Operator).GetAsync($"/api/v1/servers/{Server}/files");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
     }
 
@@ -81,7 +83,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task List_Root_200_DirsFirst()
     {
-        HttpResponseMessage r = await Client(_engine, AuthTier.Operator).GetAsync($"/api/v1/servers/{Server}/files");
+        HttpResponseMessage r = await Client(_engine, KgsmTier.Operator).GetAsync($"/api/v1/servers/{Server}/files");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync());
@@ -99,7 +101,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Read_TextFile_200()
     {
-        HttpResponseMessage r = await Client(_engine, AuthTier.Operator)
+        HttpResponseMessage r = await Client(_engine, KgsmTier.Operator)
             .GetAsync($"/api/v1/servers/{Server}/files/content?path=server.cfg");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
@@ -112,7 +114,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Read_Binary_409_FileBinary()
     {
-        HttpResponseMessage r = await Client(_engine, AuthTier.Operator)
+        HttpResponseMessage r = await Client(_engine, KgsmTier.Operator)
             .GetAsync($"/api/v1/servers/{Server}/files/content?path=blob.bin");
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Contains("\"code\":\"file_binary\"", await r.Content.ReadAsStringAsync());
@@ -121,7 +123,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Read_TraversalEscape_404()
     {
-        HttpResponseMessage r = await Client(_engine, AuthTier.Operator)
+        HttpResponseMessage r = await Client(_engine, KgsmTier.Operator)
             .GetAsync($"/api/v1/servers/{Server}/files/content?path=../../../../etc/passwd");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
@@ -133,7 +135,7 @@ public sealed class FileBrowserApiTests
     {
         // A unique secret in the content — it must NOT appear in the audit row (only path/size/sha256).
         const string secret = "rcon_password=SUPER_SECRET_TOKEN_42";
-        HttpResponseMessage put = await Put(_engine, AuthTier.Operator, "edit.cfg",
+        HttpResponseMessage put = await Put(_engine, KgsmTier.Operator, "edit.cfg",
             JsonSerializer.Serialize(new { content = secret + "\n", origin = "ui" }));
         Assert.Equal(HttpStatusCode.OK, put.StatusCode);
 
@@ -142,7 +144,7 @@ public sealed class FileBrowserApiTests
 
         // The file.write audit row exists, scoped to the server, with path/size/sha256 meta — and the
         // raw audit response NEVER contains the secret content (the regression that matters most).
-        HttpResponseMessage auditResp = await Client(_engine, AuthTier.Operator).GetAsync("/api/v1/audit?serverId=" + Server);
+        HttpResponseMessage auditResp = await Client(_engine, KgsmTier.Operator).GetAsync("/api/v1/audit?serverId=" + Server);
         string auditJson = await auditResp.Content.ReadAsStringAsync();
         Assert.DoesNotContain("SUPER_SECRET_TOKEN_42", auditJson);
 
@@ -160,7 +162,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Save_StaleEtag_412()
     {
-        HttpResponseMessage r = await Put(_engine, AuthTier.Operator, "edit.cfg",
+        HttpResponseMessage r = await Put(_engine, KgsmTier.Operator, "edit.cfg",
             JsonSerializer.Serialize(new { content = "x\n", etag = "sha256:deadbeef" }));
         Assert.Equal(HttpStatusCode.PreconditionFailed, r.StatusCode);
     }
@@ -168,7 +170,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Save_NonExistent_404_NoCreate()
     {
-        HttpResponseMessage r = await Put(_engine, AuthTier.Operator, "does-not-exist.cfg",
+        HttpResponseMessage r = await Put(_engine, KgsmTier.Operator, "does-not-exist.cfg",
             JsonSerializer.Serialize(new { content = "x" }));
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
@@ -176,21 +178,21 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Save_MissingContent_400()
     {
-        HttpResponseMessage r = await Put(_engine, AuthTier.Operator, "edit.cfg", "{}");
+        HttpResponseMessage r = await Put(_engine, KgsmTier.Operator, "edit.cfg", "{}");
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 
     [Fact]
     public async Task Save_BadOrigin_400()
     {
-        HttpResponseMessage r = await Put(_engine, AuthTier.Operator, "edit.cfg",
+        HttpResponseMessage r = await Put(_engine, KgsmTier.Operator, "edit.cfg",
             "{\"content\":\"x\",\"origin\":\"hacker\"}");
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 
     // ===== helpers ================================================================================
 
-    private static HttpClient Client(AuthTestFactory factory, AuthTier? tier)
+    private static HttpClient Client(AuthTestFactory factory, KgsmTier? tier)
     {
         HttpClient c = factory.CreateClient();
         if (tier is { } t)
@@ -198,7 +200,7 @@ public sealed class FileBrowserApiTests
         return c;
     }
 
-    private static Task<HttpResponseMessage> Put(AuthTestFactory f, AuthTier? tier, string path, string json) =>
+    private static Task<HttpResponseMessage> Put(AuthTestFactory f, KgsmTier? tier, string path, string json) =>
         Client(f, tier).PutAsync($"/api/v1/servers/{Server}/files/content?path={Uri.EscapeDataString(path)}",
             new StringContent(json, Encoding.UTF8, "application/json"));
 

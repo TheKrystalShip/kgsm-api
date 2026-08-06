@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Players;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -23,7 +25,7 @@ public sealed class PlayerRosterStreamTests(AuthTestFactory factory) : IClassFix
     {
         string serverId = $"sse-reset-{Guid.NewGuid():N}";
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            factory.CreateClient(), "/api/v1/stream?topics=players", factory.AccessToken(AuthTier.Viewer));
+            factory.CreateClient(), "/api/v1/stream?topics=players", factory.AccessToken(KgsmTier.Viewer));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
@@ -58,7 +60,7 @@ public sealed class PlayerRosterStreamTests(AuthTestFactory factory) : IClassFix
     {
         string serverId = $"sse-reset-empty-{Guid.NewGuid():N}";
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            factory.CreateClient(), "/api/v1/stream?topics=players", factory.AccessToken(AuthTier.Viewer));
+            factory.CreateClient(), "/api/v1/stream?topics=players", factory.AccessToken(KgsmTier.Viewer));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 

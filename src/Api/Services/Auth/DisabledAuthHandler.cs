@@ -3,6 +3,8 @@ using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
@@ -26,11 +28,11 @@ public sealed class DisabledAuthHandler(
         Claim[] claims =
         [
             new("sub", "discord:dev"),
-            new(AuthClaims.Tier, AuthTiers.Admin),
-            new(AuthClaims.Host, api.HostId),
-            new(AuthClaims.TokenKind, TokenKind.Access),
-            new(AuthClaims.Username, "dev"),
-            new(AuthClaims.Display, "dev (auth disabled)"),
+            new(KgsmAuthClaims.Tier, KgsmTiers.Admin),
+            new(KgsmAuthClaims.Host, api.HostId),
+            new(KgsmAuthClaims.TokenKind, KgsmTokenKind.Access),
+            new(KgsmAuthClaims.Username, "dev"),
+            new(KgsmAuthClaims.Display, "dev (auth disabled)"),
             new("scope", "identify guilds"),
         ];
         var identity = new ClaimsIdentity(claims, SchemeName, "sub", roleType: null);

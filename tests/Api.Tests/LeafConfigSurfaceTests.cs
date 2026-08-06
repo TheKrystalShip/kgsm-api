@@ -5,6 +5,8 @@ using System.Text.Json;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Leaves;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -355,7 +357,7 @@ public sealed class LeafConfigSurfaceTests
     private static HttpClient Admin(LeafConfigTestFactory f)
     {
         HttpClient c = f.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(AuthTier.Admin));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(KgsmTier.Admin));
         return c;
     }
 

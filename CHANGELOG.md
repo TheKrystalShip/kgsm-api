@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the Discord seam and the tier model are the ecosystem's
+
+- **`IDiscordDirectory` (from `TheKrystalShip.KGSM.Auth.Discord`) replaces this API's own Discord
+  resolver.** One implementation, shared with every other surface, so no two can resolve the same
+  person differently.
+- **`AuthTier` / `AuthTiers` / `AuthClaims` / `TokenKind` are gone**, replaced by `KgsmTier` /
+  `KgsmTiers` / `KgsmAuthClaims` / `KgsmTokenKind` from the shared package. `AuthPolicy` and
+  `TierAuthorizationHandler` stay — ASP.NET policy names and enforcement are this surface's own.
+
+### Added
+
+- **PKCE on the OAuth login.** `/auth/discord/start` sends an `S256` challenge and `/callback`
+  presents the verifier. The verifier rides the existing HttpOnly state cookie, so there is still no
+  server-side pending store and the locked stateless decision is untouched.
+- **`AuthServiceGraphTests`** — builds the auth graph without the Discord fake. Every other test
+  replaces that seam, so an unregistered dependency was invisible to the suite and would surface as a
+  `500` on the first real login. It caught exactly that.
+
 ### Changed — one shared source for who may do what
 
 - **The Discord app, guild, role-lookup token and role map move to the shared `KgsmAuth` section**,

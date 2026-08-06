@@ -22,6 +22,9 @@ using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Extensions;
 
+using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Discord;
+
 namespace TheKrystalShip.Api;
 
 /// <summary>
@@ -460,13 +463,38 @@ public class Startup(IConfiguration configuration)
         // so no new client. The self/* exposing endpoints live on PeersController (no extra service).
         services.AddSingleton<ClusterPeerRelay>();
 
-        // M4·a — auth (Discord per-host, Model A). Stateless JWT bearer (the M4 decision): no session
-        // table, no user row — keeps M5 as the first EF migration. The Discord seam (IDiscordIdentityResolver)
-        // keeps everything that talks to discord.com behind one interface, so the whole 401/403/tier matrix
-        // is testable in-process with a fake. The token service mints/validates the host-scoped JWTs; the
-        // tier handler grants a hierarchical viewer/operator/admin policy from the 'tier' claim.
+        // Auth — Discord per-host, Model A. The Discord seam (IDiscordDirectory, from
+        // TheKrystalShip.KGSM.Auth.Discord) keeps everything that talks to discord.com behind one
+        // interface shared with every other KGSM surface, so the whole 401/403/tier matrix is testable
+        // in-process with a fake and no two surfaces can resolve a person differently. The token
+        // service mints/validates the host-scoped JWTs; the tier handler grants a hierarchical
+        // viewer/operator/admin policy from the 'tier' claim.
         services.AddSingleton<ISessionTokenService, SessionTokenService>();
-        services.AddHttpClient<IDiscordIdentityResolver, DiscordIdentityResolver>(
+        // The callback URL is this surface's own; the app, guild, token and role map are the host's.
+        // All of it is projected from ApiOptions rather than re-read from configuration: ApiOptions is
+        // the single place any key is interpreted, and a second reader is how two halves of one
+        // setting drift apart.
+        services.AddSingleton(sp =>
+        {
+            ApiOptions o = sp.GetRequiredService<ApiOptions>();
+            return new KgsmAuthOptions
+            {
+                ClientId = o.DiscordClientId,
+                ClientSecret = o.DiscordClientSecret,
+                BotToken = o.DiscordBotToken,
+                GuildId = o.DiscordGuildId,
+            };
+        });
+        // "identify guilds", not the package's leaner "identify" default: the granted scopes are
+        // surfaced on GET /auth/session and /me and the SPA reads them, so narrowing the set would be
+        // a visible contract change. Roles still come from the bot token — `guilds` buys nothing for
+        // authorization, it is just what this surface has always asked for.
+        services.AddSingleton(sp => new DiscordOAuthEndpoints(
+            sp.GetRequiredService<ApiOptions>().DiscordRedirectUri, "identify guilds"));
+        services.AddSingleton(sp => new KgsmRoleMap(
+            sp.GetRequiredService<ApiOptions>().RoleAdminIds,
+            sp.GetRequiredService<ApiOptions>().RoleOperatorIds));
+        services.AddHttpClient<IDiscordDirectory, DiscordDirectory>(
             c => c.Timeout = TimeSpan.FromSeconds(10));
         services.AddSingleton<IAuthorizationHandler, TierAuthorizationHandler>();
 
@@ -489,7 +517,7 @@ public class Startup(IConfiguration configuration)
                     OnTokenValidated = async ctx =>
                     {
                         // A refresh token authenticates ONLY /auth/session/refresh, never a protected call.
-                        if (ctx.Principal?.FindFirst(AuthClaims.TokenKind)?.Value != TokenKind.Access)
+                        if (ctx.Principal?.FindFirst(KgsmAuthClaims.TokenKind)?.Value != KgsmTokenKind.Access)
                         {
                             ctx.Fail("not an access token");
                             return;
@@ -511,7 +539,7 @@ public class Startup(IConfiguration configuration)
                         if (!opts.SessionsEnabled)
                             return;
 
-                        string? sid = ctx.Principal?.FindFirst(AuthClaims.SessionId)?.Value;
+                        string? sid = ctx.Principal?.FindFirst(KgsmAuthClaims.SessionId)?.Value;
                         if (string.IsNullOrEmpty(sid))
                         {
                             ctx.Fail("no session id (pre-M4·c token)");
@@ -543,9 +571,9 @@ public class Startup(IConfiguration configuration)
         // middleware picks challenge vs forbid). 401/403 already render the frozen {error} envelope below.
         services.AddAuthorization(o =>
         {
-            o.AddPolicy(AuthPolicy.Viewer, p => p.Requirements.Add(new TierRequirement(AuthTier.Viewer)));
-            o.AddPolicy(AuthPolicy.Operator, p => p.Requirements.Add(new TierRequirement(AuthTier.Operator)));
-            o.AddPolicy(AuthPolicy.Admin, p => p.Requirements.Add(new TierRequirement(AuthTier.Admin)));
+            o.AddPolicy(AuthPolicy.Viewer, p => p.Requirements.Add(new TierRequirement(KgsmTier.Viewer)));
+            o.AddPolicy(AuthPolicy.Operator, p => p.Requirements.Add(new TierRequirement(KgsmTier.Operator)));
+            o.AddPolicy(AuthPolicy.Admin, p => p.Requirements.Add(new TierRequirement(KgsmTier.Admin)));
             // Secure-by-default: any endpoint without an explicit [Authorize]/[AllowAnonymous] still
             // requires an authenticated caller — so a future controller can't ship silently open. The
             // open probes (/health, /api/v1) opt out with [AllowAnonymous]; diagnostics are admin-gated.

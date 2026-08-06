@@ -35,9 +35,15 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
   by the 10-min `SessionCleanupWorker`. A token with no `sid` claim → `401` (no grandfathering).
   `Api__SessionsDisabled=true` makes the whole registry inert — no per-request check, no revoke surface, no GC
   (the stateless-JWT escape hatch).
-- **`IDiscordIdentityResolver` is the seam — the one chokepoint to `discord.com`.** Everything that
-  talks to Discord goes through it. **Never** call `discord.com` from anywhere else. This is exactly
-  what makes the whole 401/403/tier matrix testable in-process with a fake (`tests/Api.Tests`).
+- **`IDiscordDirectory` is the seam — the one chokepoint to `discord.com`,** and it lives in
+  `TheKrystalShip.KGSM.Auth.Discord`, shared with every other KGSM surface. Everything that talks to
+  Discord goes through it. **Never** call `discord.com` from anywhere else. This is what makes the
+  whole 401/403/tier matrix testable in-process with a fake (`tests/Api.Tests`), and what keeps two
+  surfaces from resolving the same person differently.
+- **The tier vocabulary is the ecosystem's.** `KgsmTier`/`KgsmTiers`/`KgsmAuthClaims`/`KgsmTokenKind`
+  come from `TheKrystalShip.KGSM.Auth`; this project keeps only `AuthPolicy` (ASP.NET policy names)
+  and `TierAuthorizationHandler` (how this surface enforces them). There is no local tier enum to
+  drift.
 - **Roles come from the bot token, by doc mandate.** `GET /guilds/{guild}/members/{user}` with the
   **bot token** — the only path, because the `identify guilds` user scopes don't carry roles
   (`architecture.html:570`). The Discord app/bot-token/guild/role-map are **shared external config**

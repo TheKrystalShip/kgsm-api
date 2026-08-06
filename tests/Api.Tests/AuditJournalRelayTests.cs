@@ -7,6 +7,8 @@ using Microsoft.Extensions.Configuration;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -41,7 +43,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         // HttpClient is collected, which surfaces as a mid-stream IOException rather than a clean fail.
         using HttpClient client = _factory.CreateClient();
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            client, "/api/v1/stream?topics=audit", _factory.AccessToken(AuthTier.Viewer));
+            client, "/api/v1/stream?topics=audit", _factory.AccessToken(KgsmTier.Viewer));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
@@ -79,7 +81,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
     {
         using HttpClient client = _factory.CreateClient();
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            client, "/api/v1/stream?topics=audit", _factory.AccessToken(AuthTier.Viewer));
+            client, "/api/v1/stream?topics=audit", _factory.AccessToken(KgsmTier.Viewer));
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
         string instance = $"nopersist-{Guid.NewGuid():N}";
@@ -101,7 +103,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         // local table alone (honestly marked degraded) — exactly the read that would expose a double-write.
         using HttpClient reader = _factory.CreateClient();
         reader.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _factory.AccessToken(AuthTier.Viewer));
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _factory.AccessToken(KgsmTier.Viewer));
         HttpResponseMessage page = await reader.GetAsync($"/api/v1/audit?serverId={instance}&limit=200");
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
 

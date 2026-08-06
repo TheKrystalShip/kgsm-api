@@ -9,6 +9,8 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -103,7 +105,7 @@ public sealed class SessionRegistryTests(AuthTestFactory factory) : IClassFixtur
 
         // The auth.login audit row's meta.sid links it to the session row just created.
         HttpClient viewer = factory.CreateClient();
-        viewer.DefaultRequestHeaders.Authorization = new("Bearer", factory.AccessToken(AuthTier.Viewer));
+        viewer.DefaultRequestHeaders.Authorization = new("Bearer", factory.AccessToken(KgsmTier.Viewer));
         JsonElement body = await Json(await viewer.GetAsync("/api/v1/audit?actor=haru"));
         JsonElement[] rows = body.GetProperty("data").EnumerateArray().ToArray();
         JsonElement loginRow = rows.First(x => x.GetProperty("action").GetString() == AuditAction.AuthLogin

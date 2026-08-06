@@ -6,6 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -51,7 +53,7 @@ public sealed class SessionRotationTests(AuthTestFactory factory) : IClassFixtur
         var store = factory.Services.GetRequiredService<SessionStore>();
         var opts = factory.Services.GetRequiredService<ApiOptions>();
         string sid = "sid_rot_" + Guid.NewGuid().ToString("N");
-        MintedToken r0 = tokens.MintRefresh(FakeDiscordResolver.Identity, AuthTier.Operator, sid);
+        MintedToken r0 = tokens.MintRefresh(FakeDiscordResolver.Identity, KgsmTier.Operator, sid);
         DateTimeOffset created = DateTimeOffset.UtcNow.AddMinutes(-1);   // LastSeen must visibly advance
         DateTimeOffset shortExpires = DateTimeOffset.UtcNow.AddDays(10);
         await store.CreateAsync(sid, $"discord:{FakeDiscordResolver.Identity.UserId}", opts.HostId,
@@ -79,7 +81,7 @@ public sealed class SessionRotationTests(AuthTestFactory factory) : IClassFixtur
     {
         // The rotated refresh token from one call is itself a valid refresh token for the next call —
         // the SPA can keep refreshing indefinitely (the rolling window), adopting the new refresh each time.
-        string r0 = factory.RefreshToken(AuthTier.Operator);
+        string r0 = factory.RefreshToken(KgsmTier.Operator);
         string r1 = (await Json(await PostRefresh(Bearer(r0)))).GetProperty("refresh").GetString()!;
         HttpResponseMessage second = await PostRefresh(Bearer(r1));
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
@@ -93,7 +95,7 @@ public sealed class SessionRotationTests(AuthTestFactory factory) : IClassFixtur
     {
         // Present r0 once (rotates the row to r1's jti), then present the SAME r0 again: its jti is now
         // stale vs the row's CurrentJti → 401 (reuse detection — an old/stolen refresh token can't mint).
-        string r0 = factory.RefreshToken(AuthTier.Operator);
+        string r0 = factory.RefreshToken(KgsmTier.Operator);
         HttpResponseMessage first = await PostRefresh(Bearer(r0));
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
 
@@ -113,7 +115,7 @@ public sealed class SessionRotationTests(AuthTestFactory factory) : IClassFixtur
         // An access token with a live session row authorizes /me. After logout revokes + evicts the
         // session, the SAME token 401s — the server-side revoke the milestone exists for (not just a
         // client-side token drop). Uses the production-default 5s cache TTL; the Evict makes it instant.
-        string token = factory.AccessToken(AuthTier.Viewer);
+        string token = factory.AccessToken(KgsmTier.Viewer);
         Assert.Equal(HttpStatusCode.OK, (await Bearer(token).GetAsync("/api/v1/me")).StatusCode);
 
         Assert.Equal(HttpStatusCode.NoContent, (await Bearer(token).PostAsync("/auth/logout", content: null)).StatusCode);

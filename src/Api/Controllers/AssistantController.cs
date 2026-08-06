@@ -9,6 +9,9 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Leaves;
 
+using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Discord;
+
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
@@ -76,9 +79,9 @@ public sealed class AssistantController(
         //               user turned the toggle on. This is the real gate: an operator (or a tampered
         //               SPA forcing actions:true) is zeroed here — autoAct requires admin tier.
         // body.Actions is the toggle INTENT; it can only ever narrow autoAct, never widen authority.
-        AuthTier tier = ci is not null ? SessionClaims.ReadTier(ci) : AuthTier.None;
-        bool canAct = tier >= AuthTier.Operator;
-        bool autoAct = (body.Actions ?? false) && tier >= AuthTier.Admin;
+        KgsmTier tier = ci is not null ? SessionClaims.ReadTier(ci) : KgsmTier.None;
+        bool canAct = tier >= KgsmTier.Operator;
+        bool autoAct = (body.Actions ?? false) && tier >= KgsmTier.Admin;
 
         // The per-chat conversation id from the SPA (the "new chat" identity). Forwarded to the assistant
         // as a SUB-scope of the verified user's memory key (web:<userId>:<chatId>) so each chat is a fresh

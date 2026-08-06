@@ -12,6 +12,9 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 
+using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Discord;
+
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
@@ -21,14 +24,14 @@ namespace TheKrystalShip.Api.Controllers;
 /// the host's bot. Stateless — no user row, no session table (the M4 bearer decision).
 /// <para>
 /// <b>M4·a built:</b> the JWT mint/refresh/session/logout machinery + the verdict logic, all behind
-/// the <see cref="IDiscordIdentityResolver"/> seam (fake-tested). <b>M4·b (live):</b> the real Discord
+/// the <see cref="IDiscordDirectory"/> seam (fake-tested). <b>M4·b (live):</b> the real Discord
 /// code exchange + bot-token role lookup, validated once on the trusted host when the Discord app /
 /// bot token / guild / role-map are supplied — until then the login endpoints 503.
 /// </para>
 /// </summary>
 [ApiController]
 public sealed class AuthController(
-    IDiscordIdentityResolver discord,
+    IDiscordDirectory discord,
     ISessionTokenService tokens,
     SessionStore sessions,
     ISessionValidator sessionValidator,
@@ -52,10 +55,12 @@ public sealed class AuthController(
         return jsonOptions;
     }
 
-    // The OAuth CSRF state cookie — set at /start, verified at /callback. This is the stateless
-    // double-submit guard: the random nonce rides BOTH the cookie (HttpOnly, our origin) and the
-    // authorize URL's `state` (which Discord echoes back), and the callback requires them equal. No
-    // server-side store, so it honors the no-session-table decision. One-time, short-lived.
+    // The in-flight login cookie — set at /start, consumed at /callback. It carries BOTH halves of
+    // the handshake: the CSRF `state` Discord echoes back, and the PKCE `code_verifier` presented at
+    // the exchange. Keeping the verifier here rather than in a server-side pending store is what lets
+    // this API run PKCE while staying stateless. HttpOnly and our origin, so only this browser's own
+    // login can satisfy it — the binding is the whole CSRF property, and a set of issued states held
+    // server-side would not have it. One-time, short-lived.
     private const string StateCookie = "kgsm_oauth_state";
     private static readonly TimeSpan StateTtl = TimeSpan.FromMinutes(10);
 
@@ -73,9 +78,10 @@ public sealed class AuthController(
             return Error(StatusCodes.Status503ServiceUnavailable, "auth_unconfigured",
                 "Discord auth is not configured on this host.");
 
-        string state = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
-        Response.Cookies.Append(StateCookie, state, StateCookieOptions());
-        string url = discord.BuildAuthorizeUrl(state, prompt ?? "none");
+        OAuthHandshake handshake = OAuthHandshake.Create();
+        Response.Cookies.Append(StateCookie, handshake.ToCookieValue(), StateCookieOptions());
+        // Only the challenge travels — the verifier stays in the cookie, never in a URL.
+        string url = discord.BuildAuthorizeUrl(handshake.State, handshake.CodeChallenge, prompt ?? "none");
         return Redirect(url);
     }
 
@@ -95,14 +101,14 @@ public sealed class AuthController(
             return Fail(StatusCodes.Status503ServiceUnavailable, "auth_unconfigured",
                 "Discord auth is not configured on this host.");
 
-        // CSRF gate: the state Discord echoes back must equal the nonce we set in the cookie at
-        // /start. The cookie is one-time — clear it whatever the outcome (no replay). A missing
-        // cookie (expired/never-started) or a mismatch is a forged/stale login -> 400, never a grant.
-        // This runs BEFORE any redirect or exchange — the redirect handoff never weakens the gate.
-        string? expectedState = Request.Cookies[StateCookie];
-        if (expectedState is not null)
+        // CSRF gate: the state Discord echoes back must equal the one issued to THIS browser. The
+        // cookie is one-time — clear it whatever the outcome (no replay). A missing cookie
+        // (expired/never-started), a malformed one, or a mismatch is a forged or stale login -> 400,
+        // never a grant. This runs BEFORE any exchange, so the redirect handoff never weakens it.
+        string? cookie = Request.Cookies[StateCookie];
+        if (cookie is not null)
             Response.Cookies.Delete(StateCookie, StateCookieOptions());
-        if (!StateMatches(state, expectedState))
+        if (!OAuthHandshake.TryParse(cookie, out OAuthHandshake handshake) || !handshake.MatchesState(state))
             return Fail(StatusCodes.Status400BadRequest, "invalid_state",
                 "the OAuth state did not validate (possible CSRF, or the login expired — start again).");
 
@@ -112,7 +118,7 @@ public sealed class AuthController(
         ResolvedPrincipal? resolved;
         try
         {
-            resolved = await discord.ResolveAsync(code, ct);
+            resolved = await discord.ResolveAsync(code, handshake.CodeVerifier, ct);
         }
         catch (DiscordAuthException ex)
         {
@@ -130,7 +136,7 @@ public sealed class AuthController(
         string userHandle = $"discord:{resolved.Identity.UserId}";
 
         // Verified identity, but no role on this host -> terminal 403 (never auto-re-authed).
-        if (resolved.Tier == AuthTier.None)
+        if (resolved.Tier == KgsmTier.None)
             return options.FrontendRedirectEnabled
                 ? FrontendRedirect(Frag(("error", "denied")))
                 : StatusCode(StatusCodes.Status403Forbidden,
@@ -195,7 +201,7 @@ public sealed class AuthController(
         // separate, not-yet-needed contract change).
         return options.FrontendRedirectEnabled
             ? FrontendRedirect(Frag(("access", access.Token), ("refresh", refresh.Token)))
-            : Ok(new CallbackResult("ok", AuthTiers.ToWire(resolved.Tier), access.Token, refresh.Token, userHandle,
+            : Ok(new CallbackResult("ok", KgsmTiers.ToWire(resolved.Tier), access.Token, refresh.Token, userHandle,
                 access.ExpiresAt, refresh.ExpiresAt));
     }
 
@@ -210,7 +216,7 @@ public sealed class AuthController(
     /// This node does <b>not</b> re-check Discord guild membership — it has no Discord round-trip to
     /// make here; it trusts the cluster-token-authenticated peer's tier assertion (that peer already
     /// resolved it via its own guild-role lookup at the user's original login). An unparseable/unknown/
-    /// empty tier floors to <see cref="AuthTier.Viewer"/> — never escalated, never denied outright.
+    /// empty tier floors to <see cref="KgsmTier.Viewer"/> — never escalated, never denied outright.
     /// </para>
     /// <para>
     /// Mints exactly like <see cref="Callback"/>: a fresh <c>sid</c>, both tokens minted carrying it,
@@ -239,13 +245,13 @@ public sealed class AuthController(
             return Error(StatusCodes.Status400BadRequest, "bad_request", "discordId is required");
 
         // The vouching peer already authenticated this user (its own OAuth login) — never re-check
-        // Discord here (no token to check with). AuthTiers.Parse alone floors an unparseable/unknown/
+        // Discord here (no token to check with). KgsmTiers.Parse alone floors an unparseable/unknown/
         // empty tier to None (a terminal denial elsewhere, e.g. Callback) — wrong here: a caller that
         // reached this far already cleared the cluster-token + peer-enabled gate above, so an ambiguous
         // tier assertion floors to Viewer instead (honest and safe — never escalated past what the
         // peer asserted, never denied outright for a merely-unparseable string).
-        AuthTier parsedTier = AuthTiers.Parse(body.Tier);
-        AuthTier tier = parsedTier == AuthTier.None ? AuthTier.Viewer : parsedTier;
+        KgsmTier parsedTier = KgsmTiers.Parse(body.Tier);
+        KgsmTier tier = parsedTier == KgsmTier.None ? KgsmTier.Viewer : parsedTier;
         string userHandle = $"discord:{body.DiscordId}";
         var identity = new DiscordIdentity(body.DiscordId, body.Username, body.DisplayName, null, Array.Empty<string>());
 
@@ -343,7 +349,7 @@ public sealed class AuthController(
 
         // Built from the CALLER'S CLAIMS, never body — body carries only nodeId (see the XML doc above).
         var reqBody = new ClusterSessionRequest(
-            caller.UserId, caller.Username, caller.Display, AuthTiers.ToWire(SessionClaims.ReadTier(ci)));
+            caller.UserId, caller.Username, caller.Display, KgsmTiers.ToWire(SessionClaims.ReadTier(ci)));
 
         HttpClient http = httpClientFactory.CreateClient(OutboxDrainer.HttpClientName);
         HttpResponseMessage response;
@@ -462,7 +468,7 @@ public sealed class AuthController(
             return Error(StatusCodes.Status401Unauthorized, "unauthorized",
                 "the refresh token is invalid, expired, or has been superseded");
 
-        return Ok(new RefreshResponse(access.Token, refresh.Token, AuthTiers.ToWire(claims.Tier), access.ExpiresAt));
+        return Ok(new RefreshResponse(access.Token, refresh.Token, KgsmTiers.ToWire(claims.Tier), access.ExpiresAt));
     }
 
     /// <summary>
@@ -567,12 +573,12 @@ public sealed class AuthController(
     // posture elsewhere in Meta. `peerNode` (the cluster SSO vouch) is the analogous additive: the
     // vouching peer's node id, when present, so a vouched login's audit row still names which node
     // asserted the identity.
-    private async Task RecordAuthAsync(string action, DiscordIdentity id, AuthTier tier, string summary,
+    private async Task RecordAuthAsync(string action, DiscordIdentity id, KgsmTier tier, string summary,
         string? sid, string? userAgent, CancellationToken ct, string? peerNode = null, string origin = AuditOrigin.Ui)
     {
         try
         {
-            var meta = new Dictionary<string, string> { ["tier"] = AuthTiers.ToWire(tier) };
+            var meta = new Dictionary<string, string> { ["tier"] = KgsmTiers.ToWire(tier) };
             if (!string.IsNullOrEmpty(sid))
                 meta["sid"] = sid;
             if (!string.IsNullOrEmpty(userAgent))
@@ -611,13 +617,4 @@ public sealed class AuthController(
         IsEssential = true,
         MaxAge = StateTtl,
     };
-
-    // Constant-time compare of the echoed state against the cookie nonce; either missing => no match.
-    private static bool StateMatches(string? echoed, string? expected)
-    {
-        if (string.IsNullOrEmpty(echoed) || string.IsNullOrEmpty(expected)) return false;
-        return CryptographicOperations.FixedTimeEquals(
-            System.Text.Encoding.ASCII.GetBytes(echoed),
-            System.Text.Encoding.ASCII.GetBytes(expected));
-    }
 }

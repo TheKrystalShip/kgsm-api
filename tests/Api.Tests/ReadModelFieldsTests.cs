@@ -13,6 +13,8 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -43,7 +45,7 @@ public sealed class ReadModelFieldsTests
     [Fact]
     public async Task Host_PanelVersion_IsApiVersion_OnListAndDetail()
     {
-        HttpClient c = Client(_base, AuthTier.Viewer);
+        HttpClient c = Client(_base, KgsmTier.Viewer);
 
         // GET /hosts (list) — the single host carries panelVersion == the in-process ApiInfo.ApiVersion.
         using JsonDocument list = await GetJson(c, "/api/v1/hosts");
@@ -63,7 +65,7 @@ public sealed class ReadModelFieldsTests
         using JsonDocument root = await GetJson(_base.CreateClient(), "/api/v1");
         string handshake = root.RootElement.GetProperty("version").GetString()!;
 
-        using JsonDocument list = await GetJson(Client(_base, AuthTier.Viewer), "/api/v1/hosts");
+        using JsonDocument list = await GetJson(Client(_base, KgsmTier.Viewer), "/api/v1/hosts");
         string panel = list.RootElement.EnumerateArray().Single().GetProperty("panelVersion").GetString()!;
 
         Assert.Equal(handshake, panel);
@@ -144,7 +146,7 @@ public sealed class ReadModelFieldsTests
     public async Task Server_NewFields_RideTheDetailView()
     {
         // The fields are on the shared Server record, so GET /servers/{id} (detail) carries them too.
-        using JsonDocument doc = await GetJson(Client(_engine, AuthTier.Viewer), "/api/v1/servers/factorio-checked");
+        using JsonDocument doc = await GetJson(Client(_engine, KgsmTier.Viewer), "/api/v1/servers/factorio-checked");
         JsonElement srv = doc.RootElement;
         Assert.True(srv.GetProperty("updateAvailable").GetBoolean());
         Assert.Equal("2026-06-16T14:23:01.0000000Z", srv.GetProperty("startedAt").GetString());
@@ -152,7 +154,7 @@ public sealed class ReadModelFieldsTests
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static HttpClient Client(AuthTestFactory factory, AuthTier tier)
+    private static HttpClient Client(AuthTestFactory factory, KgsmTier tier)
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(tier));
@@ -170,7 +172,7 @@ public sealed class ReadModelFieldsTests
     /// so it outlives the parsed document).</summary>
     private static async Task<JsonElement> GetServer(AuthTestFactory factory, string id)
     {
-        using JsonDocument doc = await GetJson(Client(factory, AuthTier.Viewer), "/api/v1/servers");
+        using JsonDocument doc = await GetJson(Client(factory, KgsmTier.Viewer), "/api/v1/servers");
         foreach (JsonElement e in doc.RootElement.EnumerateArray())
             if (e.GetProperty("id").GetString() == id)
                 return e.Clone();

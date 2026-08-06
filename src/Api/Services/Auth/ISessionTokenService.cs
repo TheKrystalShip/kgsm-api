@@ -1,5 +1,8 @@
 using Microsoft.IdentityModel.Tokens;
 
+using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Discord;
+
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
@@ -19,13 +22,13 @@ namespace TheKrystalShip.Api.Services.Auth;
 public interface ISessionTokenService
 {
     /// <summary>Mint a short-lived access bearer for an authorized identity/tier, scoped to a session.</summary>
-    MintedToken MintAccess(DiscordIdentity identity, AuthTier tier, string sessionId);
+    MintedToken MintAccess(DiscordIdentity identity, KgsmTier tier, string sessionId);
 
     /// <summary>Mint the refresh token (its lifetime IS the 30-day absolute cap — there is no
     /// server-side state to extend the session past it, so the cap can't be moved by rotation).
     /// Carries the same <paramref name="sessionId"/> so a refresh re-mints access with the
     /// same <c>sid</c> (D7/D8).</summary>
-    MintedToken MintRefresh(DiscordIdentity identity, AuthTier tier, string sessionId);
+    MintedToken MintRefresh(DiscordIdentity identity, KgsmTier tier, string sessionId);
 
     /// <summary>Validate a refresh token presented at <c>/auth/session/refresh</c>. Returns the
     /// claims needed to re-mint a fresh access token (incl. the <c>sid</c> to carry through), or

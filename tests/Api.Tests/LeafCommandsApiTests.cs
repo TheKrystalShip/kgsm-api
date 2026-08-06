@@ -3,6 +3,8 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -35,7 +37,7 @@ public sealed class LeafCommandsApiTests
         }
         """;
 
-    private static HttpClient Client(LeafTestFactory f, AuthTier tier)
+    private static HttpClient Client(LeafTestFactory f, KgsmTier tier)
     {
         HttpClient c = f.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(tier));
@@ -55,7 +57,7 @@ public sealed class LeafCommandsApiTests
         using var factory = new LeafTestFactory();
         factory.InstallCommands("bot", BotManifest);
 
-        JsonElement body = await Get(Client(factory, AuthTier.Operator), "bot");
+        JsonElement body = await Get(Client(factory, KgsmTier.Operator), "bot");
 
         Assert.Equal("bot", body.GetProperty("leaf").GetString());
         Assert.Equal("discord", body.GetProperty("surface").GetString());
@@ -92,7 +94,7 @@ public sealed class LeafCommandsApiTests
               "commands": [ { "name": "ping", "description": "Check if the bot is responsive", "mutates": false } ] }
             """);
 
-        JsonElement body = await Get(Client(factory, AuthTier.Operator), "bot");
+        JsonElement body = await Get(Client(factory, KgsmTier.Operator), "bot");
 
         Assert.Empty(body.GetProperty("commands").EnumerateArray().Single().GetProperty("options").EnumerateArray());
     }
@@ -106,7 +108,7 @@ public sealed class LeafCommandsApiTests
     {
         using var factory = new LeafTestFactory();
         factory.InstallCommands("bot", BotManifest);
-        HttpClient client = Client(factory, AuthTier.Operator);
+        HttpClient client = Client(factory, KgsmTier.Operator);
 
         HttpResponseMessage resp = await client.GetAsync($"/api/v1/hosts/{Host}/services/monitor/commands");
 
@@ -121,7 +123,7 @@ public sealed class LeafCommandsApiTests
         using var factory = new LeafTestFactory();
         factory.InstallCommands("bot", BotManifest);
 
-        HttpResponseMessage resp = await Client(factory, AuthTier.Operator)
+        HttpResponseMessage resp = await Client(factory, KgsmTier.Operator)
             .GetAsync("/api/v1/hosts/some-other-box/services/bot/commands");
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
@@ -142,7 +144,7 @@ public sealed class LeafCommandsApiTests
         using var factory = new LeafTestFactory();
         factory.InstallCommands("bot", json);
 
-        HttpResponseMessage resp = await Client(factory, AuthTier.Operator)
+        HttpResponseMessage resp = await Client(factory, KgsmTier.Operator)
             .GetAsync($"/api/v1/hosts/{Host}/services/bot/commands");
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
@@ -156,7 +158,7 @@ public sealed class LeafCommandsApiTests
         factory.InstallCommands("bot", BotManifest);
         factory.InstallCommands("assistant", "{ oh dear");
 
-        JsonElement body = await Get(Client(factory, AuthTier.Operator), "bot");
+        JsonElement body = await Get(Client(factory, KgsmTier.Operator), "bot");
 
         Assert.Equal(2, body.GetProperty("commands").GetArrayLength());
     }
@@ -173,8 +175,8 @@ public sealed class LeafCommandsApiTests
         string path = $"/api/v1/hosts/{Host}/services/bot/commands";
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await factory.CreateClient().GetAsync(path)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await Client(factory, AuthTier.Viewer).GetAsync(path)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await Client(factory, AuthTier.Operator).GetAsync(path)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await Client(factory, AuthTier.Admin).GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await Client(factory, KgsmTier.Viewer).GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Client(factory, KgsmTier.Operator).GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Client(factory, KgsmTier.Admin).GetAsync(path)).StatusCode);
     }
 }

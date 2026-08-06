@@ -9,6 +9,8 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -537,7 +539,7 @@ public sealed class ClusterSsoTests
         }, default);
 
         using HttpClient client = factory.CreateClient();
-        HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(AuthTier.Viewer));
+        HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(KgsmTier.Viewer));
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         JsonElement nodes = (await Json(resp)).GetProperty("nodes");
@@ -576,7 +578,7 @@ public sealed class ClusterSsoTests
         }, default);
 
         using HttpClient client = factory.CreateClient();
-        HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(AuthTier.Viewer));
+        HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(KgsmTier.Viewer));
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         JsonElement nodes = (await Json(resp)).GetProperty("nodes");
@@ -615,7 +617,7 @@ public sealed class ClusterSsoTests
         }, default);
 
         using HttpClient client = factory.CreateClient();
-        HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(AuthTier.Viewer));
+        HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(KgsmTier.Viewer));
 
         JsonElement nodes = (await Json(resp)).GetProperty("nodes");
         JsonElement hearsay = nodes.EnumerateArray().Single(n => n.GetProperty("nodeId").GetString() == "node-hearsay");
@@ -653,7 +655,7 @@ public sealed class ClusterSsoTests
 
             using HttpClient clientA = factoryA.CreateClient();
             JsonElement body = await Json(await PostVouchRequestAsync(
-                clientA, factoryA.AccessToken(AuthTier.Operator), "node-b"));
+                clientA, factoryA.AccessToken(KgsmTier.Operator), "node-b"));
 
             string accessTokenB = body.GetProperty("accessToken").GetString()!;
             Assert.False(string.IsNullOrWhiteSpace(accessTokenB));
@@ -693,11 +695,11 @@ public sealed class ClusterSsoTests
             // The request body never carries a tier — only nodeId. Each caller's tier must come from
             // THEIR OWN validated session claims on A, not anything the body could assert.
             JsonElement viewerBody = await Json(await PostVouchRequestAsync(
-                clientA, factoryA.AccessToken(AuthTier.Viewer), "node-b"));
+                clientA, factoryA.AccessToken(KgsmTier.Viewer), "node-b"));
             string viewerAccessTokenB = viewerBody.GetProperty("accessToken").GetString()!;
 
             JsonElement operatorBody = await Json(await PostVouchRequestAsync(
-                clientA, factoryA.AccessToken(AuthTier.Operator), "node-b"));
+                clientA, factoryA.AccessToken(KgsmTier.Operator), "node-b"));
             string operatorAccessTokenB = operatorBody.GetProperty("accessToken").GetString()!;
 
             // An operator-gated action on B: a viewer-floored token must 403 (never escalated); an
@@ -732,7 +734,7 @@ public sealed class ClusterSsoTests
         using HttpClient client = factory.CreateClient();
 
         HttpResponseMessage resp = await PostVouchRequestAsync(
-            client, factory.AccessToken(AuthTier.Viewer), nodeId: "");
+            client, factory.AccessToken(KgsmTier.Viewer), nodeId: "");
 
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         JsonElement error = (await Json(resp)).GetProperty("error");
@@ -750,7 +752,7 @@ public sealed class ClusterSsoTests
             using HttpClient client = factoryA.CreateClient();
 
             HttpResponseMessage resp = await PostVouchRequestAsync(
-                client, factoryA.AccessToken(AuthTier.Viewer), "node-never-added");
+                client, factoryA.AccessToken(KgsmTier.Viewer), "node-never-added");
 
             Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
             JsonElement error = (await Json(resp)).GetProperty("error");
@@ -780,7 +782,7 @@ public sealed class ClusterSsoTests
 
             using HttpClient client = factoryA.CreateClient();
             HttpResponseMessage resp = await PostVouchRequestAsync(
-                client, factoryA.AccessToken(AuthTier.Operator), "node-c");
+                client, factoryA.AccessToken(KgsmTier.Operator), "node-c");
 
             Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
             JsonElement error = (await Json(resp)).GetProperty("error");
@@ -806,7 +808,7 @@ public sealed class ClusterSsoTests
 
             using HttpClient client = factoryA.CreateClient();
             HttpResponseMessage resp = await PostVouchRequestAsync(
-                client, factoryA.AccessToken(AuthTier.Operator), "node-dead");
+                client, factoryA.AccessToken(KgsmTier.Operator), "node-dead");
 
             Assert.Equal(HttpStatusCode.BadGateway, resp.StatusCode);
             JsonElement error = (await Json(resp)).GetProperty("error");

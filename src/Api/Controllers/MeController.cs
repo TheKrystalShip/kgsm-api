@@ -6,6 +6,8 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
@@ -64,7 +66,7 @@ public sealed class MeController(AppDbContext db) : ControllerBase
 
         return new MeResponse(
             new SessionUser($"discord:{id.UserId}", id.Username, id.Display, id.AvatarUrl),
-            AuthTiers.ToWire(SessionClaims.ReadTier(ci)),
+            KgsmTiers.ToWire(SessionClaims.ReadTier(ci)),
             id.Scopes,
             recentLogins);
     }

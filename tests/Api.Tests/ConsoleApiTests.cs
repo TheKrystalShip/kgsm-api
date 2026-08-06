@@ -10,6 +10,8 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -49,7 +51,7 @@ public sealed class ConsoleApiTests
     [Fact]
     public async Task Post_Viewer_403_WriteIsOperatorPlus()
     {
-        HttpResponseMessage r = await Post(_engine, AuthTier.Viewer, Native, "{\"input\":\"/say hi\"}");
+        HttpResponseMessage r = await Post(_engine, KgsmTier.Viewer, Native, "{\"input\":\"/say hi\"}");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
@@ -58,7 +60,7 @@ public sealed class ConsoleApiTests
     [Fact]
     public async Task Post_Operator_Native_202_Delivered()
     {
-        HttpResponseMessage r = await Post(_engine, AuthTier.Operator, Native, "{\"input\":\"/say hello\",\"origin\":\"ui\"}");
+        HttpResponseMessage r = await Post(_engine, KgsmTier.Operator, Native, "{\"input\":\"/say hello\",\"origin\":\"ui\"}");
         Assert.Equal(HttpStatusCode.Accepted, r.StatusCode); // 202 — delivered to the console input
     }
 
@@ -67,7 +69,7 @@ public sealed class ConsoleApiTests
     [Fact]
     public async Task Post_Operator_Container_409_NativeOnly()
     {
-        HttpResponseMessage r = await Post(_engine, AuthTier.Operator, Container, "{\"input\":\"/say hi\"}");
+        HttpResponseMessage r = await Post(_engine, KgsmTier.Operator, Container, "{\"input\":\"/say hi\"}");
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Contains("native", await r.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
     }
@@ -77,7 +79,7 @@ public sealed class ConsoleApiTests
     [Fact]
     public async Task Post_Operator_UnknownId_404()
     {
-        HttpResponseMessage r = await Post(_engine, AuthTier.Operator, "nope", "{\"input\":\"/say hi\"}");
+        HttpResponseMessage r = await Post(_engine, KgsmTier.Operator, "nope", "{\"input\":\"/say hi\"}");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
@@ -85,14 +87,14 @@ public sealed class ConsoleApiTests
     public async Task Post_EngineAbsent_503()
     {
         // The AuthTestFactory leaves the engine unprovisioned → no IInstanceService → honest 503.
-        HttpResponseMessage r = await Post(_noEngine, AuthTier.Operator, Native, "{\"input\":\"/say hi\"}");
+        HttpResponseMessage r = await Post(_noEngine, KgsmTier.Operator, Native, "{\"input\":\"/say hi\"}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
     }
 
     [Fact]
     public async Task Post_BlankInput_400()
     {
-        HttpResponseMessage r = await Post(_engine, AuthTier.Operator, Native, "{\"input\":\"   \"}");
+        HttpResponseMessage r = await Post(_engine, KgsmTier.Operator, Native, "{\"input\":\"   \"}");
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 
@@ -100,14 +102,14 @@ public sealed class ConsoleApiTests
     public async Task Post_OverLongInput_400()
     {
         string big = new string('x', 1001);
-        HttpResponseMessage r = await Post(_engine, AuthTier.Operator, Native, $"{{\"input\":\"{big}\"}}");
+        HttpResponseMessage r = await Post(_engine, KgsmTier.Operator, Native, $"{{\"input\":\"{big}\"}}");
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 
     [Fact]
     public async Task Post_BadOrigin_400()
     {
-        HttpResponseMessage r = await Post(_engine, AuthTier.Operator, Native, "{\"input\":\"/say hi\",\"origin\":\"hacker\"}");
+        HttpResponseMessage r = await Post(_engine, KgsmTier.Operator, Native, "{\"input\":\"/say hi\",\"origin\":\"hacker\"}");
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 
@@ -118,14 +120,14 @@ public sealed class ConsoleApiTests
     {
         // The fake fails the sentinel command exactly as kgsm would when there's no FIFO (server stopped):
         // the controller must surface that, not fabricate a success.
-        HttpResponseMessage r = await Post(_engine, AuthTier.Operator, Native, "{\"input\":\"/trigger-fail\"}");
+        HttpResponseMessage r = await Post(_engine, KgsmTier.Operator, Native, "{\"input\":\"/trigger-fail\"}");
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Contains("No active server", await r.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
     }
 
     // ===== helpers ================================================================================
 
-    private static Task<HttpResponseMessage> Post(AuthTestFactory f, AuthTier? tier, string id, string json)
+    private static Task<HttpResponseMessage> Post(AuthTestFactory f, KgsmTier? tier, string id, string json)
     {
         HttpClient c = f.CreateClient();
         if (tier is { } t)

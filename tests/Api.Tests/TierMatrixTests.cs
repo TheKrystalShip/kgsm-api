@@ -3,6 +3,8 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -58,7 +60,7 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     [Fact]
     public async Task Viewer_Reads_200()
     {
-        HttpClient c = Client(factory.AccessToken(AuthTier.Viewer));
+        HttpClient c = Client(factory.AccessToken(KgsmTier.Viewer));
         Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/api/v1/hosts")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/api/v1/servers")).StatusCode);
     }
@@ -66,16 +68,16 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     [Fact]
     public async Task Viewer_PostCommand_403()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).SendAsync(Command("anything"));
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).SendAsync(Command("anything"));
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
         Assert.Contains("\"code\":\"forbidden\"", await resp.Content.ReadAsStringAsync());
     }
 
     // --- Operator / Admin clear the command gate (404 = no such server => authorization PASSED) ----
     [Theory]
-    [InlineData(AuthTier.Operator)]
-    [InlineData(AuthTier.Admin)]
-    public async Task OperatorAndAdmin_PostCommand_PassAuthz_404(AuthTier tier)
+    [InlineData(KgsmTier.Operator)]
+    [InlineData(KgsmTier.Admin)]
+    public async Task OperatorAndAdmin_PostCommand_PassAuthz_404(KgsmTier tier)
     {
         HttpResponseMessage resp = await Client(factory.AccessToken(tier)).SendAsync(Command("no-such-server"));
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode); // got past authz to the controller
@@ -83,7 +85,7 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
 
     [Fact]
     public async Task Admin_Reads_200() =>
-        Assert.Equal(HttpStatusCode.OK, (await Client(factory.AccessToken(AuthTier.Admin)).GetAsync("/api/v1/hosts")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Client(factory.AccessToken(KgsmTier.Admin)).GetAsync("/api/v1/hosts")).StatusCode);
 
     // --- Host logs (GET /hosts/{id}/logs): OPERATOR-gated, stricter than the viewer-gated audit feed -----
     // (raw journald can carry secrets). The reader shells real journalctl; content is irrelevant to the gate
@@ -101,15 +103,15 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     public async Task Viewer_Logs_403()
     {
         // A viewer can read the audit log but NOT raw host logs — the deliberate one-tier-up gate.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).GetAsync(LogsPath);
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).GetAsync(LogsPath);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
         Assert.Contains("\"code\":\"forbidden\"", await resp.Content.ReadAsStringAsync());
     }
 
     [Theory]
-    [InlineData(AuthTier.Operator)]
-    [InlineData(AuthTier.Admin)]
-    public async Task OperatorAndAdmin_Logs_200(AuthTier tier)
+    [InlineData(KgsmTier.Operator)]
+    [InlineData(KgsmTier.Admin)]
+    public async Task OperatorAndAdmin_Logs_200(KgsmTier tier)
     {
         HttpResponseMessage resp = await Client(factory.AccessToken(tier)).GetAsync(LogsPath);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode); // authorization passed -> the page (lines or empty)
@@ -119,7 +121,7 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     public async Task Operator_Logs_UnknownHost_404()
     {
         // Past authz (operator) but a foreign host id -> 404, consistent with the rest of the hosts surface.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator))
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Operator))
             .GetAsync("/api/v1/hosts/not-this-host/logs?limit=1");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -127,7 +129,7 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     [Fact]
     public async Task Operator_Logs_UnknownSource_400()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator))
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Operator))
             .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/logs?source=bogus");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -149,15 +151,15 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     public async Task Viewer_Services_403()
     {
         // Mirrors the host-log gate: a viewer cannot read host service internals — operator and up only.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).GetAsync(ServicesPath);
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).GetAsync(ServicesPath);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
         Assert.Contains("\"code\":\"forbidden\"", await resp.Content.ReadAsStringAsync());
     }
 
     [Theory]
-    [InlineData(AuthTier.Operator)]
-    [InlineData(AuthTier.Admin)]
-    public async Task OperatorAndAdmin_Services_200(AuthTier tier)
+    [InlineData(KgsmTier.Operator)]
+    [InlineData(KgsmTier.Admin)]
+    public async Task OperatorAndAdmin_Services_200(KgsmTier tier)
     {
         HttpResponseMessage resp = await Client(factory.AccessToken(tier)).GetAsync(ServicesPath);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode); // authorization passed -> the board (real or honest-unknown)
@@ -168,7 +170,7 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     [Fact]
     public async Task Operator_Services_UnknownHost_404()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator))
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Operator))
             .GetAsync("/api/v1/hosts/not-this-host/services");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -178,7 +180,7 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     public async Task NoneTier_Reads_403()
     {
         // Authenticated (valid signature) but tier 'none' -> forbidden, never a default grant.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.None)).GetAsync("/api/v1/hosts");
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.None)).GetAsync("/api/v1/hosts");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -186,14 +188,14 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     public async Task RefreshToken_AsAccessBearer_401()
     {
         // A refresh token must never authenticate a protected call (OnTokenValidated rejects it).
-        HttpResponseMessage resp = await Client(factory.RefreshToken(AuthTier.Admin)).GetAsync("/api/v1/hosts");
+        HttpResponseMessage resp = await Client(factory.RefreshToken(KgsmTier.Admin)).GetAsync("/api/v1/hosts");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
     [Fact]
     public async Task WrongSignature_401()
     {
-        string forged = TestTokens.MintAccessWithKey("a-totally-different-signing-key", AuthTestFactory.HostId, AuthTier.Admin);
+        string forged = TestTokens.MintAccessWithKey("a-totally-different-signing-key", AuthTestFactory.HostId, KgsmTier.Admin);
         HttpResponseMessage resp = await Client(forged).GetAsync("/api/v1/hosts");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
@@ -211,7 +213,7 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     [Fact]
     public async Task Stream_Sse_WithBearerHeader_Connects()
     {
-        string token = factory.AccessToken(AuthTier.Viewer);
+        string token = factory.AccessToken(KgsmTier.Viewer);
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(Client(), "/api/v1/stream", token);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.StartsWith("text/event-stream", resp.Content.Headers.ContentType?.ToString());
@@ -230,7 +232,7 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     [Fact]
     public async Task Stream_Sse_QueryTokenIgnored()
     {
-        string token = factory.AccessToken(AuthTier.Viewer);
+        string token = factory.AccessToken(KgsmTier.Viewer);
         HttpResponseMessage resp = await SseTestHelpers.OpenStream(Client(), $"/api/v1/stream?access_token={token}");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
@@ -239,7 +241,7 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     [Fact]
     public async Task Stream_Sse_OperatorTopic_SilentlyDroppedForViewer()
     {
-        string token = factory.AccessToken(AuthTier.Viewer);
+        string token = factory.AccessToken(KgsmTier.Viewer);
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
             Client(), $"/api/v1/stream?topics=hosts/{AuthTestFactory.HostId}/logs", token);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode); // connects — the drop is silent, not a 403

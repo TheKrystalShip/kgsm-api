@@ -3,6 +3,8 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -21,7 +23,7 @@ public sealed class LeafProvisioningTests
     public async Task Connect_Monitor_FlipsProvisioned_AndAudits()
     {
         using var factory = new LeafTestFactory();
-        HttpClient admin = Client(factory, AuthTier.Admin);
+        HttpClient admin = Client(factory, KgsmTier.Admin);
 
         // Baseline: monitor absent (provisioned:false) on the capability block + the Services row.
         Assert.False(await MetricsProvisioned(admin));
@@ -51,7 +53,7 @@ public sealed class LeafProvisioningTests
     public async Task Disconnect_Reverses_AndAudits()
     {
         using var factory = new LeafTestFactory();
-        HttpClient admin = Client(factory, AuthTier.Admin);
+        HttpClient admin = Client(factory, KgsmTier.Admin);
 
         await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
         Assert.True(await MetricsProvisioned(admin));
@@ -72,14 +74,14 @@ public sealed class LeafProvisioningTests
     public async Task Connect_EmitsCapabilitiesPatch_OnTheStream()
     {
         using var factory = new LeafTestFactory();
-        string token = factory.AccessToken(AuthTier.Admin);
+        string token = factory.AccessToken(KgsmTier.Admin);
 
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
             factory.CreateClient(), $"/api/v1/stream?topics=hosts/{Host}/capabilities", token);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
-        HttpClient admin = Client(factory, AuthTier.Admin);
+        HttpClient admin = Client(factory, KgsmTier.Admin);
 
         // Connect repeatedly across the read window so the subscription is certainly live before the flip we
         // observe (the LeafProvisioningController flip is idempotent → re-connecting stays provisioned:true).
@@ -109,7 +111,7 @@ public sealed class LeafProvisioningTests
     public async Task Connect_Operator_403()
     {
         using var factory = new LeafTestFactory();
-        HttpResponseMessage resp = await Client(factory, AuthTier.Operator)
+        HttpResponseMessage resp = await Client(factory, KgsmTier.Operator)
             .PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -128,7 +130,7 @@ public sealed class LeafProvisioningTests
     public async Task Connect_ForeignHost_404()
     {
         using var factory = new LeafTestFactory();
-        HttpResponseMessage resp = await Client(factory, AuthTier.Admin)
+        HttpResponseMessage resp = await Client(factory, KgsmTier.Admin)
             .PostAsync($"/api/v1/hosts/not-this-host/services/{MonitorUnitless}/connect", null);
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -140,7 +142,7 @@ public sealed class LeafProvisioningTests
     public async Task Connect_UnknownOrNonProvisionableLeaf_404(string leaf)
     {
         using var factory = new LeafTestFactory();
-        HttpResponseMessage resp = await Client(factory, AuthTier.Admin)
+        HttpResponseMessage resp = await Client(factory, KgsmTier.Admin)
             .PostAsync($"/api/v1/hosts/{Host}/services/{leaf}/connect", null);
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -154,14 +156,14 @@ public sealed class LeafProvisioningTests
         {
             using (var first = new LeafTestFactory(db))
             {
-                HttpClient admin = Client(first, AuthTier.Admin);
+                HttpClient admin = Client(first, KgsmTier.Admin);
                 await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
                 Assert.True(await ServiceProvisioned(admin, MonitorUnitless));
             } // dispose → host stops → the SQLite row is committed
 
             // A second process pointed at the SAME db must load the persisted flip on startup (no re-connect).
             using var second = new LeafTestFactory(db);
-            HttpClient admin2 = Client(second, AuthTier.Admin);
+            HttpClient admin2 = Client(second, KgsmTier.Admin);
             Assert.True(await ServiceProvisioned(admin2, MonitorUnitless));
             Assert.True(await MetricsProvisioned(admin2));
         }
@@ -178,7 +180,7 @@ public sealed class LeafProvisioningTests
         {
             using (var first = new LeafTestFactory(db, socket))
             {
-                HttpClient admin = Client(first, AuthTier.Admin);
+                HttpClient admin = Client(first, KgsmTier.Admin);
                 Assert.True(await ServiceProvisioned(admin, MonitorUnitless)); // config seeds it provisioned
                 await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/disconnect", null);
                 Assert.False(await ServiceProvisioned(admin, MonitorUnitless));
@@ -186,7 +188,7 @@ public sealed class LeafProvisioningTests
 
             // Same config, so nothing about the host moved — the operator's disconnect stands.
             using var second = new LeafTestFactory(db, socket);
-            Assert.False(await ServiceProvisioned(Client(second, AuthTier.Admin), MonitorUnitless));
+            Assert.False(await ServiceProvisioned(Client(second, KgsmTier.Admin), MonitorUnitless));
         }
         finally { try { File.Delete(db); } catch { /* best effort */ } }
     }
@@ -203,11 +205,11 @@ public sealed class LeafProvisioningTests
         try
         {
             using (var configured = new LeafTestFactory(db, "/run/kgsm-monitor/metrics.sock"))
-                Assert.True(await ServiceProvisioned(Client(configured, AuthTier.Admin), MonitorUnitless));
+                Assert.True(await ServiceProvisioned(Client(configured, KgsmTier.Admin), MonitorUnitless));
 
             // The endpoint is gone from config now — and no runtime flip ever recorded a contrary intent.
             using var deconfigured = new LeafTestFactory(db);
-            HttpClient admin = Client(deconfigured, AuthTier.Admin);
+            HttpClient admin = Client(deconfigured, KgsmTier.Admin);
             Assert.False(await ServiceProvisioned(admin, MonitorUnitless));
             Assert.False(await MetricsProvisioned(admin));
         }
@@ -245,13 +247,13 @@ public sealed class LeafProvisioningTests
             // Config does not provide the monitor, but the deployed row says connected and carries no seed to
             // contradict it — so it stands, and the column is now there for the next start to compare against.
             using var factory = new LeafTestFactory(db);
-            Assert.True(await ServiceProvisioned(Client(factory, AuthTier.Admin), MonitorUnitless));
+            Assert.True(await ServiceProvisioned(Client(factory, KgsmTier.Admin), MonitorUnitless));
         }
         finally { try { File.Delete(db); } catch { /* best effort */ } }
     }
 
     // ---- helpers ----------------------------------------------------------------------------------
-    private static HttpClient Client(LeafTestFactory factory, AuthTier? tier)
+    private static HttpClient Client(LeafTestFactory factory, KgsmTier? tier)
     {
         HttpClient c = factory.CreateClient();
         if (tier is { } t)

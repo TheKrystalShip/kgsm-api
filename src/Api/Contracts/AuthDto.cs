@@ -79,7 +79,7 @@ public sealed record RevokeRequest(string? Sid, bool? All);
 
 // POST /auth/cluster-session — the vouch request body. `tier` is a single resolved tier string
 // (viewer/operator/admin), NOT a roles array — the vouching peer already resolved it via its own
-// guild-role lookup; an unparseable/unknown/empty value floors to viewer (AuthTiers.Parse's safe
+// guild-role lookup; an unparseable/unknown/empty value floors to viewer (KgsmTiers.Parse's safe
 // default) rather than denying or escalating an ambiguous assertion.
 public sealed record ClusterSessionRequest(string DiscordId, string Username, string DisplayName, string Tier);
 

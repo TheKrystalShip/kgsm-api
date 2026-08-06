@@ -12,6 +12,8 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -77,13 +79,13 @@ public sealed class ServerNoteRoundTripTests : IClassFixture<ServerNoteRoundTrip
     {
         _ = label; // names the case in test output
 
-        HttpResponseMessage put = await Put(AuthTier.Operator, SourcedConfigFactory.Instance,
+        HttpResponseMessage put = await Put(KgsmTier.Operator, SourcedConfigFactory.Instance,
             JsonSerializer.Serialize(new { body, origin = "ui" }));
         Assert.Equal(HttpStatusCode.OK, put.StatusCode);
 
         // The GET re-reads through the fake's `source`-the-file path, so this is the byte trip:
         // encode → key="value" in a real file → bash source → decode.
-        HttpResponseMessage get = await Get(AuthTier.Viewer, SourcedConfigFactory.Instance);
+        HttpResponseMessage get = await Get(KgsmTier.Viewer, SourcedConfigFactory.Instance);
         Assert.Equal(HttpStatusCode.OK, get.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await get.Content.ReadAsStringAsync());
@@ -95,12 +97,12 @@ public sealed class ServerNoteRoundTripTests : IClassFixture<ServerNoteRoundTrip
     {
         // The two attribution keys share the file with the body; a body that broke the sourcing would
         // take them down with it, so asserting they come back proves the whole file still parses.
-        HttpResponseMessage put = await Put(AuthTier.Operator, SourcedConfigFactory.Instance,
+        HttpResponseMessage put = await Put(KgsmTier.Operator, SourcedConfigFactory.Instance,
             "{\"body\":\"quotes \\\" and $vars\",\"origin\":\"ui\"}");
         Assert.Equal(HttpStatusCode.OK, put.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(
-            await (await Get(AuthTier.Viewer, SourcedConfigFactory.Instance)).Content.ReadAsStringAsync());
+            await (await Get(KgsmTier.Viewer, SourcedConfigFactory.Instance)).Content.ReadAsStringAsync());
         JsonElement note = doc.RootElement.GetProperty("note");
         Assert.Equal("quotes \" and $vars", note.GetProperty("body").GetString());
         Assert.False(string.IsNullOrEmpty(note.GetProperty("updatedBy").GetString()));
@@ -114,10 +116,10 @@ public sealed class ServerNoteRoundTripTests : IClassFixture<ServerNoteRoundTrip
         // sourcing, and it must decode identically on both paths.
         const string body = "Modpack \"v3\" — $10 entry fee";
         Assert.Equal(HttpStatusCode.OK,
-            (await Put(AuthTier.Operator, SourcedConfigFactory.Instance,
+            (await Put(KgsmTier.Operator, SourcedConfigFactory.Instance,
                 JsonSerializer.Serialize(new { body, origin = "ui" }))).StatusCode);
 
-        HttpResponseMessage list = await Client(AuthTier.Viewer).GetAsync("/api/v1/servers");
+        HttpResponseMessage list = await Client(KgsmTier.Viewer).GetAsync("/api/v1/servers");
         Assert.Equal(HttpStatusCode.OK, list.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await list.Content.ReadAsStringAsync());
@@ -130,15 +132,15 @@ public sealed class ServerNoteRoundTripTests : IClassFixture<ServerNoteRoundTrip
     public async Task Delete_ClearsTheBody_AndTheFileStillSources()
     {
         Assert.Equal(HttpStatusCode.OK,
-            (await Put(AuthTier.Operator, SourcedConfigFactory.Instance,
+            (await Put(KgsmTier.Operator, SourcedConfigFactory.Instance,
                 "{\"body\":\"about to be cleared \\\"quoted\\\"\",\"origin\":\"ui\"}")).StatusCode);
 
-        HttpResponseMessage del = await Client(AuthTier.Operator)
+        HttpResponseMessage del = await Client(KgsmTier.Operator)
             .DeleteAsync($"/api/v1/servers/{SourcedConfigFactory.Instance}/note");
         Assert.Equal(HttpStatusCode.OK, del.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(
-            await (await Get(AuthTier.Viewer, SourcedConfigFactory.Instance)).Content.ReadAsStringAsync());
+            await (await Get(KgsmTier.Viewer, SourcedConfigFactory.Instance)).Content.ReadAsStringAsync());
         // Honestly null (nothing written), and reachable at all only because the file still parses.
         Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("note").ValueKind);
     }
@@ -171,17 +173,17 @@ public sealed class ServerNoteRoundTripTests : IClassFixture<ServerNoteRoundTrip
 
     // --- helpers ---------------------------------------------------------------------------------
 
-    private HttpClient Client(AuthTier tier)
+    private HttpClient Client(KgsmTier tier)
     {
         HttpClient c = _factory.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _factory.AccessToken(tier));
         return c;
     }
 
-    private Task<HttpResponseMessage> Get(AuthTier tier, string id) =>
+    private Task<HttpResponseMessage> Get(KgsmTier tier, string id) =>
         Client(tier).GetAsync($"/api/v1/servers/{id}/note");
 
-    private Task<HttpResponseMessage> Put(AuthTier tier, string id, string json) =>
+    private Task<HttpResponseMessage> Put(KgsmTier tier, string id, string json) =>
         Client(tier).PutAsync($"/api/v1/servers/{id}/note",
             new StringContent(json, Encoding.UTF8, "application/json"));
 

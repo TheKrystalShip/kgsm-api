@@ -10,11 +10,18 @@ Api's `TreatWarningsAsErrors`.
 - **`AuthTestFactory : WebApplicationFactory<Program>`** boots the real app with **auth ON** + a known
   `KGSM_API_AUTH_SIGNING_KEY`, the Discord config present (so the login path runs), and the
   **engine/monitor left unprovisioned** so reads degrade to `200` with no external dependency.
-- **`FakeDiscordResolver`** replaces `IDiscordIdentityResolver` (via `ConfigureTestServices` +
+- **`FakeDiscordResolver`** replaces `IDiscordDirectory` (via `ConfigureTestServices` +
   `RemoveAll`). It is **the seam that makes auth testable without `discord.com`** — the M3
   "exercise the contract without the live dependency" move. It **switches purely on the OAuth `code`**
   (`viewer`/`operator`/`admin`/`none`/`bad`/`boom`), so cases are stateless and parallel-safe. No shared
-  mutable state, no test ordering.
+  mutable state, no test ordering. It records the PKCE verifier the callback presented
+  (`LastCodeVerifier`) so a test can assert the handshake round-tripped rather than trusting it was
+  built.
+- **`AuthServiceGraphTests` builds the auth graph the way PRODUCTION does** — a bare
+  `WebApplicationFactory<Program>` with no fake — because every other test here replaces the Discord
+  seam and therefore never constructs the real one. A dependency the real implementation needs and the
+  container cannot supply is invisible to the rest of the suite and surfaces as a `500` on the first
+  login against a deployed host. Keep it fake-free.
 - **Mint tokens via the server's OWN token service** — `factory.AccessToken(tier)` /
   `RefreshToken(tier)` resolve `ISessionTokenService` from `factory.Services`, so the key + host audience
   match the running pipeline. For a deliberately-wrong-signature token, `TestTokens.MintAccessWithKey`.

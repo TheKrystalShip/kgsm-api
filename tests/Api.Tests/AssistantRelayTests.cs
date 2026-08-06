@@ -5,6 +5,8 @@ using System.Text;
 
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -41,7 +43,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     public async Task NoneTier_403()
     {
         // Authenticated but below viewer → forbidden (the load-bearing 401-vs-403 split).
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.None)).SendAsync(Turn("""{"prompt":"hi"}"""));
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.None)).SendAsync(Turn("""{"prompt":"hi"}"""));
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -49,7 +51,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     public async Task Viewer_AssistantAbsent_404()
     {
         // Viewer clears authz; the unprovisioned assistant degrades to an honest 404, never a 500.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).SendAsync(Turn("""{"prompt":"hi"}"""));
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).SendAsync(Turn("""{"prompt":"hi"}"""));
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
     }
@@ -58,7 +60,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     public async Task Viewer_EmptyPrompt_400()
     {
         // Prompt validation precedes the capability gate — a whitespace prompt is a 400 envelope.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).SendAsync(Turn("""{"prompt":"   "}"""));
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).SendAsync(Turn("""{"prompt":"   "}"""));
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -84,7 +86,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     {
         // The load-bearing new gate: confirm EXECUTES a mutation, so it is operator-gated — a viewer
         // (who may chat + propose via the turn) is forbidden here, 403 before any capability/upstream check.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).SendAsync(Confirm("""{"token":"t"}"""));
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).SendAsync(Confirm("""{"token":"t"}"""));
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -92,7 +94,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     public async Task Confirm_Operator_MissingToken_400()
     {
         // Token validation precedes the capability gate — a blank token is a 400 envelope, like the turn's prompt.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator)).SendAsync(Confirm("""{"token":"   "}"""));
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Operator)).SendAsync(Confirm("""{"token":"   "}"""));
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -101,7 +103,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     public async Task Confirm_Operator_AssistantAbsent_404()
     {
         // Operator clears authz; the unprovisioned assistant degrades to an honest 404, never a 500.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator)).SendAsync(Confirm("""{"token":"t"}"""));
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Operator)).SendAsync(Confirm("""{"token":"t"}"""));
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
     }
@@ -123,7 +125,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     public async Task Compact_NoneTier_403()
     {
         // Authenticated but below viewer → forbidden (same gate as the turn/reads).
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.None)).SendAsync(Compact("chat1"));
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.None)).SendAsync(Compact("chat1"));
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -131,7 +133,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     public async Task Compact_Viewer_AssistantAbsent_404()
     {
         // Viewer clears authz; the unprovisioned assistant degrades to an honest 404, never a 500.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).SendAsync(Compact("chat1"));
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).SendAsync(Compact("chat1"));
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
     }
@@ -161,7 +163,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     public async Task Review_ViewerTier_403(string path)
     {
         // A viewer may chat with the assistant and read their OWN history — never anyone else's.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer)).GetAsync(path);
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).GetAsync(path);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -174,7 +176,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     {
         // Operator is the tier that may ACT on a server. Reading someone's conversation is a different
         // power, and this is the assertion that keeps the two from being conflated later.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Operator)).GetAsync(path);
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Operator)).GetAsync(path);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -186,7 +188,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     public async Task Review_Admin_AssistantAbsent_404(string path)
     {
         // Admin clears authz; the unprovisioned assistant degrades to an honest 404, never a 500.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Admin)).GetAsync(path);
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Admin)).GetAsync(path);
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
     }
@@ -199,7 +201,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
         // sends them looking for an outage instead of a stale link. Asserted here at the shape level: with
         // no assistant provisioned the degrade 404 arrives instead, but both are 404 + not_found, which is
         // exactly the contract this pins — this endpoint never answers a missing conversation with a 5xx.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Admin))
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Admin))
             .GetAsync("/api/v1/assistant/admin/conversations/bm9wZQ");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
@@ -212,7 +214,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
         // parameter route ever won, this would be relayed as a conversation handle and quietly 404 — so the
         // assertion is that an ADMIN reaches the capability gate (404 "not_found" from the unprovisioned
         // assistant) rather than being rejected as a bad handle by some other path.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Admin))
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Admin))
             .GetAsync("/api/v1/assistant/admin/conversations/stats");
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
@@ -224,7 +226,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     {
         // The user to review is required, and validating it precedes the capability gate — same shape as
         // the turn's prompt and the confirm's token.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Admin))
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Admin))
             .GetAsync("/api/v1/assistant/admin/conversations");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -236,7 +238,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
         // Rating the answer YOU received is a personal action on your own conversation, like reading or
         // deleting it — so viewer must reach it. If this ever starts 403ing, the endpoint has been
         // conflated with the admin review surface next door, which reads OTHER people's conversations.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer))
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer))
             .PostAsJsonAsync("/api/v1/assistant/conversations/chatA/turns/42/feedback",
                 new { rating = "down", note = "wrong port" });
 
@@ -257,7 +259,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     {
         // The route constrains turnId to a long. A non-numeric segment must not fall through to some other
         // template and be read as part of a conversation key.
-        HttpResponseMessage resp = await Client(factory.AccessToken(AuthTier.Viewer))
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer))
             .PostAsJsonAsync("/api/v1/assistant/conversations/chatA/turns/not-a-turn/feedback",
                 new { rating = "up" });
 

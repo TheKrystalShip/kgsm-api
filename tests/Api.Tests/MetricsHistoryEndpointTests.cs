@@ -8,6 +8,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Leaves;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -22,7 +24,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(AuthTier.Viewer));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Viewer));
         return c;
     }
 
@@ -142,7 +144,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         using WebApplicationFactoryWithFake fakeFactory = new(monitorBody);
         HttpClient client = fakeFactory.Factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", AuthTestFactory.MintTokenWithRow(fakeFactory.Factory.Services, AuthTier.Viewer, access: true));
+            "Bearer", AuthTestFactory.MintTokenWithRow(fakeFactory.Factory.Services, KgsmTier.Viewer, access: true));
 
         HttpResponseMessage r = await client.GetAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}/services/watchdog/metrics/history?range=1h");
@@ -166,7 +168,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         using WebApplicationFactoryWithFake fakeFactory = new(monitorBody);
         HttpClient client = fakeFactory.Factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", AuthTestFactory.MintTokenWithRow(fakeFactory.Factory.Services, AuthTier.Viewer, access: true));
+            "Bearer", AuthTestFactory.MintTokenWithRow(fakeFactory.Factory.Services, KgsmTier.Viewer, access: true));
 
         HttpResponseMessage r = await client.GetAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}/metrics/history?range=1h");

@@ -7,6 +7,9 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 
+using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Discord;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -59,7 +62,7 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     /// <see cref="AuthTestFactory.MintTokenWithRow"/> — needed here because the admin cross-user tests
     /// require a SECOND, genuinely distinct user, not just a second sid for the same user.
     /// </summary>
-    private (string Token, string Sid) MintForUser(AuthTier tier, string discordUserId)
+    private (string Token, string Sid) MintForUser(KgsmTier tier, string discordUserId)
     {
         var tokens = factory.Services.GetRequiredService<ISessionTokenService>();
         var store = factory.Services.GetRequiredService<SessionStore>();
@@ -80,12 +83,12 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task List_ReturnsOnlyActiveRows_WithCurrentFlagSet()
     {
-        string tokenA = factory.AccessToken(AuthTier.Viewer);
+        string tokenA = factory.AccessToken(KgsmTier.Viewer);
         string sidA = SidFromToken(tokenA);
-        string tokenB = factory.AccessToken(AuthTier.Viewer);
+        string tokenB = factory.AccessToken(KgsmTier.Viewer);
         string sidB = SidFromToken(tokenB);
         // A third session, revoked up front — must NOT appear in the active list.
-        string tokenC = factory.AccessToken(AuthTier.Viewer);
+        string tokenC = factory.AccessToken(KgsmTier.Viewer);
         string sidC = SidFromToken(tokenC);
         Assert.Equal(HttpStatusCode.NoContent,
             (await Bearer(tokenC).PostAsJsonAsync("/auth/session/revoke", new { sid = sidC })).StatusCode);
@@ -108,9 +111,9 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task List_Admin_UserIdOverride_ReturnsAnotherUsersActiveSet()
     {
-        (string otherToken, string otherSid) = MintForUser(AuthTier.Viewer, "555000111");
+        (string otherToken, string otherSid) = MintForUser(KgsmTier.Viewer, "555000111");
         string otherUserId = "discord:555000111";
-        string adminToken = factory.AccessToken(AuthTier.Admin);
+        string adminToken = factory.AccessToken(KgsmTier.Admin);
 
         JsonElement body = await Json(await Bearer(adminToken).GetAsync($"/auth/sessions?userId={otherUserId}"));
         JsonElement[] rows = body.GetProperty("data").EnumerateArray().ToArray();
@@ -124,8 +127,8 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task List_Viewer_UserIdOverride_IsIgnored_ScopedToSelf()
     {
-        (_, string otherSid) = MintForUser(AuthTier.Viewer, "555000222");
-        string viewerToken = factory.AccessToken(AuthTier.Viewer);
+        (_, string otherSid) = MintForUser(KgsmTier.Viewer, "555000222");
+        string viewerToken = factory.AccessToken(KgsmTier.Viewer);
 
         JsonElement body = await Json(
             await Bearer(viewerToken).GetAsync("/auth/sessions?userId=discord:555000222"));
@@ -147,9 +150,9 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task SelfRevoke_BySid_KillsThatSession_SiblingUnaffected_AuditInfo()
     {
-        string token1 = factory.AccessToken(AuthTier.Viewer);
+        string token1 = factory.AccessToken(KgsmTier.Viewer);
         string sid1 = SidFromToken(token1);
-        string token2 = factory.AccessToken(AuthTier.Viewer); // sibling session, same user
+        string token2 = factory.AccessToken(KgsmTier.Viewer); // sibling session, same user
 
         Assert.Equal(HttpStatusCode.OK, (await GetMe(Bearer(token1))).StatusCode);
 
@@ -170,8 +173,8 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task SelfRevoke_BySid_NotOwnedByCaller_404()
     {
-        (_, string otherSid) = MintForUser(AuthTier.Viewer, "555000333");
-        string callerToken = factory.AccessToken(AuthTier.Viewer);
+        (_, string otherSid) = MintForUser(KgsmTier.Viewer, "555000333");
+        string callerToken = factory.AccessToken(KgsmTier.Viewer);
 
         // A viewer must not be able to revoke another user's session by sid — 404, not 403 (never
         // confirms the sid exists for someone else).
@@ -183,7 +186,7 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task SelfRevoke_NeitherSidNorAll_RevokesCallingSession()
     {
-        string token = factory.AccessToken(AuthTier.Viewer);
+        string token = factory.AccessToken(KgsmTier.Viewer);
         Assert.Equal(HttpStatusCode.OK, (await GetMe(Bearer(token))).StatusCode);
 
         HttpResponseMessage revoke = await Bearer(token).PostAsync("/auth/session/revoke", content: null);
@@ -195,7 +198,7 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task SelfRevoke_BothSidAndAll_400()
     {
-        string token = factory.AccessToken(AuthTier.Viewer);
+        string token = factory.AccessToken(KgsmTier.Viewer);
         string sid = SidFromToken(token);
         HttpResponseMessage resp =
             await Bearer(token).PostAsJsonAsync("/auth/session/revoke", new { sid, all = true });
@@ -207,9 +210,9 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task SelfRevokeAll_KillsAllOwnSessions_IncludingCaller_AuditInfo()
     {
-        string token1 = factory.AccessToken(AuthTier.Viewer);
-        string token2 = factory.AccessToken(AuthTier.Viewer);
-        string token3 = factory.AccessToken(AuthTier.Viewer);
+        string token1 = factory.AccessToken(KgsmTier.Viewer);
+        string token2 = factory.AccessToken(KgsmTier.Viewer);
+        string token3 = factory.AccessToken(KgsmTier.Viewer);
         foreach (string t in new[] { token1, token2, token3 })
             Assert.Equal(HttpStatusCode.OK, (await GetMe(Bearer(t))).StatusCode);
 
@@ -222,7 +225,7 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
 
         // Prove via a fresh session (mint AFTER the revoke-all, so it isn't itself wiped) that the
         // audit row landed as auth.session.revoke.all / info.
-        string freshToken = factory.AccessToken(AuthTier.Viewer);
+        string freshToken = factory.AccessToken(KgsmTier.Viewer);
         JsonElement audit = await Json(await Bearer(freshToken).GetAsync("/api/v1/audit?actor=haru"));
         JsonElement row = audit.GetProperty("data").EnumerateArray()
             .First(r => r.GetProperty("action").GetString() == "auth.session.revoke.all");
@@ -242,8 +245,8 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task AdminRevoke_BySid_KillsTargetSession_AuditWarn()
     {
-        (string targetToken, string targetSid) = MintForUser(AuthTier.Viewer, "555000444");
-        string adminToken = factory.AccessToken(AuthTier.Admin);
+        (string targetToken, string targetSid) = MintForUser(KgsmTier.Viewer, "555000444");
+        string adminToken = factory.AccessToken(KgsmTier.Admin);
 
         Assert.Equal(HttpStatusCode.OK, (await GetMe(Bearer(targetToken))).StatusCode);
 
@@ -263,7 +266,7 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task AdminRevoke_BySid_UnknownSid_404()
     {
-        string adminToken = factory.AccessToken(AuthTier.Admin);
+        string adminToken = factory.AccessToken(KgsmTier.Admin);
         HttpResponseMessage resp =
             await Bearer(adminToken).PostAsync("/auth/sessions/sid_does_not_exist/revoke", null);
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
@@ -272,8 +275,8 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task AdminRevoke_BySid_ViewerForbidden_403()
     {
-        (_, string targetSid) = MintForUser(AuthTier.Viewer, "555000555");
-        string viewerToken = factory.AccessToken(AuthTier.Viewer);
+        (_, string targetSid) = MintForUser(KgsmTier.Viewer, "555000555");
+        string viewerToken = factory.AccessToken(KgsmTier.Viewer);
 
         HttpResponseMessage resp = await Bearer(viewerToken).PostAsync($"/auth/sessions/{targetSid}/revoke", null);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
@@ -284,9 +287,9 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task AdminRevokeAllForUser_KillsAllTargetSessions()
     {
-        (string t1, _) = MintForUser(AuthTier.Viewer, "555000666");
-        (string t2, _) = MintForUser(AuthTier.Operator, "555000666");
-        string adminToken = factory.AccessToken(AuthTier.Admin);
+        (string t1, _) = MintForUser(KgsmTier.Viewer, "555000666");
+        (string t2, _) = MintForUser(KgsmTier.Operator, "555000666");
+        string adminToken = factory.AccessToken(KgsmTier.Admin);
 
         Assert.Equal(HttpStatusCode.OK, (await GetMe(Bearer(t1))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await GetMe(Bearer(t2))).StatusCode);
@@ -310,7 +313,7 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task AdminRevokeAllForUser_NoActiveSessions_StillNoContent()
     {
-        string adminToken = factory.AccessToken(AuthTier.Admin);
+        string adminToken = factory.AccessToken(KgsmTier.Admin);
         HttpResponseMessage resp =
             await Bearer(adminToken).PostAsync("/auth/users/discord:no-such-user/sessions/revoke-all", null);
         Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
@@ -319,7 +322,7 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task AdminRevokeAllForUser_ViewerForbidden_403()
     {
-        string viewerToken = factory.AccessToken(AuthTier.Viewer);
+        string viewerToken = factory.AccessToken(KgsmTier.Viewer);
         HttpResponseMessage resp =
             await Bearer(viewerToken).PostAsync("/auth/users/discord:555000666/sessions/revoke-all", null);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);

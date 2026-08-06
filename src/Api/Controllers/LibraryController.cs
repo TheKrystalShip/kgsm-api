@@ -11,6 +11,8 @@ using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
@@ -316,7 +318,7 @@ public sealed class LibraryController(
     /// the file with <c>readOnly:true</c>: the editor opens, the buttons don't. Read off the verified
     /// token's tier claim, never a request field.</summary>
     private bool CallerCanWrite() =>
-        User.Identity is ClaimsIdentity ci && SessionClaims.ReadTier(ci) >= AuthTier.Admin;
+        User.Identity is ClaimsIdentity ci && SessionClaims.ReadTier(ci) >= KgsmTier.Admin;
 
     /// <summary>The blueprint's runtime as the ENGINE reports it in the cached catalog, or <c>null</c> when
     /// it isn't there (brand-new, or malformed enough that the engine won't enumerate it — precisely a file

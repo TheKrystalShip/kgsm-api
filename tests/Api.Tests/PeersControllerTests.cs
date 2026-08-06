@@ -10,6 +10,8 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -55,7 +57,7 @@ public sealed class PeersControllerTests : IClassFixture<AuthTestFactory>
         });
 
     private static string AdminToken(WebApplicationFactory<Program> app) =>
-        AuthTestFactory.MintTokenWithRow(app.Services, AuthTier.Admin, access: true);
+        AuthTestFactory.MintTokenWithRow(app.Services, KgsmTier.Admin, access: true);
 
     private static HttpRequestMessage Bearer(HttpMethod method, string path, string token, object? body = null)
     {
@@ -153,7 +155,7 @@ public sealed class PeersControllerTests : IClassFixture<AuthTestFactory>
     {
         using WebApplicationFactory<Program> app = BuildApp();
         using HttpClient client = app.CreateClient();
-        string viewerToken = AuthTestFactory.MintTokenWithRow(app.Services, AuthTier.Viewer, access: true);
+        string viewerToken = AuthTestFactory.MintTokenWithRow(app.Services, KgsmTier.Viewer, access: true);
 
         HttpResponseMessage resp = await client.SendAsync(
             Bearer(HttpMethod.Post, "/api/v1/peers", viewerToken, new { url = "https://node-b.test" }));

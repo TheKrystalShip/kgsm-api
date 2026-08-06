@@ -11,6 +11,8 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -42,7 +44,7 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Install_MissingBlueprint_400()
     {
-        HttpResponseMessage resp = await Post(_engine, AuthTier.Operator, "{}");
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator, "{}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -52,7 +54,7 @@ public sealed class InstallUninstallTests
     {
         // The fake's generate-id rejects "zzznope" (the EC_BLUEPRINT_NOT_FOUND analog) → a client-input 400,
         // with kgsm's real detail surfaced — nothing is created.
-        HttpResponseMessage resp = await Post(_engine, AuthTier.Operator, "{\"blueprint\":\"zzznope\"}");
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator, "{\"blueprint\":\"zzznope\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -60,7 +62,7 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Install_BadOrigin_400()
     {
-        HttpResponseMessage resp = await Post(_engine, AuthTier.Operator,
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator,
             "{\"blueprint\":\"factorio\",\"origin\":\"hacker\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -72,7 +74,7 @@ public sealed class InstallUninstallTests
         // A typed reserved field with the wrong type trips [ApiController]'s model validation BEFORE the
         // action runs. It must STILL return the frozen { error } envelope (invariant #4), never the
         // framework's ValidationProblemDetails — the gotcha the api CLAUDE.md flags for M8's typed bodies.
-        HttpResponseMessage resp = await Post(_engine, AuthTier.Operator,
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator,
             "{\"blueprint\":\"factorio\",\"port\":\"not-a-number\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         string body = await resp.Content.ReadAsStringAsync();
@@ -85,7 +87,7 @@ public sealed class InstallUninstallTests
     public async Task Install_MalformedJson_400_Envelope()
     {
         // An unparseable body is also a pre-action model-binding failure — same envelope, never ProblemDetails.
-        HttpResponseMessage resp = await Post(_engine, AuthTier.Operator, "{not valid json");
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator, "{not valid json");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         string body = await resp.Content.ReadAsStringAsync();
         Assert.Contains("\"code\":\"bad_request\"", body);
@@ -95,7 +97,7 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Install_Valid_202_InstallJob_NoAuditDoubleWrite()
     {
-        HttpResponseMessage resp = await Post(_engine, AuthTier.Operator, "{\"blueprint\":\"factorio\"}");
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator, "{\"blueprint\":\"factorio\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
         JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
@@ -107,7 +109,7 @@ public sealed class InstallUninstallTests
         // No double-write: install is the echo path (kgsm owns server.install). The fake engine emits no
         // event and the API writes no row directly, so the audit feed stays empty — a stray direct write
         // by the command runner would surface here.
-        HttpResponseMessage audit = await Client(_engine, AuthTier.Viewer).GetAsync("/api/v1/audit");
+        HttpResponseMessage audit = await Client(_engine, KgsmTier.Viewer).GetAsync("/api/v1/audit");
         Assert.Equal(HttpStatusCode.OK, audit.StatusCode);
         using JsonDocument page = JsonDocument.Parse(await audit.Content.ReadAsStringAsync());
         Assert.Empty(page.RootElement.GetProperty("data").EnumerateArray());
@@ -121,7 +123,7 @@ public sealed class InstallUninstallTests
     {
         // The Game Port override is validated 1-65535 up front — an out-of-range value is a client-input
         // 400, never passed to kgsm to fail mid-install.
-        HttpResponseMessage resp = await Post(_engine, AuthTier.Operator,
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator,
             $"{{\"blueprint\":\"factorio\",\"port\":{port}}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -131,7 +133,7 @@ public sealed class InstallUninstallTests
     public async Task Install_ValidPort_202()
     {
         // An in-range Game Port is accepted (and forwarded to the engine — see RunInstall → Install(port:)).
-        HttpResponseMessage resp = await Post(_engine, AuthTier.Operator,
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator,
             "{\"blueprint\":\"factorio\",\"port\":34250}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
         JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
@@ -142,7 +144,7 @@ public sealed class InstallUninstallTests
     public async Task Install_Viewer_403()
     {
         // Operator-gated: a viewer reading /servers cannot create one. (Gate is orthogonal to permissions.)
-        HttpResponseMessage resp = await Post(_engine, AuthTier.Viewer, "{\"blueprint\":\"factorio\"}");
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Viewer, "{\"blueprint\":\"factorio\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -158,7 +160,7 @@ public sealed class InstallUninstallTests
     public async Task Install_EngineUnprovisioned_503()
     {
         // Past the blueprint/origin checks, an unconfigured engine degrades to 503 — not a 500.
-        HttpResponseMessage resp = await Post(_noEngine, AuthTier.Operator, "{\"blueprint\":\"factorio\"}");
+        HttpResponseMessage resp = await Post(_noEngine, KgsmTier.Operator, "{\"blueprint\":\"factorio\"}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
         Assert.Contains("\"code\":\"unavailable\"", await resp.Content.ReadAsStringAsync());
     }
@@ -168,7 +170,7 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Uninstall_UnknownServer_404()
     {
-        HttpResponseMessage resp = await Delete(_engine, AuthTier.Operator, "does-not-exist");
+        HttpResponseMessage resp = await Delete(_engine, KgsmTier.Operator, "does-not-exist");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
     }
@@ -177,7 +179,7 @@ public sealed class InstallUninstallTests
     public async Task Uninstall_KnownServer_202_UninstallJob()
     {
         // The fake roster carries "factorio-1" (see FakeInstanceService.GetAll) → the gate admits it.
-        HttpResponseMessage resp = await Delete(_engine, AuthTier.Operator, "factorio-1");
+        HttpResponseMessage resp = await Delete(_engine, KgsmTier.Operator, "factorio-1");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
         JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
@@ -188,7 +190,7 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Uninstall_BadOrigin_400()
     {
-        HttpResponseMessage resp = await Delete(_engine, AuthTier.Operator, "factorio-1", origin: "hacker");
+        HttpResponseMessage resp = await Delete(_engine, KgsmTier.Operator, "factorio-1", origin: "hacker");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -196,7 +198,7 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Uninstall_Viewer_403()
     {
-        HttpResponseMessage resp = await Delete(_engine, AuthTier.Viewer, "factorio-1");
+        HttpResponseMessage resp = await Delete(_engine, KgsmTier.Viewer, "factorio-1");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -211,14 +213,14 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Uninstall_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Delete(_noEngine, AuthTier.Operator, "anything");
+        HttpResponseMessage resp = await Delete(_noEngine, KgsmTier.Operator, "anything");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
         Assert.Contains("\"code\":\"unavailable\"", await resp.Content.ReadAsStringAsync());
     }
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static HttpClient Client(AuthTestFactory factory, AuthTier? tier)
+    private static HttpClient Client(AuthTestFactory factory, KgsmTier? tier)
     {
         HttpClient c = factory.CreateClient();
         if (tier is { } t)
@@ -226,12 +228,12 @@ public sealed class InstallUninstallTests
         return c;
     }
 
-    private static Task<HttpResponseMessage> Post(AuthTestFactory factory, AuthTier? tier, string json) =>
+    private static Task<HttpResponseMessage> Post(AuthTestFactory factory, KgsmTier? tier, string json) =>
         Client(factory, tier).PostAsync("/api/v1/servers",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
     private static Task<HttpResponseMessage> Delete(
-        AuthTestFactory factory, AuthTier? tier, string id, string? origin = null) =>
+        AuthTestFactory factory, KgsmTier? tier, string id, string? origin = null) =>
         Client(factory, tier).DeleteAsync(
             $"/api/v1/servers/{id}" + (origin is null ? "" : $"?origin={origin}"));
 

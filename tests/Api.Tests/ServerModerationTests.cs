@@ -13,6 +13,8 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -35,7 +37,7 @@ public sealed class ServerModerationTests
 
     public ServerModerationTests(ModerationTestFactory f) => _f = f;
 
-    private HttpClient Client(AuthTier? tier)
+    private HttpClient Client(KgsmTier? tier)
     {
         HttpClient c = _f.CreateClient();
         if (tier is { } t)
@@ -68,7 +70,7 @@ public sealed class ServerModerationTests
     [Fact]
     public async Task ViewerTier_403_OperatorGated()
     {
-        HttpResponseMessage resp = await Client(AuthTier.Viewer)
+        HttpResponseMessage resp = await Client(KgsmTier.Viewer)
             .PostAsync($"/api/v1/servers/{ByIp}/players/whoever/kick", null);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -76,7 +78,7 @@ public sealed class ServerModerationTests
     [Fact]
     public async Task UnknownServer_404()
     {
-        HttpResponseMessage resp = await Client(AuthTier.Operator)
+        HttpResponseMessage resp = await Client(KgsmTier.Operator)
             .PostAsync("/api/v1/servers/nope/players/whoever/kick", null);
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -88,7 +90,7 @@ public sealed class ServerModerationTests
         // this is what stops a caller naming someone (or something) the server never saw.
         Engine.Reset();
 
-        HttpResponseMessage resp = await Client(AuthTier.Operator)
+        HttpResponseMessage resp = await Client(KgsmTier.Operator)
             .PostAsync($"/api/v1/servers/{ByIp}/players/198.51.100.9/kick", null);
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
@@ -101,7 +103,7 @@ public sealed class ServerModerationTests
         Engine.Reset();
         string identity = SeedPlayer(NoModeration, id: null, name: "Someone", addr: null);
 
-        HttpResponseMessage resp = await Client(AuthTier.Operator)
+        HttpResponseMessage resp = await Client(KgsmTier.Operator)
             .PostAsync($"/api/v1/servers/{NoModeration}/players/{identity}/kick", null);
 
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
@@ -117,7 +119,7 @@ public sealed class ServerModerationTests
         Engine.Reset();
         string identity = SeedPlayer(ByIp, id: null, name: "NoAddressHere", addr: null);
 
-        HttpResponseMessage resp = await Client(AuthTier.Operator)
+        HttpResponseMessage resp = await Client(KgsmTier.Operator)
             .PostAsync($"/api/v1/servers/{ByIp}/players/{identity}/ban", null);
 
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
@@ -136,7 +138,7 @@ public sealed class ServerModerationTests
         Engine.Reset();
         string identity = SeedPlayer(ByIp, id: null, name: "Walterus", addr: "95.19.50.122:61543");
 
-        HttpResponseMessage resp = await Client(AuthTier.Operator)
+        HttpResponseMessage resp = await Client(KgsmTier.Operator)
             .PostAsync($"/api/v1/servers/{ByIp}/players/{identity}/{action}?origin=ui", null);
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -161,7 +163,7 @@ public sealed class ServerModerationTests
         Engine.Reset();
         string identity = SeedPlayer(ByName, id: "uuid-1", name: "Notch", addr: "10.0.0.5:2222");
 
-        HttpResponseMessage resp = await Client(AuthTier.Operator)
+        HttpResponseMessage resp = await Client(KgsmTier.Operator)
             .PostAsync($"/api/v1/servers/{ByName}/players/{identity}/ban", null);
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -180,7 +182,7 @@ public sealed class ServerModerationTests
         Engine.Reset();
         string identity = SeedPlayer(ByIp, id: null, name: "Walterus", addr: "95.19.50.122:61543");
 
-        await Client(AuthTier.Operator)
+        await Client(KgsmTier.Operator)
             .PostAsync($"/api/v1/servers/{ByIp}/players/{identity}/kick?origin=ui", null);
 
         Assert.False(string.IsNullOrWhiteSpace(Engine.LastCall!.Actor));
@@ -195,7 +197,7 @@ public sealed class ServerModerationTests
         Engine.Reset();
         string identity = SeedPlayer(ByIp, id: null, name: "Walterus", addr: "95.19.50.122:61543");
 
-        HttpResponseMessage resp = await Client(AuthTier.Operator)
+        HttpResponseMessage resp = await Client(KgsmTier.Operator)
             .PostAsync($"/api/v1/servers/{ByIp}/players/{identity}/kick?origin=system", null);
 
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
@@ -213,7 +215,7 @@ public sealed class ServerModerationTests
         Engine.FailWith = "Cannot kick on 'romestead': the server is not running";
         string identity = SeedPlayer(ByIp, id: null, name: "Walterus", addr: "95.19.50.122:61543");
 
-        HttpResponseMessage resp = await Client(AuthTier.Operator)
+        HttpResponseMessage resp = await Client(KgsmTier.Operator)
             .PostAsync($"/api/v1/servers/{ByIp}/players/{identity}/kick", null);
 
         Assert.Equal(HttpStatusCode.BadGateway, resp.StatusCode);
@@ -255,7 +257,7 @@ public sealed class ServerModerationTests
     [Fact]
     public async Task RosterResponse_ReportsWhatTheGameSupports()
     {
-        HttpResponseMessage resp = await Client(AuthTier.Operator).GetAsync($"/api/v1/servers/{ByIp}/players");
+        HttpResponseMessage resp = await Client(KgsmTier.Operator).GetAsync($"/api/v1/servers/{ByIp}/players");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -269,7 +271,7 @@ public sealed class ServerModerationTests
     [Fact]
     public async Task RosterResponse_NeverClaimsSupportTheBlueprintDidNotDeclare()
     {
-        HttpResponseMessage resp = await Client(AuthTier.Operator)
+        HttpResponseMessage resp = await Client(KgsmTier.Operator)
             .GetAsync($"/api/v1/servers/{NoModeration}/players");
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
