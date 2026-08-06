@@ -165,6 +165,15 @@
       "risk": "wiring"
     },
     {
+      "key": "assistantPublicUrl",
+      "env": "Api__AssistantPublicUrl",
+      "label": "Assistant public URL",
+      "description": "The assistant's own public address, e.g. https://assistant.example.com. The Control Panel's chat talks to the assistant directly on it. Empty means the chat reports the assistant unreachable from the browser rather than routing through this API.",
+      "group": "leaves",
+      "type": "string",
+      "risk": "wiring"
+    },
+    {
       "key": "assistantRelaySecret",
       "env": "Api__AssistantRelaySecret",
       "label": "Assistant relay secret",

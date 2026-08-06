@@ -233,9 +233,16 @@ exactly one correct access path:
   a same-version repack is served stale from the NuGet cache (`id+version` keyed).
 - **Assistant** → the typed **`Services/Leaves/AssistantClient.cs`** (a dedicated
   `HttpClient` subclass, not raw HTTP in the aggregator). It exposes a liveness `CheckHealthAsync`
-  (`GET /health`, M2) for the §4·b capability; it is the home the tool catalog, capability discovery,
-  and the **HTTP/SSE** turn relay (M7) grow into. Probe self-bounds via a linked token — leave
-  the client's `Timeout` at default so future slower calls aren't capped by the probe budget.
+  (`GET /health`) for the §4·b capability and the HTTP/SSE relay behind `/api/v1/assistant/*`. Probe
+  self-bounds via a linked token — leave the client's `Timeout` at default so slower calls aren't
+  capped by the probe budget.
+  **The relay is peer transport and is expected to be idle.** A browser talking to *this* host's
+  assistant addresses the leaf directly, on the public origin reported as the capability's
+  `info.url` (`Api:AssistantPublicUrl`), with a session the leaf itself issued — this API relays
+  nothing for its own node, and the controller logs a warning on every call it serves so that
+  dormancy is measured rather than assumed. `Api:AssistantBaseUrl` is this API's own loopback route
+  and is never a browser address; the two are separate settings because conflating them hands a
+  browser an address it cannot reach.
 
 **Leaf health & the capability model (M2).** Capability **availability** is owned by the always-on
 **`Services/Leaves/LeafHealthMonitor.cs`**, which polls each *provisioned* leaf's health every ~2s

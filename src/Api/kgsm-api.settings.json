@@ -35,6 +35,8 @@
       "WatchdogSocketPath": "/run/kgsm-watchdog/control.sock",
       // Assistant base URL. Blank reports the assistant absent.
       "AssistantBaseUrl": "",
+      // Public origin browsers reach the assistant on. Blank reports no browser route.
+      "AssistantPublicUrl": "",
       // Shared secret for the assistant turn relay (X-Relay-Secret). Blank sends none.
       "AssistantRelaySecret": "",
       // kgsm-firewall control socket. Blank reports the ports surface absent.

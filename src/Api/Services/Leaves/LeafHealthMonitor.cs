@@ -46,6 +46,9 @@ public sealed class LeafHealthMonitor : BackgroundService
     // NOT the runtime DB registry (the four provisionable leaves): the scheduler is an opt-in leaf resolved
     // optionally from DI. Captured once at construction, same source as the conditional registration.
     private readonly bool _schedulerProvisioned;
+    // The assistant's PUBLIC origin (config, fixed for the process) — reported as the capability's info so
+    // the Control Panel's chat can address the leaf itself. Null when unconfigured: no info, no browser route.
+    private readonly string? _assistantPublicUrl;
     // Serializes the poll body so the always-on 2s loop and an out-of-band PollNowAsync (a connect/disconnect
     // forcing an immediate publish) never race two writers onto _current.
     private readonly SemaphoreSlim _pollGate = new(1, 1);
@@ -68,6 +71,7 @@ public sealed class LeafHealthMonitor : BackgroundService
         _logger = logger;
         _topic = StreamProtocol.HostCapabilitiesTopic(options.HostId);
         _schedulerProvisioned = options.SchedulerProvisioned;
+        _assistantPublicUrl = options.AssistantPublicUrl;
         _current = ColdBlock(); // provisioned -> unknown (declared, not yet probed); unprovisioned -> absent
     }
 
@@ -135,7 +139,7 @@ public sealed class LeafHealthMonitor : BackgroundService
             HostCapabilities prev = _current;
             var next = new HostCapabilities(
                 Metrics: BuildMetrics(prev.Metrics, metricsProvisioned, metricsTask.Result, snap, now),
-                Assistant: BuildLeaf(prev.Assistant, assistantProvisioned, assistantTask.Result, now, "Assistant health check failed."),
+                Assistant: BuildAssistant(prev.Assistant, assistantProvisioned, assistantTask.Result, _assistantPublicUrl, now),
                 Watchdog: BuildLeaf(prev.Watchdog, watchdogProvisioned, watchdogTask.Result, now, "Watchdog is not ready."),
                 Scheduler: BuildLeaf(prev.Scheduler, _schedulerProvisioned, schedulerTask.Result, now, "Scheduler status check failed."));
 
@@ -190,6 +194,24 @@ public sealed class LeafHealthMonitor : BackgroundService
             Info: info);
     }
 
+    // The assistant carries its public origin in `info` so the chat surface can reach the leaf directly.
+    // The origin is config, not health, so it rides along on every status — a leaf that is momentarily down
+    // still has the same address, and withholding it would make a transient outage look like a missing route.
+    private static Capability BuildAssistant(
+        Capability prev, bool provisioned, bool healthy, string? publicUrl, DateTimeOffset now)
+    {
+        if (!provisioned)
+            return Capability.Absent;
+
+        string status = healthy ? CapabilityStatus.Operational : CapabilityStatus.Down;
+        return new Capability(
+            Provisioned: true,
+            Status: status,
+            Since: SinceFor(prev, status, now),
+            Message: healthy ? null : "Assistant health check failed.",
+            Info: publicUrl is null ? null : new AssistantCapabilityInfo(publicUrl));
+    }
+
     private static Capability BuildLeaf(Capability prev, bool provisioned, bool healthy, DateTimeOffset now, string downMessage)
     {
         if (!provisioned)
@@ -215,7 +237,10 @@ public sealed class LeafHealthMonitor : BackgroundService
             : Capability.Absent;
         return new HostCapabilities(
             Metrics: Cold(_registry.IsProvisioned(ProvisionableLeaf.Monitor)),
-            Assistant: Cold(_registry.IsProvisioned(ProvisionableLeaf.Assistant)),
+            Assistant: _registry.IsProvisioned(ProvisionableLeaf.Assistant)
+                ? new Capability(Provisioned: true, Status: CapabilityStatus.Unknown,
+                    Info: _assistantPublicUrl is null ? null : new AssistantCapabilityInfo(_assistantPublicUrl))
+                : Capability.Absent,
             Watchdog: Cold(_registry.IsProvisioned(ProvisionableLeaf.Watchdog)),
             Scheduler: Cold(_schedulerProvisioned));
     }

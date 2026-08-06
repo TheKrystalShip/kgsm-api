@@ -81,6 +81,14 @@ public sealed class ApiSettings
     [LeafField("assistantUrl", "Assistant URL", Group = "leaves", Risk = LeafRisk.Wiring, NoDefault = true)]
     public string? AssistantBaseUrl { get; set; }
 
+    /// <summary>Public origin browsers reach the assistant on. Blank reports no browser route.</summary>
+    /// <panel>The assistant's own public address, e.g. <c>https://assistant.example.com</c>. The Control
+    /// Panel's chat talks to the assistant directly on it. Empty means the chat reports the assistant
+    /// unreachable from the browser rather than routing through this API.</panel>
+    [LeafField("assistantPublicUrl", "Assistant public URL", Group = "leaves", Risk = LeafRisk.Wiring,
+        NoDefault = true)]
+    public string? AssistantPublicUrl { get; set; }
+
     /// <summary>Shared secret for the assistant turn relay (X-Relay-Secret). Blank sends none.</summary>
     /// <panel>Shared secret letting this API ask the assistant on a signed-in user's behalf. It has to
     /// match the assistant's own relay secret.</panel>

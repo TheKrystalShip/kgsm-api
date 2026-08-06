@@ -78,6 +78,16 @@ public sealed class ApiOptions
     public required string AssistantBaseUrl { get; init; }
 
     /// <summary>
+    /// The public origin a browser reaches the assistant on (<c>Api__AssistantPublicUrl</c>), e.g.
+    /// <c>https://assistant.example.com</c>. Reported in the assistant capability's <c>info.url</c>
+    /// so the Control Panel's chat can address the leaf directly; <see cref="AssistantBaseUrl"/> is
+    /// this API's own loopback route and is never a browser address. <see langword="null"/> when
+    /// unset — the capability then carries no <c>info</c> and the chat says the assistant has no
+    /// browser route, rather than inventing one from the loopback URL.
+    /// </summary>
+    public string? AssistantPublicUrl { get; init; }
+
+    /// <summary>
     /// Shared secret for the M7 assistant turn relay (<c>Api__AssistantRelaySecret</c>) — the
     /// API presents it as <c>X-Relay-Secret</c> so the co-located assistant trusts the forwarded
     /// end-user identity (it must match the assistant's <c>Assistant:Relay:Secret</c>). Empty ⇒ no
@@ -430,6 +440,7 @@ public sealed class ApiOptions
         $"{ApiSettings.Section}__{nameof(ApiSettings.WatchdogSocketPath)}" => WatchdogSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerSocketPath)}" => SchedulerSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantBaseUrl)}" => AssistantBaseUrl,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantPublicUrl)}" => AssistantPublicUrl,
         $"{ApiSettings.Section}__{nameof(ApiSettings.FirewallSocketPath)}" => FirewallSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.KgsmPath)}" => KgsmPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.KgsmJournalDir)}" => KgsmJournalDir,
@@ -746,6 +757,8 @@ public sealed class ApiOptions
             MonitorSocketPath = Defaulted(s.MonitorSocketPath, "/run/kgsm-monitor/metrics.sock"),
             WatchdogSocketPath = Defaulted(s.WatchdogSocketPath, "/run/kgsm-watchdog/control.sock"),
             AssistantBaseUrl = Defaulted(s.AssistantBaseUrl, ""),
+            // The browser route is opt-in and has no sensible default — a loopback URL is not one.
+            AssistantPublicUrl = Clean(s.AssistantPublicUrl),
             AssistantRelaySecret = Defaulted(s.AssistantRelaySecret, ""),
             // Opt-in (blank = absent): the firewall authority is a separate optional install.
             FirewallSocketPath = Defaulted(s.FirewallSocketPath, ""),

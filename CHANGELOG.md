@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the assistant relay is peer transport; browsers reach the leaf directly
+
+A browser talking to this host's assistant addresses the leaf on its own public origin, with a
+session the leaf issued. This API is not in the path of a turn, a confirmation or a conversation
+read for its own node: the assistant is a standalone service, and needing an aggregator in front of
+it to serve a browser is what made it not one.
+
+- **`Api__AssistantPublicUrl`** is the public origin browsers reach the assistant on
+  (`https://assistant.example.com`). It is reported as the assistant capability's `info.url` in
+  `GET /hosts`, which is the whole of how the Control Panel learns the address. `AssistantBaseUrl`
+  stays this API's own loopback route and is never handed to a browser. Blank means no browser route
+  is reported at all — the chat then says the assistant is unreachable from the browser rather than
+  inventing an address from the loopback URL, and rather than silently routing through the relay.
+- **`/api/v1/assistant/*` logs a warning on every call it serves.** The route is retained for
+  reaching a *peer* node's assistant across a cluster; serving one for the local node means a client
+  that could have gone direct did not, and that is a defect worth seeing rather than assuming away.
+
 ### Changed — nginx terminates TLS; this service listens on loopback only
 
 The host runs nginx as its public multiplexer (`../nginx-ingress-plan.md`), routing by hostname to

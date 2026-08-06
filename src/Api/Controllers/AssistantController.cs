@@ -36,6 +36,14 @@ namespace TheKrystalShip.Api.Controllers;
 /// <c>503</c>; reachable-but-rejecting (a relay misconfig) ⇒ <c>502</c> — all the frozen <c>{error}</c>
 /// envelope, decided <em>before</em> the SSE response is committed.
 /// </para>
+/// <para>
+/// <b>This is peer transport, and it is expected to be idle.</b> A browser talking to the assistant on
+/// this host addresses the leaf directly on its own public origin (reported as the assistant capability's
+/// <c>info.url</c>) with a session the leaf itself issued — the leaf is standalone and needs no aggregator
+/// in front of it. Every call served here is therefore logged as a warning: it means a client that could
+/// have gone direct did not, and the coupling this route exists to avoid is back. The route is retained
+/// for reaching a <em>peer</em> node's assistant across a cluster.
+/// </para>
 /// </summary>
 [ApiController]
 [Route("api/v1/assistant")]
@@ -54,6 +62,8 @@ public sealed class AssistantController(
     [HttpPost("turn")]
     public async Task<IActionResult> Turn([FromBody] AssistantTurnRequest? body, CancellationToken ct)
     {
+        NoteRelayUse("POST /assistant/turn");
+
         if (string.IsNullOrWhiteSpace(body?.Prompt))
             return Error(StatusCodes.Status400BadRequest, "bad_request", "prompt is required");
 
@@ -169,6 +179,8 @@ public sealed class AssistantController(
     [Authorize(Policy = AuthPolicy.Operator)]
     public async Task<IActionResult> Confirm([FromBody] AssistantConfirmRequest? body, CancellationToken ct)
     {
+        NoteRelayUse("POST /assistant/confirm");
+
         if (string.IsNullOrWhiteSpace(body?.Token))
             return Error(StatusCodes.Status400BadRequest, "bad_request", "token is required");
 
@@ -375,6 +387,8 @@ public sealed class AssistantController(
         Func<HttpResponseMessage, Task<IActionResult>> onSuccess,
         CancellationToken ct)
     {
+        NoteRelayUse($"{Request.Method} {Request.Path}");
+
         Capability cap = health.Current.Assistant;
         if (!cap.Provisioned)
             return Error(StatusCodes.Status404NotFound, "not_found", "no assistant on this host");
@@ -438,6 +452,16 @@ public sealed class AssistantController(
 
     // The frozen { error: { code, message } } envelope (architecture.html §6) — only ever returned
     // before the SSE response is committed.
+    // Every call through this controller reaches THIS host's own assistant, which browsers address
+    // directly. Serving one means a client took the relay when a direct route exists — record it, with the
+    // route, so the dormancy this controller is supposed to have is measured rather than assumed. A flood
+    // here is not log noise; it is the regression being reported.
+    private void NoteRelayUse(string route) =>
+        logger.LogWarning(
+            "assistant relay served {Route} for the local node — clients address the assistant leaf "
+            + "directly on its public origin; this route is peer transport",
+            route);
+
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
 
