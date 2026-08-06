@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the app trusts a reverse proxy on this machine about the client
+
+`UseForwardedHeaders`, restricted to a proxy on loopback. Groundwork for putting nginx in front
+(`../nginx-ingress-plan.md` Phase A) and **inert until one exists**: the middleware honours the
+headers only when the immediate peer is a known proxy, so a forged `X-Forwarded-Proto` from the
+internet is ignored.
+
+- Without it, behind a plain-http loopback hop `Request.IsHttps` is false on every request — and the
+  OAuth CSRF state cookie is written `Secure = Request.IsHttps`, so a browser login would keep working
+  while quietly dropping to a non-Secure cookie. Client addresses would likewise all read as loopback.
+- `X-Forwarded-Host` is deliberately **not** trusted: the proxy passes the original `Host` through, so
+  there is nothing to reconstruct and one fewer header to believe. `ForwardLimit` is 1.
+
 ### Changed — one relay header carries the caller's authority
 
 - **`X-Relay-Tier` replaces `X-Relay-Can-Act` and `X-Relay-Admin`.** The assistant does no Discord

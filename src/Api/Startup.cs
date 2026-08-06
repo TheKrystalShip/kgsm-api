@@ -1,7 +1,10 @@
+using System.Net;
+
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TheKrystalShip.Api.Contracts;
@@ -603,6 +606,31 @@ public class Startup(IConfiguration configuration)
             o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
         });
 
+        // Behind a reverse proxy the request this app sees is the PROXY's: plain http, from 127.0.0.1.
+        // Without translating the forwarded headers, `Request.IsHttps` is false on every request — and
+        // the OAuth CSRF state cookie is written `Secure = Request.IsHttps`, so a browser login would
+        // quietly downgrade to a non-Secure cookie while continuing to work. Client addresses would
+        // likewise all read as loopback, making the audit log's actor-vs-origin story meaningless.
+        //
+        // Trust is restricted to a proxy on this machine. The middleware honours these headers only
+        // when the IMMEDIATE PEER is a known proxy, so a request arriving from the internet carrying a
+        // forged X-Forwarded-Proto is ignored — which is also what makes this safe to run with no proxy
+        // in front at all. ForwardLimit 1: exactly one hop is expected, and a longer chain would mean
+        // trusting a header a stranger appended.
+        services.Configure<ForwardedHeadersOptions>(o =>
+        {
+            o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+            o.ForwardLimit = 1;
+            // Replace the framework defaults rather than adding to them, so the trusted set is exactly
+            // what is written here.
+            o.KnownProxies.Clear();
+            o.KnownIPNetworks.Clear();
+            o.KnownProxies.Add(IPAddress.Loopback);
+            o.KnownProxies.Add(IPAddress.IPv6Loopback);
+            // X-Forwarded-Host is deliberately NOT trusted: the proxy passes the original Host through
+            // untouched, so Request.Host is already right and there is one fewer header to believe.
+        });
+
         // Error contract over the default ProblemDetails body. AddProblemDetails is
         // registered only to satisfy UseExceptionHandler's startup guard — ApiExceptionHandler
         // always handles, so the ProblemDetails fallback never fires.
@@ -644,6 +672,11 @@ public class Startup(IConfiguration configuration)
         bool serveSpa = !string.IsNullOrEmpty(spaWebRoot) && File.Exists(Path.Combine(spaWebRoot, "index.html"));
         if (serveSpa)
             startupLog.LogInformation("Serving the Control Panel SPA from {WebRoot} (same-origin).", spaWebRoot);
+
+        // FIRST, before anything reads the scheme or the caller's address: rewrite the request from
+        // what the proxy sent us into what the client actually asked for. Everything downstream — the
+        // https upgrade below, cookie Secure flags, audit origins — reads the corrected values.
+        app.UseForwardedHeaders();
 
         app.UseExceptionHandler(); // unhandled -> 500 error envelope (ApiExceptionHandler)
 

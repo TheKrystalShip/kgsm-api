@@ -62,6 +62,15 @@ Both use temp fixtures on purpose. The engine's real journal is one shared host-
 kgsm-api on the box reads, so a test writing to it would land permanently in the operator's audit log —
 the same rule that keeps kgsm-web's smoke read-only (`kgsm-web/CLAUDE.md`).
 
+## Setting connection facts a test server does not supply
+
+`ForwardedHeadersTests` needs a **remote IP address**, because the forwarded-headers trust decision
+turns on who the immediate peer was — and an in-memory test server leaves it null, which reads as
+"not a trusted proxy" and would make every such test pass for the wrong reason. It stamps one with an
+`IStartupFilter` registered through `ConfigureTestServices`: a filter's middleware runs **before** the
+app's own `Configure`, which is the only way to get ahead of `UseForwardedHeaders` from outside the
+pipeline. Use the same trick for any other `HttpContext.Connection` fact a test needs to control.
+
 ## What lives here vs. smoke
 
 - **Here:** behavior that needs in-process service replacement or deterministic control — the auth
