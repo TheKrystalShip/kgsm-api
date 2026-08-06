@@ -26,7 +26,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// <para>
 /// <b>Auth:</b> gated at <b>viewer</b> — a turn is a chat/read that may <em>propose</em> a command
 /// but never executes one (execution is the operator-gated M3 command path; <c>command.verified</c>
-/// is the SPA's to compose, NOT a turn event — see <c>kgsm-llm/docs/m7-sse-5a-spec.md</c>). The API
+/// is the SPA's to compose, NOT a turn event — see <c>kgsm-llm/docs/wire-contract.md</c>). The API
 /// forwards the verified caller's Discord identity to the assistant over the trusted co-located relay
 /// (a shared secret); the assistant still derives authority itself from the bot, and keys per-user
 /// memory on the forwarded id.
