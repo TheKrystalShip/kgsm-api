@@ -206,7 +206,13 @@ public static class AuditQueries
                 Instance = string.IsNullOrWhiteSpace(serverId) ? null : serverId,
                 Type = null, // no clean 1:1 category->type mapping (a category spans many event types)
                 SinceMs = sinceMs,
-                Before = cursor?.Id,
+                // Both halves of the merge cursor. The id is often a LOCAL row's — whichever source
+                // supplied the page's boundary row — so it can name no event in the journal at all; it
+                // is a tie-break only, and the timestamp is what bounds the page. Passing the id alone
+                // would leave the reader unable to place a local cursor, and the walk would restart
+                // from the newest page every time the local side supplied the boundary.
+                BeforeTsMs = cursor?.TsMs,
+                BeforeId = cursor?.Id,
                 Limit = limit
             }, ct).ConfigureAwait(false);
         }

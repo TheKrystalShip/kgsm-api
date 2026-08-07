@@ -170,7 +170,7 @@ public sealed class AuditMergeTests : IDisposable
         {
             // Once the cursor has walked past the tied row the journal is "exhausted" (no cursor on
             // page 1; on page 2 it is set, so return empty — proves no duplicate and no loss).
-            if (q.Before is not null) return FakeEventJournal.Page();
+            if (q.BeforeTsMs is not null) return FakeEventJournal.Page();
             return FakeEventJournal.Page(EngineEvent("evt_mon_tie", tie));
         });
 
@@ -207,6 +207,63 @@ public sealed class AuditMergeTests : IDisposable
         Assert.Equal(2, page.Data.Count); // both are server.* — category="server" keeps both
         Assert.All(page.Data, r => Assert.StartsWith("server.", r.Action));
     }
+
+    /// <summary>
+    /// Walking the merged feed to exhaustion must terminate, visiting every row exactly once.
+    /// </summary>
+    /// <remarks>
+    /// The regression: the cursor's id belongs to whichever source supplied the page's last row, so
+    /// it is regularly a LOCAL id that names no journal event. A reader that treated an id it could
+    /// not place as "no cursor" restarted from the newest page every time that happened, and the walk
+    /// never ended — 10,845 rows over 457 distinct ones, on a live host. Passing the timestamp as
+    /// well as the id is what bounds the page when the id is foreign. Interleaving the two sources
+    /// tightly is what makes the local side supply the boundary often enough to catch it.
+    /// </remarks>
+    [Fact]
+    public async Task PageMergedAsync_WalkingToExhaustion_Terminates_AndVisitsEachRowOnce()
+    {
+        DateTimeOffset t0 = new(2026, 8, 4, 0, 0, 0, TimeSpan.Zero);
+
+        var engine = new List<EventHistoryEntry>();
+        for (int i = 0; i < 20; i++)
+        {
+            await SeedLocalAsync(AuditAction.FileWrite, t0.AddMinutes(i * 2), $"evt_local{i:D2}");
+            engine.Add(EngineEvent($"evt_2026-08-04_{i:D12}", t0.AddMinutes(i * 2 + 1)));
+        }
+
+        var fake = new FakeEventJournal(q =>
+        {
+            IEnumerable<EventHistoryEntry> rows = engine.OrderByDescending(e => e.Ts);
+            if (q.BeforeTsMs is { } beforeMs)
+            {
+                rows = rows.Where(e =>
+                {
+                    long ms = e.Ts.ToUnixTimeMilliseconds();
+                    return ms < beforeMs
+                        || (ms == beforeMs && string.CompareOrdinal(e.Id, q.BeforeId) < 0);
+                });
+            }
+            return FakeEventJournal.Page([.. rows.Take(q.Limit)]);
+        });
+
+        var seen = new List<string>();
+        string? cursor = null;
+
+        for (int guard = 0; guard < 100; guard++)
+        {
+            AuditPage page = await AuditQueries.PageMergedAsync(
+                _db, fake, HostId, cursor, limit: 7,
+                severity: null, serverId: null, actor: null, since: null, category: null,
+                CancellationToken.None);
+
+            seen.AddRange(page.Data.Select(r => r.Id));
+            cursor = page.NextCursor;
+            if (cursor is null) break;
+        }
+
+        Assert.Equal(40, seen.Count);
+        Assert.Equal(40, seen.Distinct().Count());
+    }
 }
 
 /// <summary>Switch-on-input fake (the FakeDiscordResolver pattern) — deterministic per call, so parallel
@@ -216,7 +273,7 @@ internal sealed class FakeEventJournal(Func<EventHistoryQuery, EventHistoryPage>
 {
     /// <summary>A readable journal returning exactly these events.</summary>
     public static EventHistoryPage Page(params EventHistoryEntry[] events) =>
-        new(events, null, events.Length > 0 ? events[^1].Ts : null, false, true);
+        new(events, null, null, events.Length > 0 ? events[^1].Ts : null, false, true);
 
     public Task<EventHistoryPage> QueryAsync(EventHistoryQuery query, CancellationToken cancellationToken = default) =>
         Task.FromResult(respond(query));
