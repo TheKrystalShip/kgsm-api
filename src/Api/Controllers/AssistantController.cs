@@ -9,6 +9,7 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Leaves;
 
+using TheKrystalShip.Kgsm.Assistant.Relay;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
 
@@ -92,7 +93,7 @@ public sealed class AssistantController(
         // the toggle INTENT — it can only ever narrow this, never widen authority, so an operator (or a
         // tampered SPA forcing actions:true) is zeroed here.
         KgsmTier tier = ci is not null ? SessionClaims.ReadTier(ci) : KgsmTier.None;
-        var caller = RelayPrincipal.From(identity, tier);
+        var caller = RelayPrincipals.From(identity, tier);
         bool autoAct = (body.Actions ?? false) && tier >= KgsmTier.Admin;
 
         // The per-chat conversation id from the SPA (the "new chat" identity). Forwarded to the assistant
@@ -197,7 +198,7 @@ public sealed class AssistantController(
 
         // This action is operator-gated, so the forwarded tier is operator or better — but it is read,
         // never assumed, so an admin confirming is relayed as an admin.
-        var caller = RelayPrincipal.From(identity, SessionClaims.ReadTier(ci!));
+        var caller = RelayPrincipals.From(identity, SessionClaims.ReadTier(ci!));
 
         HttpResponseMessage? upstream;
         try
@@ -403,7 +404,7 @@ public sealed class AssistantController(
         // Read the tier here rather than at each call site: the relayed calls are a mix of self-service
         // and admin-gated, and picking the authority per call is how one of them ends up asserting an
         // authority its own action does not require.
-        var caller = RelayPrincipal.From(identity, SessionClaims.ReadTier(ci!));
+        var caller = RelayPrincipals.From(identity, SessionClaims.ReadTier(ci!));
 
         HttpResponseMessage? upstream;
         try

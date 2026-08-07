@@ -489,3 +489,9 @@ $RECYCLE.BIN/
 
 # Personal, host-local Claude notes (dev-token usage, etc.) — never committed
 CLAUDE.local.md
+
+# A local dev run (dotnet run from src/Api) creates its SQLite store beside the code;
+# it is host state, never source.
+src/Api/kgsm-api.db
+src/Api/kgsm-api.db-shm
+src/Api/kgsm-api.db-wal

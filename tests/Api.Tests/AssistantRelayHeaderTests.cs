@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Leaves;
+using TheKrystalShip.Kgsm.Assistant.Relay;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
 
@@ -143,6 +144,19 @@ public sealed class AssistantRelayHeaderTests : IAsyncLifetime
         Assert.Equal("198772043", _received["X-Relay-User"]);
         Assert.Equal("Haru", _received["X-Relay-User-Name"]);
         Assert.Equal("admin", _received["X-Relay-Tier"]);
+    }
+
+    [Fact]
+    public async Task EveryRelayCallNamesThisLeaf()
+    {
+        // The assistant reads this to pick which prompts answer and which origin the turn's actions
+        // are recorded under. Absent, it falls back to the assistant's own — correct, and silent, so
+        // the header going missing would not otherwise show up as a failure anywhere.
+        using AssistantClient client = Client();
+
+        using HttpResponseMessage? response = await client.GetReviewUsersAsync(Caller(KgsmTier.Admin), default);
+
+        Assert.Equal("kgsm-api", _received!["X-Relay-Leaf"]);
     }
 
     [Fact]

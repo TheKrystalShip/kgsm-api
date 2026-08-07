@@ -2,26 +2,21 @@ using System.Net.Http.Json;
 using System.Net.Sockets;
 
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Kgsm.Assistant.Relay;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
 
 namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>
-/// The verified end-user a relay call acts for: who they are, and what this API resolved they may do.
+/// Builds the shared <see cref="RelayPrincipal"/> from this API's own notion of a signed-in caller.
 /// </summary>
 /// <remarks>
-/// Identity and authority travel together deliberately. They were separate arguments, and a call site
-/// could forward a person while forgetting — or hand-picking — what they were allowed to do; the
-/// review calls each passed a literal <c>true</c> for admin, which is only correct for as long as
-/// every one of them stays behind an admin-gated action. Bundling them means a caller cannot express
-/// "this user, with somebody else's authority".
+/// The principal type itself belongs to the relay package, so this API and kgsm-bot forward identity
+/// and authority in one shape. This factory does not, because it speaks Discord identities — which is
+/// how <em>this</em> surface authenticates, not something every relaying leaf has.
 /// </remarks>
-/// <param name="Tier">
-/// The tier read from the caller's own verified session. The assistant trusts it because the relay
-/// secret matched, so it must never be anything but what this API measured.
-/// </param>
-public sealed record RelayPrincipal(string UserId, string DisplayName, KgsmTier Tier)
+internal static class RelayPrincipals
 {
     /// <summary>The caller as forwarded on their own behalf.</summary>
     public static RelayPrincipal From(DiscordIdentity identity, KgsmTier tier) =>
@@ -60,7 +55,9 @@ public sealed class AssistantClient : HttpClient
 
     private readonly ILogger<AssistantClient> _logger;
     private readonly LeafRegistry _registry;
-    private readonly string _relaySecret;
+    // Identity and authority go on the wire through the assistant's own relay contract, so this API
+    // cannot drift from the filter that reads them — or from the bot that writes them too.
+    private readonly AssistantRelay _relay;
     private readonly bool _hasBaseUrl;
 
     public AssistantClient(ApiOptions options, LeafRegistry registry, ILogger<AssistantClient> logger)
@@ -68,7 +65,7 @@ public sealed class AssistantClient : HttpClient
     {
         _logger = logger;
         _registry = registry;
-        _relaySecret = options.AssistantRelaySecret;
+        _relay = new AssistantRelay(options.AssistantRelaySecret, RelayLeaf.Api);
 
         // Unbounded class Timeout — the short relays set their OWN budget via a linked token (probe 2s,
         // reads 120s), while the SSE turn and the streamed blueprint finalize are body-length-unbounded by
@@ -125,21 +122,9 @@ public sealed class AssistantClient : HttpClient
             Content = JsonContent.Create(turnBody),
         };
         request.Headers.Accept.ParseAdd("text/event-stream");
-        AddRelayHeaders(request, caller);
-        // The API's AUTO-ACCEPT authority (admin tier ∧ the user's toggle): when "true" the assistant
-        // runs lifecycle commands immediately instead of staging them. Strictly stronger than the tier
-        // alone, which is why it stays its own header — it is a preference riding a permission, not a
-        // permission. Same trust basis and same fail-closed default: anything but "true" is no.
-        request.Headers.TryAddWithoutValidation("X-Relay-Auto-Act", autoAct ? "true" : "false");
-        // The per-chat conversation id — a SUB-scope of THIS user's assistant memory
-        // (web:<userId>:<id>), so a "new chat" in the SPA is a fresh context window. NOT an identity:
-        // the assistant always prefixes the verified X-Relay-User, so this can only partition the
-        // caller's own history. Already bounded to [A-Za-z0-9_-] by the controller; omitted when null ⇒
-        // the assistant keeps the bare per-user conversation (the prior single-context behaviour).
-        string conv = HeaderSafe(conversationId ?? string.Empty);
-        if (!string.IsNullOrEmpty(conv))
-            request.Headers.TryAddWithoutValidation("X-Relay-Conversation-Id", conv);
-
+        // The identity and its verified tier, plus this turn's auto-accept decision and per-chat
+        // sub-scope — the per-call parts ride the same writer so they cannot be forwarded apart.
+        _relay.Write(request, caller, new RelayCall(autoAct, conversationId));
         return await SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
     }
 
@@ -292,7 +277,7 @@ public sealed class AssistantClient : HttpClient
         // action authority the same way it did when it PROPOSED — from the forwarded tier. A relay host
         // with no Discord config of its own has no other authority source, so without this the finalize
         // is denied.
-        AddRelayHeaders(request, caller);
+        _relay.Write(request, caller);
 
         // ResponseHeadersRead: return the stream as soon as the headers land so the minutes-long finalize
         // body isn't HttpClient.Timeout-bound (the class Timeout is Infinite; see the ctor). The heartbeats
@@ -313,7 +298,7 @@ public sealed class AssistantClient : HttpClient
 
         var request = new HttpRequestMessage(method, path) { Content = body };
         request.Headers.Accept.ParseAdd("application/json");
-        AddRelayHeaders(request, caller);
+        _relay.Write(request, caller);
 
         using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timed.CancelAfter(ReadTimeout);
@@ -321,71 +306,15 @@ public sealed class AssistantClient : HttpClient
     }
 
     /// <summary>
-    /// Writes the trusted-relay headers: the shared secret, the forwarded identity, and the caller's
-    /// verified tier.
+    /// Liveness probe for the §4·b assistant capability, run through the assistant's own shared probe
+    /// so every leaf that consumes it agrees on what "up" means: <c>GET /health</c>, a 2xx, within
+    /// <see cref="ProbeTimeout"/>. Never throws. An unprovisioned assistant is short-circuited here
+    /// rather than probed, so the capability renders <c>absent</c> instead of a broken <c>down</c>.
     /// </summary>
-    /// <remarks>
-    /// One place, so identity and authority cannot be forwarded apart. The tier is the assistant's whole
-    /// authority on this path — it does no Discord lookup for a relayed caller — and it is trusted there
-    /// only because the secret matched. It is written as the canonical wire spelling, which the assistant
-    /// parses fail-closed: anything it does not recognise, including this header being absent, is
-    /// <see cref="KgsmTier.None"/>, never a softer grant.
-    /// </remarks>
-    private void AddRelayHeaders(HttpRequestMessage request, RelayPrincipal caller)
-    {
-        if (!string.IsNullOrEmpty(_relaySecret))
-            request.Headers.TryAddWithoutValidation("X-Relay-Secret", _relaySecret);
-
-        // The user id is a Discord snowflake set at login (not free text); the display name is a
-        // user-controlled Discord value crossing a trust boundary, so strip control chars (CR/LF) —
-        // defence in depth against header injection, and it also avoids a weird display name throwing.
-        request.Headers.TryAddWithoutValidation("X-Relay-User", HeaderSafe(caller.UserId));
-        string displayName = HeaderSafe(caller.DisplayName);
-        if (!string.IsNullOrEmpty(displayName))
-            request.Headers.TryAddWithoutValidation("X-Relay-User-Name", displayName);
-
-        request.Headers.TryAddWithoutValidation("X-Relay-Tier", KgsmTiers.ToWire(caller.Tier));
-    }
-
-    // Drop control chars (incl. CR/LF) so a user-controlled value can never split a header.
-    private static string HeaderSafe(string value) =>
-        string.IsNullOrEmpty(value) ? value : new string(value.Where(c => !char.IsControl(c)).ToArray());
-
-    /// <summary>
-    /// Liveness probe for the §4·b assistant capability: <c>GET /health</c>, a 2xx means the assistant
-    /// is up and able to provide its capability (the canonical signal polled frequently by
-    /// <c>LeafHealthMonitor</c>). Returns <c>false</c> on timeout, unreachable, or non-2xx — it never
-    /// throws, and never blocks longer than <see cref="ProbeTimeout"/>. The assistant already serves
-    /// <c>/health</c> (the ecosystem-standard path); the SSE turn relay still lands at M7.
-    /// </summary>
-    public async Task<bool> CheckHealthAsync(CancellationToken ct)
-    {
-        if (!IsProvisioned)
-            return false;
-
-        // Self-bound to the probe budget, independent of the client's (default) Timeout, while
-        // still honoring caller cancellation through the linked token.
-        using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timed.CancelAfter(ProbeTimeout);
-        try
-        {
-            // Headers-only: we only need the status, not the body.
-            using HttpResponseMessage resp = await this
-                .GetAsync("/health", HttpCompletionOption.ResponseHeadersRead, timed.Token)
-                .ConfigureAwait(false);
-            return resp.IsSuccessStatusCode;
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            _logger.LogDebug("assistant /health probe timed out after {Timeout}", ProbeTimeout);
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "assistant /health probe failed");
-            return false;
-        }
-    }
+    public Task<bool> CheckHealthAsync(CancellationToken ct) =>
+        IsProvisioned
+            ? AssistantHealthProbe.CheckAsync(this, ct, _logger, ProbeTimeout)
+            : Task.FromResult(false);
 
     // Recycle pooled connections so a process-lifetime singleton never pins a stale one (the
     // documented long-lived-HttpClient alternative to IHttpClientFactory). Largely moot for a

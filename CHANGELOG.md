@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the assistant relay headers come from the assistant's own package
+
+`TheKrystalShip.Kgsm.Assistant.Relay` (built by kgsm-llm, which validates these headers on the other
+side) now supplies `RelayPrincipal` and writes the relay headers this API had hand-rolled. They carry
+who someone is and what they may do, and kgsm-bot is about to send the same ones — a second
+implementation is how two surfaces come to disagree about that.
+
+The API also now identifies itself with `X-Relay-Leaf: kgsm-api`, which is how the assistant selects
+the prompt overrides its browser chat reads. The liveness probe runs through the package's shared
+probe, so every leaf consuming the assistant agrees on what "up" means.
+
+`RelayPrincipal.From(DiscordIdentity, tier)` becomes `RelayPrincipals.From(...)` and stays here: the
+principal shape is shared, but building one from a Discord identity is how *this* surface
+authenticates, not something every relaying leaf has.
+
 ### Fixed — an API-only deploy no longer takes the Control Panel down
 
 `deploy.sh` rebuilds the publish tree from empty on every run and then syncs it over the prefix with
