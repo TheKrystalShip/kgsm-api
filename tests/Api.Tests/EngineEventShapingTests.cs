@@ -99,6 +99,8 @@ public sealed class EngineEventShapingTests
     [InlineData("instance_update_finished")]
     [InlineData("instance_stop_started")]
     [InlineData("instance_stop_finished")]
+    [InlineData("instance_restart_started")]
+    [InlineData("instance_restart_finished")]
     public void Shape_SilentType_ReturnsNull(string type)
     {
         var item = new EventHistoryEntry("evt_x", Ts, type, "mc", null, null, null, null, Data(new { InstanceName = "mc" }));

@@ -235,6 +235,24 @@ public sealed class KgsmAuditConsumer(
             return Task.CompletedTask;
         });
 
+        // instance_restart_started / instance_restart_finished — the bracket for the longest lifecycle
+        // verb (kgsm 3.7.4-rc1): a stop's drain plus the game's whole boot. kgsm runs both halves through
+        // its pure logic rather than the stop and start commands, so NOTHING else is emitted in between —
+        // without this pair the first and only word is instance_restarted at the very end, and until then
+        // the instance still reads as running normally. Same discipline as the other two brackets:
+        // audit-silent (server.restart, written from instance_restarted, is the fact), claims and releases
+        // the one in-flight slot, and mints nothing when this API issued the restart itself.
+        events.RegisterHandler<InstanceRestartStartedData>(d =>
+        {
+            ObserveStarted(d.InstanceName, CommandVerb.Restart);
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<InstanceRestartFinishedData>(d =>
+        {
+            SettleObserved(d.InstanceName);
+            return Task.CompletedTask;
+        });
+
         // server.install — carries the blueprint it was installed from.
         events.RegisterHandler<InstanceInstalledData>(d =>
         {

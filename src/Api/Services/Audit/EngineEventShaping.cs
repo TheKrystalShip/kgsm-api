@@ -35,6 +35,8 @@ public static class EngineEventShaping
         "instance_update_finished",          // releases it — "the run ended", not "the version moved"
         "instance_stop_started",             // same bracket for a shutdown; server.stop is the fact
         "instance_stop_finished",            // releases it — "the run ended", not "the instance is down"
+        "instance_restart_started",          // same bracket for a restart; server.restart is the fact
+        "instance_restart_finished",         // releases it — "the run ended", not "the instance came back"
     };
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General)

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A restart kgsm runs for another entrypoint is tracked like the other two long verbs.** kgsm brackets
+  a restart with `instance_restart_started`/`instance_restart_finished` (3.7.4-rc1, typed in kgsm-lib
+  3.2.0), and those claim and release the same one-in-flight-per-server slot, so `activeJob` reports the
+  bounce whoever asked for it. This is the verb that needed it most: a restart runs its stop and its
+  start through kgsm's pure logic rather than the commands, so NOTHING was emitted between them and
+  `instance_restarted` at the very end was the first and only word. Both events stay out of the audit
+  feed — `server.restart` is the fact worth a row.
+
 ### Changed — the assistant relay headers come from the assistant's own package
 
 `TheKrystalShip.Kgsm.Assistant.Relay` (built by kgsm-llm, which validates these headers on the other
