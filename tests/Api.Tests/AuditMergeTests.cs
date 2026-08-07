@@ -264,6 +264,60 @@ public sealed class AuditMergeTests : IDisposable
         Assert.Equal(40, seen.Count);
         Assert.Equal(40, seen.Distinct().Count());
     }
+
+    /// <summary>
+    /// Engine events that shape to nothing must not consume the page's budget.
+    /// </summary>
+    /// <remarks>
+    /// The regression, measured on a live host: a journal fetch of 200 RAW events covering
+    /// 2026-08-05→08-07 contained 49 silent types, so only 151 became rows. The merged page filled the
+    /// rest from the local table, its last row was a local one at 2026-07-31, and the cursor advanced
+    /// there — skipping every engine event between 07-31 and 08-05 permanently, while all of them sat
+    /// in the journal. A short engine half is not a short page; it is a hole in the audit trail.
+    /// </remarks>
+    [Fact]
+    public async Task PageMergedAsync_SilentEventsDoNotStarveTheEngineHalf_SoNoWindowIsSkipped()
+    {
+        DateTimeOffset t0 = new(2026, 8, 4, 0, 0, 0, TimeSpan.Zero);
+
+        // Newest 8 engine events are all silent; the real ones sit behind them.
+        var engine = new List<EventHistoryEntry>();
+        for (int i = 0; i < 8; i++)
+            engine.Add(EngineEvent($"evt_2026-08-04_{100 + i:D12}", t0.AddMinutes(100 + i), "instance_ready"));
+        for (int i = 0; i < 8; i++)
+            engine.Add(EngineEvent($"evt_2026-08-04_{i:D12}", t0.AddMinutes(i), "instance_started"));
+
+        // Local rows older than every engine event, so they are what fills a starved page.
+        for (int i = 0; i < 8; i++)
+            await SeedLocalAsync(AuditAction.FileWrite, t0.AddMinutes(-10 - i), $"evt_local{i:D2}");
+
+        var fake = new FakeEventJournal(q =>
+        {
+            IEnumerable<EventHistoryEntry> rows = engine.OrderByDescending(e => e.Ts);
+            if (q.BeforeTsMs is { } beforeMs)
+            {
+                rows = rows.Where(e =>
+                {
+                    long ms = e.Ts.ToUnixTimeMilliseconds();
+                    return ms < beforeMs || (ms == beforeMs && string.CompareOrdinal(e.Id, q.BeforeId) < 0);
+                });
+            }
+            EventHistoryEntry[] taken = [.. rows.Take(q.Limit)];
+            return taken.Length == q.Limit
+                ? new EventHistoryPage(taken, taken[^1].Ts.ToUnixTimeMilliseconds(), taken[^1].Id, null, false, true)
+                : FakeEventJournal.Page(taken);
+        });
+
+        AuditPage page = await AuditQueries.PageMergedAsync(
+            _db, fake, HostId, cursor: null, limit: 8,
+            severity: null, serverId: null, actor: null, since: null, category: null,
+            CancellationToken.None);
+
+        // All 8 slots go to real engine events — the silent ones cost nothing — so no local row is
+        // pulled up past engine history that has not been served yet.
+        Assert.Equal(8, page.Data.Count);
+        Assert.All(page.Data, r => Assert.Equal(AuditAction.ServerStart, r.Action));
+    }
 }
 
 /// <summary>Switch-on-input fake (the FakeDiscordResolver pattern) — deterministic per call, so parallel

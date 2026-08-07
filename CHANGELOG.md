@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `/audit` was silently dropping engine events
+
+The engine half of the merge fetched `limit` **raw** events and only then dropped the ones shaping
+treats as silent, so it under-filled. The merged page topped up from the local table, its last row
+was a local one, and the cursor advanced there — past every engine event in the journal window that
+had never been fetched. Those events were gone from the feed for good.
+
+Measured on this host: one page fetched 200 raw events spanning 2026-08-05→08-07, 49 of them silent
+types, and the cursor landed on a local row at 2026-07-31 — four days of engine history skipped
+while all of it sat in the journal. Walking `/audit` to exhaustion returned 638 rows where the
+sources held 1150; the missing 512 are now served.
+
+This predates the journal migration — the same starvation existed when the engine half came from
+kgsm-monitor's `GET /events`, which shaped after fetching in exactly the same way. The
+`severity`/`actor`/`category` filters starve it identically, having no journal-side equivalent.
+
+The engine half now keeps fetching until it has a full page of usable records or the journal is
+exhausted, bounded at 20 fetches per request. Stopping on that bound reports "there is more" rather
+than ending the feed, so a heavily-filtered query stays bounded without ever claiming it reached
+the end.
+
 ### Changed — engine history comes from the journal, not from kgsm-monitor
 
 `GET /audit` reads the engine half of the merge through kgsm-lib's `IEventJournalHistory`, straight

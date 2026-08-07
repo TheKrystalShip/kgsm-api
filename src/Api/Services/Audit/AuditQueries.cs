@@ -42,6 +42,12 @@ public static class AuditQueries
     // precisely rather than assumed away.
     private const int TieBreakSlack = 32;
 
+    // How many journal pages one merge page may read before giving up on filling itself. A query
+    // whose filters match almost nothing would otherwise walk the whole retention window in one
+    // request; stopping early and reporting "there is more" keeps the work bounded without ever
+    // claiming the feed ended.
+    private const int MaxJournalFetches = 20;
+
     /// <summary>
     /// The dotted actions <see cref="AuditMapping"/>'s <c>From*Event</c> mappers produce that are, post
     /// Phase-C, EXCLUSIVELY sourced from the kgsm event echo. <see cref="KgsmAuditConsumer"/> no longer
@@ -189,6 +195,28 @@ public static class AuditQueries
         return batch.Take(limit).ToList();
     }
 
+    /// <summary>
+    /// The engine half of the merge: up to <paramref name="limit"/> <em>shaped</em> records, newest
+    /// first, or the journal exhausted.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this loops.</b> A journal page is <paramref name="limit"/> RAW events, and shaping
+    /// drops some of them unconditionally — a silent type is not a domain fact, so it never becomes a
+    /// row — while severity/actor/category narrow further, having no journal-side equivalent. Returning
+    /// whatever survived one fetch under-fills this side of the merge, and that is not merely a short
+    /// page: the merged page's last row then comes from the local table, the cursor advances to it, and
+    /// every engine event between there and the journal's fetched window is skipped for good. Measured
+    /// before this loop existed: one page fetched 200 raw events covering 2026-08-05→08-07, 49 of them
+    /// silent, and the cursor landed on a local row at 2026-07-31 — losing four days of engine history
+    /// from the feed while every one of those events sat in the journal.
+    /// </para>
+    /// <para>
+    /// So it keeps fetching until it has a full page of records the caller can actually use, or the
+    /// journal runs out. <see cref="MaxJournalFetches"/> bounds the work; stopping there reports
+    /// <c>journalFull</c>, which keeps <c>hasMore</c> true so the caller pages again rather than being
+    /// told the feed ended.
+    /// </para>
+    /// </remarks>
     private static async Task<(List<AuditRecord> Records, bool Degraded, bool JournalFull)> QueryJournalAsync(
         IEventJournalHistory? journal, string hostId, AuditCursor? cursor, int limit,
         string[]? severities, string? serverId, long? sinceMs, string? categoryPrefix, CancellationToken ct)
@@ -198,57 +226,84 @@ public static class AuditQueries
         // caller cannot have engine history either way, and must not be told it has all of it.
         if (journal is null) return (new List<AuditRecord>(), true, false);
 
-        EventHistoryPage page;
-        try
+        var records = new List<AuditRecord>(limit);
+        long? beforeTs = cursor?.TsMs;
+        string? beforeId = cursor?.Id;
+        bool more = false;
+
+        for (int fetch = 0; fetch < MaxJournalFetches; fetch++)
         {
-            page = await journal.QueryAsync(new EventHistoryQuery
+            EventHistoryPage page;
+            try
             {
-                Instance = string.IsNullOrWhiteSpace(serverId) ? null : serverId,
-                Type = null, // no clean 1:1 category->type mapping (a category spans many event types)
-                SinceMs = sinceMs,
-                // Both halves of the merge cursor. The id is often a LOCAL row's — whichever source
-                // supplied the page's boundary row — so it can name no event in the journal at all; it
-                // is a tie-break only, and the timestamp is what bounds the page. Passing the id alone
-                // would leave the reader unable to place a local cursor, and the walk would restart
-                // from the newest page every time the local side supplied the boundary.
-                BeforeTsMs = cursor?.TsMs,
-                BeforeId = cursor?.Id,
-                Limit = limit
-            }, ct).ConfigureAwait(false);
+                page = await journal.QueryAsync(new EventHistoryQuery
+                {
+                    Instance = string.IsNullOrWhiteSpace(serverId) ? null : serverId,
+                    Type = null, // no clean 1:1 category->type mapping (a category spans many event types)
+                    SinceMs = sinceMs,
+                    // Both halves of the cursor. The id is often a LOCAL row's — whichever source
+                    // supplied the page's boundary row — so it can name no event in the journal at all;
+                    // it is a tie-break only, and the timestamp is what bounds the page. Passing the id
+                    // alone would leave the reader unable to place a local cursor, and the walk would
+                    // restart from the newest page every time the local side supplied the boundary.
+                    BeforeTsMs = beforeTs,
+                    BeforeId = beforeId,
+                    Limit = limit
+                }, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // QueryAsync itself never throws for a missing or unreadable journal (see
+                // EventJournalHistory) — this is a last-resort guard so a surprise degrades the page
+                // rather than 500ing the whole endpoint. Anything already gathered is kept: a partial
+                // engine half is still better than dropping it, and `degraded` says so.
+                return (records, true, false);
+            }
+
+            // An unreadable journal is not an empty one. Serving "no engine events" for a directory the
+            // API cannot read would report silence as fact.
+            if (!page.JournalReadable) return (records, true, false);
+
+            foreach (EventHistoryEntry item in page.Events)
+            {
+                AuditRecord? shaped = EngineEventShaping.Shape(item, hostId);
+                if (shaped is null) continue; // deliberately-silent type
+                if (severities is { Length: > 0 } && !severities.Contains(shaped.Severity)) continue;
+                if (!string.IsNullOrWhiteSpace(serverId) && shaped.ServerId != serverId) continue;
+                if (categoryPrefix is not null && !shaped.Action.StartsWith(categoryPrefix, StringComparison.Ordinal)) continue;
+                records.Add(shaped);
+            }
+
+            // A truncated scan stopped on its byte budget, so there is more behind it either way.
+            if (page.NextCursorTsMs is null || page.Truncated)
+            {
+                more = records.Count > limit || page.Truncated;
+                break;
+            }
+
+            beforeTs = page.NextCursorTsMs;
+            beforeId = page.NextCursorId;
+
+            if (records.Count >= limit)
+            {
+                more = true;
+                break;
+            }
+
+            // Ran the fetch budget out with a page still unfilled — honest "there is more", so the
+            // caller keeps walking instead of being told the feed ended.
+            if (fetch == MaxJournalFetches - 1) more = true;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+
+        // Only the newest `limit` are this page's; the overshoot is re-read from the cursor next time,
+        // exactly as the local side's own batch overshoot is.
+        if (records.Count > limit)
         {
-            // QueryAsync itself never throws for a missing or unreadable journal (see
-            // EventJournalHistory) — this is a last-resort guard so a surprise degrades the page
-            // rather than 500ing the whole endpoint.
-            return (new List<AuditRecord>(), true, false);
+            records.RemoveRange(limit, records.Count - limit);
+            more = true;
         }
 
-        // An unreadable journal is not an empty one. Serving "no engine events" for a directory the
-        // API cannot read would report silence as fact.
-        if (!page.JournalReadable) return (new List<AuditRecord>(), true, false);
-
-        var records = new List<AuditRecord>(page.Events.Count);
-        foreach (EventHistoryEntry item in page.Events)
-        {
-            AuditRecord? shaped = EngineEventShaping.Shape(item, hostId);
-            if (shaped is null) continue; // deliberately-silent type
-            if (severities is { Length: > 0 } && !severities.Contains(shaped.Severity)) continue;
-            if (!string.IsNullOrWhiteSpace(serverId) && shaped.ServerId != serverId) continue;
-            if (categoryPrefix is not null && !shaped.Action.StartsWith(categoryPrefix, StringComparison.Ordinal)) continue;
-            records.Add(shaped);
-        }
-
-        // The RAW page fullness (before the in-memory severity/actor/category trim above), not the
-        // filtered count — filtering can shrink `records` well below `limit` even though the journal may
-        // still hold more beyond this batch (severity/actor/category have no journal-side equivalent, so
-        // a filtered merge page can legitimately come back sparse; kgsm-web already walks pages until it
-        // has enough rows or the cursor exhausts).
-        //
-        // A truncated scan counts as full for the same reason: it stopped early, so there is more
-        // behind it, and saying otherwise would end the page walk on a budget rather than on the data.
-        bool journalFull = page.Events.Count == limit || page.Truncated;
-        return (records, false, journalFull);
+        return (records, false, more);
     }
 
     private static string[]? ParseSeverities(string? severity)
