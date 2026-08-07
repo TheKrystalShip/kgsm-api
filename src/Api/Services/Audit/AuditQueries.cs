@@ -3,23 +3,27 @@ using Microsoft.EntityFrameworkCore;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Leaves;
+using TheKrystalShip.KGSM.Core.Interfaces;
+using TheKrystalShip.KGSM.Core.Models;
 
 namespace TheKrystalShip.Api.Services.Audit;
 
 /// <summary>
-/// The read side of the audit log — a ts-DESC merge (event-history-plan.md Phase C, Locked decision #4)
-/// of two disjoint sources: the local EF table (API-only rows — auth/session/leaf/files/console-audit,
-/// plus whatever pre-cutover engine rows are already frozen there) and kgsm-monitor's <c>GET /events</c>
-/// (the engine's own history, shaped at read time via <see cref="MonitorEventShaping"/>). Pure query
-/// logic over an <see cref="AppDbContext"/> + an <see cref="IMonitorEventsClient"/> (both resolved on
-/// the request scope by the controller), so it is unit-testable against a real SQLite + a fake monitor
-/// client without a live kgsm/monitor.
+/// The read side of the audit log — a ts-DESC merge of two disjoint sources: the local EF table
+/// (API-only rows — auth/session/leaf/files/console-audit, plus whatever pre-cutover engine rows are
+/// frozen there) and the engine's own event journal, read through kgsm-lib's
+/// <see cref="IEventJournalHistory"/> and shaped at read time via <see cref="EngineEventShaping"/>.
+/// Pure query logic over an <see cref="AppDbContext"/> + the journal reader, so it is unit-testable
+/// against a real SQLite and a fake reader with no live kgsm.
 /// </summary>
 /// <remarks>
-/// <para><b>Cursor.</b> A composite <c>(ts, id)</c> keyset — see <see cref="AuditCursor"/> — spans both
-/// sources, unlike the old bare local <c>rowid</c> cursor (which can't address a monitor-sourced row).
-/// The wire string stays opaque to the client (kgsm-web only stores/echoes it — confirmed by reading its
-/// audit store — so changing the internal encoding is safe).</para>
+/// <para><b>Why the journal and not a leaf.</b> Engine history is a property of the record on disk, so
+/// this API answers for it with no daemon involved. A host missing every optional leaf still returns a
+/// complete audit trail.</para>
+/// <para><b>Cursor.</b> A composite <c>(ts, id)</c> keyset — see <see cref="AuditCursor"/> — spanning
+/// both sources. It works across them because a journal id is the event's position and therefore sorts
+/// like the journal itself, so one cursor addresses a local row and an engine row alike. The wire string
+/// stays opaque to the client (kgsm-web only stores and echoes it), so the encoding is free to change.</para>
 /// <para><b>Local exclusion.</b> <see cref="EngineSourcedActions"/> is the set of dotted actions that,
 /// post-cutover, can ONLY be freshly written by the (now-removed) kgsm-event-echo path in
 /// <see cref="KgsmAuditConsumer"/> — so a local row bearing one of them is frozen pre-cutover history,
@@ -43,15 +47,15 @@ public static class AuditQueries
     /// Phase-C, EXCLUSIVELY sourced from the kgsm event echo. <see cref="KgsmAuditConsumer"/> no longer
     /// writes any of these to the local table (it now only publishes them live — see
     /// <see cref="AuditService.PublishLive"/>), so a local row bearing one is frozen pre-cutover history;
-    /// excluding it here means the merge's engine-sourced rows come solely from the monitor.
+    /// excluding it here means the merge's engine-sourced rows come solely from the journal.
     /// <para>
     /// <see cref="AuditAction.NetworkPortsOpen"/> is DELIBERATELY NOT in this set: it is dual-sourced —
-    /// kgsm's CLI-echo (<c>instance_ports_opened</c>, now monitor-only, shaped via
-    /// <see cref="MonitorEventShaping"/>) AND the api-issued <c>open_ports</c> command's DIRECT local
+    /// kgsm's CLI-echo (<c>instance_ports_opened</c>, journal-only, shaped via
+    /// <see cref="EngineEventShaping"/>) AND the api-issued <c>open_ports</c> command's DIRECT local
     /// write (<c>AuditMapping.FromPortsOpenedCommand</c>, called from
-    /// <c>Services/Commands/CommandRunner.cs</c> — untouched by Phase C, no kgsm event exists for it to
+    /// <c>Services/Commands/CommandRunner.cs</c> — no kgsm event exists for it to
     /// echo). Excluding <c>network.ports.open</c> here would silently drop every <c>open_ports</c>
-    /// command's own audit trail, which is genuinely API-only and has no monitor counterpart.
+    /// command's own audit trail, which is genuinely API-only and has no journal counterpart.
     /// <c>network.ports.close</c> has no such direct writer (§3·g is open-only) so it excludes cleanly.
     /// </para>
     /// </summary>
@@ -90,17 +94,17 @@ public static class AuditQueries
         limit is null || limit <= 0 ? DefaultLimit : Math.Min(limit.Value, MaxLimit);
 
     /// <summary>
-    /// The merged, ts-DESC page: local API-only rows ∪ kgsm-monitor's shaped engine rows. Every filter is
-    /// pushed to both sources before merge (<c>serverId</c> as the monitor's <c>instance=</c>, <c>since</c>
-    /// as its <c>since=</c> in unix ms); <c>severity</c>/<c>actor</c>/<c>category</c> have no monitor-side
-    /// equivalent (the monitor stores raw events, not the shaped vocabulary), so they narrow the EF query
-    /// via SQL and the shaped monitor records via an equivalent in-memory filter, applied identically.
-    /// Monitor unreachable → <see cref="AuditPage.EngineHistoryDegraded"/> true, local-only rows (never a
-    /// silent drop, never a 500).
+    /// The merged, ts-DESC page: local API-only rows ∪ the journal's shaped engine rows. Every filter is
+    /// pushed to both sources before merge (<c>serverId</c> as the journal query's instance scope,
+    /// <c>since</c> as its lower bound); <c>severity</c>/<c>actor</c>/<c>category</c> have no journal-side
+    /// equivalent (the journal holds raw events, not the shaped vocabulary), so they narrow the EF query
+    /// via SQL and the shaped engine records via an equivalent in-memory filter, applied identically.
+    /// An unreadable journal, or a host with no engine → <see cref="AuditPage.EngineHistoryDegraded"/>
+    /// true and local-only rows: never a silent drop, never a 500.
     /// </summary>
     public static async Task<AuditPage> PageMergedAsync(
         AppDbContext db,
-        IMonitorEventsClient monitor,
+        IEventJournalHistory? journal,
         string hostId,
         string? cursor,
         int limit,
@@ -120,11 +124,11 @@ public static class AuditQueries
             db, c, limit, severities, serverId, actor, sinceTs, categoryPrefix, ct).ConfigureAwait(false);
         List<AuditRecord> localRecords = localRows.Select(AuditMapping.ToRecord).ToList();
 
-        (List<AuditRecord> monitorRecords, bool degraded, bool monitorFull) = await QueryMonitorAsync(
-            monitor, hostId, c, limit, severities, serverId, sinceTs?.ToUnixTimeMilliseconds(),
+        (List<AuditRecord> engineRecords, bool degraded, bool journalFull) = await QueryJournalAsync(
+            journal, hostId, c, limit, severities, serverId, sinceTs?.ToUnixTimeMilliseconds(),
             categoryPrefix, ct).ConfigureAwait(false);
 
-        List<AuditRecord> merged = localRecords.Concat(monitorRecords)
+        List<AuditRecord> merged = localRecords.Concat(engineRecords)
             .GroupBy(r => r.Id, StringComparer.Ordinal).Select(g => g.First()) // defensive boundary dedup
             .OrderByDescending(r => r.Ts)
             .ThenByDescending(r => r.Id, StringComparer.Ordinal)
@@ -136,8 +140,8 @@ public static class AuditQueries
         // note in the Phase-C report — an exchange-argument proof, not a heuristic). "More rows might
         // exist" iff either source's own fetch came back full (it might have more beyond what we took) or
         // the combined candidate pool exceeded one page (some fetched rows didn't make the cut).
-        bool hasMore = localRows.Count == limit || monitorFull
-            || localRecords.Count + monitorRecords.Count > limit;
+        bool hasMore = localRows.Count == limit || journalFull
+            || localRecords.Count + engineRecords.Count > limit;
 
         string? next = hasMore && merged.Count > 0
             ? new AuditCursor(merged[^1].Ts.ToUnixTimeMilliseconds(), merged[^1].Id).ToString()
@@ -185,42 +189,43 @@ public static class AuditQueries
         return batch.Take(limit).ToList();
     }
 
-    private static async Task<(List<AuditRecord> Records, bool Degraded, bool MonitorFull)> QueryMonitorAsync(
-        IMonitorEventsClient monitor, string hostId, AuditCursor? cursor, int limit,
+    private static async Task<(List<AuditRecord> Records, bool Degraded, bool JournalFull)> QueryJournalAsync(
+        IEventJournalHistory? journal, string hostId, AuditCursor? cursor, int limit,
         string[]? severities, string? serverId, long? sinceMs, string? categoryPrefix, CancellationToken ct)
     {
-        MonitorEventPage? page;
+        // No engine provisioned on this host: there is no journal to read, which is a missing
+        // capability rather than a failure. Reported the same way an unreadable one is — the
+        // caller cannot have engine history either way, and must not be told it has all of it.
+        if (journal is null) return (new List<AuditRecord>(), true, false);
+
+        EventHistoryPage page;
         try
         {
-            page = await monitor.GetEventsAsync(
-                instance: string.IsNullOrWhiteSpace(serverId) ? null : serverId,
-                type: null, // no clean 1:1 category->type mapping (a category spans many event types)
-                sinceMs: sinceMs,
-                untilMs: null,
-                beforeTs: cursor?.TsMs,
-                beforeId: cursor?.Id,
-                limit: limit,
-                ct: ct).ConfigureAwait(false);
+            page = await journal.QueryAsync(new EventHistoryQuery
+            {
+                Instance = string.IsNullOrWhiteSpace(serverId) ? null : serverId,
+                Type = null, // no clean 1:1 category->type mapping (a category spans many event types)
+                SinceMs = sinceMs,
+                Before = cursor?.Id,
+                Limit = limit
+            }, ct).ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // GetEventsAsync itself never throws (see MonitorClient) — this is a last-resort guard so a
-            // merge-time surprise degrades the page rather than 500ing the whole endpoint.
-            page = null;
+            // QueryAsync itself never throws for a missing or unreadable journal (see
+            // EventJournalHistory) — this is a last-resort guard so a surprise degrades the page
+            // rather than 500ing the whole endpoint.
+            return (new List<AuditRecord>(), true, false);
         }
 
-        // page.Events null is defensive, not merely hypothetical: MonitorEventPage's positional-record
-        // properties have no JSON-required enforcement, so a 200 response that parses as valid JSON but
-        // doesn't carry an "events" array (a misrouted proxy, an old/mismatched monitor build, a stub
-        // that doesn't implement /events and 200s some other shape for any unrecognized path) leaves
-        // Events null rather than throwing at deserialize time — treated the same as monitor-down: an
-        // honest degrade, never a 500 from an unguarded null dereference below.
-        if (page is null || page.Events is null) return (new List<AuditRecord>(), true, false);
+        // An unreadable journal is not an empty one. Serving "no engine events" for a directory the
+        // API cannot read would report silence as fact.
+        if (!page.JournalReadable) return (new List<AuditRecord>(), true, false);
 
         var records = new List<AuditRecord>(page.Events.Count);
-        foreach (MonitorEventItem item in page.Events)
+        foreach (EventHistoryEntry item in page.Events)
         {
-            AuditRecord? shaped = MonitorEventShaping.Shape(item, hostId);
+            AuditRecord? shaped = EngineEventShaping.Shape(item, hostId);
             if (shaped is null) continue; // deliberately-silent type
             if (severities is { Length: > 0 } && !severities.Contains(shaped.Severity)) continue;
             if (!string.IsNullOrWhiteSpace(serverId) && shaped.ServerId != serverId) continue;
@@ -229,12 +234,15 @@ public static class AuditQueries
         }
 
         // The RAW page fullness (before the in-memory severity/actor/category trim above), not the
-        // filtered count — filtering can shrink `records` well below `limit` even though the monitor may
-        // still have more rows beyond this batch (it doesn't support these filters server-side, so a
-        // filtered merge page can legitimately come back sparse; kgsm-web already walks pages until it
-        // has enough rows or the cursor exhausts — see the audit-feed investigation in the Phase-C report).
-        bool monitorFull = page.Events.Count == limit;
-        return (records, false, monitorFull);
+        // filtered count — filtering can shrink `records` well below `limit` even though the journal may
+        // still hold more beyond this batch (severity/actor/category have no journal-side equivalent, so
+        // a filtered merge page can legitimately come back sparse; kgsm-web already walks pages until it
+        // has enough rows or the cursor exhausts).
+        //
+        // A truncated scan counts as full for the same reason: it stopped early, so there is more
+        // behind it, and saying otherwise would end the page walk on a budget rather than on the data.
+        bool journalFull = page.Events.Count == limit || page.Truncated;
+        return (records, false, journalFull);
     }
 
     private static string[]? ParseSeverities(string? severity)
@@ -272,8 +280,8 @@ public static class AuditQueries
 
 /// <summary>
 /// The merged feed's keyset cursor: a composite <c>(ts, id)</c> pair, total-ordered ts-DESC then id-DESC
-/// (ordinal), spanning both the local table and kgsm-monitor's event history — a single local
-/// <c>rowid</c> can't address a monitor-sourced row (Locked decision #4). Wire-encoded as
+/// (ordinal), spanning both the local table and the engine's journal history — a single local
+/// <c>rowid</c> cannot address a journal-sourced row. Wire-encoded as
 /// <c>"{tsUnixMs}:{id}"</c>; deliberately simple/readable rather than obfuscated, since the string is
 /// opaque to the client by convention (kgsm-web never parses it — confirmed by reading its audit store),
 /// not by construction.

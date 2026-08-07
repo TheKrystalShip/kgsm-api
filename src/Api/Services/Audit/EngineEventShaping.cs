@@ -1,21 +1,27 @@
 using System.Text.Json;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Leaves;
+using TheKrystalShip.KGSM.Core.Interfaces;
+using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Services.Audit;
 
 /// <summary>
-/// Shapes one raw <see cref="MonitorEventItem"/> — kgsm-monitor's neutral, undomained persistence of a
-/// kgsm engine envelope (event-history-plan.md §"the monitor store", Locked decision #2) — into the same
-/// <see cref="AuditRecord"/> shape <see cref="KgsmAuditConsumer"/> used to write at persist time, reusing
-/// the exact same <see cref="AuditMapping"/> <c>From*Event</c> mappers so a merged <c>GET /audit</c> row
-/// sourced from the monitor is indistinguishable from one that used to be written locally. This is the
-/// read-time half of Phase C: the monitor stores raw/neutral, the API applies the domain shaping.
+/// Shapes one raw <see cref="EventHistoryEntry"/> — an engine envelope as the journal holds it, neutral
+/// and undomained — into an <see cref="AuditRecord"/>, through the same <see cref="AuditMapping"/>
+/// <c>From*Event</c> mappers the live path uses. That shared mapping is what makes a row read back from
+/// history indistinguishable from the one pushed live for the same event.
+/// <para>
+/// The split is deliberate: the journal stores what happened, and the domain vocabulary — dotted
+/// actions, severity, a human summary — is applied here, at read time. Storing the shaped form would
+/// freeze one consumer's vocabulary into the record, and every other consumer would have to live with
+/// it.
+/// </para>
 /// </summary>
-public static class MonitorEventShaping
+public static class EngineEventShaping
 {
-    // Event types KgsmAuditConsumer deliberately never audited even before Phase C — transient
+    // Event types KgsmAuditConsumer deliberately never audits — transient
     // sub-phase/refinement signals, not new domain facts (see the consumer's own remarks on
     // InstanceReadyData / the PublishPhase handlers). Kept invisible in the merged feed too, so the
     // shaped output matches write-time behavior exactly rather than surfacing previously-silent noise.
@@ -44,7 +50,7 @@ public static class MonitorEventShaping
     /// silently dropped from the audit trail (Locked decision #8's whole point — a neutral raw store
     /// means an event the domain layer hasn't wired a mapper for yet still shows up).
     /// </summary>
-    public static AuditRecord? Shape(MonitorEventItem item, string hostId)
+    public static AuditRecord? Shape(EventHistoryEntry item, string hostId)
     {
         ArgumentNullException.ThrowIfNull(item);
         if (SilentTypes.Contains(item.Type)) return null;
@@ -75,7 +81,7 @@ public static class MonitorEventShaping
             "instance_crashed" => Map<InstanceCrashedData>(item, d => AuditMapping.FromCrashEvent(d, hostId)),
             "instance_failed" => Map<InstanceFailedData>(item, d => AuditMapping.FromFailedEvent(d, hostId)),
             // network.ports.open is dual-sourced (see AuditQueries.EngineSourcedActions remarks) — the
-            // CLI-echo half is shaped here from the monitor exactly like every other engine action; the
+            // CLI-echo half is shaped here from the journal exactly like every other engine action; the
             // api-issued open_ports command's DIRECT local write is untouched and disjoint.
             "instance_ports_opened" => Map<InstancePortsOpenedData>(item, d => AuditMapping.FromPortsOpenedEvent(d, hostId)),
             "instance_ports_closed" => Map<InstancePortsClosedData>(item, d => AuditMapping.FromPortsClosedEvent(d, hostId)),
@@ -108,9 +114,9 @@ public static class MonitorEventShaping
     // A server note is one operator action spread over three config keys (body + who + when), so the
     // engine emits three instance_config_changed events for it. Only the body's event is surfaced; the
     // two attribution keys are dropped here so an edit reads as one line in a feed that shows three.
-    // Nothing is destroyed — the raw events remain in the monitor's store, which is the neutral record.
+    // Nothing is destroyed — the raw events remain in the journal, which is the record.
     // The live path (KgsmAuditConsumer) applies the same rule, so both halves of the merge agree.
-    private static bool IsNoteAttributionChange(MonitorEventItem item)
+    private static bool IsNoteAttributionChange(EventHistoryEntry item)
     {
         if (!string.Equals(item.Type, "instance_config_changed", StringComparison.Ordinal)) return false;
         if (item.Data is not { ValueKind: JsonValueKind.Object } data) return false;
@@ -130,7 +136,7 @@ public static class MonitorEventShaping
     // Data — see EventDataBase's remarks) before handing off to the real From*Event mapper. Null/failed
     // deserialize falls back to a blank T (never throws) so a malformed or absent Data payload still
     // yields an honest row via the mapper's own null-handling, rather than vanishing.
-    private static AuditWrite? Map<T>(MonitorEventItem item, Func<T, AuditWrite> build) where T : EventDataBase, new()
+    private static AuditWrite? Map<T>(EventHistoryEntry item, Func<T, AuditWrite> build) where T : EventDataBase, new()
     {
         T typed;
         if (item.Data is { ValueKind: JsonValueKind.Object } data)
@@ -157,7 +163,7 @@ public static class MonitorEventShaping
     // BlueprintEventDataBase, and the two meet only at the subject-neutral root. The instance-name
     // backfill is likewise absent by design — an envelope's `instance` field is empty for a blueprint
     // event, and copying it anywhere here would invent a server relationship that does not exist.
-    private static AuditWrite? MapBlueprint<T>(MonitorEventItem item, Func<T, AuditWrite> build)
+    private static AuditWrite? MapBlueprint<T>(EventHistoryEntry item, Func<T, AuditWrite> build)
         where T : BlueprintEventDataBase, new()
     {
         T typed;
@@ -180,7 +186,7 @@ public static class MonitorEventShaping
 
     // A genuinely unclassified event type — never drop it. No fabricated detail: actor/origin/target are
     // exactly what the envelope carried (or null), and meta records only the literal raw type name.
-    private static AuditRecord GenericShape(MonitorEventItem item, string hostId)
+    private static AuditRecord GenericShape(EventHistoryEntry item, string hostId)
     {
         AuditActor actor = AuditMapping.ParseActor(item.Actor);
         string? origin = AuditMapping.NormalizeOrigin(item.Origin);

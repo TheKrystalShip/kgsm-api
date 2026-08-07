@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — engine history comes from the journal, not from kgsm-monitor
+
+`GET /audit` reads the engine half of the merge through kgsm-lib's `IEventJournalHistory`, straight
+from kgsm's event journal, instead of scraping kgsm-monitor's `GET /events`. Audit history no longer
+depends on any leaf being installed: a host running nothing but kgsm and this API returns a complete
+trail, and stopping the monitor now costs metrics and nothing else.
+
+`IMonitorEventsClient`, `MonitorEventPage` and `MonitorEventItem` are gone, along with
+`MonitorClient.GetEventsAsync` — that client keeps its metrics scrape and its verbatim
+metrics-history relay. `MonitorEventShaping` is `EngineEventShaping`; the shaping itself, the
+`AuditMapping` mappers, the merge, the cursor and the wire contract are all unchanged, so kgsm-web
+sees no difference.
+
+`engineHistoryDegraded` keeps its name and meaning — engine history is unavailable — but the ways it
+can happen are now an unreadable journal or a host with no engine, rather than a leaf being down.
+The reader is resolved per-request from the request scope, because kgsm-lib registers only when the
+engine is provisioned; injecting it would make an engine-less host fail to construct the controller
+and answer 500 on the endpoint an operator reads to find out what happened.
+
+### Changed — engine audit ids are journal positions
+
+An engine event's id is now `evt_<segment>_<offset>` (kgsm-lib 3.0.0's `AuditId.ForPosition`) rather
+than a hash of its contents. The old id hashed a timestamp of one-second granularity, so two
+identical events in the same second collapsed to one id and the merge's boundary dedup dropped the
+second — a real occurrence, silently lost. A position is unique by construction.
+
+It also sorts like the journal, so the existing single `(ts, id)` keyset cursor still addresses both
+merge sources with no second cursor. `EngineEventIdTracker` derives the live-pushed id from the
+position kgsm-lib now reports on the raw-event hook, which is the same value the history read
+derives it from — so the SSE row and the row a later `GET /audit` returns carry one id by
+construction rather than by two computations agreeing.
+
+Ids are opaque to kgsm-web (it stores and echoes the cursor, never parses it), and pre-existing local
+rows keep their old ids — they are excluded from the merge by `EngineSourcedActions` regardless.
+
 ### Changed — the assistant relay is peer transport; browsers reach the leaf directly
 
 A browser talking to this host's assistant addresses the leaf on its own public origin, with a

@@ -1,39 +1,41 @@
+using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Services.Audit;
 
 /// <summary>
-/// Captures the deterministic <see cref="AuditId.ForEvent"/> id for the kgsm engine event currently
-/// being dispatched, so a typed <c>IEventService.RegisterHandler&lt;T&gt;</c> callback in
-/// <see cref="KgsmAuditConsumer"/> — which only ever receives the typed <c>EventDataBase</c>, never the
-/// raw <see cref="EventWrapper"/> (kgsm-lib has no combined-callback overload) — can still tag its
-/// shaped, non-persisted audit row with the SAME id kgsm-monitor independently computed for the
-/// identical envelope (event-history-plan.md Phase C). Without this, a client reconciling a
-/// live-pushed <c>audit.append</c> row against the SAME event later returned by <c>GET /audit</c>
-/// (shaped from the monitor's persisted copy) would see two different ids for one fact.
+/// Captures the id of the kgsm engine event currently being dispatched, so a typed
+/// <c>IEventService.RegisterHandler&lt;T&gt;</c> callback in <see cref="KgsmAuditConsumer"/> — which
+/// only ever receives the typed <c>EventDataBase</c>, never the envelope or its position — can tag its
+/// shaped, non-persisted audit row with the SAME id a later <c>GET /audit</c> will give that event.
+/// Without this, a client reconciling a live-pushed <c>audit.append</c> row against the same event
+/// found again in history would see two ids for one fact.
 /// </summary>
 /// <remarks>
-/// <b>Why a single mutable field is safe.</b> kgsm-lib's socket listener accepts and fully drains one
-/// connection at a time (<c>UnixSocketClient.AcceptConnectionsAsync</c> awaits
-/// <c>HandleClientConnectionAsync</c> to completion before accepting the next), and within a
-/// connection each envelope is processed end-to-end — raw handlers, then typed dispatch, both fully
-/// awaited — before the next message is read (<c>EventService.OnEventReceivedAsync</c>). So "the raw
-/// handler that just fired" and "the typed handler about to run" always refer to the exact same event,
-/// with no interleaving from a concurrent event. Register <see cref="OnRawEvent"/> via
-/// <c>IEventService.RegisterRawHandler</c> (raw handlers run before typed dispatch, for every event,
-/// known or unknown), then call <see cref="TakePendingId"/> from inside each typed handler that needs
-/// the id.
+/// The id is <see cref="AuditId.ForPosition"/> over the journal position the transport reports, which
+/// is what the history read derives it from too — so the two agree by construction rather than by two
+/// computations happening to match. An envelope arriving with no position (a transport that cannot
+/// supply one) has no addressable id and falls back below.
+/// </remarks>
+/// <remarks>
+/// <b>Why a single mutable field is safe.</b> kgsm-lib reads the journal one line at a time, and each
+/// envelope is processed end-to-end — raw handlers, then typed dispatch, both fully awaited — before
+/// the next line is read (<c>EventService.OnEventReceivedAsync</c>). So "the raw handler that just
+/// fired" and "the typed handler about to run" always refer to the same event, with no interleaving.
+/// Register <see cref="OnRawEvent"/> via <c>IEventService.RegisterRawHandler</c> (raw handlers run
+/// before typed dispatch, for every event, known or unknown), then call <see cref="TakePendingId"/>
+/// from inside each typed handler that needs the id.
 /// </remarks>
 public sealed class EngineEventIdTracker
 {
     private volatile string? _pendingId;
 
-    /// <summary>Register this as an <c>IEventService</c> raw handler. Stashes the deterministic id for
-    /// the envelope that was just received; never throws (a bad wrapper simply leaves nothing stashed,
-    /// and <see cref="TakePendingId"/> falls back).</summary>
-    public Task OnRawEvent(EventWrapper wrapper)
+    /// <summary>Register this as an <c>IEventService</c> raw handler. Stashes the id for the envelope
+    /// that was just received; never throws (an envelope with no position simply leaves nothing
+    /// stashed, and <see cref="TakePendingId"/> falls back).</summary>
+    public Task OnRawEvent(EventWrapper wrapper, EventPosition position)
     {
-        _pendingId = AuditId.ForEvent(wrapper);
+        _pendingId = position.IsKnown ? AuditId.ForPosition(position.Segment, position.Offset) : null;
         return Task.CompletedTask;
     }
 
@@ -41,9 +43,9 @@ public sealed class EngineEventIdTracker
     /// Consume the id captured for the in-flight event, clearing it so a later miss can never reuse a
     /// stale value. Falls back to a random <c>evt_</c> id (logged) on the defensive case that no raw
     /// handler ran first — an operational safety net only: this id drives the realtime push and the
-    /// alert↔audit recovery bridge, never persistence (the monitor's own independently-computed id is
-    /// the source of truth for the merged <c>/audit</c> history, so a fallback here can never desync a
-    /// persisted row).
+    /// alert↔audit recovery bridge, never persistence (the journal is the record and the id read back
+    /// from it is what the merged <c>/audit</c> history serves, so a fallback here can never desync a
+    /// stored row).
     /// </summary>
     public string TakePendingId(ILogger logger)
     {

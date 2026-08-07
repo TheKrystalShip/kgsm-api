@@ -1,12 +1,13 @@
 using System.Globalization;
 using System.Net;
-using System.Text;
 using System.Text.Json;
+using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
-
 using TheKrystalShip.KGSM.Auth;
 
 namespace TheKrystalShip.Api.Tests;
@@ -99,8 +100,18 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
 
         Assert.NotNull(frame);   // it WAS delivered live…
 
-        // …and it is absent from this API's own rows. No monitor is reachable here, so GET /audit is the
-        // local table alone (honestly marked degraded) — exactly the read that would expose a double-write.
+        // …and this API wrote no row of its own for it. kgsm owns server.*, so a local write would be a
+        // second copy of one fact — undedupable, since the two would differ only by which component
+        // recorded them. The local table is checked directly: GET /audit cannot show the difference,
+        // because a journal-sourced row and a locally-written one arrive there looking identical.
+        using (IServiceScope scope = _factory.Services.CreateScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            Assert.Empty(db.Audit.Where(a => a.ServerId == instance));
+        }
+
+        // It does reach the merged read — from the journal, which is the record. This is what makes
+        // engine history independent of any leaf being installed.
         using HttpClient reader = _factory.CreateClient();
         reader.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _factory.AccessToken(KgsmTier.Viewer));
@@ -108,7 +119,14 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await page.Content.ReadAsStringAsync());
-        Assert.Empty(doc.RootElement.GetProperty("data").EnumerateArray());
+        JsonElement row = Assert.Single(doc.RootElement.GetProperty("data").EnumerateArray());
+        Assert.Equal(AuditAction.ServerStop, row.GetProperty("action").GetString());
+
+        // The live push and the stored read agree on the id, so a client reconciling the two sees one
+        // fact — both derive it from the same journal position.
+        Assert.Equal(frame!.Value.GetProperty("data").GetProperty("id").GetString(),
+                     row.GetProperty("id").GetString());
+        Assert.False(doc.RootElement.GetProperty("engineHistoryDegraded").GetBoolean());
     }
 
     /// <summary>

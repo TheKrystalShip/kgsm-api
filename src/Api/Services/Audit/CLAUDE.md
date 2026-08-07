@@ -63,9 +63,22 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
 - **The API starts at the TAIL and keeps no cursor.** It never *persists* an engine event: it shapes each
   one into a live audit row, fans it out over SSE, and hands it to the notification bus. Replaying
   history on restart would re-announce to Discord/Slack events that were already announced. Nothing is
-  lost by skipping the events emitted during a restart, because the durable record is **kgsm-monitor's**
-  and `GET /audit` merges it from there. **Do not give this consumer a cursor** without first moving the
+  lost by skipping the events emitted during a restart, because **the journal is the record** and
+  `GET /audit` reads them back from it. **Do not give this consumer a cursor** without first moving the
   notification publish behind something that can tell a replay from a new event.
+- **Engine history is read from the journal, never from a leaf.** `AuditQueries` takes kgsm-lib's
+  `IEventJournalHistory`; the merge is local API-only rows ∪ the journal's shaped engine rows. This is
+  what makes the audit trail complete on a host with no optional leaves installed, and it is the reason
+  `engineHistoryDegraded` now means "unreadable journal or no engine" rather than "a leaf is down".
+  **Resolve the reader from the request scope, not the constructor** — kgsm-lib registers only when the
+  engine is provisioned, so a constructor parameter turns an engine-less host into a 500 on the one
+  endpoint that explains what happened.
+- **An engine event's id is its journal position** (`AuditId.ForPosition`, `evt_<segment>_<offset>`), not
+  a hash of its contents. Content hashing could not separate two identical events inside one second —
+  the engine's timestamps have one-second granularity — so the merge's dedup dropped the second one.
+  The id also sorts like the journal, which is why one `(ts, id)` cursor still spans both merge sources.
+  `EngineEventIdTracker` must keep deriving the live-push id from the same position, or a client
+  reconciling an SSE row against `GET /audit` sees one fact under two ids.
 
 ## Degrade gracefully (don't crash startup)
 

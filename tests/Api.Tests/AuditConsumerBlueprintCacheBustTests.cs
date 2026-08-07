@@ -197,7 +197,7 @@ public sealed class AuditConsumerBlueprintCacheBustTests : IClassFixture<AuditCo
             // on this no-op branch, which is what we want (no recording, no spurious dispatch).
         }
 
-        public void RegisterRawHandler(Func<EventWrapper, Task> handler) { /* the audit consumer's idTracker hook — unused by this test */ }
+        public void RegisterRawHandler(Func<EventWrapper, EventPosition, Task> handler) { /* the audit consumer's idTracker hook — unused by this test */ }
 
         public void Dispose() { }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;

@@ -105,9 +105,6 @@ public class Startup(IConfiguration configuration)
         // The metrics-history read seam: the same MonitorClient singleton, exposed for the history
         // proxy controller (the monitor owns history now; the API relays GET /metrics/history verbatim).
         services.AddSingleton<IMonitorHistoryClient>(sp => sp.GetRequiredService<MonitorClient>());
-        // The engine-event-history read seam (event-history-plan.md Phase C): the merged GET /audit
-        // reader shapes the monitor's raw GET /events rows via MonitorEventShaping. Same singleton.
-        services.AddSingleton<IMonitorEventsClient>(sp => sp.GetRequiredService<MonitorClient>());
         services.AddSingleton<AssistantClient>();
         // Host identity: the static, runtime-derived card (OS/runtime/build/start-time), read once + cached;
         // and the editable overrides store (region/label) — its own EnsureCreated + CREATE TABLE IF NOT EXISTS
@@ -135,8 +132,8 @@ public class Startup(IConfiguration configuration)
         // Tail, with no cursor: the API never PERSISTS an engine event. It shapes each one into a
         // live audit row, fans it out over SSE, and hands it to the notification bus — so replaying
         // history on restart would re-announce to Discord/Slack events that were already announced.
-        // Nothing is lost by starting at the tail, because the durable record belongs to
-        // kgsm-monitor and GET /audit reads it from there.
+        // Nothing is lost by starting at the tail, because the journal IS the record and GET /audit
+        // reads it back from there (IEventJournalHistory, registered by AddKgsmServices below).
         if (apiOptions.KgsmProvisioned)
         {
             services.AddKgsmServices(new KgsmOptions

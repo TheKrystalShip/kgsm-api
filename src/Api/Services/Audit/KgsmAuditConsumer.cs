@@ -13,10 +13,10 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// <summary>
 /// Subscribes to the kgsm event stream (via kgsm-lib's <see cref="IEventService"/> — the C#↔engine
 /// chokepoint, never a raw socket) and turns each lifecycle event into a live <c>audit</c> WS push +
-/// (for start/restart) the alert↔audit recovery bridge. As of event-history-plan.md Phase C this
+/// (for start/restart) the alert↔audit recovery bridge. This
 /// consumer no longer <b>persists</b> engine-sourced rows: kgsm-monitor is the single source of truth
 /// for engine history (it persists the raw envelope neutrally; <c>GET /audit</c> merges it in at read
-/// time, shaped via <see cref="AuditMapping"/>/<see cref="MonitorEventShaping"/>). This consumer stays
+/// time, shaped via <see cref="AuditMapping"/>/<see cref="EngineEventShaping"/>). This consumer stays
 /// the live-consumption path — realtime SSE and outbound notifications fire exactly as before
 /// (<see cref="AuditService.PublishLive"/>) — it simply no longer writes those rows to the local table.
 /// Watchdog-driven (autonomous <c>system</c>) and direct-CLI actions flow through the very same path.
@@ -48,7 +48,7 @@ public sealed class KgsmAuditConsumer(
     JobRegistry jobRegistry,
     ILogger<KgsmAuditConsumer> logger) : IHostedService
 {
-    // Captures the deterministic AuditId.ForEvent id for each engine envelope (via a RegisterRawHandler
+    // Captures the journal-position id for each engine envelope (via a RegisterRawHandler
     // hook — see EngineEventIdTracker remarks) so the typed handlers below, which only ever receive the
     // typed EventDataBase, can still tag their published-but-not-persisted rows with the SAME id
     // kgsm-monitor independently computed for the identical event.
@@ -97,7 +97,7 @@ public sealed class KgsmAuditConsumer(
 
     private void RegisterHandlers(IEventService events)
     {
-        // Captures AuditId.ForEvent for the envelope about to be typed-dispatched — see
+        // Captures the journal-position id for the envelope about to be typed-dispatched — see
         // EngineEventIdTracker + TakePendingEventId. Registered first so it is armed before any typed
         // handler below can run (RegisterRawHandler fires before typed dispatch for every event anyway,
         // but registration order here has no bearing on that — kgsm-lib always runs ALL raw handlers
@@ -381,7 +381,7 @@ public sealed class KgsmAuditConsumer(
         {
             // A server note spans three keys, so one edit emits three of these. Publish only the body's
             // event; the two attribution keys would triple the same action in the live feed. The
-            // monitor-history path (MonitorEventShaping) drops the same pair, so the merged /audit and
+            // monitor-history path (EngineEventShaping) drops the same pair, so the merged /audit and
             // the live stream can't disagree about what an edit looks like.
             if (!AuditMapping.IsNoteAttributionKey(d.Key))
                 PublishLive(AuditMapping.FromConfigChangedEvent(d, options.HostId));

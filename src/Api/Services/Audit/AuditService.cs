@@ -77,8 +77,8 @@ public sealed class AuditService(
     /// <summary>
     /// Announce an already-shaped <paramref name="record"/> on the <c>audit</c> WS topic + the
     /// notification bus, WITHOUT persisting it. The kgsm engine's own history now lives in
-    /// kgsm-monitor (event-history-plan.md Phase C) — <c>GET /audit</c> merges it in at read time via
-    /// <see cref="MonitorEventShaping"/>, so <see cref="KgsmAuditConsumer"/> no longer writes these rows
+    /// the engine's journal — <c>GET /audit</c> merges it in at read time via
+    /// <see cref="EngineEventShaping"/>, so <see cref="KgsmAuditConsumer"/> no longer writes these rows
     /// to the local table. Live consumption (realtime SSE + Discord/Slack notifications) stays exactly
     /// as it was: this is the same tail <see cref="AppendAsync"/> runs after a successful write, just
     /// without the write. <paramref name="record"/> must already carry its final id — the deterministic

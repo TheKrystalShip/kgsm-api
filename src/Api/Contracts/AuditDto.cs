@@ -47,7 +47,7 @@ public sealed record AuditRecord(
 /// A keyset page of audit records (architecture.html §6 cursor pagination): <c>{ data, nextCursor }</c>,
 /// newest first. <see cref="NextCursor"/> is an opaque cursor string — pass it back as <c>?cursor=</c>
 /// for the next page — or <see langword="null"/> when there are no older rows. As of
-/// event-history-plan.md Phase C the page is a ts-DESC merge of the API's own local rows (auth/session/
+/// The page is a ts-DESC merge of the API's own local rows (auth/session/
 /// leaf/files/console-audit — never engine-sourced) and kgsm-monitor's engine event history (shaped at
 /// read time); <see cref="NextCursor"/>'s internal encoding changed accordingly (a composite
 /// <c>(ts, id)</c> keyset spanning both sources, was a bare local <c>rowid</c>) but stays opaque to the

@@ -4,13 +4,15 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Leaves;
+using TheKrystalShip.KGSM.Core.Interfaces;
+using TheKrystalShip.KGSM.Core.Models;
 
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// <see cref="AuditQueries.PageMergedAsync"/> — the event-history-plan.md Phase C merge reader: a
+/// <see cref="AuditQueries.PageMergedAsync"/> — the merge reader: a
 /// ts-DESC page over {local API-only rows} ∪ {kgsm-monitor's shaped engine rows}. Pure unit tests against
-/// a real (file-backed) SQLite <see cref="AppDbContext"/> and a hand-rolled <see cref="IMonitorEventsClient"/>
+/// a real (file-backed) SQLite <see cref="AppDbContext"/> and a hand-rolled <see cref="IEventJournalHistory"/>
 /// fake — no live kgsm/monitor, no WebApplicationFactory (mirrors <c>OutboxDrainerTests.NewDb</c>'s
 /// direct-EF pattern).
 /// </summary>
@@ -44,8 +46,9 @@ public sealed class AuditMergeTests : IDisposable
         await _db.SaveChangesAsync();
     }
 
-    private static MonitorEventItem EngineEvent(string id, DateTimeOffset ts, string type = "instance_started", string instance = "mc") =>
-        new(id, ts, type, instance, null, null, System.Text.Json.JsonSerializer.SerializeToElement(new { InstanceName = instance }));
+    private static EventHistoryEntry EngineEvent(string id, DateTimeOffset ts, string type = "instance_started", string instance = "mc") =>
+        new(id, ts, type, instance, null, null, null, null,
+            System.Text.Json.JsonSerializer.SerializeToElement(new { InstanceName = instance }));
 
     // --- Local-only exclusion: a frozen pre-cutover "engine-looking" row never resurfaces -------------
     [Fact]
@@ -57,7 +60,7 @@ public sealed class AuditMergeTests : IDisposable
         await SeedLocalAsync(AuditAction.ServerStart, now, "evt_frozen1");
         await SeedLocalAsync(AuditAction.FileWrite, now.AddSeconds(1), "evt_apionly1");
 
-        var fake = new FakeMonitorEventsClient(_ => null); // no monitor — degrade, local-only
+        var fake = new FakeEventJournal(_ => EventHistoryPage.Unreadable); // unreadable — degrade, local-only
         AuditPage page = await AuditQueries.PageMergedAsync(
             _db, fake, HostId, cursor: null, limit: 50,
             severity: null, serverId: null, actor: null, since: null, category: null, CancellationToken.None);
@@ -72,7 +75,7 @@ public sealed class AuditMergeTests : IDisposable
     public async Task PageMergedAsync_MonitorDown_LocalOnly_DegradedMarkerTrue()
     {
         await SeedLocalAsync(AuditAction.FileWrite, DateTimeOffset.UtcNow, "evt_local1");
-        var fake = new FakeMonitorEventsClient(_ => null);
+        var fake = new FakeEventJournal(_ => EventHistoryPage.Unreadable);
 
         AuditPage page = await AuditQueries.PageMergedAsync(
             _db, fake, HostId, cursor: null, limit: 50,
@@ -83,17 +86,16 @@ public sealed class AuditMergeTests : IDisposable
         Assert.Equal("evt_local1", page.Data[0].Id);
     }
 
-    // --- A 200 response that parses but carries no "events" array degrades honestly, never a 500 ------
-    // Regression: a monitor page's Events can be null (no [JsonRequired]/`required` enforcement on the
-    // positional record) whenever a 200 body doesn't match the EventHistoryResponse shape — caught by
-    // running the full smoke suite against a stub monitor that 200s an unrelated JSON body (its own
-    // Snapshot shape) for any path it doesn't specifically implement, including /events. An unguarded
-    // `foreach (var item in page.Events)` threw a NullReferenceException that surfaced as a bare 500.
+    // --- A reader that throws degrades honestly, never a 500 -----------------------------------------
+    // The journal reader's contract is that it does not throw for a missing or unreadable journal, so
+    // this covers the case where it breaks that contract anyway. The audit endpoint is how an operator
+    // finds out what happened; failing it closed because one of its two sources misbehaved would hide
+    // the local half too, at exactly the moment someone is looking.
     [Fact]
-    public async Task PageMergedAsync_MonitorPageWithNullEvents_DegradesHonestly_NeverThrows()
+    public async Task PageMergedAsync_JournalReaderThrows_DegradesHonestly_NeverThrows()
     {
         await SeedLocalAsync(AuditAction.FileWrite, DateTimeOffset.UtcNow, "evt_local2");
-        var fake = new FakeMonitorEventsClient(_ => new MonitorEventPage(0, null, null, null!));
+        var fake = new FakeEventJournal(_ => throw new IOException("journal exploded"));
 
         AuditPage page = await AuditQueries.PageMergedAsync(
             _db, fake, HostId, cursor: null, limit: 50,
@@ -104,6 +106,23 @@ public sealed class AuditMergeTests : IDisposable
         Assert.Equal("evt_local2", page.Data[0].Id);
     }
 
+    // --- No engine on this host: absent history is degraded, not silently empty ----------------------
+    // A host with no kgsm has no journal to read, so there is no IEventJournalHistory to inject. That is
+    // a missing capability, and reporting it as "no engine events happened" would state silence as fact.
+    [Fact]
+    public async Task PageMergedAsync_NoEngineProvisioned_DegradesRatherThanClaimingNoEvents()
+    {
+        await SeedLocalAsync(AuditAction.FileWrite, DateTimeOffset.UtcNow, "evt_local3");
+
+        AuditPage page = await AuditQueries.PageMergedAsync(
+            _db, journal: null, HostId, cursor: null, limit: 50,
+            severity: null, serverId: null, actor: null, since: null, category: null, CancellationToken.None);
+
+        Assert.True(page.EngineHistoryDegraded);
+        Assert.Single(page.Data);
+        Assert.Equal("evt_local3", page.Data[0].Id);
+    }
+
     // --- Healthy monitor: local + monitor rows interleave in one ts-DESC feed -------------------------
     [Fact]
     public async Task PageMergedAsync_InterleavesBothSourcesByTsDescending()
@@ -112,11 +131,9 @@ public sealed class AuditMergeTests : IDisposable
         await SeedLocalAsync(AuditAction.FileWrite, t0.AddSeconds(1), "evt_local1");   // 2nd oldest
         await SeedLocalAsync(AuditAction.FileWrite, t0.AddSeconds(3), "evt_local2");   // newest
 
-        var fake = new FakeMonitorEventsClient(_ => new MonitorEventPage(2, null, null,
-        [
-            EngineEvent("evt_mon1", t0.AddSeconds(2)), // 2nd newest
-            EngineEvent("evt_mon2", t0.AddSeconds(0)), // oldest
-        ]));
+        var fake = new FakeEventJournal(_ => FakeEventJournal.Page(
+            EngineEvent("evt_mon1", t0.AddSeconds(2)),  // 2nd newest
+            EngineEvent("evt_mon2", t0.AddSeconds(0)))); // oldest
 
         AuditPage page = await AuditQueries.PageMergedAsync(
             _db, fake, HostId, cursor: null, limit: 10,
@@ -133,7 +150,7 @@ public sealed class AuditMergeTests : IDisposable
     public async Task PageMergedAsync_PushesServerIdFilterToMonitorAsInstance()
     {
         string? capturedInstance = "not-set";
-        var fake = new FakeMonitorEventsClient(req => { capturedInstance = req.Instance; return null; });
+        var fake = new FakeEventJournal(q => { capturedInstance = q.Instance; return EventHistoryPage.Unreadable; });
 
         await AuditQueries.PageMergedAsync(
             _db, fake, HostId, cursor: null, limit: 10,
@@ -149,12 +166,12 @@ public sealed class AuditMergeTests : IDisposable
         DateTimeOffset tie = new(2026, 7, 18, 5, 0, 0, TimeSpan.Zero);
         await SeedLocalAsync(AuditAction.FileWrite, tie, "evt_local_tie");
 
-        var fake = new FakeMonitorEventsClient(req =>
+        var fake = new FakeEventJournal(q =>
         {
-            // Once the cursor has walked past the tied row, the monitor is "exhausted" (no before_ts yet
-            // on page 1; on page 2 the cursor is set, so return empty — proves no duplicate/loss).
-            if (req.BeforeTs is not null) return new MonitorEventPage(0, null, null, []);
-            return new MonitorEventPage(1, null, null, [EngineEvent("evt_mon_tie", tie)]);
+            // Once the cursor has walked past the tied row the journal is "exhausted" (no cursor on
+            // page 1; on page 2 it is set, so return empty — proves no duplicate and no loss).
+            if (q.Before is not null) return FakeEventJournal.Page();
+            return FakeEventJournal.Page(EngineEvent("evt_mon_tie", tie));
         });
 
         // limit=1 forces the tie to split across two pages.
@@ -179,11 +196,9 @@ public sealed class AuditMergeTests : IDisposable
     [Fact]
     public async Task PageMergedAsync_CategoryFilter_APIsToMonitorShapedRecordsToo()
     {
-        var fake = new FakeMonitorEventsClient(_ => new MonitorEventPage(2, null, null,
-        [
-            EngineEvent("evt_started", DateTimeOffset.UtcNow, "instance_started"),   // -> server.start
-            EngineEvent("evt_crashed", DateTimeOffset.UtcNow.AddSeconds(1), "instance_crashed"), // -> server.crash
-        ]));
+        var fake = new FakeEventJournal(_ => FakeEventJournal.Page(
+            EngineEvent("evt_started", DateTimeOffset.UtcNow, "instance_started"),                 // -> server.start
+            EngineEvent("evt_crashed", DateTimeOffset.UtcNow.AddSeconds(1), "instance_crashed"))); // -> server.crash
 
         AuditPage page = await AuditQueries.PageMergedAsync(
             _db, fake, HostId, cursor: null, limit: 10,
@@ -196,14 +211,13 @@ public sealed class AuditMergeTests : IDisposable
 
 /// <summary>Switch-on-input fake (the FakeDiscordResolver pattern) — deterministic per call, so parallel
 /// tests never share mutable state.</summary>
-internal sealed class FakeMonitorEventsClient(Func<FakeMonitorEventsClient.Request, MonitorEventPage?> respond)
-    : IMonitorEventsClient
+internal sealed class FakeEventJournal(Func<EventHistoryQuery, EventHistoryPage> respond)
+    : IEventJournalHistory
 {
-    public readonly record struct Request(
-        string? Instance, string? Type, long? SinceMs, long? UntilMs, long? BeforeTs, string? BeforeId, int Limit);
+    /// <summary>A readable journal returning exactly these events.</summary>
+    public static EventHistoryPage Page(params EventHistoryEntry[] events) =>
+        new(events, null, events.Length > 0 ? events[^1].Ts : null, false, true);
 
-    public Task<MonitorEventPage?> GetEventsAsync(
-        string? instance, string? type, long? sinceMs, long? untilMs,
-        long? beforeTs, string? beforeId, int limit, CancellationToken ct) =>
-        Task.FromResult(respond(new Request(instance, type, sinceMs, untilMs, beforeTs, beforeId, limit)));
+    public Task<EventHistoryPage> QueryAsync(EventHistoryQuery query, CancellationToken cancellationToken = default) =>
+        Task.FromResult(respond(query));
 }
