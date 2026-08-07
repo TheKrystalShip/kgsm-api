@@ -89,9 +89,15 @@ dotnet publish "$PROJECT_CSPROJ" -c Release -r "$RID" --no-self-contained -o "$P
 # the SPA fallback serve it. VITE_API_BASE=self makes the bundle talk to whatever origin served
 # it (no baked domain). Skip with SKIP_SPA=1 for an API-only deploy (the API runs fine with no
 # SPA — Startup's serveSpa gate no-ops when wwwroot has no index.html).
+#
+# A run that does not build the SPA leaves the deployed one alone. The publish tree is rebuilt from
+# empty every deploy, so without this the prune below reads "no wwwroot here" as "delete the one
+# over there" — an API-only deploy would take the Control Panel down with it. Not bundling a page
+# and removing the page already being served are different intentions.
 SPA_DIR="${KGSM_WEB_DIR:-$WORKSPACE/kgsm-web}"
+SPA_SYNC_EXCLUDES=(--exclude='/wwwroot/')
 if [[ "${SKIP_SPA:-0}" == "1" ]]; then
-    log "SKIP_SPA=1 → not bundling the SPA (API-only deploy)"
+    log "SKIP_SPA=1 → not bundling the SPA (API-only deploy; the deployed one is left as it is)"
 elif [[ -f "$SPA_DIR/package.json" ]]; then
     command -v npm >/dev/null 2>&1 || { err "npm not found, but the SPA build needs it (set SKIP_SPA=1 to skip)"; exit 1; }
     log "building the SPA (${SPA_DIR}) → bundling into wwwroot"
@@ -103,8 +109,10 @@ elif [[ -f "$SPA_DIR/package.json" ]]; then
     rm -rf "$PUBLISH_DIR/wwwroot"
     mkdir -p "$PUBLISH_DIR/wwwroot"
     cp -a "$SPA_DIR/dist/." "$PUBLISH_DIR/wwwroot/"
+    # This run owns wwwroot, so the prune manages it: a file the new bundle dropped must go.
+    SPA_SYNC_EXCLUDES=()
 else
-    warn "SPA checkout not found at ${SPA_DIR} — deploying API-only (no SPA served)."
+    warn "SPA checkout not found at ${SPA_DIR} — deploying API-only (the deployed SPA is left as it is)."
     warn "set KGSM_WEB_DIR=/path/to/kgsm-web, or SKIP_SPA=1 to silence this."
 fi
 
@@ -126,7 +134,7 @@ sysctl_do stop "$SERVICE"
 STOPPED=1
 
 log "syncing publish tree → ${PREFIX}"
-rsync -a --delete "$PUBLISH_DIR/" "$PREFIX/"
+rsync -a --delete "${SPA_SYNC_EXCLUDES[@]}" "$PUBLISH_DIR/" "$PREFIX/"
 
 log "starting ${SERVICE}"
 sysctl_do start "$SERVICE"

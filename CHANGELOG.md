@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — an API-only deploy no longer takes the Control Panel down
+
+`deploy.sh` rebuilds the publish tree from empty on every run and then syncs it over the prefix with
+`--delete`. When the SPA is not bundled — `SKIP_SPA=1`, or no kgsm-web checkout to build from — that
+tree has no `wwwroot`, so the prune read "no page here" as "delete the page over there" and removed
+the entire deployed Control Panel.
+
+A run that does not build the SPA now leaves the deployed one alone. A run that does build it still
+owns `wwwroot` fully, so a file dropped from the new bundle is still pruned.
+
 ### Fixed — `/audit` was silently dropping engine events
 
 The engine half of the merge fetched `limit` **raw** events and only then dropped the ones shaping
