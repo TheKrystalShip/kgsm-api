@@ -96,6 +96,11 @@ public static class AuditAction
     public const string BackupDelete = "backup.delete";
     public const string BackupPrune = "backup.prune";
 
+    // The one backup action with NO kgsm event behind it — the engine serves no bytes, so this is a
+    // direct write (the auth.*/file.write pattern, no double-write risk). Recorded when the archive is
+    // authorised to leave the host, not when the click happened.
+    public const string BackupDownload = "backup.download";
+
     // network.* — the firewall door. An instance's ports are open exactly while it runs, so the pair
     // brackets that lifetime: opened on the bring-up, closed on the stop, and closed again when an
     // operator drops firewall management. Both are engine echoes — emitted by the supervisor for the

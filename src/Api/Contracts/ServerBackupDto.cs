@@ -51,3 +51,25 @@ public sealed record RestoreBackupRequest(string? Backup, string? Origin = null)
 /// subsequent <c>GET /servers/{id}/backups</c> and a <c>backup.create</c> audit row lands (from the kgsm echo).
 /// </summary>
 public sealed record CreateBackupRequest(string? Origin = null);
+
+/// <summary>
+/// The response to <c>POST /servers/{id}/backups/{backupId}/download-ticket</c>: a short-lived handle
+/// plus the URL to hand the browser.
+/// </summary>
+/// <remarks>
+/// <see cref="Url"/> is server-relative on purpose. The SPA drives a cluster and already resolves each
+/// node's origin exactly; an absolute URL built here would have to guess which of this host's addresses
+/// the browser can actually reach — the same conflation that keeps the assistant's public origin a
+/// separate setting from its loopback one.
+/// </remarks>
+/// <param name="Ticket">The opaque handle — a bearer credential until it expires.</param>
+/// <param name="Url">Where to send the browser, relative to this API's root.</param>
+/// <param name="ExpiresAt">When the ticket stops being redeemable.</param>
+/// <param name="SizeBytes">The archive's size, so a caller can warn before starting a large transfer.</param>
+/// <param name="Sha256">The manifest's digest of the archive, for verifying what lands.</param>
+public sealed record BackupDownloadTicketResponse(
+    string Ticket,
+    string Url,
+    DateTimeOffset ExpiresAt,
+    long SizeBytes,
+    string? Sha256);

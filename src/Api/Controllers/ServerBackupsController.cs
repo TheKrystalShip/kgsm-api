@@ -1,10 +1,14 @@
+using System.Globalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
+using TheKrystalShip.Api.Services.Backups;
 using TheKrystalShip.Api.Services.Commands;
+using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
@@ -27,7 +31,11 @@ namespace TheKrystalShip.Api.Controllers;
 public sealed class ServerBackupsController(
     ServerAggregator aggregator,
     JobRegistry jobs,
-    CommandRunner runner) : ControllerBase
+    CommandRunner runner,
+    BackupDownloadTickets tickets,
+    AuditService audit,
+    ApiOptions options,
+    ILogger<ServerBackupsController> logger) : ControllerBase
 {
     /// <summary>
     /// List this instance's backups (<c>{ serverId, backups: [...] }</c>), newest first as the engine lists.
@@ -151,6 +159,153 @@ public sealed class ServerBackupsController(
         runner.StartBackupRestore(job, backup, actor, origin);
         return StatusCode(StatusCodes.Status202Accepted, new CommandAccepted(job));
     }
+
+    /// <summary>
+    /// Mint a short-lived ticket for downloading one backup's archive (operator — a backup carries the
+    /// instance's whole install and saves, so it holds every secret the file browser is operator-gated
+    /// for, in bulk). Returns the handle plus the relative URL to navigate to.
+    /// <list type="bullet">
+    /// <item><c>400</c> — a bad origin.</item>
+    /// <item><c>404</c> — unknown server id, or no such backup.</item>
+    /// <item><c>409</c> — the backup is uncompressed (<c>backup_uncompressed</c>): a directory tree is
+    /// not a single artifact and has no digest, so there is nothing to hand over honestly.</item>
+    /// <item><c>503</c> — the kgsm engine is not provisioned on this host.</item>
+    /// <item><c>200</c> — the ticket.</item>
+    /// </list>
+    /// </summary>
+    [HttpPost("{backupId}/download-ticket")]
+    [Authorize(Policy = AuthPolicy.Operator)] // a whole-instance archive — bulk secrets, same tier as file read
+    public async Task<IActionResult> MintDownloadTicket(
+        string id, string backupId, [FromBody] CreateBackupRequest? body, CancellationToken ct)
+    {
+        if (!TryResolveOrigin(body?.Origin, out string origin))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "unknown origin; expected one of: ui, assistant, discord, api");
+
+        if (HttpContext.RequestServices.GetService(typeof(IInstanceBackups)) is not IInstanceBackups backups)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the kgsm engine is not provisioned on this host");
+
+        if (!await ExistsAsync(id, ct).ConfigureAwait(false))
+            return NotFound();
+
+        // Open it now, purely to answer honestly: a ticket for a backup that cannot be served would
+        // turn a 404 into a broken download two clicks later, with nothing to explain it. The stream is
+        // disposed immediately — this is a probe, and the archive is reopened at redemption because the
+        // ticket outlives this request.
+        FileOpResult<BackupArchive> probe = backups.OpenArchive(id, backupId);
+        if (probe.Outcome != FileOpOutcome.Ok)
+            return DescribeArchiveFailure(probe.Outcome);
+
+        long sizeBytes;
+        string? sha256;
+        using (BackupArchive archive = probe.Value!)
+        {
+            sizeBytes = archive.SizeBytes;
+            sha256 = archive.Sha256;
+        }
+
+        (string handle, BackupDownloadTicket ticket) = tickets.Mint(
+            id, backupId,
+            AuditPrincipal.ActorString(User),
+            origin,
+            User.FindFirst(KgsmAuthClaims.SessionId)?.Value);
+
+        return Ok(new BackupDownloadTicketResponse(
+            handle,
+            $"/api/v1/servers/{Uri.EscapeDataString(id)}/backups/{Uri.EscapeDataString(backupId)}/archive?ticket={handle}",
+            ticket.ExpiresAt,
+            sizeBytes,
+            sha256));
+    }
+
+    /// <summary>
+    /// Stream a backup's archive. Authenticated by the <c>?ticket=</c> alone — a browser navigation
+    /// cannot set an Authorization header, and that is the entire reason the ticket exists.
+    /// <list type="bullet">
+    /// <item><c>401</c> — missing, expired, or wrong-backup ticket (<c>invalid_ticket</c>).</item>
+    /// <item><c>404</c> — no such backup.</item>
+    /// <item><c>409</c> — the backup is uncompressed.</item>
+    /// <item><c>503</c> — the kgsm engine is not provisioned on this host.</item>
+    /// <item><c>200</c>/<c>206</c> — the archive, range-capable so a broken transfer resumes.</item>
+    /// </list>
+    /// </summary>
+    [HttpGet("{backupId}/archive")]
+    [AllowAnonymous] // the ticket IS the credential; no bearer reaches a navigation
+    public IActionResult DownloadArchive(string id, string backupId, [FromQuery] string? ticket)
+    {
+        if (!tickets.TryRedeem(ticket, id, backupId, out BackupDownloadTicket? redeemed, out bool firstRedemption))
+            return Error(StatusCodes.Status401Unauthorized, "invalid_ticket",
+                "this download link is invalid or has expired; request the download again");
+
+        if (HttpContext.RequestServices.GetService(typeof(IInstanceBackups)) is not IInstanceBackups backups)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the kgsm engine is not provisioned on this host");
+
+        FileOpResult<BackupArchive> result = backups.OpenArchive(id, backupId);
+        if (result.Outcome != FileOpOutcome.Ok)
+            return DescribeArchiveFailure(result.Outcome);
+
+        BackupArchive archive = result.Value!;
+
+        // Audited HERE, not at mint: minting is an intent, this is the archive actually leaving the
+        // host. Fire-and-forget so a slow audit write never stalls the transfer, and only on the first
+        // redemption so a resumed download stays one row. Warn, because bulk data leaving the host is
+        // worth seeing in a feed even when it is entirely routine.
+        if (firstRedemption)
+            _ = WriteDownloadAudit(id, backupId, archive, redeemed!);
+
+        if (archive.Sha256 is { Length: > 0 } digest)
+            Response.Headers["X-Backup-Sha256"] = digest;
+
+        // The engine names every archive data.tar.gz; the backup id is what distinguishes them, so it
+        // becomes the download name — otherwise every backup a user keeps lands as data(3).tar.gz.
+        return File(archive.Content, "application/gzip", $"{backupId}.tar.gz", enableRangeProcessing: true);
+    }
+
+    private async Task WriteDownloadAudit(
+        string id, string backupId, BackupArchive archive, BackupDownloadTicket ticket)
+    {
+        try
+        {
+            var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["source"] = backupId,
+                ["sizeBytes"] = archive.SizeBytes.ToString(CultureInfo.InvariantCulture),
+            };
+            if (archive.Sha256 is { Length: > 0 } sha) meta["sha256"] = sha;
+
+            await audit.AppendAsync(new AuditWrite(
+                Ts: DateTimeOffset.UtcNow,
+                Origin: AuditMapping.NormalizeOrigin(ticket.Origin),
+                Actor: AuditMapping.ParseActor(ticket.Actor),
+                Action: AuditAction.BackupDownload,
+                Severity: AuditSeverity.Warn,
+                Target: new AuditTarget(AuditTargetKind.Server, id, id),
+                ServerId: id,
+                HostId: options.HostId,
+                Summary: $"downloaded a backup of {id}",
+                Meta: meta)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // A failed audit write must never break the download that is already streaming.
+            logger.LogWarning(ex, "Failed to write the backup.download audit row for {Server}/{Backup}",
+                id, backupId);
+        }
+    }
+
+    // One mapping for both archive endpoints, so the ticket probe and the download cannot disagree about
+    // what a given failure means.
+    private ObjectResult DescribeArchiveFailure(FileOpOutcome outcome) => outcome switch
+    {
+        FileOpOutcome.NotAFile => Error(StatusCodes.Status409Conflict, "backup_uncompressed",
+            "this backup is an uncompressed directory tree, so it cannot be downloaded as one file"),
+        FileOpOutcome.InstanceUnavailable => Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+            "the instance's backups directory is unavailable"),
+        // OutOfJail folds into 404 with NotFound — never reveal that a path resolved outside the store.
+        _ => Error(StatusCodes.Status404NotFound, "not_found", "no such backup"),
+    };
 
     // Claim the single in-flight slot for this server (atomic), mirroring ServersController. Returns false +
     // a 409 result when a command is already running for the server.

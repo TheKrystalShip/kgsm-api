@@ -316,6 +316,10 @@ public class Startup(IConfiguration configuration)
         // scope per job, since ILifecycleService is transient/process-based) and streams job.patch +
         // the verify server.patch. Both singletons.
         services.AddSingleton<JobRegistry>();
+
+        // Backup-download tickets: a singleton because the mint and the redemption are two separate
+        // requests, and the second one carries no identity of its own — the ticket is what connects them.
+        services.AddSingleton<Services.Backups.BackupDownloadTickets>();
         services.AddSingleton<CommandRunner>();
 
         // M5 — audit log (append-only, downstream of the stateless engine). AuditService is the single

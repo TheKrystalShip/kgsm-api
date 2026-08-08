@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Backup download** — `POST /servers/{id}/backups/{backupId}/download-ticket` (operator) mints a
+  short-lived handle, and `GET /servers/{id}/backups/{backupId}/archive?ticket=…` streams the archive,
+  range-capable so a broken transfer resumes.
+
+  **Why a ticket.** Every other call authenticates with a bearer header, which a `fetch` can set and a
+  navigation cannot. Downloading through `fetch` means buffering the whole archive in browser memory
+  before the save dialog appears — survivable at 90 MB, fatal at several GB, and a backup has no upper
+  bound. The ticket is what lets the browser stream to disk with its own progress and resume. The cost
+  is stated rather than hidden: a URL reaches history and can reach a proxy log, so the ticket
+  authorises exactly one backup of one server and expires in minutes. Redeeming it against any other
+  backup is a 401.
+
+  It is deliberately **not single-use**: a resumed or ranged download is a second request for the same
+  bytes, and burning the ticket on first contact would destroy the resumability the design exists for.
+  The audit row is written once, on first redemption, so one download is one row rather than one per
+  network hiccup.
+
+  **Operator, not viewer** — a backup is the instance's whole install and saves in one file, holding
+  every secret the file browser is already operator-gated for. Listing backups stays viewer.
+
+  **Compressed only.** An uncompressed backup is a `data/` tree with no single digest; it is refused
+  with `409 backup_uncompressed` rather than tarred on the fly into something no manifest describes.
+  Refused at *mint*, so an unservable backup says so on click instead of failing as a broken download.
+
+- **`backup.download`** — the audit action, at **warn**, written directly (the engine serves no bytes,
+  so there is no event to echo). It records the moment the archive is authorised to leave the host, and
+  carries the size and the manifest's digest. The response also returns that digest as
+  `X-Backup-Sha256`, so whoever receives the bytes can verify them independently.
+
 - **`backup.delete` and `backup.prune`** — the audit actions behind kgsm's
   `instance_backup_deleted` / `instance_backups_pruned` (kgsm-lib 4.2.0). Two actions rather than
   one, because they answer different questions: a delete is an operator naming one snapshot, a prune
