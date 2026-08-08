@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`network.upnp.reassert`** — the audit action behind kgsm's `instance_upnp_reasserted`
+  (kgsm-lib 4.1.0): the watchdog's sweep found the router had dropped a running instance's port
+  forwards and put them back. Its own action rather than a second `network.upnp.open`, because the two
+  answer different questions — an open sits next to a start, whereas this says the mapping went missing
+  with nothing on this host asking for it. It is the only signal an operator gets that their router
+  discards mappings it accepted, and how often, which is precisely what a reader filtering this action
+  wants to count. Recorded at **`warn`**, the only `network.*` action that is not `info`: the open/close
+  pair are the healthy lifetime, while this is an unhealthy condition being papered over.
+  `meta.ports` carries only the subset that was actually missing, so a partial loss never reads as the
+  whole set having gone. Engine-echo-only like the rest of `network.*` — nothing here re-asserts a
+  forward, so it joins `AuditQueries.EngineSourcedActions` and the merge takes it from the journal alone.
+
 ### Removed
 
 - **The `open_ports` command verb**, its runner, and the `network.ports.open` direct audit write. Ports

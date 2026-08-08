@@ -69,6 +69,7 @@ public static class AuditQueries
         AuditAction.NetworkPortsClose,
         AuditAction.NetworkUpnpOpen,
         AuditAction.NetworkUpnpClose,
+        AuditAction.NetworkUpnpReassert,
         AuditAction.PlayerJoin,
         AuditAction.PlayerLeave,
         // The moderation trio is cleanly echo-only, like blueprint.*: the endpoints thread actor+origin

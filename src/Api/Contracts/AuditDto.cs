@@ -106,6 +106,14 @@ public static class AuditAction
     public const string NetworkUpnpOpen = "network.upnp.open";
     public const string NetworkUpnpClose = "network.upnp.close";
 
+    // network.upnp.reassert — a forward the ROUTER dropped on its own, put back by the watchdog's sweep
+    // while the instance kept running. Its own action rather than a second network.upnp.open because the
+    // two answer different questions: an open sits next to a start, this one says the mapping went
+    // missing with nothing on this host asking for it. It is the only signal an operator gets that their
+    // router discards mappings it accepted — a router can report a lease as infinite and drop it anyway —
+    // and how often, which is exactly what a reader filtering this action wants to count.
+    public const string NetworkUpnpReassert = "network.upnp.reassert";
+
     // player.* — presence echoes. kgsm raises instance_player_joined/_left (kgsm-lib 1.19.0); for our
     // container images the kgsm-watchdog forwards them from the in-image detection shim, stamped
     // system/system. Distinct join/leave actions mirror server.start/server.stop. Engine-owned (no API

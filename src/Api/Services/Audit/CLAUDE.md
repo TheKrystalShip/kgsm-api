@@ -21,27 +21,27 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   an update/delete path. `EnsureCreated`, **not an EF migration** (dev authority — wipe the DB on a schema
   change; see the api `CLAUDE.md` gotcha).
 - **Closed `action` vocabulary** (`Contracts/AuditAction`). Clients/the model can't invent one. Add an
-  action only when its producer has landed, never speculatively. **M6·0 added** `server.crash` (watchdog
-  `instance_crashed`→warn / `instance_failed`→danger, both `system`-stamped) and `network.ports.open`/
-  `network.ports.close` (the CLI-path `instance_ports_opened`/`_closed` echoes). `network.ports.close` is a
-  deliberate **server-side additive** action beyond the doc's `ports.open`-only `network` set — it is now
+  action only when its producer has landed, never speculatively. `server.crash` covers the watchdog's
+  `instance_crashed`→warn / `instance_failed`→danger (both `system`-stamped); `network.ports.open`/
+  `network.ports.close` are the `instance_ports_opened`/`_closed` echoes. `network.ports.close` is a
+  deliberate **server-side additive** action beyond the doc's `ports.open`-only `network` set — it is
   honestly sourceable and keeps the trail symmetric (a standalone `files firewall disable` would otherwise
-  leave an opened-never-closed gap); the frontend accepts unknown actions forward-compat. `config.*`/`player.*`/
-  `host.*`/… stay deferred. The api-issued `open_ports` command writes `network.ports.open` **directly** (M6·b)
-  — kgsm runs nothing, so there is no echo to read (the `auth.*` case); there is no api close command (§3·g is
-  open-only), so `network.ports.close` is cleanly CLI-echo-only. The per-event mapping policy lives in the
-  **pure** `AuditMapping.From{Crash,Failed,PortsOpened,PortsClosed}Event` mappers, unit-tested without a socket.
-- **M6·b: `open_ports` writes `network.ports.open` DIRECTLY** (`AuditMapping.FromPortsOpenedCommand`, called by
-  `CommandRunner`) — the `auth.*` case: it goes through `IFirewallService`, which emits no event, so there is no
-  echo and no double-write (the CLI echo path above is disjoint). Written **only on a real change (`Applied` or
-  `AppliedInactive`)**, not a `NoOp` (recording "opened" when nothing changed fabricates a change; symmetric with
-  the CLI echo). `AppliedInactive` (rule staged, ufw inactive — Firewall.Contracts 1.1.0) audits with
-  `enforced:false` and a "staged" summary, distinct from an enforced "opened". Its `meta` carries **`jobId`**
-  (the job↔audit correlation — see the next bullet) plus the opened `ports`.
-- **`origin` nullable** is a recorded §6 divergence. **`meta.jobId` was the OTHER divergence ("not populatable")
-  — but that was the event-ECHO path only.** The M6·b `open_ports` DIRECT write CAN populate it (the api owns
-  both the job and the append), so its row carries `meta.jobId` for the alert↔audit `resolution.actionId` bridge
-  (M6·a). The echo path still can't (no id round-trips the stateless engine) — keep that limit for `server.*`.
+  leave an opened-never-closed gap); the frontend accepts unknown actions forward-compat.
+  `config.*`/`player.*`/`host.*`/… stay deferred. **The whole `network.*` set is engine-echo-only** — an
+  instance's ports and router forwards are opened by the supervisor when it starts and released when it
+  stops, so the api issues no network command and has nothing to direct-write. The per-event mapping
+  policy lives in the **pure** `AuditMapping.From{Crash,Failed,PortsOpened,PortsClosed,UpnpOpened,
+  UpnpClosed,UpnpReasserted}Event` mappers, unit-tested without a socket.
+- **`network.upnp.reassert` is the one `network.*` action at `warn`.** It records that the watchdog's
+  sweep found the ROUTER had dropped a running instance's forwards and put them back — a fact about the
+  router, not about anything this host did, and the only signal an operator has that their IGD discards
+  mappings it accepted (it can report a lease as infinite and drop it anyway). The open/close pair are
+  `info` because they are the healthy lifetime; this one is an unhealthy condition being papered over, and
+  a run of them is worth noticing. `meta.ports` carries **only the subset that was missing**, so a partial
+  loss never reads as the whole set having gone.
+- **`origin` nullable** is a recorded §6 divergence, and so is **`meta.jobId`**: no id round-trips the
+  stateless engine, and every action that reaches the audit log is an engine echo, so nothing here can
+  populate it. Keep that limit in mind for the alert↔audit `resolution.actionId` bridge.
 
 ## Invariants when you touch this
 

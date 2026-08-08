@@ -172,6 +172,21 @@ public static class AuditMapping
         UpnpWrite(d, hostId, AuditAction.NetworkUpnpClose, "removed", d.Ports);
 
     /// <summary>
+    /// Map a kgsm <c>instance_upnp_reasserted</c> event (the watchdog's sweep found the router had
+    /// dropped a running instance's forwards and put them back, confirmed exit-0) to a
+    /// <c>network.upnp.reassert</c> row. Its own action rather than a second
+    /// <see cref="FromUpnpOpenedEvent"/>: an open sits next to a start, whereas this records that the
+    /// mapping disappeared with nothing on this host asking for it — a fact about the ROUTER, and the
+    /// only one a reader can count to learn how unreliable theirs is. <c>meta.ports</c> carries the
+    /// subset that was actually missing, so a partial loss never reads as the whole set having gone.
+    /// Warn, not Info: unlike the open/close pair this is an unhealthy condition being papered over,
+    /// and a run of them is worth noticing.
+    /// </summary>
+    public static AuditWrite FromUpnpReassertedEvent(InstanceUpnpReassertedData d, string hostId) =>
+        UpnpWrite(d, hostId, AuditAction.NetworkUpnpReassert, "restored dropped", d.Ports,
+            AuditSeverity.Warn);
+
+    /// <summary>
     /// Map an API-internal "update available" detection (from <see cref="Aggregation.UpdateCheckCache"/>) to
     /// a <c>server.update_available</c> row at <see cref="AuditSeverity.Info"/>. This is a direct write
     /// (the <c>auth.*</c> case) — the update check is API-owned, not a kgsm engine event, so there is no
@@ -496,7 +511,8 @@ public static class AuditMapping
     // ports meta as PortsWrite, but a router-forward summary ("forwarded/removed UPnP ports") so the
     // audit feed reads distinctly from the host-firewall rows.
     private static AuditWrite UpnpWrite(
-        EventDataBase d, string hostId, string action, string verb, IReadOnlyList<PortMapping> ports)
+        EventDataBase d, string hostId, string action, string verb, IReadOnlyList<PortMapping> ports,
+        string severity = AuditSeverity.Info)
     {
         string instance = Instance(d);
         string formatted = FormatPorts(ports);
@@ -505,7 +521,7 @@ public static class AuditMapping
             Origin: NormalizeOrigin(d.Origin),
             Actor: ParseActor(d.Actor),
             Action: action,
-            Severity: AuditSeverity.Info,
+            Severity: severity,
             Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
             ServerId: instance,
             HostId: hostId,

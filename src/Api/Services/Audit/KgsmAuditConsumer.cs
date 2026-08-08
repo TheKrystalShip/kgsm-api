@@ -325,6 +325,16 @@ public sealed class KgsmAuditConsumer(
             return Task.CompletedTask;
         });
 
+        // network.upnp.reassert — the watchdog's sweep found the router had dropped a running instance's
+        // forwards and put them back. A fact about the ROUTER rather than about anything on this host,
+        // which is why it is not folded into the open above: an operator counting these learns how often
+        // their IGD discards mappings it accepted. Engine-owned → no double-write.
+        events.RegisterHandler<InstanceUpnpReassertedData>(d =>
+        {
+            PublishLive(AuditMapping.FromUpnpReassertedEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
+
         // player.join / player.leave — presence echoes (kgsm-lib 1.19.0, extended 1.29.0 with
         // addr/sessionKey/reason). For our container images the watchdog forwards these from the in-image
         // detection shim; native log-scraping detection emits the identical shape. The player id/name/addr

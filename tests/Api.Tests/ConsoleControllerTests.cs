@@ -146,8 +146,6 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
         public Task<IReadOnlyList<WatchdogInstanceState>> ListAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WatchdogInstanceState>>(Array.Empty<WatchdogInstanceState>());
         public Task<IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>?> GetAllPlayersAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>?>(null);
         public Task<WatchdogUpnpList?> GetUpnpAsync(string instanceName, CancellationToken cancellationToken = default) => Task.FromResult<WatchdogUpnpList?>(null);
-        public Task<WatchdogUpnpActionResult> OpenUpnpAsync(string instanceName, IReadOnlyList<PortMapping>? ports = null, string origin = "control", CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<WatchdogUpnpActionResult> CloseUpnpAsync(string instanceName, string origin = "control", CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public void Dispose() { }
     }
 }

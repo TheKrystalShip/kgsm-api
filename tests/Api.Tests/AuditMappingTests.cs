@@ -321,6 +321,43 @@ public sealed class AuditMappingTests
         Assert.Equal("2456/udp", w.Meta!["ports"]);
     }
 
+    [Fact]
+    public void FromUpnpReassertedEvent_IsItsOwnAction_AtWarn_CarryingOnlyTheRestoredSubset()
+    {
+        // The instance also forwards 2456-2458/udp; the router dropped only the tcp one while it kept
+        // running, so that is all the event carries and all the row reports. A re-assert claiming the
+        // whole configured set would overstate what actually changed.
+        var data = new InstanceUpnpReassertedData
+        {
+            InstanceName = "valheim",
+            Actor = "system",
+            Origin = "system",
+            Ports = [new PortMapping { Start = 27015, End = 27015, Protocol = "tcp" }],
+        };
+
+        AuditWrite w = AuditMapping.FromUpnpReassertedEvent(data, hostId: "primary");
+
+        // Distinct from BOTH the open (a bring-up) and the firewall action — this is a fact about the
+        // router, and a reader counting these learns how unreliable theirs is.
+        Assert.Equal(AuditAction.NetworkUpnpReassert, w.Action);
+        Assert.NotEqual(AuditAction.NetworkUpnpOpen, w.Action);
+
+        // Warn, not Info: unlike the open/close pair this is an unhealthy condition being papered over.
+        Assert.Equal(AuditSeverity.Warn, w.Severity);
+        Assert.Equal("system", w.Origin);
+        Assert.Equal(ActorKind.System, w.Actor.Kind);
+        Assert.Equal("valheim", w.ServerId);
+        Assert.Equal("27015/tcp", w.Meta!["ports"]);
+    }
+
+    [Fact]
+    public void ReassertIsEngineSourced_SoTheMergeTakesItFromTheJournalOnly()
+    {
+        // Nothing in the api re-asserts a forward — the watchdog's sweep is the only producer — so the
+        // action belongs in the engine-sourced set, and a local row must never be a second source.
+        Assert.Contains(AuditAction.NetworkUpnpReassert, AuditQueries.EngineSourcedActions);
+    }
+
     // --- player.join / player.left: presence echoes (watchdog-forwarded, system/system) --------------
     [Fact]
     public void FromPlayerJoinedEvent_IsInfoPlayerJoin_IdentityInMeta_SystemProvenance()
