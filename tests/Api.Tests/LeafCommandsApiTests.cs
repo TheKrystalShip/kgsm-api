@@ -17,23 +17,27 @@ public sealed class LeafCommandsApiTests
 {
     private const string Host = AuthTestFactory.HostId;
 
-    // The shape kgsm-bot's build emits, trimmed to two commands — one that reads, one that acts.
+    // The shape kgsm-bot's build emits, trimmed to two commands — one that reads, one that acts, each
+    // under the gate that admits it.
     private const string BotManifest = """
         {
-          "schemaVersion": 1,
+          "schemaVersion": 2,
           "leaf": "bot",
           "surface": "discord",
-          "gate": "none",
-          "commands": [
-            { "name": "list", "description": "List all game server instances", "mutates": false, "options": [] },
-            {
-              "name": "start", "description": "Start up a game server", "mutates": true,
-              "options": [
-                { "name": "instance", "description": "Game server instance",
-                  "type": "string", "required": true, "autocomplete": true }
-              ]
-            }
-          ]
+          "gates": {
+            "none": [
+              { "name": "list", "description": "List all game server instances", "mutates": false, "options": [] }
+            ],
+            "operator": [
+              {
+                "name": "start", "description": "Start up a game server", "mutates": true,
+                "options": [
+                  { "name": "instance", "description": "Game server instance",
+                    "type": "string", "required": true, "autocomplete": true }
+                ]
+              }
+            ]
+          }
         }
         """;
 
@@ -79,7 +83,7 @@ public sealed class LeafCommandsApiTests
         [.. body.GetProperty("gates").EnumerateObject().SelectMany(g => g.Value.EnumerateArray())];
 
     [Fact]
-    public async Task AVersion2ManifestReachesTheWireAsTheLeafWroteIt()
+    public async Task TheManifestReachesTheWireAsTheLeafWroteIt()
     {
         using var factory = new LeafTestFactory();
         factory.InstallCommands("assistant", AssistantManifest);
@@ -105,23 +109,19 @@ public sealed class LeafCommandsApiTests
     }
 
     /// <summary>
-    /// A version 1 file is restated into the one shape this API serves, so a client never branches on where
-    /// a manifest came from. Its single gate is by definition what the leaf requires for a command that
-    /// ACTS, so its acting commands go under that gate and its reading commands under `none` — which is
-    /// what "the leaf states no check for these" already meant.
+    /// The other surface, whose options are free text rather than a fixed set: a Discord option's
+    /// suggestions come from the bot as someone types, so the file offers no <c>values</c> and a client
+    /// has to read that as free text rather than as an empty set of choices.
     /// </summary>
     [Fact]
-    public async Task AVersion1ManifestIsRestatedIntoTheSameShape()
+    public async Task AFreeTextOptionOffersNoValues()
     {
         using var factory = new LeafTestFactory();
-        factory.InstallCommands("bot", BotManifest.Replace("\"gate\": \"none\"", "\"gate\": \"operator\""));
+        factory.InstallCommands("bot", BotManifest);
 
         JsonElement body = await Get(Client(factory, KgsmTier.Operator), "bot");
-
-        Assert.Equal(2, body.GetProperty("schemaVersion").GetInt32());
-        Assert.Equal("discord", body.GetProperty("surface").GetString());
-
         JsonElement gates = body.GetProperty("gates");
+
         Assert.Equal(["start"], gates.GetProperty("operator").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
         Assert.Equal(["list"], gates.GetProperty("none").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
 
@@ -134,8 +134,6 @@ public sealed class LeafCommandsApiTests
         Assert.Equal("string", option.GetProperty("type").GetString());
         Assert.True(option.GetProperty("required").GetBoolean());
         Assert.True(option.GetProperty("autocomplete").GetBoolean());
-        // A Discord option's suggestions come from the bot as someone types, not from the file — so it
-        // offers no fixed set, and a client reads that as free text.
         Assert.Equal(JsonValueKind.Null, option.GetProperty("values").ValueKind);
     }
 
@@ -143,19 +141,14 @@ public sealed class LeafCommandsApiTests
     /// A command declaring no options at all is "takes no options", not an absent list — the panel prints
     /// what to type, and a null there is a hole in that answer.
     /// </summary>
-    [Theory]
-    [InlineData("""
-        { "schemaVersion": 1, "leaf": "bot", "surface": "discord", "gate": "none",
-          "commands": [ { "name": "ping", "description": "Check if the bot is responsive", "mutates": false } ] }
-        """)]
-    [InlineData("""
-        { "schemaVersion": 2, "leaf": "bot", "surface": "discord",
-          "gates": { "none": [ { "name": "ping", "description": "Check if the bot is responsive", "mutates": false } ] } }
-        """)]
-    public async Task ACommandWithNoOptionsArrivesWithAnEmptyList(string json)
+    [Fact]
+    public async Task ACommandWithNoOptionsArrivesWithAnEmptyList()
     {
         using var factory = new LeafTestFactory();
-        factory.InstallCommands("bot", json);
+        factory.InstallCommands("bot", """
+            { "schemaVersion": 2, "leaf": "bot", "surface": "discord",
+              "gates": { "none": [ { "name": "ping", "description": "Check if the bot is responsive", "mutates": false } ] } }
+            """);
 
         JsonElement body = await Get(Client(factory, KgsmTier.Operator), "bot");
 
@@ -198,17 +191,16 @@ public sealed class LeafCommandsApiTests
     /// is not the leaf it describes, one with a nameless command, and one that is not JSON at all.
     /// </summary>
     [Theory]
-    // A version this build does not know: the rest of the file may mean something else entirely.
-    [InlineData("""{ "schemaVersion": 99, "leaf": "bot", "surface": "discord", "gate": "none", "commands": [] }""")]
+    // A version this build does not know: the rest of the file may mean something else entirely. The
+    // retired flat-list shape is exactly that — a file still written that way is skipped whole rather
+    // than half-read as though its `gate` meant what this build's `gates` means.
+    [InlineData("""{ "schemaVersion": 99, "leaf": "bot", "surface": "discord", "gates": {} }""")]
+    [InlineData("""{ "schemaVersion": 1, "leaf": "bot", "surface": "discord", "gate": "none", "commands": [] }""")]
     // Installed under a name that is not the leaf it describes.
-    [InlineData("""{ "schemaVersion": 1, "leaf": "assistant", "surface": "discord", "gate": "none", "commands": [] }""")]
     [InlineData("""{ "schemaVersion": 2, "leaf": "assistant", "surface": "chat", "gates": {} }""")]
     // A nameless command — the panel would print it as something to type.
-    [InlineData("""{ "schemaVersion": 1, "leaf": "bot", "surface": "discord", "gate": "none", "commands": [ { "name": "" } ] }""")]
     [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "surface": "discord", "gates": { "none": [ { "name": "" } ] } }""")]
-    // A version 1 file stating no gate says nothing about what it checks before acting.
-    [InlineData("""{ "schemaVersion": 1, "leaf": "bot", "surface": "discord", "commands": [] }""")]
-    // Neither shape's catalog, and no surface to print.
+    // No catalog, and no surface to print.
     [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "surface": "discord" }""")]
     [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "gates": { "none": [] } }""")]
     [InlineData("this is not json")]

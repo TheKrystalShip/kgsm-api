@@ -99,10 +99,13 @@ shipped a descriptor yet, not the authority. Format: `../leaf-config-descriptor.
 into `commands/` **below** the descriptor directory — one level down because the descriptor scan globs
 `*.json` at the top and would read it as a malformed descriptor. `LeafCommandStore` scans that
 subdirectory and `GET /hosts/{id}/services/{leaf}/commands` serves it **verbatim**: the API holds no
-idea what any command does, and passes the leaf's own `gate` through without restating it, because it
-cannot verify a check it does not implement. A leaf that ships no manifest is a **404**, not an empty
-list — most take no commands, and that is a different statement. Read-only reference material, so it
-sits at operator with the rest of `ServicesController`. Format: `../leaf-command-manifest.md`.
+idea what any command does, and passes each command's gate through without restating it, because it
+cannot verify a check it does not implement. The catalog is keyed by that gate, so a leaf whose
+commands need different tiers says so and the panel prints it. A leaf that ships no manifest is a
+**404**, not an empty list — most take no commands, and that is a different statement. Read-only
+reference material, so it sits at operator with the rest of `ServicesController`. **One schema
+version is understood** (`LeafCommandManifest.SupportedSchemaVersion`); anything else is skipped
+whole and logged once, never half-read. Format: `../leaf-command-manifest.md`.
 
 Two consequences worth knowing before touching this code:
 
