@@ -89,6 +89,13 @@ public static class AuditAction
     public const string BackupCreate = "backup.create";
     public const string BackupRestore = "backup.restore";
 
+    // The two removal actions. Separate because they answer different questions: a delete is an
+    // operator naming one snapshot, a prune is retention policy sweeping whatever fell outside the
+    // keep window. Collapsing them would make "who threw away that backup" a question about counts,
+    // and force anyone auditing retention to filter out hand-deletes.
+    public const string BackupDelete = "backup.delete";
+    public const string BackupPrune = "backup.prune";
+
     // network.* — the firewall door. An instance's ports are open exactly while it runs, so the pair
     // brackets that lifetime: opened on the bring-up, closed on the stop, and closed again when an
     // operator drops firewall management. Both are engine echoes — emitted by the supervisor for the

@@ -393,6 +393,7 @@ public sealed class ServerModerationTests
         public List<InstanceBackup> GetBackupsDetailed(string instanceName) => throw new NotImplementedException();
         public KgsmResult CreateBackup(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult RestoreBackup(string instanceName, string backupName, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public KgsmResult DeleteBackup(string instanceName, string backupName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult PruneBackups(string instanceName, int keepN, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult Update(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public Task<LogSubscription> SubscribeToLogsAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();

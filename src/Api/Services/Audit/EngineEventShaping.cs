@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Leaves;
@@ -80,6 +81,15 @@ public static class EngineEventShaping
             "instance_backup_restored" => Map<InstanceBackupRestoredData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.BackupRestore, AuditSeverity.Success, "restored backup for", hostId,
                     Meta(("source", d.Source), ("version", d.Version)))),
+            // Warn, not Success: destroying a backup is the one backup operation with no undo, and it
+            // succeeding is exactly what makes it worth surfacing.
+            "instance_backup_deleted" => Map<InstanceBackupDeletedData>(item,
+                d => AuditMapping.FromServerEvent(d, AuditAction.BackupDelete, AuditSeverity.Warn, "deleted a backup for", hostId,
+                    Meta(("source", d.Source)))),
+            "instance_backups_pruned" => Map<InstanceBackupsPrunedData>(item,
+                d => AuditMapping.FromServerEvent(d, AuditAction.BackupPrune, AuditSeverity.Info, "pruned backups for", hostId,
+                    Meta(("deleted", d.Deleted.ToString(CultureInfo.InvariantCulture)),
+                         ("kept", d.Kept.ToString(CultureInfo.InvariantCulture))))),
             "instance_crashed" => Map<InstanceCrashedData>(item, d => AuditMapping.FromCrashEvent(d, hostId)),
             "instance_failed" => Map<InstanceFailedData>(item, d => AuditMapping.FromFailedEvent(d, hostId)),
             "instance_ports_opened" => Map<InstancePortsOpenedData>(item, d => AuditMapping.FromPortsOpenedEvent(d, hostId)),

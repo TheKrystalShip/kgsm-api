@@ -89,6 +89,44 @@ public sealed class EngineEventShapingTests
         Assert.Equal(AuditAction.NetworkPortsOpen, shaped!.Action);
     }
 
+    // --- the two backup-removal events shape to their own actions, never to one shared "removed" ------
+    [Fact]
+    public void Shape_BackupDeleted_ShapesToBackupDelete_CarryingTheBackupId()
+    {
+        var item = new EventHistoryEntry(
+            "evt_del1", Ts, "instance_backup_deleted", "mc", null, "discord:haru", "ui", null,
+            Data(new { InstanceName = "mc", Source = "mc-20260731T142233Z-a3f9c1" }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.NotNull(shaped);
+        Assert.Equal(AuditAction.BackupDelete, shaped!.Action);
+        // Warn, not Success: destroying a backup is the one backup operation with no undo.
+        Assert.Equal(AuditSeverity.Warn, shaped.Severity);
+        Assert.Equal("mc-20260731T142233Z-a3f9c1", shaped.Meta!["source"]);
+        Assert.Equal("mc", shaped.ServerId);
+    }
+
+    [Fact]
+    public void Shape_BackupsPruned_ShapesToBackupPrune_CarryingTheCounts()
+    {
+        var item = new EventHistoryEntry(
+            "evt_prune1", Ts, "instance_backups_pruned", "mc", null, "system:scheduler", "system", null,
+            Data(new { InstanceName = "mc", Deleted = 3, Kept = 5 }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.NotNull(shaped);
+        Assert.Equal(AuditAction.BackupPrune, shaped!.Action);
+        // Info, not Warn: retention policy running to plan is the healthy case. The delete above is
+        // the one an operator should notice.
+        Assert.Equal(AuditSeverity.Info, shaped.Severity);
+        Assert.Equal("3", shaped.Meta!["deleted"]);
+        Assert.Equal("5", shaped.Meta["kept"]);
+        // A prune is a sweep — it names no single backup, so nothing may claim one.
+        Assert.False(shaped.Meta.ContainsKey("source"));
+    }
+
     // --- deliberately-silent types (transient sub-phase signals) never surface, matching write-time ---
     [Theory]
     [InlineData("instance_ready")]

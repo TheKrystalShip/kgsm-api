@@ -65,6 +65,8 @@ public static class AuditQueries
         AuditAction.ServerCrash,
         AuditAction.BackupCreate,
         AuditAction.BackupRestore,
+        AuditAction.BackupDelete,
+        AuditAction.BackupPrune,
         AuditAction.NetworkPortsOpen,
         AuditAction.NetworkPortsClose,
         AuditAction.NetworkUpnpOpen,

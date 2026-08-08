@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`backup.delete` and `backup.prune`** — the audit actions behind kgsm's
+  `instance_backup_deleted` / `instance_backups_pruned` (kgsm-lib 4.2.0). Two actions rather than
+  one, because they answer different questions: a delete is an operator naming one snapshot, a prune
+  is retention policy sweeping whatever fell outside the keep window. Collapsing them would turn
+  "who threw away that backup" into a question about counts, and force anyone auditing retention to
+  filter out hand-deletes. `backup.delete` carries the id in `meta.source` and is the one backup
+  action at **warn** — it is the only backup operation with no undo; `backup.prune` carries
+  `meta.deleted`/`meta.kept` at info, since policy running to plan is the healthy case. Both are
+  engine echoes (no direct write) and both re-scan that instance's backups, so `lastBackup` and
+  `backupCount` settle within a tick rather than waiting out the scan cadence — a prune can move
+  `lastBackup` by deleting the newest thing outside the keep window.
+
 - **`network.upnp.reassert`** — the audit action behind kgsm's `instance_upnp_reasserted`
   (kgsm-lib 4.1.0): the watchdog's sweep found the router had dropped a running instance's port
   forwards and put them back. Its own action rather than a second `network.upnp.open`, because the two

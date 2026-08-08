@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Realtime;
@@ -277,6 +278,25 @@ public sealed class KgsmAuditConsumer(
             RefreshBackupsOf(d.InstanceName);
             return WriteServer(d, AuditAction.BackupRestore, AuditSeverity.Success, "restored backup for",
                 Meta(("source", d.Source), ("version", d.Version)));
+        });
+
+        // The removal pair re-scans for the same reason the create/restore pair does — backupCount and
+        // lastBackup both change when a backup goes away, and a prune can move lastBackup by deleting
+        // the newest thing outside the keep window. Deleting warns (no undo); pruning is policy running
+        // to plan, so it informs. The counts carry as meta so a reader sees what the sweep did without
+        // diffing two listings.
+        events.RegisterHandler<InstanceBackupDeletedData>(d =>
+        {
+            RefreshBackupsOf(d.InstanceName);
+            return WriteServer(d, AuditAction.BackupDelete, AuditSeverity.Warn, "deleted a backup for",
+                Meta(("source", d.Source)));
+        });
+        events.RegisterHandler<InstanceBackupsPrunedData>(d =>
+        {
+            RefreshBackupsOf(d.InstanceName);
+            return WriteServer(d, AuditAction.BackupPrune, AuditSeverity.Info, "pruned backups for",
+                Meta(("deleted", d.Deleted.ToString(CultureInfo.InvariantCulture)),
+                     ("kept", d.Kept.ToString(CultureInfo.InvariantCulture))));
         });
 
         // server.crash — the resident supervisor's autonomous signals (kgsm-watchdog, kgsm-lib 1.9.0),
