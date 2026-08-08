@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the leaf command manifest reads schemaVersion 1 and 2, and serves one shape
+
+A leaf's commands do not necessarily share one gate: the assistant's `/autorun` needs admin while the
+rest need viewer, and schemaVersion 1 carries a single leaf-wide `gate`. Version 2 keys the catalog
+by the gate that admits each command, so a command cannot be added without landing in a bucket.
+
+`LeafCommandStore` reads **both versions** and serves the version 2 shape either way, so a client
+never branches on where a manifest came from and there is no deploy-order dependency between this API
+and the leaves. A version 1 file's single gate is by definition what the leaf requires for a command
+that *acts*, so its acting commands are restated under that gate and its reading commands under
+`none` — which is what "the leaf states no check for these" already meant.
+
+An option gains `values`, the fixed set an autocomplete option offers; absent means free text, which
+is what every Discord option is.
+
 ### Added
 - **A restart kgsm runs for another entrypoint is tracked like the other two long verbs.** kgsm brackets
   a restart with `instance_restart_started`/`instance_restart_finished` (3.7.4-rc1, typed in kgsm-lib

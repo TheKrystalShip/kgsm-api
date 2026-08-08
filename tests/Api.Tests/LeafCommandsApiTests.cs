@@ -51,24 +51,81 @@ public sealed class LeafCommandsApiTests
         return JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
     }
 
+    // The shape kgsm-llm's build emits: the catalog keyed by the gate that admits each command.
+    private const string AssistantManifest = """
+        {
+          "schemaVersion": 2,
+          "leaf": "assistant",
+          "surface": "chat",
+          "gates": {
+            "viewer": [
+              { "name": "compact", "description": "Summarize this conversation", "mutates": true, "options": [] }
+            ],
+            "admin": [
+              {
+                "name": "autorun", "description": "Whether actions run without confirmation", "mutates": true,
+                "options": [
+                  { "name": "state", "description": "Whether auto-run is on.",
+                    "type": "string", "required": false, "autocomplete": true, "values": ["on", "off"] }
+                ]
+              }
+            ]
+          }
+        }
+        """;
+
+    /// <summary>All the commands in a manifest, whichever gate each sits under.</summary>
+    private static JsonElement[] AllCommands(JsonElement body) =>
+        [.. body.GetProperty("gates").EnumerateObject().SelectMany(g => g.Value.EnumerateArray())];
+
     [Fact]
-    public async Task TheManifestReachesTheWireAsTheLeafWroteIt()
+    public async Task AVersion2ManifestReachesTheWireAsTheLeafWroteIt()
     {
         using var factory = new LeafTestFactory();
-        factory.InstallCommands("bot", BotManifest);
+        factory.InstallCommands("assistant", AssistantManifest);
+
+        JsonElement body = await Get(Client(factory, KgsmTier.Operator), "assistant");
+
+        Assert.Equal("assistant", body.GetProperty("leaf").GetString());
+        Assert.Equal("chat", body.GetProperty("surface").GetString());
+
+        // The leaf's own statement about what it checks before running each command. The API cannot verify
+        // a gate it does not implement, so it must neither soften nor restate this.
+        JsonElement gates = body.GetProperty("gates");
+        Assert.Equal(["compact"], gates.GetProperty("viewer").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
+        Assert.Equal(["autorun"], gates.GetProperty("admin").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
+
+        JsonElement option = gates.GetProperty("admin").EnumerateArray().Single()
+            .GetProperty("options").EnumerateArray().Single();
+        Assert.Equal("state", option.GetProperty("name").GetString());
+        Assert.False(option.GetProperty("required").GetBoolean());
+        Assert.True(option.GetProperty("autocomplete").GetBoolean());
+        // The fixed set the option offers, which is what lets a surface complete it without asking the leaf.
+        Assert.Equal(["on", "off"], option.GetProperty("values").EnumerateArray().Select(v => v.GetString()));
+    }
+
+    /// <summary>
+    /// A version 1 file is restated into the one shape this API serves, so a client never branches on where
+    /// a manifest came from. Its single gate is by definition what the leaf requires for a command that
+    /// ACTS, so its acting commands go under that gate and its reading commands under `none` — which is
+    /// what "the leaf states no check for these" already meant.
+    /// </summary>
+    [Fact]
+    public async Task AVersion1ManifestIsRestatedIntoTheSameShape()
+    {
+        using var factory = new LeafTestFactory();
+        factory.InstallCommands("bot", BotManifest.Replace("\"gate\": \"none\"", "\"gate\": \"operator\""));
 
         JsonElement body = await Get(Client(factory, KgsmTier.Operator), "bot");
 
-        Assert.Equal("bot", body.GetProperty("leaf").GetString());
+        Assert.Equal(2, body.GetProperty("schemaVersion").GetInt32());
         Assert.Equal("discord", body.GetProperty("surface").GetString());
-        // The leaf's own statement about what it checks before acting. The API cannot verify a gate it does
-        // not implement, so it must neither soften nor restate this.
-        Assert.Equal("none", body.GetProperty("gate").GetString());
 
-        JsonElement[] commands = body.GetProperty("commands").EnumerateArray().ToArray();
-        Assert.Equal(["list", "start"], commands.Select(c => c.GetProperty("name").GetString()));
+        JsonElement gates = body.GetProperty("gates");
+        Assert.Equal(["start"], gates.GetProperty("operator").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
+        Assert.Equal(["list"], gates.GetProperty("none").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
 
-        JsonElement start = commands.Single(c => c.GetProperty("name").GetString() == "start");
+        JsonElement start = gates.GetProperty("operator").EnumerateArray().Single();
         Assert.True(start.GetProperty("mutates").GetBoolean());
         Assert.Equal("Start up a game server", start.GetProperty("description").GetString());
 
@@ -77,26 +134,32 @@ public sealed class LeafCommandsApiTests
         Assert.Equal("string", option.GetProperty("type").GetString());
         Assert.True(option.GetProperty("required").GetBoolean());
         Assert.True(option.GetProperty("autocomplete").GetBoolean());
-
-        Assert.False(commands.Single(c => c.GetProperty("name").GetString() == "list").GetProperty("mutates").GetBoolean());
+        // A Discord option's suggestions come from the bot as someone types, not from the file — so it
+        // offers no fixed set, and a client reads that as free text.
+        Assert.Equal(JsonValueKind.Null, option.GetProperty("values").ValueKind);
     }
 
     /// <summary>
     /// A command declaring no options at all is "takes no options", not an absent list — the panel prints
     /// what to type, and a null there is a hole in that answer.
     /// </summary>
-    [Fact]
-    public async Task ACommandWithNoOptionsArrivesWithAnEmptyList()
+    [Theory]
+    [InlineData("""
+        { "schemaVersion": 1, "leaf": "bot", "surface": "discord", "gate": "none",
+          "commands": [ { "name": "ping", "description": "Check if the bot is responsive", "mutates": false } ] }
+        """)]
+    [InlineData("""
+        { "schemaVersion": 2, "leaf": "bot", "surface": "discord",
+          "gates": { "none": [ { "name": "ping", "description": "Check if the bot is responsive", "mutates": false } ] } }
+        """)]
+    public async Task ACommandWithNoOptionsArrivesWithAnEmptyList(string json)
     {
         using var factory = new LeafTestFactory();
-        factory.InstallCommands("bot", """
-            { "schemaVersion": 1, "leaf": "bot", "surface": "discord", "gate": "none",
-              "commands": [ { "name": "ping", "description": "Check if the bot is responsive", "mutates": false } ] }
-            """);
+        factory.InstallCommands("bot", json);
 
         JsonElement body = await Get(Client(factory, KgsmTier.Operator), "bot");
 
-        Assert.Empty(body.GetProperty("commands").EnumerateArray().Single().GetProperty("options").EnumerateArray());
+        Assert.Empty(AllCommands(body).Single().GetProperty("options").EnumerateArray());
     }
 
     /// <summary>
@@ -135,9 +198,19 @@ public sealed class LeafCommandsApiTests
     /// is not the leaf it describes, one with a nameless command, and one that is not JSON at all.
     /// </summary>
     [Theory]
-    [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "surface": "discord", "gate": "none", "commands": [] }""")]
+    // A version this build does not know: the rest of the file may mean something else entirely.
+    [InlineData("""{ "schemaVersion": 99, "leaf": "bot", "surface": "discord", "gate": "none", "commands": [] }""")]
+    // Installed under a name that is not the leaf it describes.
     [InlineData("""{ "schemaVersion": 1, "leaf": "assistant", "surface": "discord", "gate": "none", "commands": [] }""")]
+    [InlineData("""{ "schemaVersion": 2, "leaf": "assistant", "surface": "chat", "gates": {} }""")]
+    // A nameless command — the panel would print it as something to type.
     [InlineData("""{ "schemaVersion": 1, "leaf": "bot", "surface": "discord", "gate": "none", "commands": [ { "name": "" } ] }""")]
+    [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "surface": "discord", "gates": { "none": [ { "name": "" } ] } }""")]
+    // A version 1 file stating no gate says nothing about what it checks before acting.
+    [InlineData("""{ "schemaVersion": 1, "leaf": "bot", "surface": "discord", "commands": [] }""")]
+    // Neither shape's catalog, and no surface to print.
+    [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "surface": "discord" }""")]
+    [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "gates": { "none": [] } }""")]
     [InlineData("this is not json")]
     public async Task AManifestThatCannotBeTrustedIsSkipped(string json)
     {
@@ -160,7 +233,7 @@ public sealed class LeafCommandsApiTests
 
         JsonElement body = await Get(Client(factory, KgsmTier.Operator), "bot");
 
-        Assert.Equal(2, body.GetProperty("commands").GetArrayLength());
+        Assert.Equal(2, AllCommands(body).Length);
     }
 
     /// <summary>
