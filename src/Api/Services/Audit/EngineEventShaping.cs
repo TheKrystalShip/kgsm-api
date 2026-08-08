@@ -82,9 +82,6 @@ public static class EngineEventShaping
                     Meta(("source", d.Source), ("version", d.Version)))),
             "instance_crashed" => Map<InstanceCrashedData>(item, d => AuditMapping.FromCrashEvent(d, hostId)),
             "instance_failed" => Map<InstanceFailedData>(item, d => AuditMapping.FromFailedEvent(d, hostId)),
-            // network.ports.open is dual-sourced (see AuditQueries.EngineSourcedActions remarks) — the
-            // CLI-echo half is shaped here from the journal exactly like every other engine action; the
-            // api-issued open_ports command's DIRECT local write is untouched and disjoint.
             "instance_ports_opened" => Map<InstancePortsOpenedData>(item, d => AuditMapping.FromPortsOpenedEvent(d, hostId)),
             "instance_ports_closed" => Map<InstancePortsClosedData>(item, d => AuditMapping.FromPortsClosedEvent(d, hostId)),
             "instance_upnp_opened" => Map<InstanceUpnpOpenedData>(item, d => AuditMapping.FromUpnpOpenedEvent(d, hostId)),

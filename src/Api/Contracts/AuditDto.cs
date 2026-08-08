@@ -89,13 +89,11 @@ public static class AuditAction
     public const string BackupCreate = "backup.create";
     public const string BackupRestore = "backup.restore";
 
-    // network.* — the firewall door. The doc's §3·d `network` set lists only `ports.open`; the server
-    // additionally records `network.ports.close` — a real, now-sourceable action (instance_ports_closed,
-    // kgsm-lib 1.12.0), so opens and closes form a symmetric trail (a standalone `files firewall disable`
-    // closes ports outside any uninstall and would otherwise go unrecorded). Both are CLI-path echoes
-    // (kgsm bash emits them, kgsm-lib 1.12.0). The api-issued `open_ports` command writes `ports.open`
-    // DIRECTLY at M6·b (kgsm runs nothing → no echo, the auth.* case); there is no close command
-    // (§3·g is open-only), so `ports.close` is cleanly CLI-echo-only — no double-write risk.
+    // network.* — the firewall door. An instance's ports are open exactly while it runs, so the pair
+    // brackets that lifetime: opened on the bring-up, closed on the stop, and closed again when an
+    // operator drops firewall management. Both are engine echoes — emitted by the supervisor for the
+    // instances it supervises and by kgsm for the edges it performs itself — so the api writes neither
+    // directly and there is no double-write risk. Recording closes keeps the trail symmetric.
     public const string NetworkPortsOpen = "network.ports.open";
     public const string NetworkPortsClose = "network.ports.close";
 

@@ -4,8 +4,7 @@ namespace TheKrystalShip.Api.Contracts;
 /// The per-server firewall/ports view (architecture.html §3·g, M6·b) — the cross-reference of what a
 /// server <em>requires</em> against what the host firewall actually has open. A field on the
 /// <see cref="Server"/> <strong>detail</strong> response only (<c>GET /servers/{id}</c>); omitted on the
-/// list and on the <c>servers</c> stream (which stay the frozen M1·b shape). The fresh block is also
-/// pushed on the dedicated <c>servers/{id}/network</c> WS topic after an <c>open_ports</c> command verifies.
+/// list and on the <c>servers</c> stream (which stay the frozen M1·b shape).
 /// <para>
 /// <strong>Honesty (the central M6·b call):</strong> <see cref="Required"/> is always knowable — it is the
 /// server's own domain truth (kgsm <c>Instance.Ports</c>), independent of the firewall. Per-row

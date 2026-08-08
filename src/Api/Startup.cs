@@ -162,13 +162,12 @@ public class Startup(IConfiguration configuration)
         // M6·b — ports. The firewall authority (kgsm-firewall) is OPT-IN like the assistant: its kgsm-lib
         // client is registered ONLY when its socket is configured (blank => firewall "absent"). It is
         // deliberately NOT added to the LeafHealthMonitor 2s poll — the daemon is socket-activated and
-        // idle-exits, so a periodic probe would defeat that; NetworkAggregator probes it ON-DEMAND (detail
-        // views + the open_ports verify), bounding each call, and reports liveness as the block-level
-        // `firewall` status. A longer request timeout covers ufw mutation serialized behind the global lock.
+        // idle-exits, so a periodic probe would defeat that; NetworkAggregator probes it ON-DEMAND on a
+        // detail view, bounding each call, and reports liveness as the block-level `firewall` status.
         // Always register the firewall client too (lazy, configured-or-default socket): the runtime registry
-        // flag — NOT the client's presence — decides the firewall surface now (NetworkAggregator + the
-        // open_ports command gate on LeafRegistry.IsProvisioned("firewall"), seeded from config so the
-        // default is unchanged). A runtime "connect firewall" arms the ports surface without a restart.
+        // flag — NOT the client's presence — decides the firewall surface now (NetworkAggregator gates
+        // on LeafRegistry.IsProvisioned("firewall"), seeded from config so the default is unchanged).
+        // A runtime "connect firewall" arms the ports surface without a restart.
         services.AddKgsmFirewallClient(o =>
         {
             o.SocketPath = string.IsNullOrWhiteSpace(apiOptions.FirewallSocketPath)

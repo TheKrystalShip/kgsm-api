@@ -86,9 +86,4 @@ public sealed class CommandGateTests
         Assert.Null(CommandGate.Inadmissible(CommandVerb.Restart, ServerStatus.Starting));
     }
 
-    [Fact]
-    public void OpenPorts_AgainstStarting_IsAdmissible_AlwaysDeclarative()
-    {
-        Assert.Null(CommandGate.Inadmissible(CommandVerb.OpenPorts, ServerStatus.Starting));
-    }
 }

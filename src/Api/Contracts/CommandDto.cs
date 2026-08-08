@@ -3,7 +3,7 @@ namespace TheKrystalShip.Api.Contracts;
 /// <summary>
 /// The request body for <c>POST /servers/{id}/commands</c> (architecture.html §5·d, M3). The client
 /// expresses <em>intent only</em> — a closed, server-defined verb set
-/// (<c>start</c>/<c>stop</c>/<c>restart</c>/<c>update</c>/<c>open_ports</c>); an unknown/empty verb is
+/// (<c>start</c>/<c>stop</c>/<c>restart</c>/<c>update</c>); an unknown/empty verb is
 /// rejected at write time (<c>400</c>). <c>update</c> (long-running, version-changing) joined the set in
 /// the Tier-1 ops slice.
 /// <para>
@@ -55,7 +55,7 @@ public sealed record InstallRequest(
     string? Password = null);
 
 /// <summary>
-/// The closed lifecycle verb set the API admits in M3 (+ <c>update</c> + <c>open_ports</c>). Server-defined —
+/// The closed lifecycle verb set the API admits. Server-defined —
 /// the client (or, later, the model) cannot invent one. <see cref="Install"/>/<see cref="Uninstall"/>
 /// (M8·b) and <see cref="BackupCreate"/>/<see cref="BackupRestore"/> (Tier-1 ops) are <em>not</em> part of
 /// <see cref="IsKnown"/>: they are NOT <c>POST /servers/{id}/commands</c> verbs (install creates a server /
@@ -99,18 +99,7 @@ public static class CommandVerb
     /// machinery (the install/uninstall pattern — verbs are param-less, this is not).</summary>
     public const string BackupRestore = "backup_restore";
 
-    /// <summary>
-    /// Open this server's required host-firewall ports (M6·b, architecture.html §3·g). <strong>Intent
-    /// only — the client sends NO port list</strong>: the server derives the target set from the
-    /// instance's own <c>Instance.Ports</c> (accepting a client list would let the browser open
-    /// anything). Always admissible (no run-state no-op — opening ports is declarative/idempotent),
-    /// audited by a <em>direct</em> <c>network.ports.open</c> write (kgsm runs nothing on the
-    /// <c>IFirewallService</c> path → no event echo → no double-write), verified by a firewall re-probe
-    /// pushed on <c>servers/{id}/network</c>.
-    /// </summary>
-    public const string OpenPorts = "open_ports";
-
-    public static bool IsKnown(string? verb) => verb is Start or Stop or Restart or Update or OpenPorts;
+    public static bool IsKnown(string? verb) => verb is Start or Stop or Restart or Update;
 }
 
 /// <summary>

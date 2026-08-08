@@ -35,13 +35,6 @@ public static class StreamProtocol
     public static bool IsServerConsoleTopic(string topic) =>
         topic.StartsWith("servers/", StringComparison.Ordinal) && topic.EndsWith("/console", StringComparison.Ordinal);
 
-    /// <summary>One server's firewall/ports block: <c>servers/{id}/network</c> (M6·b). The fresh
-    /// <see cref="Contracts.ServerNetwork"/> is pushed here after an <c>open_ports</c> command verifies —
-    /// kept off the <see cref="ServersTopic"/> so <see cref="ServerPatch"/> stays the frozen M1·b
-    /// <c>Server</c> (the same topic-separation discipline as the metric topic). On-demand only — no pump
-    /// publishes it (the firewall is socket-activated + idle-exits; a periodic probe would defeat that).</summary>
-    public static string ServerNetworkTopic(string id) => $"servers/{id}/network";
-
     /// <summary>This host's capacity metric ticks: <c>hosts/{hostId}/metrics</c>.</summary>
     public static string HostMetricsTopic(string hostId) => $"hosts/{hostId}/metrics";
 
@@ -95,16 +88,6 @@ public static class StreamProtocol
     /// returns) — merged by the client by <c>id</c>. Emitted when systemd state, health, or provisioning
     /// flips for any leaf in the <see cref="Leaves.LeafCatalog"/>.</summary>
     public const string ServicePatch = "service.patch";
-
-    /// <summary>A fresh <see cref="Contracts.ServerNetwork"/> block (M6·b) on <see cref="ServerNetworkTopic"/>,
-    /// after an <c>open_ports</c> command re-probes the firewall. Patch-only, supersede-by-latest per server
-    /// (the topic is already per-id) — exactly like <see cref="ServerPatch"/>. The data is byte-identical to
-    /// the <c>network</c> field a subsequent <c>GET /servers/{id}</c> returns (one shared build path).</summary>
-    public const string NetworkPatch = "network.patch";
-
-    /// <summary>The per-connection coalesce key for a server's network block on
-    /// <see cref="ServerNetworkTopic"/>: a slow client gets the newest re-probe, never a backlog.</summary>
-    public static string ServerNetworkEntityKey(string id) => $"servers-network:{id}";
 
     // --- console (#8 — the follow-only stdout stream) ---
     /// <summary>One live console line on a <see cref="ServerConsoleTopic"/>: <c>data = { id, seq, line }</c>.

@@ -9,14 +9,13 @@ using TheKrystalShip.KGSM.Core.Models;
 namespace TheKrystalShip.Api.Services.Commands;
 
 /// <summary>
-/// Executes an admitted command job off the request path (M3 lifecycle + M6·b <c>open_ports</c> + M8·b
+/// Executes an admitted command job off the request path (the lifecycle verbs +
 /// <c>install</c>/<c>uninstall</c> + Tier-1 ops <c>update</c>/<c>backup_create</c>/<c>backup_restore</c>).
 /// The controller returns <c>202</c> immediately; this runner drives the
 /// verb to completion on a background task, streaming each state transition as <c>job.patch</c> on the
 /// <c>jobs</c> topic and, on settle, a fresh verify patch — <c>server.patch</c> (run-state for the
-/// lifecycle verbs; the newly-created instance for <c>install</c>), <c>server.removed</c> (the tombstone
-/// for <c>uninstall</c>), or <c>network.patch</c> on <c>servers/{id}/network</c> (the firewall re-probe,
-/// <c>open_ports</c>).
+/// lifecycle verbs; the newly-created instance for <c>install</c>) or <c>server.removed</c> (the tombstone
+/// for <c>uninstall</c>).
 /// </summary>
 /// <remarks>
 /// <para><b>Lifetime (load-bearing):</b> a singleton. The <c>202</c> disposes the request's DI scope, but
@@ -27,9 +26,8 @@ namespace TheKrystalShip.Api.Services.Commands;
 /// <para><b>Audit split (the no-double-write contract):</b> the lifecycle verbs <em>and</em>
 /// <c>install</c>/<c>uninstall</c> stamp <c>actor</c>+<c>origin</c> onto the engine call and the M5 consumer
 /// records the event echo (<c>server.start/stop/restart</c>, <c>server.install</c>, <c>server.uninstall</c>)
-/// — this runner writes NO audit row for them. <c>open_ports</c> goes through <see cref="IFirewallService"/>,
-/// which emits no event, so it is the <c>auth.*</c> case: this runner writes the <c>network.ports.open</c>
-/// row <b>directly</b>. Disjoint by construction — kgsm never echoes an api firewall call.</para>
+/// — this runner writes NO audit row for any of them. Every verb it runs is an engine call the engine
+/// itself audits, so there is no direct-write path here to keep disjoint from the echo.</para>
 /// <para><b>Always settles:</b> the verb runs inside try/finally so a started job always reaches a terminal
 /// state — releasing the registry's in-flight slot even if the verb throws.</para>
 /// </remarks>
@@ -38,21 +36,13 @@ public sealed class CommandRunner(
     StreamHub hub,
     ServerAggregator aggregator,
     JobRegistry registry,
-    AuditService audit,
-    ApiOptions options,
     Aggregation.UpdateCheckCache updateCheckCache,
-    Leaves.LeafRegistry leafRegistry,
     ILogger<CommandRunner> logger)
 {
-    // The open_ports firewall mutation can be slower than a detail-view probe (ufw serialized behind a
-    // global lock), so it gets a more generous bound than NetworkAggregator's 2s read probe.
-    private static readonly TimeSpan OpenPortsTimeout = TimeSpan.FromSeconds(30);
-
     /// <summary>
     /// Fire-and-forget the job's execution. The job is already registered (queued). <paramref name="actor"/>
     /// (the bearer identity, e.g. <c>discord:haru</c>) and <paramref name="origin"/> (the declared surface)
-    /// are stamped onto a lifecycle engine command (so the kgsm event echo carries provenance) or, for
-    /// <c>open_ports</c>, onto the direct audit row this runner writes.
+    /// are stamped onto the engine command, so the kgsm event echo carries provenance.
     /// </summary>
     public void Start(Job job, string? actor = null, string? origin = null) =>
         _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName: null));
@@ -115,7 +105,6 @@ public sealed class CommandRunner(
             using IServiceScope scope = scopeFactory.CreateScope();
             (ok, error) = job.Verb switch
             {
-                CommandVerb.OpenPorts => await RunOpenPortsAsync(scope, job, actor, origin).ConfigureAwait(false),
                 CommandVerb.Install => RunInstall(scope, job, blueprint!, installPort, actor, origin, installAutostart),
                 CommandVerb.Uninstall => RunUninstall(scope, job, actor, origin),
                 // update / backup_* live on IInstanceService, NOT ILifecycleService — they get their own
@@ -156,16 +145,13 @@ public sealed class CommandRunner(
         }
 
         // Verify: re-read authoritative state and reflect it. Best-effort — if the read fails, the next
-        // poll/diff cycle reconciles instead (coalesced by the same key). open_ports verifies the firewall
-        // (network.patch); uninstall pushes the server.removed tombstone once the instance is gone; the
-        // lifecycle verbs and install verify run-state/roster (server.patch — install surfaces the new server).
+        // poll/diff cycle reconciles instead (coalesced by the same key). uninstall pushes the
+        // server.removed tombstone once the instance is gone; the lifecycle verbs and install verify
+        // run-state/roster (server.patch — install surfaces the new server).
         try
         {
             switch (job.Verb)
             {
-                case CommandVerb.OpenPorts:
-                    await PublishNetworkPatchAsync(job.ServerId).ConfigureAwait(false);
-                    break;
                 case CommandVerb.Uninstall:
                     await PublishServerRemovedAsync(job.ServerId).ConfigureAwait(false);
                     break;
@@ -203,8 +189,7 @@ public sealed class CommandRunner(
     // exactly there (kgsm's generate-id echoes an already-unique name verbatim), so the verify target and
     // the instance_installed event's name match. installDir/version stay null — reserved/inert per §3·h
     // (only blueprint + name are honored today). NO audit row here: kgsm emits instance_installed →
-    // KgsmAuditConsumer writes the server.install echo with the stamped provenance (the lifecycle case, NOT
-    // the open_ports direct write).
+    // KgsmAuditConsumer writes the server.install echo with the stamped provenance.
     private (bool ok, string? error) RunInstall(
         IServiceScope scope, Job job, string blueprint, int? port, string? actor, string? origin, bool? autostart = null)
     {
@@ -301,62 +286,6 @@ public sealed class CommandRunner(
     private static string Detail(KgsmResult r) =>
         string.IsNullOrWhiteSpace(r.Stderr) ? $"exit {r.ExitCode}" : r.Stderr.Trim();
 
-    // open_ports (M6·b) — intent only: the target ports are SERVER-DERIVED from the instance's own
-    // Instance.Ports (never a client list). Opens through IFirewallService (no kgsm event → a DIRECT audit
-    // write), audited only on a real change (Applied), mirroring the CLI echo path which emits only on a
-    // confirmed open. A NoOp (desired state already held) succeeds without an audit row — recording "opened"
-    // when nothing changed would fabricate a change.
-    private async Task<(bool ok, string? error)> RunOpenPortsAsync(
-        IServiceScope scope, Job job, string? actor, string? origin)
-    {
-        // The firewall client is now always registered (lazy); runtime provisioning is the registry's flag.
-        // Degrade honestly when the firewall isn't connected on this host (the prior `firewall is null` case).
-        if (!leafRegistry.IsProvisioned(Leaves.ProvisionableLeaf.Firewall))
-            return (false, "firewall authority not provisioned");
-
-        var firewall = scope.ServiceProvider.GetService(typeof(IFirewallService)) as IFirewallService;
-        if (firewall is null)
-            return (false, "firewall authority not provisioned");
-
-        var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
-        if (instances is null)
-            return (false, "engine not provisioned");
-
-        // `instances info <name> --json` — a single-instance spawn (cheaper than the full GetAll roster);
-        // verified to carry the SAME structured `ports` block as `list --detailed` (the freeze's fact-check),
-        // so the server-derived target is sound and matches the verify-probe's required set.
-        Instance? instance = instances.GetInstanceInfo(job.ServerId);
-        if (instance is null)
-            return (false, $"unknown server '{job.ServerId}'");
-
-        IReadOnlyList<PortMapping> ports = instance.Ports;
-        if (ports.Count == 0)
-            return (true, null); // nothing required to open — vacuous success, no firewall call, no audit row
-
-        using var timeout = new CancellationTokenSource(OpenPortsTimeout);
-        // EnsureOpenAsync is declarative: it makes the firewall own exactly these ports for the instance.
-        FirewallActionResult result = await firewall
-            .EnsureOpenAsync(job.ServerId, ports, timeout.Token).ConfigureAwait(false);
-
-        if (!result.Ok)
-            return (false, string.IsNullOrWhiteSpace(result.Detail)
-                ? $"firewall {result.Outcome.ToString().ToLowerInvariant()}"
-                : result.Detail);
-
-        // Direct audit write when a rule actually changed — Applied (enforced) OR AppliedInactive (staged on
-        // an inactive firewall). Both are real config changes; the audit summary distinguishes "opened" from
-        // "staged" via `enforced`. A NoOp (desired state already held) writes nothing — recording "opened"
-        // when nothing changed would fabricate a change (symmetric with the CLI echo, which fires only on a
-        // confirmed change).
-        if (result.Outcome is FirewallOutcome.Applied or FirewallOutcome.AppliedInactive)
-            await audit.AppendAsync(AuditMapping.FromPortsOpenedCommand(
-                    job.ServerId, ports, actor, origin, options.HostId, job.Id,
-                    enforced: result.Outcome == FirewallOutcome.Applied))
-                .ConfigureAwait(false);
-
-        return (true, null);
-    }
-
     private void Publish(Job job) =>
         hub.Publish(StreamProtocol.JobsTopic, StreamProtocol.JobEntityKey(job.Id),
             new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, job));
@@ -385,16 +314,5 @@ public sealed class CommandRunner(
         }
         hub.Publish(StreamProtocol.ServersTopic, StreamProtocol.ServerEntityKey(serverId),
             new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerRemoved, new ServerRemoved(serverId)));
-    }
-
-    // The open_ports verify: re-probe the firewall and push the fresh network block on servers/{id}/network.
-    // Reuses the detail build so the patch is byte-identical to a subsequent GET /servers/{id} network field.
-    private async Task PublishNetworkPatchAsync(string serverId)
-    {
-        // null baseUrl: this verify only publishes the Network block — skip the cover/hero art join.
-        Server? server = await aggregator.GetServerDetailAsync(serverId, null, CancellationToken.None).ConfigureAwait(false);
-        if (server?.Network is not null)
-            hub.Publish(StreamProtocol.ServerNetworkTopic(serverId), StreamProtocol.ServerNetworkEntityKey(serverId),
-                new StreamMessage(StreamProtocol.ServerNetworkTopic(serverId), StreamProtocol.NetworkPatch, server.Network));
     }
 }

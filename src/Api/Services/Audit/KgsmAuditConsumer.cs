@@ -295,11 +295,10 @@ public sealed class KgsmAuditConsumer(
             return Task.CompletedTask;
         });
 
-        // network.ports.open / .close — the CLI-path firewall echoes (kgsm bash emits these on a
-        // confirmed open/close via create, firewall-enable/disable, or uninstall — kgsm-lib 1.12.0).
-        // Both recorded so the trail is symmetric. The api-issued `open_ports` command writes
-        // `network.ports.open` directly at M6·b (kgsm runs nothing → no echo, the auth.* case); there is
-        // no api close command (§3·g is open-only), so `network.ports.close` is cleanly CLI-echo-only.
+        // network.ports.open / .close — the firewall echoes, emitted on a confirmed open/close by
+        // whichever component performed it (the supervisor on the instances it supervises, kgsm on the
+        // edges it performs itself). Both recorded so the trail is symmetric; neither is ever written
+        // directly by the api.
         events.RegisterHandler<InstancePortsOpenedData>(d =>
         {
             PublishLive(AuditMapping.FromPortsOpenedEvent(d, options.HostId));

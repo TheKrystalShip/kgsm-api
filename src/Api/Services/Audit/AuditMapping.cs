@@ -131,21 +131,21 @@ public static class AuditMapping
     }
 
     /// <summary>
-    /// Map a kgsm <c>instance_ports_opened</c> event (the CLI-path firewall echo — kgsm bash opened
+    /// Map a kgsm <c>instance_ports_opened</c> event (the firewall echo — the engine opened
     /// the host-firewall ports on a confirmed success) to a <c>network.ports.open</c> row, recording
-    /// the opened ports in <c>meta</c> in the canonical range-preserving form. The api-issued
-    /// <c>open_ports</c> command writes this action directly at M6·b (no kgsm echo exists), so this
-    /// mapper covers only the engine-sourced opens.
+    /// the opened ports in <c>meta</c> in the canonical range-preserving form. Engine-sourced only:
+    /// an instance's ports are opened by the supervisor when it starts and released when it stops,
+    /// so the api never opens one itself and has nothing to direct-write.
     /// </summary>
     public static AuditWrite FromPortsOpenedEvent(InstancePortsOpenedData d, string hostId) =>
         PortsWrite(d, hostId, AuditAction.NetworkPortsOpen, "opened", d.Ports);
 
     /// <summary>
-    /// Map a kgsm <c>instance_ports_closed</c> event (the CLI-path firewall echo — kgsm bash removed
-    /// the host-firewall ports on a confirmed success, via uninstall or a standalone firewall-disable)
-    /// to a <c>network.ports.close</c> row. Recording closes keeps the trail symmetric — a disable that
-    /// isn't part of an uninstall would otherwise leave an opened-never-closed gap. There is no
-    /// api-issued close command (§3·g is open-only), so this action is cleanly CLI-echo-only.
+    /// Map a kgsm <c>instance_ports_closed</c> event (the firewall echo — the engine removed the
+    /// host-firewall ports on a confirmed success, on a stop, an uninstall, or a standalone
+    /// firewall-disable) to a <c>network.ports.close</c> row. Recording closes keeps the trail
+    /// symmetric — a disable that isn't part of an uninstall would otherwise leave an
+    /// opened-never-closed gap.
     /// </summary>
     public static AuditWrite FromPortsClosedEvent(InstancePortsClosedData d, string hostId) =>
         PortsWrite(d, hostId, AuditAction.NetworkPortsClose, "closed", d.Ports);
@@ -202,47 +202,6 @@ public static class AuditMapping
             ServerId: instance,
             HostId: hostId,
             Summary: $"update available for {Display(instance)}",
-            Meta: meta);
-    }
-
-    /// <summary>
-    /// Build the <see cref="AuditWrite"/> for the API-issued <c>open_ports</c> command (M6·b) — a
-    /// <strong>direct</strong> write, the <c>auth.*</c> case: the api opens the ports through kgsm-lib's
-    /// <c>IFirewallService</c>, which runs no kgsm command and emits no event, so there is no echo to read
-    /// and no double-write risk (the CLI path's <c>instance_ports_opened</c> echo is disjoint —
-    /// <see cref="FromPortsOpenedEvent"/>). Provenance is the bearer <paramref name="actor"/> + the
-    /// caller-declared <paramref name="origin"/>, parsed/normalized exactly like an event's. <c>meta</c>
-    /// carries the opened ports <em>and</em> the <paramref name="jobId"/> — the job↔audit correlation the
-    /// M5 echo path could not provide (no id round-trips the stateless engine), now populatable because the
-    /// api owns both the job and this append (the alert↔audit <c>resolution.actionId</c> bridge for M6·a).
-    /// </summary>
-    /// <param name="enforced"><see langword="true"/> when the firewall is enforcing (the rule is live —
-    /// "opened"); <see langword="false"/> when it was staged on an INACTIVE firewall (the
-    /// <c>applied-inactive</c> outcome — the rule persists and enforces on the operator's next
-    /// <c>ufw enable</c>, and the port is open meanwhile). The audit row must say "staged", not "opened",
-    /// when nothing is enforcing — recording an enforced open that didn't happen would be the very lie this
-    /// work removes.</param>
-    public static AuditWrite FromPortsOpenedCommand(
-        string serverId, IReadOnlyList<PortMapping> ports, string? actor, string? origin, string hostId,
-        string jobId, bool enforced = true)
-    {
-        var meta = new Dictionary<string, string> { ["jobId"] = jobId };
-        string formatted = FormatPorts(ports);
-        if (!string.IsNullOrEmpty(formatted)) meta["ports"] = formatted;
-        if (!enforced) meta["enforced"] = "false"; // staged on an inactive firewall, not yet enforcing
-
-        return new AuditWrite(
-            Ts: DateTimeOffset.UtcNow,
-            Origin: NormalizeOrigin(origin),
-            Actor: ParseActor(actor),
-            Action: AuditAction.NetworkPortsOpen,
-            Severity: AuditSeverity.Info,
-            Target: new AuditTarget(AuditTargetKind.Server, serverId, serverId),
-            ServerId: serverId,
-            HostId: hostId,
-            Summary: enforced
-                ? $"opened firewall ports for {Display(serverId)}"
-                : $"staged firewall ports for {Display(serverId)} (firewall inactive — enforces on enable)",
             Meta: meta);
     }
 

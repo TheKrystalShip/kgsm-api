@@ -28,8 +28,7 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// post-cutover, can ONLY be freshly written by the (now-removed) kgsm-event-echo path in
 /// <see cref="KgsmAuditConsumer"/> — so a local row bearing one of them is frozen pre-cutover history,
 /// excluded here to keep the two sources disjoint (Locked decision #4's "no dedup headaches"; a
-/// defensive id-based dedup still runs at the merge boundary as belt-and-braces).
-/// <see cref="AuditAction.NetworkPortsOpen"/> is deliberately NOT excluded — see that field's remarks.</para>
+/// defensive id-based dedup still runs at the merge boundary as belt-and-braces).</para>
 /// </remarks>
 public static class AuditQueries
 {
@@ -54,16 +53,6 @@ public static class AuditQueries
     /// writes any of these to the local table (it now only publishes them live — see
     /// <see cref="AuditService.PublishLive"/>), so a local row bearing one is frozen pre-cutover history;
     /// excluding it here means the merge's engine-sourced rows come solely from the journal.
-    /// <para>
-    /// <see cref="AuditAction.NetworkPortsOpen"/> is DELIBERATELY NOT in this set: it is dual-sourced —
-    /// kgsm's CLI-echo (<c>instance_ports_opened</c>, journal-only, shaped via
-    /// <see cref="EngineEventShaping"/>) AND the api-issued <c>open_ports</c> command's DIRECT local
-    /// write (<c>AuditMapping.FromPortsOpenedCommand</c>, called from
-    /// <c>Services/Commands/CommandRunner.cs</c> — no kgsm event exists for it to
-    /// echo). Excluding <c>network.ports.open</c> here would silently drop every <c>open_ports</c>
-    /// command's own audit trail, which is genuinely API-only and has no journal counterpart.
-    /// <c>network.ports.close</c> has no such direct writer (§3·g is open-only) so it excludes cleanly.
-    /// </para>
     /// </summary>
     internal static readonly HashSet<string> EngineSourcedActions = new(StringComparer.Ordinal)
     {
@@ -76,7 +65,8 @@ public static class AuditQueries
         AuditAction.ServerCrash,
         AuditAction.BackupCreate,
         AuditAction.BackupRestore,
-        AuditAction.NetworkPortsClose, // .Open is deliberately excluded from this set — see remarks above
+        AuditAction.NetworkPortsOpen,
+        AuditAction.NetworkPortsClose,
         AuditAction.NetworkUpnpOpen,
         AuditAction.NetworkUpnpClose,
         AuditAction.PlayerJoin,

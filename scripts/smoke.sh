@@ -21,11 +21,11 @@
 #   sweep: every protected endpoint 401s with the frozen envelope, /health + /api/v1 stay open, and the
 #   login endpoint 503s until Discord is configured (the M4·b live half). The full 401/403/tier matrix +
 #   the callback/refresh/session flow are proven in-process by tests/Api.Tests (the Discord seam faked).
-#   M6·b (§3·g): the ports surface degrade path (no firewall configured here) — open_ports is an admitted
-#   verb (unknown server → 404, not a 400), the server DETAIL `network` block reports firewall:"absent" +
+#   The ports surface degrade path (no firewall configured here): `open_ports` is refused as an unknown
+#   verb (there is no on-demand open), the server DETAIL `network` block reports firewall:"absent" +
 #   reachable:null (reserved) + every required open:null (never fabricated false), the list OMITS network
 #   (detail≠list), and the host grid is omitted when the firewall is absent. The operational firewall path
-#   (open verdicts + the open_ports apply/audit/verify) is a trusted-host live-validate.
+#   (the open/closed verdicts against a live authority) is a trusted-host live-validate.
 #
 # Two phases. Phase A runs deterministically with NO monitor (the degrade path: host metrics
 # down + capacity null; every server metrics:null). Phase B starts an EMBEDDED stub monitor
@@ -959,12 +959,14 @@ sys.exit(0 if ('data' in d and 'nextCursor' in d) else 1)
   # --- M6·b ports: the network surface (firewall ABSENT here → the honest degrade path) -------
   echo "==> M6·b ports checks — network block degrade (no firewall configured in smoke)"
 
-  # 31. open_ports is an ADMITTED verb now (the closed set grew): an unknown server resolves first → 404,
-  #     NOT a 400 unknown-verb. That distinction is the proof the verb is in the closed set.
+  # 31. There is no on-demand port open: an instance's ports are opened by the supervisor when it starts
+  #     and released when it stops. `open_ports` must be REFUSED as an unknown verb (400) — and the verb is
+  #     rejected BEFORE the server id is resolved, so a nonexistent server still yields 400, never 404.
+  #     That ordering is what proves the verb left the closed set rather than merely losing its handler.
   req POST /api/v1/servers/does-not-exist/commands -H 'Content-Type: application/json' -d '{"verb":"open_ports"}'
-  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
-    && ok "open_ports admitted (unknown server → 404, not a 400 unknown-verb)" \
-    || bad "M6·b open_ports verb (code=$CODE body=$BODY)"
+  [[ "$CODE" == 400 ]] && grep -q '"code":"bad_request"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
+    && ok "open_ports refused as an unknown verb (400 before the id is resolved)" \
+    || bad "open_ports must no longer be an admitted verb (code=$CODE body=$BODY)"
 
   # 32. The server DETAIL view carries the `network` block; with no firewall configured it degrades
   #     honestly — firewall:"absent", reachable:null (RESERVED — no upstream prober), and EVERY required
@@ -1001,9 +1003,8 @@ sys.exit(0 if 'network' not in json.load(open('/tmp/kgsm-api-smoke.body')) else 
     ok "/hosts/{id} omits the openPorts grid when firewall absent (honest null, omitted)"
   else bad "M6·b host network omitted (code=$CODE body=$BODY)"; fi
 
-  echo "  (note: the OPERATIONAL firewall path — open/closed verdicts, the open_ports apply + the direct"
-  echo "   network.ports.open audit + the servers/{id}/network verify patch — is a trusted-host live-validate,"
-  echo "   needing the kgsm-firewall daemon + kgsm-group socket access, like M3's mutation happy path)"
+  echo "  (note: the OPERATIONAL firewall path — the open/closed verdicts against a live authority — is a"
+  echo "   trusted-host live-validate, needing the kgsm-firewall daemon + kgsm-group socket access)"
 
   # --- Metrics history: the verbatim proxy to kgsm-monitor (the single source of truth) --------
   echo "==> metrics history checks — GET /{servers,hosts}/{id}/metrics/history (proxy to the monitor)"

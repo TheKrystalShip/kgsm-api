@@ -31,7 +31,7 @@ public sealed class NetworkAggregator(
     ILogger<NetworkAggregator> logger)
 {
     // Bound a detail-view probe so a hung daemon degrades fast (matches the other leaf probes' 2s).
-    // The open_ports WRITE path bounds itself separately (ufw mutation can be slower) — see CommandRunner.
+    // Read-only: the api never writes a firewall rule, so this is the only bound the surface needs.
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
 
     /// <summary>

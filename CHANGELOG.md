@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **The `open_ports` command verb**, its runner, and the `network.ports.open` direct audit write. Ports
+  are opened by the supervisor on an instance's bring-up and released on its stop, so the API has no
+  on-demand open to offer; `POST /servers/{id}/commands` now admits `start`/`stop`/`restart`/`update`
+  only, and an `open_ports` body is refused as an unknown verb before the server id is resolved. The
+  `network.patch` stream frame and the `servers/{id}/network` topic went with it — they existed solely to
+  verify that command, and nothing subscribed. The read surfaces are untouched: the server detail
+  `network` block and the host open-ports grid still report what the firewall holds.
+
+### Changed
+
+- **`network.ports.open` is engine-sourced like every other network action.** With no direct writer left
+  it joins `AuditQueries.EngineSourcedActions`, removing the one documented exception in the
+  audit-sourcing model. Pre-existing local rows for that action are excluded from the feed as frozen
+  history, the same treatment every other engine action's pre-cutover rows already had.
+
+
 ### Added
 - **Four leaf-Overview read endpoints** under the existing Services route, each 404ing when the host
   doesn't serve that leaf and 503ing when it does and the leaf wouldn't answer:
