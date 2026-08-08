@@ -31,11 +31,15 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
     private static async Task<JsonElement> Json(HttpResponseMessage r) =>
         JsonDocument.Parse(await r.Content.ReadAsStringAsync()).RootElement;
 
-    // A fake monitor history client that answers with a fixed body (the verbatim-relay seam).
+    // A fake monitor history client that answers with a fixed body (the verbatim-relay seam). The stats
+    // relay shares the interface but not these tests' subject, so it answers null — the honest "this
+    // monitor wouldn't say", which is what a fake with nothing to report should be.
     private sealed class FakeMonitorHistory(string? json) : IMonitorHistoryClient
     {
         public Task<string?> GetHistoryJsonAsync(string kind, string id, string? range, CancellationToken ct) =>
             Task.FromResult(json);
+
+        public Task<string?> GetStatsJsonAsync(CancellationToken ct) => Task.FromResult<string?>(null);
     }
 
     // --- Auth gate ---

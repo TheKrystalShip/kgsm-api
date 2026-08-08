@@ -17,6 +17,12 @@ public interface IMonitorHistoryClient
     /// when the monitor is unprovisioned, unreachable, slow, or answers non-2xx (honest degrade —
     /// the caller then serves an empty response, never a fabricated curve).</summary>
     Task<string?> GetHistoryJsonAsync(string kind, string id, string? range, CancellationToken ct);
+
+    /// <summary>Fetch the monitor's own self-report (<c>GET /stats</c>) verbatim — what it is sampling
+    /// and what its history store actually holds. Returns <c>null</c> on the same terms as the history
+    /// relay (unprovisioned, unreachable, slow, non-2xx): the caller reports that it could not be read,
+    /// which is a different statement from a monitor that answered with nothing recorded.</summary>
+    Task<string?> GetStatsJsonAsync(CancellationToken ct);
 }
 
 /// <summary>
@@ -183,6 +189,34 @@ public sealed class MonitorClient : IMonitorHistoryClient, IDisposable
         catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
         {
             _logger.LogDebug(ex, "monitor /metrics/history failed");
+            return null;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> GetStatsJsonAsync(CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Monitor))
+            return null; // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            using HttpResponseMessage resp = await _http.GetAsync("/stats", ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("monitor /stats returned {Status}", (int)resp.StatusCode);
+                return null;
+            }
+            return await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("monitor /stats timed out after {Timeout}", ScrapeTimeout);
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "monitor /stats failed");
             return null;
         }
     }

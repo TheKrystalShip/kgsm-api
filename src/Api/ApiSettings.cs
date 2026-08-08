@@ -109,6 +109,13 @@ public sealed class ApiSettings
         Risk = LeafRisk.Wiring, NoDefault = true)]
     public string? SchedulerSocketPath { get; set; }
 
+    /// <summary>kgsm-bot status socket. Blank reports the bot's status surface absent.</summary>
+    /// <panel>The Discord bot's status socket, which the Services page reads its gateway and channel
+    /// state from. Empty means the bot page shows systemd liveness only.</panel>
+    [LeafField("botSocket", "Discord bot socket", Group = "leaves", Type = LeafType.Path,
+        Risk = LeafRisk.Wiring, NoDefault = true)]
+    public string? BotSocketPath { get; set; }
+
 
     // ── KGSM engine ──────────────────────────────────────────────────────
     /// <summary>Path to the host's kgsm entrypoint. Blank is a misconfiguration, not a capability toggle.</summary>

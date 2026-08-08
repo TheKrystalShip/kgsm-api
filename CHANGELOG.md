@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Four leaf-Overview read endpoints** under the existing Services route, each 404ing when the host
+  doesn't serve that leaf and 503ing when it does and the leaf wouldn't answer:
+  - `GET /hosts/{id}/services/scheduler/schedules` — the scheduler's whole board, relayed as the leaf
+    computes it (this API re-derives no fire time).
+  - `GET /hosts/{id}/services/watchdog/supervision` — the supervision table joined with the persisted
+    boot-autostart set and the supervisor's own readiness, through kgsm-lib's `IWatchdogClient`.
+  - `GET /hosts/{id}/services/monitor/stats` — the monitor's self-report, relayed verbatim.
+  - `GET /hosts/{id}/services/bot/status` — the Discord bot's gateway, guild and channel state,
+    relayed verbatim.
+- `BotClient` — reads kgsm-bot's NDJSON status socket, registered only when `Api__BotSocketPath` is
+  configured (the same opt-in shape as the scheduler).
+- `Api__BotSocketPath` settings key.
+
 ### Changed — the leaf command manifest is keyed by gate (schemaVersion 2)
 
 A leaf's commands do not necessarily share one gate: the assistant's `/autorun` needs admin while the

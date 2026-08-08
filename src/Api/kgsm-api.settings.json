@@ -43,6 +43,8 @@
       "FirewallSocketPath": "",
       // kgsm-scheduler status socket. Blank reports the scheduler absent.
       "SchedulerSocketPath": "",
+      // kgsm-bot status socket. Blank leaves the bot page with systemd liveness only.
+      "BotSocketPath": "",
 
       // ── KGSM engine ──
       // Path to the host's kgsm entrypoint. Blank is a misconfiguration, not a capability toggle.

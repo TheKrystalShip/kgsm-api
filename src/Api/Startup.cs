@@ -185,6 +185,12 @@ public class Startup(IConfiguration configuration)
         if (apiOptions.SchedulerProvisioned)
             services.AddSingleton<SchedulerClient>();
 
+        // The Discord bot's status socket, opt-in on exactly the same terms as the scheduler's: a host
+        // that configures no path registers no client, and the Services page falls back to systemd
+        // liveness alone rather than reporting a bot that is perpetually unreachable.
+        if (apiOptions.BotStatusProvisioned)
+            services.AddSingleton<BotClient>();
+
         // Always registered: it degrades to firewall:"absent"/null when not provisioned, so the
         // server/host aggregators can depend on it unconditionally.
         services.AddSingleton<NetworkAggregator>();

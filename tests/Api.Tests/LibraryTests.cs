@@ -291,7 +291,7 @@ public sealed class LibraryAggregatorTests
     {
         HostId = "test", HostLabel = "test",
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
-        FirewallSocketPath = "", SchedulerSocketPath = "", KgsmPath = "", KgsmJournalDir = "/var/lib/kgsm/events",
+        FirewallSocketPath = "", SchedulerSocketPath = "", BotSocketPath = "", KgsmPath = "", KgsmJournalDir = "/var/lib/kgsm/events",
         BlueprintCacheTtlSeconds = 60,
         InstanceCacheTtlSeconds = 60,
         LogSources = [], JournalctlPath = "journalctl", SystemctlPath = "systemctl", LogReadTimeoutMs = 5000,

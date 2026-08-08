@@ -119,6 +119,9 @@ public sealed class ApiOptions
     /// </summary>
     public required string SchedulerSocketPath { get; init; }
 
+    /// <summary>kgsm-bot's status socket; blank when this host serves no bot status surface.</summary>
+    public required string BotSocketPath { get; init; }
+
     /// <summary>
     /// Path to the host's <c>kgsm.sh</c> entrypoint — the single C#↔engine chokepoint kgsm-lib
     /// shells (instances, run-state). Default: the AUR-packaged symlink <c>/usr/bin/kgsm</c>.
@@ -224,6 +227,9 @@ public sealed class ApiOptions
     /// <see cref="SchedulerSocketPath"/>). When false the scheduler leaf is absent — its capability renders
     /// absent and <c>nextFireUtc</c> is null on the settings surface, never an error.</summary>
     public bool SchedulerProvisioned => !string.IsNullOrWhiteSpace(SchedulerSocketPath);
+
+    /// <summary>The bot publishes a status socket on this host (config-based, like the scheduler).</summary>
+    public bool BotStatusProvisioned => !string.IsNullOrWhiteSpace(BotSocketPath);
 
     /// <summary>
     /// Whether the kgsm engine is configured (a non-empty <see cref="KgsmPath"/>). Unlike a leaf
@@ -439,6 +445,7 @@ public sealed class ApiOptions
         $"{ApiSettings.Section}__{nameof(ApiSettings.MonitorSocketPath)}" => MonitorSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.WatchdogSocketPath)}" => WatchdogSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerSocketPath)}" => SchedulerSocketPath,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.BotSocketPath)}" => BotSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantBaseUrl)}" => AssistantBaseUrl,
         $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantPublicUrl)}" => AssistantPublicUrl,
         $"{ApiSettings.Section}__{nameof(ApiSettings.FirewallSocketPath)}" => FirewallSocketPath,
@@ -765,6 +772,7 @@ public sealed class ApiOptions
             // Opt-in (blank = absent): the scheduler is a separate optional leaf. Set it to
             // /run/kgsm-scheduler/status.sock on a host that runs kgsm-scheduler.
             SchedulerSocketPath = Defaulted(s.SchedulerSocketPath, ""),
+            BotSocketPath = Defaulted(s.BotSocketPath, ""),
             KgsmPath = Defaulted(s.KgsmPath, "/usr/bin/kgsm"),
             KgsmJournalDir = Defaulted(s.KgsmJournalDir, "/var/lib/kgsm/events"),
             DbPath = BlankFallback(s.DbPath, "kgsm-api.db"),
