@@ -669,7 +669,7 @@ public sealed class ClusterSsoTests
             HttpResponseMessage sessionResp = await clientB.SendAsync(sessionRequest);
             Assert.Equal(HttpStatusCode.OK, sessionResp.StatusCode);
             JsonElement sessionBody = await Json(sessionResp);
-            Assert.Equal($"discord:{FakeDiscordResolver.Identity.UserId}",
+            Assert.Equal(FakeDiscordResolver.Identity.Handle,
                 sessionBody.GetProperty("user").GetProperty("id").GetString());
         }
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }

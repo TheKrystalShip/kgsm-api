@@ -58,7 +58,7 @@ public sealed class SessionRotationTests(AuthTestFactory factory) : IClassFixtur
         MintedToken r0 = tokens.MintRefresh(FakeDiscordResolver.Identity, KgsmTier.Operator, sid);
         DateTimeOffset created = DateTimeOffset.UtcNow.AddMinutes(-1);   // LastSeen must visibly advance
         DateTimeOffset shortExpires = DateTimeOffset.UtcNow.AddDays(10);
-        await store.CreateAsync(sid, $"discord:{FakeDiscordResolver.Identity.UserId}", opts.HostId,
+        await store.CreateAsync(sid, FakeDiscordResolver.Identity.Handle, opts.HostId,
             created, shortExpires, userAgent: null, initialJti: r0.Jti, CancellationToken.None);
 
         HttpResponseMessage resp = await PostRefresh(Bearer(r0.Token));

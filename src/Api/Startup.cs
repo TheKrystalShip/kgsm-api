@@ -492,12 +492,11 @@ public class Startup(IConfiguration configuration)
         // so no new client. The self/* exposing endpoints live on PeersController (no extra service).
         services.AddSingleton<ClusterPeerRelay>();
 
-        // Auth — Discord per-host, Model A. The Discord seam (IDiscordDirectory, from
-        // TheKrystalShip.KGSM.Auth.Discord) keeps everything that talks to discord.com behind one
-        // interface shared with every other KGSM surface, so the whole 401/403/tier matrix is testable
-        // in-process with a fake and no two surfaces can resolve a person differently. The token
-        // service mints/validates the host-scoped JWTs; the tier handler grants a hierarchical
-        // viewer/operator/admin policy from the 'tier' claim.
+        // Auth — per-host, Model A. The sign-in seam (ISignInService, from TheKrystalShip.KGSM.Auth)
+        // keeps the login behind one interface shared with every other KGSM surface, so the whole
+        // 401/403/tier matrix is testable in-process with a fake and no two surfaces can resolve a
+        // person differently. The token service mints/validates the host-scoped JWTs; the tier handler
+        // grants a hierarchical viewer/operator/admin policy from the 'tier' claim.
         services.AddSingleton<ISessionTokenService>(sp => new SessionTokenService(
             sp.GetRequiredService<ApiOptions>().ToSessionTokenOptions(),
             sp.GetRequiredService<ILogger<SessionTokenService>>()));
@@ -525,8 +524,29 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton(sp => new KgsmRoleMap(
             sp.GetRequiredService<ApiOptions>().RoleAdminIds,
             sp.GetRequiredService<ApiOptions>().RoleOperatorIds));
-        services.AddHttpClient<IDiscordDirectory, DiscordDirectory>(
-            c => c.Timeout = TimeSpan.FromSeconds(10));
+        // Discord answers both halves of a sign-in on this host: it verifies who someone is
+        // (IIdentityProvider) and, from their guild roles, what they may do (IAuthorityProvider). One
+        // client registration, surfaced under both seams so they resolve to the same instance — and
+        // so changing where authority comes from is a change to one line here rather than to the
+        // controller. SignInService is the composition the login path actually depends on.
+        // Discord answers both halves of a sign-in on this host: it verifies who someone is
+        // (IIdentityProvider) and, from their guild roles, what they may do (IAuthorityProvider).
+        // Registering the two separately is what makes changing where authority comes from a change to
+        // one line here rather than to the login path.
+        //
+        // Everything stays TRANSIENT, like the typed client it wraps. Holding a typed HttpClient in a
+        // singleton pins one handler for the process lifetime, so the factory's rotation — and with it
+        // DNS refresh — silently stops. The composition resolves the client ONCE and hands the same
+        // instance to both halves, so a single sign-in makes its identity and authority calls on one
+        // client rather than opening a second.
+        services.AddHttpClient<DiscordDirectory>(c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddTransient<IIdentityProvider>(sp => sp.GetRequiredService<DiscordDirectory>());
+        services.AddTransient<IAuthorityProvider>(sp => sp.GetRequiredService<DiscordDirectory>());
+        services.AddTransient<ISignInService>(sp =>
+        {
+            DiscordDirectory discord = sp.GetRequiredService<DiscordDirectory>();
+            return new SignInService(discord, discord);
+        });
         services.AddSingleton<IAuthorizationHandler, TierAuthorizationHandler>();
 
         // Auth is ON by default; Api__AuthDisabled=true swaps the default scheme for a synthetic-admin

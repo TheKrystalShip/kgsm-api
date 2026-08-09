@@ -67,7 +67,7 @@ public sealed class MeController(AppDbContext db) : ControllerBase
             .ToList();
 
         return new MeResponse(
-            new SessionUser($"discord:{id.UserId}", id.Username, id.Display, id.AvatarUrl),
+            new SessionUser(id.Handle, id.Username, id.Display, id.AvatarUrl),
             KgsmTiers.ToWire(SessionClaims.ReadTier(ci)),
             id.Scopes,
             recentLogins);

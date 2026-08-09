@@ -20,20 +20,22 @@ using TheKrystalShip.KGSM.Auth.Sessions;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// Auth — Discord per-host, Model A (architecture.html §3·f, keystone O5). Identity is a global
-/// Discord SSO anchor; authorization is a short-lived host-scoped JWT this host mints after verifying
-/// identity once (<c>/users/@me</c>, then the Discord token is discarded) and resolving the role via
-/// the host's bot. Stateless — no user row, no session table (the M4 bearer decision).
+/// Auth — per-host, Model A (architecture.html §3·f, keystone O5). Identity is a global SSO anchor at
+/// whichever provider this host signs people in through; authorization is a short-lived host-scoped
+/// JWT this host mints after verifying identity once (the provider's token is then discarded) and
+/// resolving the tier. The two halves are separate seams — <see cref="SignInService"/> composes an
+/// identity provider with an authority provider — so this controller names neither and works the same
+/// whichever pair a host is wired with. Stateless — no user row (the M4 bearer decision).
 /// <para>
-/// <b>M4·a built:</b> the JWT mint/refresh/session/logout machinery + the verdict logic, all behind
-/// the <see cref="IDiscordDirectory"/> seam (fake-tested). <b>M4·b (live):</b> the real Discord
-/// code exchange + bot-token role lookup, validated once on the trusted host when the Discord app /
-/// bot token / guild / role-map are supplied — until then the login endpoints 503.
+/// The mint/refresh/session/logout machinery and the verdict logic sit entirely above the sign-in
+/// seams, so the whole 401/403/tier matrix is exercised in-process against a fake and no test needs
+/// to reach a provider. The login endpoints answer <c>503</c> until this host is configured with an
+/// application, a role-lookup credential and a role map.
 /// </para>
 /// </summary>
 [ApiController]
 public sealed class AuthController(
-    IDiscordDirectory discord,
+    ISignInService signIn,
     ISessionTokenService tokens,
     SessionStore sessions,
     ISessionValidator sessionValidator,
@@ -83,7 +85,7 @@ public sealed class AuthController(
         OAuthHandshake handshake = OAuthHandshake.Create();
         Response.Cookies.Append(StateCookie, handshake.ToCookieValue(), StateCookieOptions());
         // Only the challenge travels — the verifier stays in the cookie, never in a URL.
-        string url = discord.BuildAuthorizeUrl(handshake.State, handshake.CodeChallenge, prompt ?? "none");
+        string url = signIn.BuildAuthorizeUrl(handshake.State, handshake.CodeChallenge, prompt ?? "none");
         return Redirect(url);
     }
 
@@ -120,14 +122,16 @@ public sealed class AuthController(
         ResolvedPrincipal? resolved;
         try
         {
-            resolved = await discord.ResolveAsync(code, handshake.CodeVerifier, ct);
+            resolved = await signIn.ResolveAsync(code, handshake.CodeVerifier, ct);
         }
-        catch (DiscordAuthException ex)
+        catch (KgsmAuthProviderException ex)
         {
-            // Couldn't reach/parse Discord — an honest upstream error, NEVER a default grant.
-            logger.LogWarning(ex, "Discord auth exchange failed.");
+            // Couldn't reach/parse the provider — an honest upstream error, NEVER a default grant.
+            // Caught as the neutral type: whichever half of the sign-in failed, identity or authority,
+            // the answer to the browser is the same and this API has no verdict to report.
+            logger.LogWarning(ex, "{Provider} auth exchange failed.", signIn.Provider);
             return Fail(StatusCodes.Status502BadGateway, "auth_provider_error",
-                "Could not complete authentication with Discord.");
+                "Could not complete authentication with the identity provider.");
         }
 
         // The code couldn't be exchanged into a verified identity (bad/expired/reused).
@@ -135,7 +139,7 @@ public sealed class AuthController(
             return Fail(StatusCodes.Status401Unauthorized, "login_required",
                 "The authorization code was invalid or expired.");
 
-        string userHandle = $"discord:{resolved.Identity.UserId}";
+        string userHandle = resolved.Identity.Handle;
 
         // Verified identity, but no role on this host -> terminal 403 (never auto-re-authed).
         if (resolved.Tier == KgsmTier.None)
@@ -254,8 +258,12 @@ public sealed class AuthController(
         // peer asserted, never denied outright for a merely-unparseable string).
         KgsmTier parsedTier = KgsmTiers.Parse(body.Tier);
         KgsmTier tier = parsedTier == KgsmTier.None ? KgsmTier.Viewer : parsedTier;
-        string userHandle = $"discord:{body.DiscordId}";
-        var identity = new DiscordIdentity(body.DiscordId, body.Username, body.DisplayName, null, Array.Empty<string>());
+        // The vouch wire names Discord explicitly (`discordId`) because that is the only provider a
+        // peer can vouch for today; the identity is built provider-qualified so nothing downstream —
+        // the token subject, the session row's key — has to know that.
+        var identity = new KgsmIdentity(
+            KgsmActorProvider.Discord, body.DiscordId, body.Username, body.DisplayName, null, []);
+        string userHandle = identity.Handle;
 
         // Mirror Callback's mint+persist sequence exactly (same jti choice, same expiry choice): a
         // fresh sid, both tokens minted carrying it, the refresh's jti stored as the row's initial
@@ -351,7 +359,7 @@ public sealed class AuthController(
 
         // Built from the CALLER'S CLAIMS, never body — body carries only nodeId (see the XML doc above).
         var reqBody = new ClusterSessionRequest(
-            caller.UserId, caller.Username, caller.Display, KgsmTiers.ToWire(SessionClaims.ReadTier(ci)));
+            caller.Subject, caller.Username, caller.Display, KgsmTiers.ToWire(SessionClaims.ReadTier(ci)));
 
         HttpClient http = httpClientFactory.CreateClient(OutboxDrainer.HttpClientName);
         HttpResponseMessage response;
@@ -481,14 +489,14 @@ public sealed class AuthController(
     [HttpGet("/auth/session")]
     public ActionResult<SessionResponse> Session()
     {
-        DiscordIdentity? id = User.Identity is System.Security.Claims.ClaimsIdentity ci
+        KgsmIdentity? id = User.Identity is System.Security.Claims.ClaimsIdentity ci
             ? SessionClaims.ReadIdentity(ci)
             : null;
         if (id is null)
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no session");
 
         return new SessionResponse(
-            new SessionUser($"discord:{id.UserId}", id.Username, id.Display, id.AvatarUrl),
+            new SessionUser(id.Handle, id.Username, id.Display, id.AvatarUrl),
             id.Scopes);
     }
 
@@ -575,7 +583,7 @@ public sealed class AuthController(
     // posture elsewhere in Meta. `peerNode` (the cluster SSO vouch) is the analogous additive: the
     // vouching peer's node id, when present, so a vouched login's audit row still names which node
     // asserted the identity.
-    private async Task RecordAuthAsync(string action, DiscordIdentity id, KgsmTier tier, string summary,
+    private async Task RecordAuthAsync(string action, KgsmIdentity id, KgsmTier tier, string summary,
         string? sid, string? userAgent, CancellationToken ct, string? peerNode = null, string origin = AuditOrigin.Ui)
     {
         try
@@ -590,7 +598,7 @@ public sealed class AuthController(
             await audit.AppendAsync(new AuditWrite(
                 Ts: DateTimeOffset.UtcNow,
                 Origin: origin,
-                Actor: new AuditActor(ActorKind.User, id.Username, ActorProvider.Discord),
+                Actor: new AuditActor(ActorKind.User, id.Username, id.Provider),
                 Action: action,
                 Severity: AuditSeverity.Info,
                 Target: null,

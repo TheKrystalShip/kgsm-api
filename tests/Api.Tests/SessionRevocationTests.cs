@@ -70,9 +70,10 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
         var store = factory.Services.GetRequiredService<SessionStore>();
         var opts = factory.Services.GetRequiredService<ApiOptions>();
         string sid = "sid_test_other_" + Guid.NewGuid().ToString("N");
-        var identity = new DiscordIdentity(discordUserId, discordUserId, discordUserId, null, []);
+        var identity = new KgsmIdentity(
+            KgsmActorProvider.Discord, discordUserId, discordUserId, discordUserId, null, []);
         MintedToken minted = tokens.MintAccess(identity, tier, sid);
-        store.CreateAsync(sid, $"discord:{discordUserId}", opts.HostId,
+        store.CreateAsync(sid, identity.Handle, opts.HostId,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(opts.SessionsRefreshAbsoluteDays),
             userAgent: null, initialJti: minted.Jti, CancellationToken.None).GetAwaiter().GetResult();
         return (minted.Token, sid);

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The login path no longer names an identity provider.** `AuthController` depends on the shared
+  `ISignInService` and reports an upstream failure as `KgsmAuthProviderException` → `502`, so changing
+  where this host verifies identity or resolves authority is a change to the DI registration rather
+  than to the controller. Discord still answers both halves and remains the only configured provider.
+- **Identity is `KgsmIdentity`**, and the `discord:<id>` handle is built by the identity rather than
+  interpolated at seven call sites. Token subjects, session-row keys and audit actors are unchanged
+  string-for-string, so live sessions survive the upgrade.
+- An audit row records the provider that actually verified the actor instead of assuming Discord.
+
 ### Added
 
 - **Backup deletion** — `DELETE /servers/{id}/backups/{backupId}` (operator) removes one snapshot and

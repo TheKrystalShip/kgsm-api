@@ -83,7 +83,7 @@ public sealed class SessionController(
         if (User.Identity is not ClaimsIdentity ci || SessionClaims.ReadIdentity(ci) is not { } caller)
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no session");
 
-        string callerUserId = $"discord:{caller.UserId}";
+        string callerUserId = caller.Handle;
         KgsmTier tier = SessionClaims.ReadTier(ci);
         string? callerSid = SessionClaims.ReadSessionId(ci);
 
@@ -118,7 +118,7 @@ public sealed class SessionController(
         if (User.Identity is not ClaimsIdentity ci || SessionClaims.ReadIdentity(ci) is not { } caller)
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no session");
 
-        string callerUserId = $"discord:{caller.UserId}";
+        string callerUserId = caller.Handle;
         string? callerSid = SessionClaims.ReadSessionId(ci);
         bool hasSid = !string.IsNullOrWhiteSpace(body?.Sid);
         bool all = body?.All == true;
@@ -135,7 +135,7 @@ public sealed class SessionController(
             await RecordAsync(AuditAction.AuthSessionRevokeAll, AuditSeverity.Info, ci,
                 $"{caller.Display} logged out everywhere ({revokedSids.Count} session(s))",
                 meta: new Dictionary<string, string> { ["count"] = revokedSids.Count.ToString() }, ct);
-            await FanOutRevokeAllAsync(caller.UserId, ct);
+            await FanOutRevokeAllAsync(caller.Subject, ct);
             return NoContent();
         }
 
@@ -216,12 +216,12 @@ public sealed class SessionController(
                 meta: new Dictionary<string, string> { ["userId"] = userId, ["count"] = revokedSids.Count.ToString() },
                 ct);
 
-        // userId is the prefixed handle (discord:<id>); the cluster payload/handler wants the bare id
-        // (SessionRevokeHandler re-adds the prefix on the receiving end — see FanOutRevokeAllAsync).
-        string rawDiscordId = userId.StartsWith("discord:", StringComparison.Ordinal)
-            ? userId["discord:".Length..]
-            : userId;
-        await FanOutRevokeAllAsync(rawDiscordId, ct);
+        // userId is the provider-qualified handle; the cluster payload carries the bare subject, which
+        // the receiving handler re-qualifies (see FanOutRevokeAllAsync + SessionRevokeHandler). An
+        // unqualified value is passed through as-is rather than rejected — it is already the shape the
+        // payload wants.
+        string subject = KgsmActor.TryParse(userId, out _, out string parsed) ? parsed : userId;
+        await FanOutRevokeAllAsync(subject, ct);
         return NoContent();
     }
 
@@ -232,7 +232,7 @@ public sealed class SessionController(
     private async Task RecordAsync(string action, string severity, ClaimsIdentity ci, string summary,
         IReadOnlyDictionary<string, string> meta, CancellationToken ct)
     {
-        DiscordIdentity? actor = SessionClaims.ReadIdentity(ci);
+        KgsmIdentity? actor = SessionClaims.ReadIdentity(ci);
         if (actor is null)
             return;
         try
@@ -240,7 +240,7 @@ public sealed class SessionController(
             await audit.AppendAsync(new AuditWrite(
                 Ts: DateTimeOffset.UtcNow,
                 Origin: AuditOrigin.Ui,
-                Actor: new AuditActor(ActorKind.User, actor.Username, ActorProvider.Discord),
+                Actor: new AuditActor(ActorKind.User, actor.Username, actor.Provider),
                 Action: action,
                 Severity: severity,
                 Target: null,

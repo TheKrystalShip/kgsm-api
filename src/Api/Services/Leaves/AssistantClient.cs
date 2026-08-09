@@ -19,8 +19,8 @@ namespace TheKrystalShip.Api.Services.Leaves;
 internal static class RelayPrincipals
 {
     /// <summary>The caller as forwarded on their own behalf.</summary>
-    public static RelayPrincipal From(DiscordIdentity identity, KgsmTier tier) =>
-        new(identity.UserId, identity.Display, tier);
+    public static RelayPrincipal From(KgsmIdentity identity, KgsmTier tier) =>
+        new(identity.Subject, identity.Display, tier);
 }
 
 /// <summary>

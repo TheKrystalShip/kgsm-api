@@ -47,7 +47,7 @@ internal static class TestTokens
         var signing = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
         var claims = new List<Claim>
         {
-            new("sub", $"discord:{FakeDiscordResolver.Identity.UserId}"),
+            new("sub", FakeDiscordResolver.Identity.Handle),
             new(KgsmAuthClaims.Tier, KgsmTiers.ToWire(tier)),
             new(KgsmAuthClaims.Host, hostId),
             new(KgsmAuthClaims.TokenKind, KgsmTokenKind.Access),

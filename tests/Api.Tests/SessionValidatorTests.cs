@@ -38,7 +38,7 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
         var opts = services.GetRequiredService<ApiOptions>();
         string sid = "sid_validator_" + Guid.NewGuid().ToString("N");
         MintedToken minted = tokens.MintAccess(FakeDiscordResolver.Identity, tier, sid);
-        store.CreateAsync(sid, $"discord:{FakeDiscordResolver.Identity.UserId}", opts.HostId,
+        store.CreateAsync(sid, FakeDiscordResolver.Identity.Handle, opts.HostId,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(opts.SessionsRefreshAbsoluteDays),
             userAgent: null, initialJti: minted.Jti, CancellationToken.None).GetAwaiter().GetResult();
         return (minted.Token, sid);

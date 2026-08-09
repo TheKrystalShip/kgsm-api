@@ -35,11 +35,21 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
   by the 10-min `SessionCleanupWorker`. A token with no `sid` claim → `401` (no grandfathering).
   `Api__SessionsDisabled=true` makes the whole registry inert — no per-request check, no revoke surface, no GC
   (the stateless-JWT escape hatch).
-- **`IDiscordDirectory` is the seam — the one chokepoint to `discord.com`,** and it lives in
-  `TheKrystalShip.KGSM.Auth.Discord`, shared with every other KGSM surface. Everything that talks to
-  Discord goes through it. **Never** call `discord.com` from anywhere else. This is what makes the
-  whole 401/403/tier matrix testable in-process with a fake (`tests/Api.Tests`), and what keeps two
-  surfaces from resolving the same person differently.
+- **`ISignInService` is the seam the login path depends on**, and it lives in
+  `TheKrystalShip.KGSM.Auth`, shared with every other KGSM surface. It composes two halves that are
+  registered separately here: `IIdentityProvider` (who someone is) and `IAuthorityProvider` (what they
+  may do). `DiscordDirectory` answers both and remains the one chokepoint to `discord.com` — **never**
+  call `discord.com` from anywhere else. The split is what lets this host change where authority comes
+  from without touching the controller; the seam is what makes the whole 401/403/tier matrix testable
+  in-process with a fake (`tests/Api.Tests`) and keeps two surfaces from resolving the same person
+  differently.
+  ⚠ All three registrations are **transient**, matching the typed `HttpClient` underneath. A singleton
+  would pin one handler for the process lifetime and stop `HttpClientFactory` rotating it;
+  `AuthServiceGraphTests.TheSignInGraphIsTransient` is what holds that line.
+- **An identity names its provider.** `KgsmIdentity.Handle` (`provider:subject`) is the token subject,
+  the session-row key and the `userId` on the wire — built by the identity, never interpolated at a
+  call site. For a Discord login it is the same `discord:<id>` string it has always been, so live
+  sessions and stored rows are unaffected by the provider becoming explicit.
 - **The session machinery is the ecosystem's too.** `ISessionTokenService`, `SessionValidator`,
   `SessionCleanupWorker`, `ISessionRegistry` and the claim readers come from
   `TheKrystalShip.KGSM.Auth.Sessions`. `SessionStore` stays here — it IS this API's `ISessionRegistry`
@@ -70,8 +80,8 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
 - **Tier gating** (hierarchical: admin ⊇ operator ⊇ viewer): viewer = reads + the `/stream` WS,
   operator = the command `POST`, admin = diagnostics + reserved (settings/install/audit-config).
   `401` = no/invalid bearer (challenge); `403` = authenticated, tier too low (forbid) — keep that split.
-- **Honest failure modes** (the security analog of never-fabricate-a-status): Discord unreachable →
-  `DiscordAuthException` → `502`, **never a default grant**; `none`/not-in-guild → terminal `403`; a
+- **Honest failure modes** (the security analog of never-fabricate-a-status): the provider unreachable
+  → `KgsmAuthProviderException` → `502`, **never a default grant**; `none`/not-in-guild → terminal `403`; a
   failed role lookup is **never** silently downgraded to a softer tier.
 - **A refresh token is never an access bearer.** `OnTokenValidated` rejects `tkn != "access"` on
   protected calls; only `/auth/session/refresh` reads a refresh token (from the `Authorization` header).

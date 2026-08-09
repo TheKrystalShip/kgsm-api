@@ -79,7 +79,7 @@ public sealed class AssistantController(
         // Forward the verified caller's Discord identity (NEVER client-supplied): the assistant builds
         // its principal from it and keys per-user memory on web:<userId>.
         ClaimsIdentity? ci = User.Identity as ClaimsIdentity;
-        DiscordIdentity? identity = ci is not null ? SessionClaims.ReadIdentity(ci) : null;
+        KgsmIdentity? identity = ci is not null ? SessionClaims.ReadIdentity(ci) : null;
         if (identity is null)
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no verified identity");
 
@@ -192,7 +192,7 @@ public sealed class AssistantController(
             return Error(StatusCodes.Status503ServiceUnavailable, "unavailable", "the assistant is currently unavailable");
 
         ClaimsIdentity? ci = User.Identity as ClaimsIdentity;
-        DiscordIdentity? identity = ci is not null ? SessionClaims.ReadIdentity(ci) : null;
+        KgsmIdentity? identity = ci is not null ? SessionClaims.ReadIdentity(ci) : null;
         if (identity is null)
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no verified identity");
 
@@ -397,7 +397,7 @@ public sealed class AssistantController(
             return Error(StatusCodes.Status503ServiceUnavailable, "unavailable", "the assistant is currently unavailable");
 
         ClaimsIdentity? ci = User.Identity as ClaimsIdentity;
-        DiscordIdentity? identity = ci is not null ? SessionClaims.ReadIdentity(ci) : null;
+        KgsmIdentity? identity = ci is not null ? SessionClaims.ReadIdentity(ci) : null;
         if (identity is null)
             return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no verified identity");
 

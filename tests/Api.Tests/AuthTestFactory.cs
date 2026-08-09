@@ -56,8 +56,8 @@ public class AuthTestFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
-            services.RemoveAll<IDiscordDirectory>();
-            services.AddSingleton<IDiscordDirectory, FakeDiscordResolver>();
+            services.RemoveAll<ISignInService>();
+            services.AddSingleton<ISignInService, FakeDiscordResolver>();
         });
     }
 
@@ -96,7 +96,7 @@ public class AuthTestFactory : WebApplicationFactory<Program>
         // uses at login), so the validator's `Expires > now` check passes. The row's CurrentJti is the
         // MINTED token's jti — so a refresh token from RefreshToken(tier) passes reuse-detection at
         // /auth/session/refresh (the row's stored jti == the presented refresh's jti).
-        store.CreateAsync(sid, $"discord:{FakeDiscordResolver.Identity.UserId}", opts.HostId,
+        store.CreateAsync(sid, FakeDiscordResolver.Identity.Handle, opts.HostId,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(opts.SessionsRefreshAbsoluteDays),
             userAgent: null, initialJti: minted.Jti, CancellationToken.None).GetAwaiter().GetResult();
         return minted.Token;
