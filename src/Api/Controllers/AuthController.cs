@@ -30,13 +30,14 @@ namespace TheKrystalShip.Api.Controllers;
 /// <para>
 /// The mint/refresh/session/logout machinery and the verdict logic sit entirely above the sign-in
 /// seams, so the whole 401/403/tier matrix is exercised in-process against a fake and no test needs
-/// to reach a provider. The login endpoints answer <c>503</c> until this host is configured with an
-/// application, a role-lookup credential and a role map.
+/// to reach a provider. Which provider a login runs through is a route value resolved against
+/// <see cref="IAuthProviderCatalog"/>, so this controller names none of them; one this host does not
+/// offer answers <c>503</c>, the same as one nobody has heard of.
 /// </para>
 /// </summary>
 [ApiController]
 public sealed class AuthController(
-    ISignInService signIn,
+    IAuthProviderCatalog providers,
     UserDirectory users,
     ISessionTokenService tokens,
     SessionStore sessions,
@@ -72,18 +73,31 @@ public sealed class AuthController(
     private static readonly TimeSpan StateTtl = TimeSpan.FromMinutes(10);
 
     /// <summary>
-    /// Begin the OAuth bounce — 302 to Discord's authorize URL (the API owns client id / redirect /
-    /// scopes). <c>prompt=none</c> is silent SSO; the client retries with <c>consent</c> on
-    /// <c>login_required</c>. Sets the one-time CSRF state cookie verified at the callback. 503 until
-    /// Discord is configured (M4·b).
+    /// The providers this host can sign somebody in through, in the order a login page should offer
+    /// them. Anonymous by necessity — it is read by a browser with no session, to decide which
+    /// buttons to draw.
+    /// </summary>
+    /// <remarks>
+    /// Reports the <em>configured</em> set only, so a button is never drawn for a bounce that would
+    /// <c>503</c>. That a host is wired to a given provider is inferable anyway by asking its
+    /// <c>/start</c> and reading the refusal, so naming them here discloses nothing new.
+    /// </remarks>
+    [AllowAnonymous]
+    [HttpGet("/auth/providers")]
+    public IActionResult Providers() => Ok(new AuthProvidersResponse(providers.Configured));
+
+    /// <summary>
+    /// Begin the OAuth bounce — 302 to the provider's authorize URL (the API owns client id /
+    /// redirect / scopes). <c>prompt=none</c> is silent SSO; the client retries with <c>consent</c>
+    /// on <c>login_required</c>. Sets the one-time CSRF state cookie verified at the callback.
+    /// <c>503</c> for a provider this host does not offer.
     /// </summary>
     [AllowAnonymous]
-    [HttpGet("/auth/discord/start")]
-    public IActionResult Start([FromQuery] string? prompt)
+    [HttpGet("/auth/{provider}/start")]
+    public IActionResult Start(string provider, [FromQuery] string? prompt)
     {
-        if (!options.DiscordConfigured)
-            return Error(StatusCodes.Status503ServiceUnavailable, "auth_unconfigured",
-                "Discord auth is not configured on this host.");
+        if (providers.SignIn(provider) is not { } signIn)
+            return Unoffered(provider);
 
         OAuthHandshake handshake = OAuthHandshake.Create();
         Response.Cookies.Append(StateCookie, handshake.ToCookieValue(), StateCookieOptions());
@@ -91,6 +105,15 @@ public sealed class AuthController(
         string url = signIn.BuildAuthorizeUrl(handshake.State, handshake.CodeChallenge, prompt ?? "none");
         return Redirect(url);
     }
+
+    /// <summary>
+    /// A provider this host cannot sign anyone in through. One answer for an application it holds
+    /// none of and for a name nothing has ever registered: both are "this host does not offer that",
+    /// and a 404 for the second would let the set of providers a build knows about be probed.
+    /// </summary>
+    private IActionResult Unoffered(string provider) =>
+        Error(StatusCodes.Status503ServiceUnavailable, "auth_unconfigured",
+            $"Signing in with {provider} is not configured on this host.");
 
     /// <summary>
     /// The OAuth landing — exchange the code, verify identity, resolve the tier, mint the bearer.
@@ -104,12 +127,13 @@ public sealed class AuthController(
     /// </list>
     /// </summary>
     [AllowAnonymous]
-    [HttpGet("/auth/discord/callback")]
-    public async Task<IActionResult> Callback([FromQuery] string? code, [FromQuery] string? state, CancellationToken ct)
+    [HttpGet("/auth/{provider}/callback")]
+    public async Task<IActionResult> Callback(
+        string provider, [FromQuery] string? code, [FromQuery] string? state, CancellationToken ct)
     {
-        if (!options.DiscordConfigured)
+        if (providers.SignIn(provider) is not { } signIn)
             return Fail(StatusCodes.Status503ServiceUnavailable, "auth_unconfigured",
-                "Discord auth is not configured on this host.");
+                $"Signing in with {provider} is not configured on this host.");
 
         // CSRF gate: the state Discord echoes back must equal the one issued to THIS browser. The
         // cookie is one-time — clear it whatever the outcome (no replay). A missing cookie

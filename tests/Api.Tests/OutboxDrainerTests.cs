@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.Auth;
 using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -292,7 +293,7 @@ public sealed class OutboxDrainerTests
         DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000, UpdateCheckPollMs = 600000,
 
 
-        AuthDisabled = true, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
+        AuthDisabled = true, SigningKey = "", OAuth = new KgsmAuthOptions(),
         DiscordRedirectUri = "", AuthFrontendUrl = "",
         SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
 

@@ -104,13 +104,16 @@ public class LeafDescriptorSelfTests
 
     /// <summary>The env-var spelling of every property the API binds.</summary>
     /// <summary>
-    /// The properties of the shared <c>KgsmAuth</c> block that <em>this</em> surface reads. The type
-    /// carries more — the guild, the bot token and the role ids — and they belong to kgsm-bot, the one
-    /// surface that authorizes from a guild role because it has no login of its own. Declaring one
-    /// here would put a knob on this leaf's configuration page that binds to a property nothing on
-    /// this host reads.
+    /// The keys of the shared <c>KgsmAuth</c> block that <em>this</em> surface's descriptor declares.
     /// </summary>
-    private static readonly string[] SharedAuthKeysThisApiReads = ["ClientId", "ClientSecret"];
+    /// <remarks>
+    /// Written out rather than derived from the type, because the section binds a <em>map</em> of
+    /// applications keyed by provider name — there is no property per provider to reflect over, which
+    /// is exactly what lets a host be wired to another one with no rebuild here. What belongs in this
+    /// list is what an operator can set from this leaf's configuration page.
+    /// </remarks>
+    private static readonly string[] SharedAuthKeysThisApiReads =
+        ["Providers__discord__ClientId", "Providers__discord__ClientSecret"];
 
     /// <summary>
     /// Every key the settings file can bind, across BOTH bound types. The <c>Api</c> section is this
@@ -121,9 +124,7 @@ public class LeafDescriptorSelfTests
     private static HashSet<string> SettingsPropertyKeys() =>
     [
         .. typeof(ApiSettings).GetProperties().Select(p => $"{ApiSettings.Section}__{p.Name}"),
-        .. typeof(KgsmAuthOptions).GetProperties()
-            .Where(p => p.CanWrite && SharedAuthKeysThisApiReads.Contains(p.Name))
-            .Select(p => $"{KgsmAuthOptions.Section}__{p.Name}"),
+        .. SharedAuthKeysThisApiReads.Select(k => $"{KgsmAuthOptions.Section}__{k}"),
     ];
 
     /// <summary>The declared value of one <c>Api</c> key, rendered the way a descriptor default is
@@ -322,7 +323,7 @@ public class LeafDescriptorSelfTests
         string[] mustBeSecret =
         [
             "Api__SigningKey",
-            "KgsmAuth__ClientSecret",
+            "KgsmAuth__Providers__discord__ClientSecret",
             "Api__AssistantRelaySecret",
             "Api__ClusterSecret",
             "Api__ClusterSecretPrevious",

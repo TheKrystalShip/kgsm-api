@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.74.1</Version>
+    <Version>0.75.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -150,8 +150,8 @@
          so this API and kgsm-bot forward identity and authority through one implementation rather
          than two that can come to disagree about who someone is. -->
     <PackageReference Include="TheKrystalShip.Kgsm.Assistant.Relay" Version="1.0.0" />
-    <PackageReference Include="TheKrystalShip.KGSM.Auth" Version="2.0.0" />
-    <PackageReference Include="TheKrystalShip.KGSM.Auth.Discord" Version="3.0.0" />
+    <PackageReference Include="TheKrystalShip.KGSM.Auth" Version="3.0.0" />
+    <PackageReference Include="TheKrystalShip.KGSM.Auth.Discord" Version="4.0.0" />
     <PackageReference Include="TheKrystalShip.KGSM.Auth.Sessions" Version="2.0.0" />
     <!-- The host's accounts. Deliberately NOT on this API's EF context: the store is a shared host
          file the assistant reads too, and this API's own database is wiped whenever its schema

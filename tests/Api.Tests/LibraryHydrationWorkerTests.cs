@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -330,7 +331,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
         DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000, UpdateCheckPollMs = 600000,
 
 
-        AuthDisabled = true, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
+        AuthDisabled = true, SigningKey = "", OAuth = new KgsmAuthOptions(),
         DiscordRedirectUri = "", AuthFrontendUrl = "",
         SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
         ClusterSecret = "", ClusterSecretPrevious = "", NodeId = "test",

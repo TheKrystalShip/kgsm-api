@@ -124,6 +124,17 @@ public sealed record IdentitiesResponse(
     IReadOnlyList<LinkableProvider> Providers,
     ReauthState Reauth);
 
+/// <summary>
+/// <c>GET /auth/providers</c> — the providers this host can sign somebody in through, in the order a
+/// login page should offer them.
+/// </summary>
+/// <remarks>
+/// Read anonymously, by a browser deciding which buttons to draw. It carries names and nothing else:
+/// what each one is called in a UI, and what its mark looks like, are the client's business, and a
+/// host that shipped labels here would be telling four surfaces how to render.
+/// </remarks>
+public sealed record AuthProvidersResponse(IReadOnlyList<string> Providers);
+
 /// <summary>A provider this host can attach, and whether it is attached already.</summary>
 /// <param name="Configured">
 /// Whether this host is wired to it at all. Unconfigured is not an error and not a failure to report

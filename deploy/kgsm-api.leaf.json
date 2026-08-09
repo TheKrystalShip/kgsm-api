@@ -355,7 +355,7 @@
     },
     {
       "key": "authClientId",
-      "env": "KgsmAuth__ClientId",
+      "env": "KgsmAuth__Providers__discord__ClientId",
       "label": "Discord application id",
       "description": "The Discord application users sign in through. A sign-in proves who someone is; the KGSM account they prove decides what they may do.",
       "group": "auth",
@@ -364,7 +364,7 @@
     },
     {
       "key": "authClientSecret",
-      "env": "KgsmAuth__ClientSecret",
+      "env": "KgsmAuth__Providers__discord__ClientSecret",
       "label": "Discord client secret",
       "description": "Secret for that application, used to complete a sign-in server-side.",
       "group": "auth",

@@ -153,13 +153,28 @@ how long an answer from it is reused). `ApiOptions.FromSettings` is the one plac
 configuration by string key.
 
 **Who someone is comes from a shared application; what they may do comes from their KGSM account.**
-The Discord application lives once, in `/etc/kgsm/discord-auth.env`, bound from the shared `KgsmAuth`
-section that `TheKrystalShip.KGSM.Auth` owns. Every unit loads that file *before* its own env file, so
-a leaf can still override deliberately — and doing so means two surfaces signing people in through
-different applications, so prefer the shared file. The guild, bot token and role ids in that same
-file are **kgsm-bot's** — the one surface that authorizes from a guild role, because it has no login
-of its own — and bind to nothing here. This host's own OAuth callback is **not** shared and stays
-`Api__DiscordRedirectUri`. Authority is the account store (`Api__UsersDbPath`), read on every request.
+The host's OAuth applications live once, in `/etc/kgsm/kgsm-auth.env`, bound from the shared
+`KgsmAuth` section that `TheKrystalShip.KGSM.Auth` owns. They are keyed by provider
+(`KgsmAuth__Providers__discord__ClientId`), so wiring this host to another provider is a pair of
+keys and no rebuild. Every unit loads that file *before* its own env file, so a leaf can still
+override deliberately — and doing so means two surfaces signing people in through different
+applications, so prefer the shared file. Nothing in that file grants anything: authority is the
+account store (`Api__UsersDbPath`), read on every request.
+
+**A provider is a route value, resolved against `IAuthProviderCatalog`** (`Services/Auth/`). It is
+registered once per provider in `Startup`, and that registration is the **only** place this API names
+one — `/auth/{provider}/start|callback` and `/auth/identities/{provider}/start|callback` take the
+name off the route, so adding a provider touches the composition and nothing else. A provider this
+host holds no application for and one nothing has ever registered are the **same answer**, a `503
+auth_unconfigured`, never a 404 — otherwise the set of providers a build knows about could be probed.
+Anonymous `GET /auth/providers` reports the configured set, so the login page draws a button only
+where a bounce would work.
+
+This host's own OAuth callback is **not** shared and stays `Api__DiscordRedirectUri`. Its **origin**
+is what every provider's two callbacks are built from — the paths are this API's own routes, so a
+host's public address is written once and two callbacks cannot name different origins. ⚠ A provider
+accepts only redirect URIs registered on the application, so **both** of a provider's callbacks have
+to be registered with it or linking is refused at the provider, where no log here sees it.
 
 An environment variable **overrides one key** by spelling that key's path with `__`
 (`Api__DomainPollMs`, `Logging__LogLevel__Default`, `Kestrel__Certificates__Default__Path`), and env

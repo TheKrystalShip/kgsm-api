@@ -393,7 +393,7 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
         // The exchange must present the verifier for the challenge sent at /start. If the cookie
         // carried them independently, or the halves came from different handshakes, Discord would
         // reject the exchange in production and nothing here would have noticed.
-        var fake = (FakeDiscordResolver)factory.Services.GetRequiredService<ISignInService>();
+        var fake = factory.Services.GetRequiredService<FakeDiscordResolver>();
         Assert.NotNull(fake.LastCodeVerifier);
 
         string expected = Convert.ToBase64String(

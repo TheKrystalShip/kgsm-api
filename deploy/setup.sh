@@ -87,16 +87,23 @@ if [[ ! -f "$SHARED_AUTH_FILE" ]]; then
     $SUDO install -m 0600 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" /dev/null "$SHARED_AUTH_FILE"
     $SUDO tee "$SHARED_AUTH_FILE" >/dev/null <<'SHARED_AUTH'
 # ── KGSM shared sign-in — read by every surface on this host ──────────────────
-# The Discord application people sign in through. Loaded by each leaf's unit BEFORE its own env
-# file, so a leaf can still override it deliberately — but then two surfaces sign people in through
-# different applications. Prefer changing it here.
+# The OAuth applications people sign in through, keyed by provider. Loaded by each leaf's unit
+# BEFORE its own env file, so a leaf can still override one deliberately — but then two surfaces
+# sign people in through different applications. Prefer changing it here.
+#
+# Wiring this host to another provider is a pair of keys and no rebuild anywhere:
+#   KgsmAuth__Providers__github__ClientId=
+#   KgsmAuth__Providers__github__ClientSecret=
+# Each one also needs BOTH of its callbacks registered on the application — the sign-in
+# (/auth/<provider>/callback) and the account-linking one (/auth/identities/<provider>/callback) —
+# or linking is refused at the provider, before anything here sees it.
 #
 # WHO MAY DO WHAT IS NOT HERE. A sign-in establishes who someone is; what they may do is on their
 # KGSM account, in the account store at /var/lib/kgsm/auth/users.db, and it is set in the Control
 # Panel. No group, guild or role grants anything on any surface.
 
-KgsmAuth__ClientId=
-KgsmAuth__ClientSecret=
+KgsmAuth__Providers__discord__ClientId=
+KgsmAuth__Providers__discord__ClientSecret=
 SHARED_AUTH
     $SUDO chown "${DEPLOY_USER}:${DEPLOY_GROUP}" "$SHARED_AUTH_FILE"
 fi

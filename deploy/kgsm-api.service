@@ -41,7 +41,7 @@ Environment=ASPNETCORE_ENVIRONMENT=Production
 # file below can still override a value deliberately; setting one there is how a host ends up
 # granting the same person different authority on different surfaces, so prefer the shared file.
 # Seeded by deploy/setup.sh; optional, so a host that never provisioned it still starts.
-EnvironmentFile=-/etc/kgsm/discord-auth.env
+EnvironmentFile=-/etc/kgsm/kgsm-auth.env
 EnvironmentFile=-/etc/kgsm-api/kgsm-api.env
 
 # systemd creates these owned by the service user: the DB lives under StateDirectory, the

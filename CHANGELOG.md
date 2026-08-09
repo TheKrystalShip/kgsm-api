@@ -7,8 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A provider catalog** (`Services/Auth/AuthProviderCatalog.cs`) — the identity providers this host
+  can sign somebody in through, registered once each in `Startup` and resolved by name off the
+  route. That registration is the only place this API names a provider; wiring up another touches
+  the composition and nothing else.
+- **`GET /auth/providers`** (anonymous) — the configured providers, in the order a login page should
+  offer them. Read by a browser with no session, so a button is never drawn for a bounce that would
+  503.
+
 ### Changed
 
+- **The auth routes take the provider as a route value**: `/auth/{provider}/start|callback` and
+  `/auth/identities/{provider}/start|callback`. `/auth/discord/callback` matches the new template
+  verbatim, so every redirect URI registered on the Discord application keeps resolving and none has
+  to be re-registered. A provider this host holds no application for and one nothing has ever
+  registered are one answer — `503 auth_unconfigured`, never a 404, so the providers a build knows
+  about cannot be probed.
+- **`Api__DiscordRedirectUri` establishes the host's callback origin**; each provider's two
+  callbacks are built from it against this API's own routes, so a public address is written once and
+  two callbacks cannot name different origins.
+- **`LinkableProvider` on `GET /auth/identities` is projected from the catalog** rather than a
+  hand-written one-element list, so `configured` reports what this host actually holds.
+- Tracks `TheKrystalShip.KGSM.Auth` 3.0.0 / `.Auth.Discord` 4.0.0: the shared `KgsmAuth` section
+  holds applications keyed by provider (`KgsmAuth__Providers__discord__ClientId`).
+- **The shared credentials file is `/etc/kgsm/kgsm-auth.env`** — it holds a host's sign-in
+  applications, which is what it now says.
 - Tracks `TheKrystalShip.KGSM.Auth` 2.0.0, which drops `KgsmRoleMap` and the guild/role/bot-token
   keys off `KgsmAuthOptions` now that no surface derives authority from a Discord role. This API
   already bound only `ClientId`/`ClientSecret`, so nothing here changes behaviour; `setup.sh` no

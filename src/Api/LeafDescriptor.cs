@@ -63,10 +63,10 @@ using TheKrystalShip.KGSM.LeafConfig;
 // offer an operator a knob that changes nothing here. This host's own callback URL is not among them
 // either — it is per-surface, and stays on the Api section.
 
-[assembly: LeafFrameworkField("authClientId", "KgsmAuth__ClientId", "Discord application id",
+[assembly: LeafFrameworkField("authClientId", "KgsmAuth__Providers__discord__ClientId", "Discord application id",
     Description = "The Discord application users sign in through. A sign-in proves who someone is; the KGSM account they prove decides what they may do.",
     Group = "auth", Risk = LeafRisk.Wiring, NoDefault = true)]
 
-[assembly: LeafFrameworkField("authClientSecret", "KgsmAuth__ClientSecret", "Discord client secret",
+[assembly: LeafFrameworkField("authClientSecret", "KgsmAuth__Providers__discord__ClientSecret", "Discord client secret",
     Description = "Secret for that application, used to complete a sign-in server-side.",
     Group = "auth", Type = LeafType.Secret, Risk = LeafRisk.Wiring, NoDefault = true)]

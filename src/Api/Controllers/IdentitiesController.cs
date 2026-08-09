@@ -39,7 +39,7 @@ namespace TheKrystalShip.Api.Controllers;
 [ApiController]
 public sealed class IdentitiesController(
     UserDirectory users,
-    [FromKeyedServices(IdentitiesController.LinkProviderKey)] IIdentityProvider provider,
+    IAuthProviderCatalog providers,
     ReauthGate reauth,
     LinkTicketStore tickets,
     SessionStore sessions,
@@ -48,13 +48,6 @@ public sealed class IdentitiesController(
     AuditService audit,
     ILogger<IdentitiesController> logger) : ControllerBase
 {
-    /// <summary>
-    /// The identity provider configured for the link callback rather than the login one. Discord
-    /// requires the redirect URI at the exchange to match the one at the bounce, so the whole flow
-    /// runs on one instance that names this host's <c>/auth/identities/discord/callback</c>.
-    /// </summary>
-    public const string LinkProviderKey = "identity-link";
-
     /// <summary>
     /// The in-flight link cookie — set at <c>/start</c>, consumed at <c>/callback</c>. It carries an
     /// opaque ticket and nothing else: which account is being changed stays server-side, because a
@@ -129,26 +122,27 @@ public sealed class IdentitiesController(
     }
 
     /// <summary>
-    /// <c>POST /auth/identities/discord/start</c> — begin attaching a Discord account.
+    /// <c>POST /auth/identities/{provider}/start</c> — begin attaching an account at that provider.
     /// <list type="bullet">
     /// <item><c>200</c> <see cref="LinkStartResponse"/> — the authorize URL to send the browser to,
     /// with the one-time ticket cookie set alongside it.</item>
     /// <item><c>403</c> <c>reauth_required</c> — this session has not proved a credential recently.</item>
-    /// <item><c>409</c> <c>already_linked</c> — a Discord account is attached already. Detach it
-    /// first, so swapping one for another is two deliberate acts rather than a silent replacement.</item>
-    /// <item><c>503</c> <c>auth_unconfigured</c> — this host has no Discord application.</item>
+    /// <item><c>409</c> <c>already_linked</c> — an account at that provider is attached already.
+    /// Detach it first, so swapping one for another is two deliberate acts rather than a silent
+    /// replacement.</item>
+    /// <item><c>503</c> <c>auth_unconfigured</c> — this host does not offer that provider.</item>
     /// </list>
     /// </summary>
     [Authorize(Policy = AuthPolicy.Viewer)]
-    [HttpPost("/auth/identities/discord/start")]
-    public async Task<IActionResult> StartLink(CancellationToken ct)
+    [HttpPost("/auth/identities/{provider}/start")]
+    public async Task<IActionResult> StartLink(string provider, CancellationToken ct)
     {
         if (Unavailable() is { } unavailable)
             return unavailable;
 
-        if (!options.DiscordConfigured)
+        if (providers.Link(provider) is not { } identityProvider)
             return Error(StatusCodes.Status503ServiceUnavailable, "auth_unconfigured",
-                "Discord is not configured on this host.");
+                $"Connecting a {provider} account is not configured on this host.");
 
         if (await CallerAccountAsync(ct) is not { } account)
             return NoAccount();
@@ -157,10 +151,15 @@ public sealed class IdentitiesController(
         if (!reauth.IsFresh(sid))
             return ReauthRequired();
 
+        // One account per provider, per KGSM account. The store's own constraint is stricter in a
+        // different direction — an identity belongs to exactly one account, table-wide — so it would
+        // let somebody attach a second GitHub account here and never say which one signs them in.
         IReadOnlyList<UserCredential> credentials = await users.Store.ListCredentialsAsync(account.UserId, ct);
-        if (credentials.Any(c => c.Kind == CredentialKind.Identity && Provider(c.Handle) == KgsmActorProvider.Discord))
+        if (credentials.Any(c =>
+                c.Kind == CredentialKind.Identity
+                && string.Equals(Provider(c.Handle), identityProvider.Provider, StringComparison.OrdinalIgnoreCase)))
             return Error(StatusCodes.Status409Conflict, "already_linked",
-                "A Discord account is already connected. Disconnect it first.");
+                $"A {identityProvider.Provider} account is already connected. Disconnect it first.");
 
         OAuthHandshake handshake = OAuthHandshake.Create();
         string ticket = tickets.Issue(account.UserId, sid ?? string.Empty, handshake);
@@ -170,16 +169,16 @@ public sealed class IdentitiesController(
         // choosing WHICH account, and a silent bounce would attach whichever one that browser happens
         // to be signed into without ever showing them which.
         return Ok(new LinkStartResponse(
-            provider.BuildAuthorizeUrl(handshake.State, handshake.CodeChallenge, "consent")));
+            identityProvider.BuildAuthorizeUrl(handshake.State, handshake.CodeChallenge, "consent")));
     }
 
     /// <summary>
-    /// <c>GET /auth/identities/discord/callback</c> — where Discord returns the browser, attaching the
-    /// verified identity to the account that started the link.
+    /// <c>GET /auth/identities/{provider}/callback</c> — where the provider returns the browser,
+    /// attaching the verified identity to the account that started the link.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Anonymous by necessity: this is a top-level navigation from discord.com and a bearer does not
+    /// Anonymous by necessity: this is a top-level navigation from the provider and a bearer does not
     /// survive one. What authorizes it is the ticket — issued to a session that had proved a credential
     /// minutes ago, single-use, and holding the account id server-side so the browser never carries it.
     /// </para>
@@ -190,9 +189,9 @@ public sealed class IdentitiesController(
     /// </para>
     /// </remarks>
     [AllowAnonymous]
-    [HttpGet("/auth/identities/discord/callback")]
+    [HttpGet("/auth/identities/{provider}/callback")]
     public async Task<IActionResult> CompleteLink(
-        [FromQuery] string? code, [FromQuery] string? state, CancellationToken ct)
+        string provider, [FromQuery] string? code, [FromQuery] string? state, CancellationToken ct)
     {
         string? cookie = Request.Cookies[TicketCookie];
         if (cookie is not null)
@@ -210,14 +209,18 @@ public sealed class IdentitiesController(
             return LinkFailed(StatusCodes.Status502BadGateway, "authority_unavailable",
                 users.UnavailableReason ?? "The KGSM account store is unavailable on this host.");
 
+        if (providers.Link(provider) is not { } identityProvider)
+            return LinkFailed(StatusCodes.Status503ServiceUnavailable, "auth_unconfigured",
+                $"Connecting a {provider} account is not configured on this host.");
+
         KgsmIdentity? verified;
         try
         {
-            verified = await provider.VerifyAsync(code, ticket.Handshake.CodeVerifier, ct);
+            verified = await identityProvider.VerifyAsync(code, ticket.Handshake.CodeVerifier, ct);
         }
         catch (KgsmAuthProviderException ex)
         {
-            logger.LogWarning(ex, "{Provider} link exchange failed.", provider.Provider);
+            logger.LogWarning(ex, "{Provider} link exchange failed.", identityProvider.Provider);
             return LinkFailed(StatusCodes.Status502BadGateway, "auth_provider_error",
                 "Could not complete authentication with the identity provider.");
         }
@@ -359,10 +362,10 @@ public sealed class IdentitiesController(
             credentials.Any(c => c.Kind == CredentialKind.Password && c.Secret is not null),
             identities,
             [
-                new LinkableProvider(
-                    KgsmActorProvider.Discord,
-                    options.DiscordConfigured,
-                    identities.Any(i => i.Provider == KgsmActorProvider.Discord)),
+                .. providers.Registered.Select(p => new LinkableProvider(
+                    p,
+                    Configured: providers.IsConfigured(p),
+                    Linked: identities.Any(i => string.Equals(i.Provider, p, StringComparison.OrdinalIgnoreCase)))),
             ],
             new ReauthState(freshUntil is not null, freshUntil, (int)reauth.Window.TotalMinutes));
     }

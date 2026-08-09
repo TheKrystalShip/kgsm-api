@@ -20,22 +20,33 @@ namespace TheKrystalShip.Api.Tests;
 public sealed class AuthServiceGraphTests
 {
     /// <summary>
-    /// The production graph, with exactly one setting pinned.
+    /// The production graph on a host wired to a provider — no fake anywhere.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// ⚠ <c>Api:UsersDbPath</c> defaults to <c>/var/lib/kgsm/auth/users.db</c> — the HOST's real account
     /// store, shared with every KGSM service on the box — and resolving <c>UserDirectory</c> opens it,
     /// which creates it. A graph test must not hand the operator a live accounts file nobody made, so
-    /// this one setting is redirected and nothing else is. Everything the tests below assert is built
-    /// exactly as production builds it.
+    /// it is redirected.
+    /// </para>
+    /// <para>
+    /// The application and the redirect URI are pinned because a host with neither offers no provider
+    /// at all, which is a real state with its own test below — but not the one that proves the real
+    /// provider is constructible. Everything else is built exactly as production builds it.
+    /// </para>
     /// </remarks>
-    private static WebApplicationFactory<Program> RealGraph(string? usersDbPath = null) =>
+    private static WebApplicationFactory<Program> RealGraph(
+        string? usersDbPath = null, bool wired = true) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {
                     ["Api:UsersDbPath"] = usersDbPath
                         ?? Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-users-{Guid.NewGuid():N}.db"),
+                    ["KgsmAuth:Providers:discord:ClientId"] = wired ? "graph-client" : "",
+                    ["KgsmAuth:Providers:discord:ClientSecret"] = wired ? "graph-secret" : "",
+                    ["Api:DiscordRedirectUri"] =
+                        wired ? "https://host.test/auth/discord/callback" : "",
                 })));
 
     [Fact]
@@ -72,26 +83,64 @@ public sealed class AuthServiceGraphTests
         using WebApplicationFactory<Program> factory = RealGraph();
         using IServiceScope scope = factory.Services.CreateScope();
 
-        ISignInService signIn = scope.ServiceProvider.GetRequiredService<ISignInService>();
+        ISignInService signIn = Assert.IsType<SignInService>(
+            scope.ServiceProvider.GetRequiredService<IAuthProviderCatalog>()
+                .SignIn(KgsmActorProvider.Discord));
 
         Assert.Equal(KgsmActorProvider.Discord, signIn.Provider);
         // Exercise it far enough to touch every injected dependency; building the URL reads the
-        // options, the endpoints and nothing over the network.
+        // application, the endpoints and nothing over the network.
         Assert.StartsWith("https://discord.com/api/oauth2/authorize", signIn.BuildAuthorizeUrl("s", "c", "none"));
+    }
+
+    [Fact]
+    public void TheTwoFlowsGoToTwoDifferentCallbacks()
+    {
+        // A sign-in and an attach end differently, so they run against different redirect URIs — and
+        // every provider requires the URI at the exchange to match the one at the bounce. Two flows
+        // that named one address would fail at the provider, where no log here would see it.
+        using WebApplicationFactory<Program> factory = RealGraph();
+        using IServiceScope scope = factory.Services.CreateScope();
+        IAuthProviderCatalog catalog = scope.ServiceProvider.GetRequiredService<IAuthProviderCatalog>();
+
+        string login = catalog.SignIn(KgsmActorProvider.Discord)!.BuildAuthorizeUrl("s", "c", "none");
+        string link = catalog.Link(KgsmActorProvider.Discord)!.BuildAuthorizeUrl("s", "c", "consent");
+
+        Assert.Contains(Uri.EscapeDataString("https://host.test/auth/discord/callback"), login);
+        Assert.Contains(Uri.EscapeDataString("https://host.test/auth/identities/discord/callback"), link);
     }
 
     [Fact]
     public void TheTwoHalvesOfTheSignInComeFromTwoDifferentPlaces()
     {
-        // The whole shape of the model, in two lines. Discord says who someone is; the account store
-        // says what they may do, and it is the only thing that ever does. Resolving each on its own
-        // also proves the registrations are satisfiable — a half nothing supplies is a 500 on the
+        // The whole shape of the model, in two lines. A provider says who someone is; the account
+        // store says what they may do, and it is the only thing that ever does. Resolving each on its
+        // own also proves the registrations are satisfiable — a half nothing supplies is a 500 on the
         // first login, and no other test constructs these.
         using WebApplicationFactory<Program> factory = RealGraph();
         using IServiceScope scope = factory.Services.CreateScope();
 
-        Assert.IsType<DiscordDirectory>(scope.ServiceProvider.GetRequiredService<IIdentityProvider>());
+        Assert.IsType<DiscordDirectory>(
+            scope.ServiceProvider.GetRequiredService<IAuthProviderCatalog>().Link(KgsmActorProvider.Discord));
         Assert.IsType<DirectoryAuthority>(scope.ServiceProvider.GetRequiredService<IAuthorityProvider>());
+    }
+
+    [Fact]
+    public void AHostWiredToNoProviderOffersNone()
+    {
+        // Not a failure to start: password sign-in still works, and the endpoints that would bounce a
+        // browser answer 503 rather than 500. A provider with no application and one nothing has ever
+        // registered are the same answer here.
+        using WebApplicationFactory<Program> factory = RealGraph(wired: false);
+        using IServiceScope scope = factory.Services.CreateScope();
+        IAuthProviderCatalog catalog = scope.ServiceProvider.GetRequiredService<IAuthProviderCatalog>();
+
+        Assert.Empty(catalog.Configured);
+        Assert.Null(catalog.SignIn(KgsmActorProvider.Discord));
+        Assert.Null(catalog.SignIn("nobody-has-heard-of-this"));
+        // Still registered, though — what this host COULD offer is a different question from what it
+        // does, and the Settings page draws on the difference.
+        Assert.Equal([KgsmActorProvider.Discord], catalog.Registered);
     }
 
     [Fact]
@@ -110,16 +159,17 @@ public sealed class AuthServiceGraphTests
     }
 
     [Fact]
-    public void TheSignInGraphIsTransient()
+    public void TheSignInGraphIsBuiltFresh()
     {
-        // A typed HttpClient held in a singleton pins one handler forever, so HttpClientFactory stops
-        // rotating and a DNS change never lands. This is the assertion that keeps someone from
-        // "optimising" the sign-in registrations to singletons later.
+        // A typed HttpClient held for the life of the process pins one handler, so HttpClientFactory
+        // stops rotating and a DNS change never lands. This is the assertion that keeps someone from
+        // "optimising" the catalog into handing out one cached provider later.
         using WebApplicationFactory<Program> factory = RealGraph();
         using IServiceScope scope = factory.Services.CreateScope();
+        IAuthProviderCatalog catalog = scope.ServiceProvider.GetRequiredService<IAuthProviderCatalog>();
 
         Assert.NotSame(
-            scope.ServiceProvider.GetRequiredService<ISignInService>(),
-            scope.ServiceProvider.GetRequiredService<ISignInService>());
+            catalog.SignIn(KgsmActorProvider.Discord),
+            catalog.SignIn(KgsmActorProvider.Discord));
     }
 }

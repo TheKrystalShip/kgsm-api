@@ -1,5 +1,6 @@
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
+using TheKrystalShip.Api.Services.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -87,4 +88,26 @@ public sealed class FakeDiscordResolver : ISignInService, IIdentityProvider
 
     private static Task<ResolvedPrincipal?> Ok(KgsmIdentity identity, KgsmTier tier) =>
         Task.FromResult<ResolvedPrincipal?>(new ResolvedPrincipal(identity, tier));
+}
+
+/// <summary>
+/// A host wired to Discord and to nothing else, with <see cref="FakeDiscordResolver"/> behind it.
+/// </summary>
+/// <remarks>
+/// It answers for exactly one provider, so a test asking for any other gets the same
+/// <see langword="null"/> the real catalog gives for a provider a host does not offer — which is what
+/// lets the "unoffered provider" cases be exercised without unconfiguring the suite.
+/// </remarks>
+public sealed class FakeAuthProviderCatalog(FakeDiscordResolver resolver) : IAuthProviderCatalog
+{
+    public IReadOnlyList<string> Configured => [KgsmActorProvider.Discord];
+
+    public IReadOnlyList<string> Registered => [KgsmActorProvider.Discord];
+
+    public bool IsConfigured(string provider) =>
+        string.Equals(provider, KgsmActorProvider.Discord, StringComparison.OrdinalIgnoreCase);
+
+    public ISignInService? SignIn(string provider) => IsConfigured(provider) ? resolver : null;
+
+    public IIdentityProvider? Link(string provider) => IsConfigured(provider) ? resolver : null;
 }

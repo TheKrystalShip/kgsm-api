@@ -596,12 +596,20 @@ public sealed class ApiOptions
     /// logged loudly). Set a stable secret on a real host.</summary>
     public required string SigningKey { get; init; }
 
-    /// <summary>Discord OAuth application client id (<c>KgsmAuth__ClientId</c>).</summary>
-    public required string DiscordClientId { get; init; }
-    /// <summary>Discord OAuth application client secret (<c>KgsmAuth__ClientSecret</c>).</summary>
-    public required string DiscordClientSecret { get; init; }
-    /// <summary>The host's OAuth redirect URI — this host's <c>/auth/discord/callback</c>
-    /// (<c>Api__DiscordRedirectUri</c>).</summary>
+    /// <summary>
+    /// The OAuth applications this host signs people in through, by provider name
+    /// (<c>KgsmAuth__Providers__&lt;name&gt;__ClientId</c>). Shared with every other surface on the
+    /// host, so one file points all of them at the same applications.
+    /// </summary>
+    public required KgsmAuthOptions OAuth { get; init; }
+
+    /// <summary>
+    /// This host's own sign-in callback (<c>Api__DiscordRedirectUri</c>) — the address a provider
+    /// returns a browser to. Its <b>origin</b> is what every provider's two callbacks are built from
+    /// (<see cref="LoginRedirectUri"/>, <see cref="LinkRedirectUri"/>): the paths belong to this
+    /// API's own routes, so there is one place a host's public address is written and no way for two
+    /// callbacks to name different origins.
+    /// </summary>
     public required string DiscordRedirectUri { get; init; }
 
     /// <summary>
@@ -737,32 +745,45 @@ public sealed class ApiOptions
     public bool SessionsProvisioned => SessionsEnabled;
 
     /// <summary>
-    /// Whether the Discord OAuth flow can run — the application's client id and secret, and this
-    /// host's own redirect URI. That is the whole of what signing someone in through Discord needs:
-    /// no guild, and no bot token, because a login establishes who someone is and the account store
-    /// alone says what they may do. Auth (JWT validation, tier gates) is enforced regardless; this
-    /// gates the <em>login</em> and <em>linking</em> endpoints, which 503 when unconfigured.
+    /// Whether a sign-in through <paramref name="provider"/> can run here — an application for it,
+    /// and this host's own public address. That is the whole of what signing someone in needs: no
+    /// group and no role, because a login establishes who someone is and the account store alone
+    /// says what they may do.
     /// </summary>
-    public bool DiscordConfigured =>
-        !string.IsNullOrWhiteSpace(DiscordClientId)
-        && !string.IsNullOrWhiteSpace(DiscordClientSecret)
-        && !string.IsNullOrWhiteSpace(DiscordRedirectUri);
+    /// <remarks>
+    /// Auth (JWT validation, tier gates) is enforced regardless; this gates the <em>login</em> and
+    /// <em>linking</em> endpoints, which 503 when a provider is not configured. A provider this host
+    /// has no application for and one it has never heard of answer the same, so a caller asks this
+    /// and never whether the name is known.
+    /// </remarks>
+    public bool ProviderConfigured(string provider) =>
+        OAuth.For(provider).Configured && !string.IsNullOrWhiteSpace(DiscordRedirectUri);
+
+    /// <summary>Where <paramref name="provider"/> returns a browser that is <em>signing in</em>.</summary>
+    public string LoginRedirectUri(string provider) => CallbackUri($"/auth/{provider}/callback");
 
     /// <summary>
-    /// Where Discord returns a browser that is <em>attaching</em> an account rather than signing in —
-    /// this host's <c>/auth/identities/discord/callback</c>, derived from
-    /// <see cref="DiscordRedirectUri"/> so the two can never name different origins.
+    /// Where <paramref name="provider"/> returns a browser that is <em>attaching</em> an account
+    /// rather than signing in.
     /// </summary>
     /// <remarks>
     /// A separate address because the two flows end differently: one mints a session, the other
-    /// attaches a credential to an account that already exists. ⚠ Discord accepts only redirect URIs
-    /// registered on the application, so <b>this one has to be registered alongside the login
-    /// callback</b> or a link is refused at discord.com before it starts. That refusal is loud and
+    /// attaches a credential to an account that already exists. ⚠ A provider accepts only redirect
+    /// URIs registered on the application, so <b>this one has to be registered alongside the login
+    /// callback</b> or a link is refused at the provider before it starts. That refusal is loud and
     /// names the URI.
     /// </remarks>
-    public string DiscordLinkRedirectUri =>
-        Uri.TryCreate(DiscordRedirectUri, UriKind.Absolute, out Uri? login)
-            ? new Uri(login, "/auth/identities/discord/callback").ToString()
+    public string LinkRedirectUri(string provider) =>
+        CallbackUri($"/auth/identities/{provider}/callback");
+
+    /// <summary>
+    /// One of this host's callbacks, on the origin <see cref="DiscordRedirectUri"/> establishes. The
+    /// path is this API's own route rather than anything configured, so a host's public address is
+    /// written once and every provider's two callbacks agree on it by construction.
+    /// </summary>
+    private string CallbackUri(string path) =>
+        Uri.TryCreate(DiscordRedirectUri, UriKind.Absolute, out Uri? configured)
+            ? new Uri(configured, path).ToString()
             : string.Empty;
 
     /// <summary>Whether the OAuth callback redirects the session back to the SPA (fragment handoff)
@@ -808,11 +829,9 @@ public sealed class ApiOptions
     public static ApiOptions FromSettings(
         ApiSettings s, MetricsThresholdPolicy policy, KgsmAuthOptions? auth = null)
     {
-        // The Discord application is the ECOSYSTEM's, not this API's — the assistant beside us signs
-        // people in through the same one — so it arrives from the shared KgsmAuth section. The
-        // redirect URI is not among them: each surface has its own callback. The guild, the bot token
-        // and the role ids in that same section belong to kgsm-bot and are not read here, because a
-        // guild role is not an answer to what anyone may do on this host.
+        // The OAuth applications are the ECOSYSTEM's, not this API's — the assistant beside us signs
+        // people in through the same ones — so they arrive from the shared KgsmAuth section. The
+        // redirect URI is not among them: each surface has its own callback.
         auth ??= new KgsmAuthOptions();
         string hostId = Clean(s.HostId) ?? Environment.MachineName;
 
@@ -944,8 +963,7 @@ public sealed class ApiOptions
             // Auth. On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = s.AuthDisabled ?? false,
             SigningKey = Defaulted(s.SigningKey, ""),
-            DiscordClientId = auth.ClientId,
-            DiscordClientSecret = auth.ClientSecret,
+            OAuth = auth,
             DiscordRedirectUri = Defaulted(s.DiscordRedirectUri, ""),
             AuthFrontendUrl = Defaulted(s.AuthFrontendUrl, ""),
             // Blank falls back to the shared host location rather than to a file beside this API's

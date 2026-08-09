@@ -181,20 +181,26 @@
       "CorsOrigins": ""
   },
 
-  // ── Who may do what, shared across every surface on this host ────────────────────────────
-  // The Discord application, the guild, the role-lookup token and the role map are the ECOSYSTEM's,
-  // not this API's: the Discord bot and the assistant authorize against the same values, and setting
-  // them per-leaf is how one person ends up with different authority depending on which surface they
-  // reach KGSM through. On a provisioned host these arrive from /etc/kgsm/discord-auth.env, which
-  // every leaf's unit loads first, and a per-leaf env file can still override deliberately.
-  // Only the application is declared here: signing someone in establishes who they are, and the KGSM
-  // account they prove says what they may do. The guild, the bot token and the role ids in that same
-  // shared file belong to kgsm-bot — a Discord surface with no login of its own — and bind to nothing
-  // here. Owned by TheKrystalShip.KGSM.Auth. This host's own callback URL is NOT here — it is
-  // per-surface, and stays as Api:DiscordRedirectUri.
+  // ── How somebody proves who they are, shared across every surface on this host ────────────
+  // The OAuth applications are the ECOSYSTEM's, not this API's: the Discord bot and the assistant
+  // sign people in through the same ones, and setting them per-leaf is how one person ends up
+  // proving a different identity depending on which surface they reach KGSM through. On a
+  // provisioned host they arrive from /etc/kgsm/kgsm-auth.env, which every leaf's unit loads first,
+  // and a per-leaf env file can still override deliberately.
+  //
+  // Keyed by provider: wiring this host to another one is a pair of keys
+  // (KgsmAuth__Providers__github__ClientId) and no rebuild. Only the applications are here —
+  // signing someone in establishes who they are, and the KGSM account they prove says what they may
+  // do, so nothing in this block grants anything. Owned by TheKrystalShip.KGSM.Auth. This host's own
+  // callback URL is NOT here — it is per-surface, and stays as Api:DiscordRedirectUri, whose origin
+  // every provider's callbacks are built from.
   "KgsmAuth": {
-    "ClientId": "",
-    "ClientSecret": ""
+    "Providers": {
+      "discord": {
+        "ClientId": "",
+        "ClientSecret": ""
+      }
+    }
   },
 
   "MetricsThresholds": {

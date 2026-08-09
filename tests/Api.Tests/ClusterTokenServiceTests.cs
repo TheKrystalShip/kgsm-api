@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.Auth;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -34,7 +35,7 @@ public sealed class ClusterTokenServiceTests
         LeafOverridesDir = "/tmp/kgsm-api-test-overrides", LeafApplyCanaryMs = 15000,
         LeafDescriptorDir = "/tmp/kgsm-api-test-descriptors", LeafDropInDir = "/tmp/kgsm-api-test-dropins",
         DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000, UpdateCheckPollMs = 600000,
-        AuthDisabled = false, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
+        AuthDisabled = false, SigningKey = "", OAuth = new KgsmAuthOptions(),
         DiscordRedirectUri = "", AuthFrontendUrl = "",
         SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
         ClusterSecret = secret, ClusterSecretPrevious = previousSecret, NodeId = nodeId,

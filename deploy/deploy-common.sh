@@ -132,7 +132,7 @@ LEAF_DESCRIPTOR_DIR="${KGSM_LEAF_DESCRIPTOR_DIR:-/var/lib/kgsm/leaves}"
 # Where this host declares who may do what — the Discord app, guild, role-lookup token and role map
 # every KGSM surface authorizes against. One file, so a person cannot hold different authority on
 # different surfaces. Each unit loads it before its own env file; setup.sh seeds it blank.
-SHARED_AUTH_FILE="${KGSM_SHARED_AUTH_FILE:-/etc/kgsm/discord-auth.env}"
+SHARED_AUTH_FILE="${KGSM_SHARED_AUTH_FILE:-/etc/kgsm/kgsm-auth.env}"
 
 # Where this host keeps its KGSM accounts — the store every surface on the box reads directly, so
 # one person is one account whichever door they come through. A directory of its own rather than a
