@@ -1,10 +1,11 @@
 # CLAUDE.md — Services/Auth/
 
-Auth — **Discord per-host, Model A** (`architecture.html §3·f`, keystone O5). Identity is a
-global Discord SSO anchor; **authorization is a short-lived host-scoped bearer** this host mints
-after verifying identity once and resolving the role via the host's bot. Built at **M4·a**; the
-authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This file is the local
-"what you must not break."
+Auth — **per-host, Model A** (`architecture.html §3·f`, keystone O5). **Identity** is proved either by
+a KGSM password or by an external provider used as an SSO anchor; **authority** is the tier on the
+caller's KGSM account, read from the host's shared account store. The bearer is a short-lived
+host-scoped JWT this host mints after verifying identity once. The authority for the contract is
+`PLAN.md §6` (auth row) + `§8`, and for the identity model `../auth-internal-users-plan.md`. This
+file is the local "what you must not break."
 
 ## Locked decisions (do not relitigate)
 
@@ -36,16 +37,20 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
   `Api__SessionsDisabled=true` makes the whole registry inert — no per-request check, no revoke surface, no GC
   (the stateless-JWT escape hatch).
 - **`ISignInService` is the seam the login path depends on**, and it lives in
-  `TheKrystalShip.KGSM.Auth`, shared with every other KGSM surface. It composes two halves that are
-  registered separately here: `IIdentityProvider` (who someone is) and `IAuthorityProvider` (what they
-  may do). `DiscordDirectory` answers both and remains the one chokepoint to `discord.com` — **never**
-  call `discord.com` from anywhere else. The split is what lets this host change where authority comes
-  from without touching the controller; the seam is what makes the whole 401/403/tier matrix testable
-  in-process with a fake (`tests/Api.Tests`) and keeps two surfaces from resolving the same person
-  differently.
-  ⚠ All three registrations are **transient**, matching the typed `HttpClient` underneath. A singleton
-  would pin one handler for the process lifetime and stop `HttpClientFactory` rotating it;
-  `AuthServiceGraphTests.TheSignInGraphIsTransient` is what holds that line.
+  `TheKrystalShip.KGSM.Auth`, shared with every other KGSM surface. It composes two halves registered
+  separately here, and **they come from two different places**: `IIdentityProvider` is
+  `DiscordDirectory` (who someone is, and the one chokepoint to `discord.com` — **never** call
+  `discord.com` from anywhere else), and `IAuthorityProvider` is the account store (what they may
+  do). A guild role is a fact about a chat server, not about this host: it is read once by
+  `kgsm-api user seed-discord` and never on a request. The seam is what makes the whole 401/403/tier
+  matrix testable in-process with a fake (`tests/Api.Tests`) and keeps two surfaces from resolving
+  the same person differently.
+  ⚠ The Discord registrations stay **transient**, matching the typed `HttpClient` underneath. A
+  singleton would pin one handler for the process lifetime and stop `HttpClientFactory` rotating it;
+  `AuthServiceGraphTests.TheSignInGraphIsTransient` is what holds that line. The authority half
+  resolves from the singleton `UserDirectory` — one file, one cache — through `DirectoryAuthority`,
+  which exists so the seam is still *resolvable* when the store will not open: a service that cannot
+  be constructed takes down the endpoints whose job is to report the problem.
 - **An identity names its provider.** `KgsmIdentity.Handle` (`provider:subject`) is the token subject,
   the session-row key and the `userId` on the wire — built by the identity, never interpolated at a
   call site. For a Discord login it is the same `discord:<id>` string it has always been, so live
@@ -64,11 +69,29 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
   come from `TheKrystalShip.KGSM.Auth`; this project keeps only `AuthPolicy` (ASP.NET policy names)
   and `TierAuthorizationHandler` (how this surface enforces them). There is no local tier enum to
   drift.
-- **Roles come from the bot token, by doc mandate.** `GET /guilds/{guild}/members/{user}` with the
-  **bot token** — the only path, because the `identify guilds` user scopes don't carry roles
-  (`architecture.html:570`). The Discord app/bot-token/guild/role-map are **shared external config**
-  (the same values the host's Discord bot uses) — **NOT a process dependency on kgsm-bot** (keystone
-  §4). Hold our own copy in config; never reach into the bot.
+- **Authority is resolved per request, from the account store, and the `tier` claim is not trusted.**
+  `LiveAuthority` runs on the JwtBearer `OnTokenValidated` event and replaces the minted claim with
+  what the account says today, so disable, demote and revoke are one mechanism: change the record,
+  and the next request reads the record. The claim stays on the token as a display hint the SPA can
+  render before its first call. `Api__AuthorityCacheSeconds` (default 5) is the only staleness left
+  in the model, and is therefore the demotion lag.
+  ⚠ Three outcomes, kept apart: a **disabled** account fails authentication (its live sessions end);
+  an identity with **no account** is a stranger holding `none` (a real answer — the session stands and
+  every gate refuses it); an **unreadable store** answers `502 authority_unavailable` via
+  `OnChallenge` — never a `401`, which would send a browser to a sign-in that reads the same file, and
+  never the token's own tier, which would let a demoted admin stay one for the length of the outage.
+- **Roles come from the bot token when a seed asks for them**, and only then.
+  `GET /guilds/{guild}/members/{user}` with the **bot token** — the only path, because the
+  `identify guilds` user scopes don't carry roles (`architecture.html:570`). The Discord
+  app/bot-token/guild/role-map are **shared external config** (the same values the host's Discord bot
+  uses) — **NOT a process dependency on kgsm-bot** (keystone §4). Hold our own copy in config; never
+  reach into the bot.
+- **A verified identity with no account here is provisioned, not denied.** It gets an unapproved
+  account and a real session holding `none`, so a surface can say "awaiting approval" rather than
+  showing somebody who just proved who they are a bare `403`. That is an unauthenticated write
+  surface, so it is capped (`Api__PendingUserCap`) with an expiry (`Api__PendingUserTtlDays`) that
+  only ever removes an account which arrived this way, is still unapproved, and has no password.
+  The terminal `403` is now a fact about the account (switched off), never about a guild.
 - **Auth is ON by default.** `Api__AuthDisabled=true` swaps in `DisabledAuthHandler` (synthetic
   admin — the pre-M4 open window), loudly logged. Never enable it on an exposed host.
 
@@ -80,9 +103,11 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
 - **Tier gating** (hierarchical: admin ⊇ operator ⊇ viewer): viewer = reads + the `/stream` WS,
   operator = the command `POST`, admin = diagnostics + reserved (settings/install/audit-config).
   `401` = no/invalid bearer (challenge); `403` = authenticated, tier too low (forbid) — keep that split.
-- **Honest failure modes** (the security analog of never-fabricate-a-status): the provider unreachable
-  → `KgsmAuthProviderException` → `502`, **never a default grant**; `none`/not-in-guild → terminal `403`; a
-  failed role lookup is **never** silently downgraded to a softer tier.
+- **Honest failure modes** (the security analog of never-fabricate-a-status): the identity provider
+  unreachable → `KgsmAuthProviderException` → `502`; the account store unreadable →
+  `502 authority_unavailable`. **Never a default grant, and never a denial either** — "we could not
+  ask" is a third answer and must stay one. A disabled account → terminal `403`; a tier is **never**
+  silently softened to make a request work.
 - **A refresh token is never an access bearer.** `OnTokenValidated` rejects `tkn != "access"` on
   protected calls; only `/auth/session/refresh` reads a refresh token (from the `Authorization` header).
 - **The SSE bearer is a normal `Authorization` header**, so `/stream` authenticates through the standard
@@ -94,7 +119,13 @@ authority for the contract is `PLAN.md §6` (auth row) + `§8` (M4·a log). This
   reactively, so ending a stream on that would churn every client four times an hour and cost the panel
   a visible reconnect each time. A live stream is never torn down for mid-stream token expiry.
 - **`/auth/session` returns the login-time profile snapshot** embedded in the token claims, NOT a live
-  re-fetch — the Discord token is discarded at callback, so "fetched live" can't hold (a §6 divergence).
+  re-fetch — the provider's token is discarded at callback, so "fetched live" can't hold (a §6
+  divergence). The **tier** on `/me` is the exception and is live, because the authority resolution
+  above has already replaced it on the principal.
+- **A peer's cluster vouch carries identity only.** Its asserted tier is deliberately not read: the
+  vouched identity resolves against *this* node's account store, so an admin on one node is not an
+  admin on every node that trusts it. `ClusterSessionRequest.Tier` stays on the wire (renaming it is a
+  cluster-wide version skew) and is ignored.
 
 - **OAuth `state` CSRF (M4·b).** `/start` sets a one-time HttpOnly `state` cookie (`kgsm_oauth_state`);
   `/callback` requires the echoed `state` to equal the cookie (constant-time) *before* any Discord

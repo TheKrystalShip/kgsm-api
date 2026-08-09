@@ -288,32 +288,34 @@ public sealed class UsersControllerTests(AuthTestFactory factory) : IClassFixtur
     {
         // The one change nobody can undo from inside the panel. Both a demotion and a disable get
         // there, so both are guarded — and so is deletion.
+        //
+        // The account under test is the CALLER'S OWN, which is not a shortcut: authority comes from
+        // the store now, so anyone making an admin request is by definition an active admin. "The only
+        // active admin" therefore always means the person holding the mouse.
+        HttpClient admin = Admin();
+        KgsmUser caller = factory.AccountOf(FakeDiscordResolver.Identity)!;
         foreach (KgsmUser other in await Users.Store.ListAsync())
         {
-            if (other.Tier == KgsmTier.Admin && other.Status == UserStatus.Active)
+            if (other.UserId != caller.UserId && other.Tier == KgsmTier.Admin && other.Status == UserStatus.Active)
                 await Users.Store.UpdateAsync(other with { Status = UserStatus.Disabled });
         }
 
-        using HttpResponseMessage created = await Admin()
-            .PostAsJsonAsync("/auth/users", New(Unique("onlyadmin"), KgsmTiers.Admin, Password));
-        UserRecord only = (await created.Content.ReadFromJsonAsync<UserRecord>())!;
-
-        using HttpResponseMessage demote = await Admin().PatchAsJsonAsync(
-            $"/auth/users/{only.Id}", new UpdateUserRequest(null, null, KgsmTiers.Operator, null));
+        using HttpResponseMessage demote = await admin.PatchAsJsonAsync(
+            $"/auth/users/{caller.UserId}", new UpdateUserRequest(null, null, KgsmTiers.Operator, null));
         Assert.Equal(HttpStatusCode.Conflict, demote.StatusCode);
         Assert.Equal("last_admin", await ErrorCode(demote));
 
-        using HttpResponseMessage disable = await Admin().PatchAsJsonAsync(
-            $"/auth/users/{only.Id}", new UpdateUserRequest(null, null, null, UserStatuses.Disabled));
+        using HttpResponseMessage disable = await admin.PatchAsJsonAsync(
+            $"/auth/users/{caller.UserId}", new UpdateUserRequest(null, null, null, UserStatuses.Disabled));
         Assert.Equal(HttpStatusCode.Conflict, disable.StatusCode);
 
-        using HttpResponseMessage delete = await Admin().DeleteAsync($"/auth/users/{only.Id}");
+        using HttpResponseMessage delete = await admin.DeleteAsync($"/auth/users/{caller.UserId}");
         Assert.Equal(HttpStatusCode.Conflict, delete.StatusCode);
 
         // With a second admin in place the same demotion goes through.
         await SeedSpareAdmin();
-        using HttpResponseMessage nowFine = await Admin().PatchAsJsonAsync(
-            $"/auth/users/{only.Id}", new UpdateUserRequest(null, null, KgsmTiers.Operator, null));
+        using HttpResponseMessage nowFine = await admin.PatchAsJsonAsync(
+            $"/auth/users/{caller.UserId}", new UpdateUserRequest(null, null, KgsmTiers.Operator, null));
         Assert.Equal(HttpStatusCode.OK, nowFine.StatusCode);
     }
 

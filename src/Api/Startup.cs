@@ -1,4 +1,5 @@
 using System.Net;
+using System.Security.Claims;
 
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Caching.Memory;
@@ -524,29 +525,6 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton(sp => new KgsmRoleMap(
             sp.GetRequiredService<ApiOptions>().RoleAdminIds,
             sp.GetRequiredService<ApiOptions>().RoleOperatorIds));
-        // Discord answers both halves of a sign-in on this host: it verifies who someone is
-        // (IIdentityProvider) and, from their guild roles, what they may do (IAuthorityProvider). One
-        // client registration, surfaced under both seams so they resolve to the same instance — and
-        // so changing where authority comes from is a change to one line here rather than to the
-        // controller. SignInService is the composition the login path actually depends on.
-        // Discord answers both halves of a sign-in on this host: it verifies who someone is
-        // (IIdentityProvider) and, from their guild roles, what they may do (IAuthorityProvider).
-        // Registering the two separately is what makes changing where authority comes from a change to
-        // one line here rather than to the login path.
-        //
-        // Everything stays TRANSIENT, like the typed client it wraps. Holding a typed HttpClient in a
-        // singleton pins one handler for the process lifetime, so the factory's rotation — and with it
-        // DNS refresh — silently stops. The composition resolves the client ONCE and hands the same
-        // instance to both halves, so a single sign-in makes its identity and authority calls on one
-        // client rather than opening a second.
-        services.AddHttpClient<DiscordDirectory>(c => c.Timeout = TimeSpan.FromSeconds(10));
-        services.AddTransient<IIdentityProvider>(sp => sp.GetRequiredService<DiscordDirectory>());
-        services.AddTransient<IAuthorityProvider>(sp => sp.GetRequiredService<DiscordDirectory>());
-        services.AddTransient<ISignInService>(sp =>
-        {
-            DiscordDirectory discord = sp.GetRequiredService<DiscordDirectory>();
-            return new SignInService(discord, discord);
-        });
         // This host's own accounts. A singleton because it wraps one SQLite file that every request
         // reads — the store opens connections per operation and pools them, so nothing is held. It is
         // NOT on AppDbContext: this API's database is operational state and is wiped whenever its
@@ -554,6 +532,27 @@ public class Startup(IConfiguration configuration)
         // written by a newer sibling on this host); UserDirectory captures that as a capability rather
         // than letting it decide whether the Control Panel starts.
         services.AddSingleton<UserDirectory>();
+
+        // The two halves of a sign-in come from two different places, which is the whole reason they
+        // are separate seams. Discord says WHO someone is (IIdentityProvider) and contributes nothing
+        // else; the account store says what they may DO (IAuthorityProvider), and is the only thing
+        // that ever does. A guild role is not an answer to the second question — it is a fact about a
+        // chat server, read once by `kgsm-api user seed-discord` to decide what tier to write onto an
+        // account, and never consulted on a request.
+        //
+        // The Discord half stays TRANSIENT, like the typed client it wraps. Holding a typed HttpClient
+        // in a singleton pins one handler for the process lifetime, so the factory's rotation — and
+        // with it DNS refresh — silently stops. The authority half is resolved from the singleton
+        // UserDirectory, because it is one file and one cache.
+        services.AddHttpClient<DiscordDirectory>(c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddTransient<IIdentityProvider>(sp => sp.GetRequiredService<DiscordDirectory>());
+        services.AddTransient<IAuthorityProvider, DirectoryAuthority>();
+        services.AddTransient<ISignInService>(sp => new SignInService(
+            sp.GetRequiredService<IIdentityProvider>(),
+            sp.GetRequiredService<IAuthorityProvider>()));
+
+        // Authority on every request, from the store, replacing the tier the token was minted with.
+        services.AddSingleton<LiveAuthority>();
         services.AddSingleton<IAuthorizationHandler, TierAuthorizationHandler>();
 
         // Auth is ON by default; Api__AuthDisabled=true swaps the default scheme for a synthetic-admin
@@ -609,7 +608,43 @@ public class Startup(IConfiguration configuration)
                             .ConfigureAwait(false))
                         {
                             ctx.Fail("session revoked or expired");
+                            return;
                         }
+
+                        // Authority, resolved now rather than read off the token. The `tier` claim
+                        // the token was minted with is replaced with what the account store says
+                        // today, so a demotion lands within the authority cache TTL instead of
+                        // whenever the token happens to rotate, and this API and the assistant beside
+                        // it — which re-derives per request — cannot disagree about the same person.
+                        // A disabled account fails here, which is what makes the switch cut live
+                        // sessions on every surface with no cross-service call.
+                        if (ctx.Principal?.Identity is not ClaimsIdentity claims)
+                        {
+                            ctx.Fail("the bearer carries no claims identity");
+                            return;
+                        }
+
+                        if (await svc.GetRequiredService<LiveAuthority>()
+                            .ApplyAsync(claims, ctx.HttpContext.RequestAborted).ConfigureAwait(false) is { } refusal)
+                        {
+                            ctx.Fail(refusal);
+                        }
+                    },
+
+                    // An unreachable account store is not a bad token. Answering the standard 401
+                    // would send a browser back to a sign-in that reads the same file and fails the
+                    // same way, so the challenge for that one failure is a 502 naming it — the same
+                    // posture as an unreachable identity provider at the callback.
+                    OnChallenge = ctx =>
+                    {
+                        if (ctx.AuthenticateFailure is not AuthorityUnavailableException failure)
+                            return Task.CompletedTask;
+
+                        ctx.HandleResponse();
+                        ctx.Response.StatusCode = StatusCodes.Status502BadGateway;
+                        ctx.Response.ContentType = "application/json";
+                        return ctx.Response.WriteAsJsonAsync(
+                            new ErrorEnvelope(new ErrorBody("authority_unavailable", failure.Message)));
                     },
                 };
             });

@@ -25,8 +25,18 @@ namespace TheKrystalShip.Api.Contracts;
 /// answers "what's active now"); this reads the audit LOG (append-only provenance, answers "what
 /// happened recently", including sessions since revoked or expired).
 /// </remarks>
+/// <param name="Status">
+/// The state of the KGSM account behind the caller: <c>active</c>, <c>pending</c>, or <c>unknown</c>
+/// when this identity proves no account on this host.
+/// </param>
+/// <remarks>
+/// <b><c>status</c> is why a <c>none</c> tier is not one fact.</b> Someone awaiting approval and
+/// someone nothing here has ever heard of both hold <c>none</c>, and a panel owes them different
+/// sentences — one is being told to wait, the other that this is not their host. Reported as
+/// <c>unknown</c> rather than guessed at when the store cannot be read.
+/// </remarks>
 public sealed record MeResponse(SessionUser User, string Tier, IReadOnlyList<string> Scopes,
-    IReadOnlyList<RecentLogin> RecentLogins);
+    IReadOnlyList<RecentLogin> RecentLogins, string Status);
 
 /// <summary>One <c>auth.login</c> audit row, shaped for the <c>/me</c> recent-logins list. <c>Device</c>
 /// is the login's <c>User-Agent</c> header (threaded into the audit row's <c>meta.userAgent</c> at login

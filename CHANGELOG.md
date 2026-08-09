@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Authority comes from the account store, and is resolved on every request.** A guild role is a
+  fact about a chat server, not about this host: Discord now answers only *who* someone is, and what
+  they may do is read off their KGSM account when their token is validated. The `tier` claim the
+  token was minted with becomes a display hint and stops being what any gate trusts, which collapses
+  disable, demote and revoke into one mechanism — change the record, and the next request reads the
+  record. A demotion lands within `Api__AuthorityCacheSeconds` (default 5) instead of whenever the
+  token happens to rotate, and this API and the assistant beside it can no longer disagree about the
+  same person. Disabling an account fails its live sessions outright rather than lowering them.
+- **An unreachable account store answers `502 authority_unavailable`** on every authenticated
+  request — never a `401`, which would send a browser back to a sign-in that reads the same file, and
+  never the token's own tier, which would let a demoted admin stay one for the length of the outage.
+- **The OAuth callback provisions rather than denies.** A verified identity with no account here gets
+  an unapproved one and a real session holding `none`, so a surface can say "awaiting approval"
+  instead of showing somebody who has just proved who they are a bare `403`. The terminal `403` is
+  now a fact about the account (switched off), not about a guild. A host already holding
+  `Api__PendingUserCap` unapproved accounts answers `503 not_accepting_accounts`.
+- **A peer's cluster vouch carries identity only.** Its asserted tier is not read: the vouched
+  identity resolves against *this* node's account store, so an admin on one node is not an admin on
+  every node that trusts it.
+- **`/me` reports the account's `status`** (`active`/`pending`/`unknown`), because a `none` tier is
+  two different facts and a panel owes them different sentences.
+- **`KgsmAuth__RoleAdminIds`/`RoleOperatorIds` are seed input only.** Nothing on the request path
+  reads them.
+
+### Added
+
+- **`kgsm-api user seed-discord`** — gives the Discord identities that have signed in to this host
+  the KGSM accounts their guild roles say they should have, reading the role map one last time and
+  recording the tier with provenance `derived`. It writes nothing without `--apply`, re-running is
+  safe (an identity that already proves an account is left exactly as it is), and an identity Discord
+  will not describe is left alone rather than seeded from a guess.
+- **`Api__AuthorityCacheSeconds`**, **`Api__PendingUserCap`** and **`Api__PendingUserTtlDays`**.
+
 ### Added
 
 - **KGSM owns the accounts.** `POST /auth/login` signs somebody in with a KGSM username and password,

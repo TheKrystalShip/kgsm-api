@@ -94,9 +94,12 @@ public sealed class AuthController(
     /// <summary>
     /// The OAuth landing — exchange the code, verify identity, resolve the tier, mint the bearer.
     /// <list type="bullet">
-    /// <item><c>200</c> <c>{ verdict:"ok", tier, token, refresh, userId }</c> — authorized.</item>
-    /// <item><c>403</c> <c>{ verdict:"denied", userId }</c> — identity verified, no role on this host (terminal).</item>
-    /// <item><c>400</c> — bad/forged state (<c>invalid_state</c>) or missing code · <c>401</c> — bad/expired code · <c>502</c> — Discord unreachable · <c>503</c> — unconfigured.</item>
+    /// <item><c>200</c> <c>{ verdict:"ok", tier, token, refresh, userId }</c> — a session on the account
+    /// this identity proves. <c>tier:"none"</c> is the honest shape for an account still awaiting
+    /// approval: it authenticates, and it may do nothing yet.</item>
+    /// <item><c>403</c> <c>{ verdict:"denied", userId }</c> — identity verified, account switched off
+    /// on this host (terminal).</item>
+    /// <item><c>400</c> — bad/forged state (<c>invalid_state</c>) or missing code · <c>401</c> — bad/expired code · <c>502</c> — Discord or the account store unreachable · <c>503</c> — unconfigured, or already holding as many unapproved accounts as this host will.</item>
     /// </list>
     /// </summary>
     [AllowAnonymous]
@@ -143,8 +146,49 @@ public sealed class AuthController(
 
         string userHandle = resolved.Identity.Handle;
 
-        // Verified identity, but no role on this host -> terminal 403 (never auto-re-authed).
-        if (resolved.Tier == KgsmTier.None)
+        // A verified identity is not yet a user. It proves an account here or it proves none, and
+        // when it proves none an unapproved one is created for it to prove — with no tier, so the
+        // session it gets can read who it is and nothing else. Membership of a guild is not consulted
+        // and contributes nothing: what someone may do is on their account and on nothing else.
+        if (!users.Available)
+            return Fail(StatusCodes.Status502BadGateway, "authority_unavailable",
+                users.UnavailableReason ?? "The KGSM account store is unavailable on this host.");
+
+        LinkResult link;
+        try
+        {
+            link = await users.Linking.ResolveOrProvisionAsync(
+                resolved.Identity, DateTimeOffset.UtcNow, options.PendingPolicy, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not resolve {Handle} against the KGSM account store.", userHandle);
+            return Fail(StatusCodes.Status502BadGateway, "authority_unavailable",
+                "The KGSM account store could not be read.");
+        }
+
+        if (link.Outcome == LinkOutcome.PendingCapReached)
+        {
+            // Not a denial of this person — a refusal to hold more unapproved accounts. Logged so an
+            // admin can see it happening, because from the outside it is indistinguishable from being
+            // turned away.
+            logger.LogWarning(
+                "{Handle} signed in but this host is already holding {Cap} accounts awaiting approval.",
+                userHandle, options.PendingUserCap);
+            return Fail(StatusCodes.Status503ServiceUnavailable, "not_accepting_accounts",
+                "This host is not accepting new accounts right now. Ask an administrator.");
+        }
+
+        KgsmUser account = link.User!;
+        if (link.Outcome == LinkOutcome.Provisioned)
+        {
+            await RecordUserAsync(AuditAction.UserProvision, resolved.Identity, account,
+                $"{account.DisplayName} signed in for the first time and is awaiting approval", ct);
+        }
+
+        // Verified identity, and this host has switched the account off -> terminal 403, the same
+        // shape a denial has always had.
+        if (account.Status == UserStatus.Disabled)
             return options.FrontendRedirectEnabled
                 ? FrontendRedirect(Frag(("error", "denied")))
                 : StatusCode(StatusCodes.Status403Forbidden,
@@ -152,8 +196,13 @@ public sealed class AuthController(
                     // null — WhenWritingNull omits them, keeping this branch's wire shape unchanged.
                     new CallbackResult("denied", null, null, null, userHandle, null, null));
 
+        // An unapproved account gets a real session at `none`, deliberately. A bare 403 tells someone
+        // who has just proved who they are nothing about what to do next; a session lets the panel
+        // say they are waiting on an admin, and lets that admin see them on the accounts screen.
+        KgsmTier tier = account.EffectiveTier;
+
         string? userAgent = UserAgent();
-        MintedSession minted = await MintSessionAsync(resolved.Identity, resolved.Tier, userAgent, ct);
+        MintedSession minted = await MintSessionAsync(resolved.Identity, tier, userAgent, ct);
         string sessionId = minted.SessionId;
         MintedToken access = minted.Access;
         MintedToken refresh = minted.Refresh;
@@ -165,7 +214,7 @@ public sealed class AuthController(
         // stamps `userAgent` (the same value just persisted on the session row above) so `/me`'s
         // recent-logins read can honestly label "which device" without a second UA capture — additive
         // to the existing direct-write, NOT a new writer (invariant #5).
-        await RecordAuthAsync(AuditAction.AuthLogin, resolved.Identity, resolved.Tier,
+        await RecordAuthAsync(AuditAction.AuthLogin, resolved.Identity, tier,
             $"{resolved.Identity.Display} logged in", sessionId, userAgent, ct);
 
         // SPA handoff (when a frontend URL is configured): 302 to the SPA with the tokens in the URL
@@ -179,7 +228,7 @@ public sealed class AuthController(
         // separate, not-yet-needed contract change).
         return options.FrontendRedirectEnabled
             ? FrontendRedirect(Frag(("access", access.Token), ("refresh", refresh.Token)))
-            : Ok(new CallbackResult("ok", KgsmTiers.ToWire(resolved.Tier), access.Token, refresh.Token, userHandle,
+            : Ok(new CallbackResult("ok", KgsmTiers.ToWire(tier), access.Token, refresh.Token, userHandle,
                 access.ExpiresAt, refresh.ExpiresAt));
     }
 
@@ -266,10 +315,10 @@ public sealed class AuthController(
     /// the same inline fail-closed preamble as <see cref="PeersController.Inbox"/>
     /// (root-routed here, alongside the rest of this controller, not under <c>/api/v1</c>).
     /// <para>
-    /// This node does <b>not</b> re-check Discord guild membership — it has no Discord round-trip to
-    /// make here; it trusts the cluster-token-authenticated peer's tier assertion (that peer already
-    /// resolved it via its own guild-role lookup at the user's original login). An unparseable/unknown/
-    /// empty tier floors to <see cref="KgsmTier.Viewer"/> — never escalated, never denied outright.
+    /// The peer establishes <em>who</em>, and nothing else. Its tier assertion is not read: authority is
+    /// per-host, so the vouched identity resolves against this node's own account store and is
+    /// provisioned unapproved when it proves nothing here. An admin on one node is therefore not an
+    /// admin on every node that trusts it, which is not what a peer relationship claims.
     /// </para>
     /// <para>
     /// Mints exactly like <see cref="Callback"/>: a fresh <c>sid</c>, both tokens minted carrying it,
@@ -297,19 +346,44 @@ public sealed class AuthController(
         if (body is null || string.IsNullOrWhiteSpace(body.DiscordId))
             return Error(StatusCodes.Status400BadRequest, "bad_request", "discordId is required");
 
-        // The vouching peer already authenticated this user (its own OAuth login) — never re-check
-        // Discord here (no token to check with). KgsmTiers.Parse alone floors an unparseable/unknown/
-        // empty tier to None (a terminal denial elsewhere, e.g. Callback) — wrong here: a caller that
-        // reached this far already cleared the cluster-token + peer-enabled gate above, so an ambiguous
-        // tier assertion floors to Viewer instead (honest and safe — never escalated past what the
-        // peer asserted, never denied outright for a merely-unparseable string).
-        KgsmTier parsedTier = KgsmTiers.Parse(body.Tier);
-        KgsmTier tier = parsedTier == KgsmTier.None ? KgsmTier.Viewer : parsedTier;
         // The vouch wire names Discord explicitly (`discordId`) because that is the only provider a
         // peer can vouch for today; the identity is built provider-qualified so nothing downstream —
         // the token subject, the session row's key — has to know that.
         var identity = new KgsmIdentity(
             KgsmActorProvider.Discord, body.DiscordId, body.Username, body.DisplayName, null, []);
+
+        // The peer authenticated this person and that is the whole of what it can tell us. Its tier
+        // assertion (`body.Tier`) is deliberately not read: authority is per-host and comes from this
+        // node's account store, so a vouched arrival resolves — or is provisioned unapproved — exactly
+        // like one arriving through this node's own login. Otherwise an admin on one node would be an
+        // admin on every node that trusts it, which is not what a peer relationship says.
+        if (!users.Available)
+            return Error(StatusCodes.Status502BadGateway, "authority_unavailable",
+                users.UnavailableReason ?? "The KGSM account store is unavailable on this host.");
+
+        LinkResult vouched;
+        try
+        {
+            vouched = await users.Linking.ResolveOrProvisionAsync(
+                identity, DateTimeOffset.UtcNow, options.PendingPolicy, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not resolve a vouched {Handle} against the KGSM account store.",
+                identity.Handle);
+            return Error(StatusCodes.Status502BadGateway, "authority_unavailable",
+                "The KGSM account store could not be read.");
+        }
+
+        if (vouched.Outcome == LinkOutcome.PendingCapReached)
+            return Error(StatusCodes.Status503ServiceUnavailable, "not_accepting_accounts",
+                "This host is not accepting new accounts right now.");
+
+        if (vouched.User!.Status == UserStatus.Disabled)
+            return Error(StatusCodes.Status403Forbidden, "account_disabled",
+                "That account is disabled on this host.");
+
+        KgsmTier tier = vouched.User.EffectiveTier;
 
         // No userAgent: a vouch is a node-to-node call, and the calling node's HTTP client is not a
         // device anyone would recognise in their own session list.
@@ -616,6 +690,40 @@ public sealed class AuthController(
         }
 
         return new MintedSession(sessionId, access, refresh);
+    }
+
+    /// <summary>
+    /// Write a <c>user.*</c> row for an account this login created, with the arriving identity as the
+    /// actor — nobody else was involved, and naming the API as the actor would hide who arrived.
+    /// </summary>
+    private async Task RecordUserAsync(
+        string action, KgsmIdentity identity, KgsmUser account, string summary, CancellationToken ct)
+    {
+        try
+        {
+            await audit.AppendAsync(new AuditWrite(
+                Ts: DateTimeOffset.UtcNow,
+                Origin: AuditOrigin.Ui,
+                Actor: new AuditActor(ActorKind.User, identity.Username, identity.Provider),
+                Action: action,
+                Severity: AuditSeverity.Warn,
+                Target: new AuditTarget("user", account.UserId, account.Username),
+                ServerId: null,
+                HostId: options.HostId,
+                Summary: summary,
+                Meta: new Dictionary<string, string>
+                {
+                    ["userId"] = account.UserId,
+                    ["identity"] = identity.Handle,
+                    ["status"] = UserStatuses.ToWire(account.Status),
+                    ["tier"] = KgsmTiers.ToWire(account.Tier),
+                }),
+                ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "audit {Action} write failed (non-fatal)", action);
+        }
     }
 
     /// <summary>The calling device, for a human reading their own session list. Never authority.</summary>

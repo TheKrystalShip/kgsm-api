@@ -230,6 +230,26 @@ public sealed class ApiSettings
         Risk = LeafRisk.Wiring)]
     public string? UsersDbPath { get; set; }
 
+    /// <summary>How long a resolved tier is reused before the store is read again. Floor 0.</summary>
+    /// <panel>How long someone's authority is reused before it is looked up again. This is how long
+    /// after an admin changes what a person may do that their next request can still go through at the
+    /// old level.</panel>
+    [LeafField("authorityCacheSeconds", "Authority lookup cache", Group = "auth", Min = 0, Unit = "s")]
+    public int? AuthorityCacheSeconds { get; set; }
+
+    /// <summary>The most accounts awaiting approval this host will hold at once. Floor 1.</summary>
+    /// <panel>How many people can be waiting for approval at the same time. Anyone who signs in through
+    /// an identity provider and has no account here yet becomes one of them, so this is the ceiling on
+    /// what a stranger can add to this host.</panel>
+    [LeafField("pendingUserCap", "Accounts awaiting approval", Group = "auth", Min = 1)]
+    public int? PendingUserCap { get; set; }
+
+    /// <summary>How long an unapproved, self-provisioned account survives unattended, in days. Floor 1.</summary>
+    /// <panel>How long someone waiting for approval stays on the list before being forgotten. Only ever
+    /// removes an account that arrived on its own and was never approved or given a password.</panel>
+    [LeafField("pendingUserTtlDays", "Approval request lifetime", Group = "auth", Min = 1, Unit = "days")]
+    public int? PendingUserTtlDays { get; set; }
+
 
     // ── Sessions ──────────────────────────────────────────────────────
     /// <summary>Turns the session registry inert, leaving revocation unenforceable.</summary>

@@ -87,6 +87,12 @@
       "AuthFrontendUrl": "",
       // The host's shared KGSM account store. Every surface on this host reads the same file.
       "UsersDbPath": "/var/lib/kgsm/auth/users.db",
+      // How long a resolved tier is reused before the store is read again. The demotion lag. Floor 0.
+      "AuthorityCacheSeconds": 5,
+      // The most accounts awaiting approval this host will hold at once. Floor 1.
+      "PendingUserCap": 32,
+      // How long an unapproved, self-provisioned account survives unattended, in days. Floor 1.
+      "PendingUserTtlDays": 14,
 
       // ── Sessions ──
       // Turns the session registry inert, leaving revocation unenforceable.

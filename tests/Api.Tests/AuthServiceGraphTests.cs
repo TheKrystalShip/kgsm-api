@@ -29,13 +29,13 @@ public sealed class AuthServiceGraphTests
     /// this one setting is redirected and nothing else is. Everything the tests below assert is built
     /// exactly as production builds it.
     /// </remarks>
-    private static WebApplicationFactory<Program> RealGraph() =>
+    private static WebApplicationFactory<Program> RealGraph(string? usersDbPath = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {
-                    ["Api:UsersDbPath"] =
-                        Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-users-{Guid.NewGuid():N}.db"),
+                    ["Api:UsersDbPath"] = usersDbPath
+                        ?? Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-users-{Guid.NewGuid():N}.db"),
                 })));
 
     [Fact]
@@ -81,16 +81,32 @@ public sealed class AuthServiceGraphTests
     }
 
     [Fact]
-    public void BothHalvesOfTheSignInAreServedByTheDiscordClient()
+    public void TheTwoHalvesOfTheSignInComeFromTwoDifferentPlaces()
     {
-        // Identity and authority are separate seams deliberately, but on this host one implementation
-        // answers both. Resolving each on its own proves the registrations exist and are satisfiable —
-        // a half nothing supplies is a 500 on the first login, and no other test constructs these.
+        // The whole shape of the model, in two lines. Discord says who someone is; the account store
+        // says what they may do, and it is the only thing that ever does. Resolving each on its own
+        // also proves the registrations are satisfiable — a half nothing supplies is a 500 on the
+        // first login, and no other test constructs these.
         using WebApplicationFactory<Program> factory = RealGraph();
         using IServiceScope scope = factory.Services.CreateScope();
 
         Assert.IsType<DiscordDirectory>(scope.ServiceProvider.GetRequiredService<IIdentityProvider>());
-        Assert.IsType<DiscordDirectory>(scope.ServiceProvider.GetRequiredService<IAuthorityProvider>());
+        Assert.IsType<DirectoryAuthority>(scope.ServiceProvider.GetRequiredService<IAuthorityProvider>());
+    }
+
+    [Fact]
+    public async Task AnUnreachableAccountStoreIsAnOutageAtTheCallAndNotAMissingService()
+    {
+        // The authority seam must resolve even when the file behind it will not open, because the
+        // endpoints that report the problem inject it too — a service that cannot be constructed
+        // takes them down with a 500 and the operator learns nothing.
+        using WebApplicationFactory<Program> factory = RealGraph(usersDbPath: "/proc/version/nope/users.db");
+        using IServiceScope scope = factory.Services.CreateScope();
+
+        var authority = scope.ServiceProvider.GetRequiredService<IAuthorityProvider>();
+
+        await Assert.ThrowsAsync<KgsmAuthProviderException>(
+            () => authority.ResolveTierAsync(FakeDiscordResolver.Identity, default));
     }
 
     [Fact]

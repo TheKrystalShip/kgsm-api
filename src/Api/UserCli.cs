@@ -27,9 +27,10 @@ internal static class UserCli
     public const string Verb = "user";
 
     /// <summary>Run a <c>user</c> subcommand. Returns the process exit code.</summary>
-    public static async Task<int> RunAsync(string[] args, string storePath)
+    public static async Task<int> RunAsync(string[] args, ApiOptions options)
     {
         string? subcommand = args.Length > 1 ? args[1] : null;
+        string storePath = options.UsersDbPath;
 
         SqliteUserStore store;
         try
@@ -53,6 +54,7 @@ internal static class UserCli
             "create" => await CreateAsync(store, signIn, args),
             "passwd" => await PasswdAsync(store, signIn, args),
             "list" => await ListAsync(store),
+            DiscordSeedCli.Subcommand => await DiscordSeedCli.RunAsync(args, store, options, options.DbPath),
             _ => Usage(subcommand),
         };
     }
@@ -235,6 +237,12 @@ internal static class UserCli
                      [--display <name>] [--password <password>]
               passwd --username <name> [--password <password>]
               list                              Every account, with its tier and status.
+              seed-discord [--apply] [--user <discord id>]…
+                                                Give the Discord identities that have signed in to
+                                                this host the KGSM accounts their guild roles say they
+                                                should have. Writes nothing without --apply. Needs the
+                                                shared Discord settings in the environment:
+                                                  set -a; . /etc/kgsm/discord-auth.env; set +a
 
             A generated password is printed once and stored only as a hash.
             """);

@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using TheKrystalShip.Api.Services.Auth;
 
 using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Users;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -46,6 +47,8 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task Callback_Authorized_200_MintsWorkingToken()
     {
+        // What a login is worth is on the account, so the account is what this states.
+        factory.SetAccount(FakeDiscordResolver.Identity, KgsmTier.Operator);
         (HttpClient c, string state) = await BeginLogin();
         HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=operator&state={state}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -64,10 +67,68 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     }
 
     [Fact]
-    public async Task Callback_NoRole_403_Denied()
+    public async Task Callback_Stranger_200_RealSessionAtNoTier_AwaitingApproval()
     {
+        // Proving who you are is not being let in — but it is also not being turned away. A stranger
+        // gets a real session holding nothing, which is what lets the panel say "waiting on an admin"
+        // instead of showing someone a bare 403 with nowhere to go.
+        string subject = "stranger-" + Guid.NewGuid().ToString("N");
         (HttpClient c, string state) = await BeginLogin();
-        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=none&state={state}");
+
+        HttpResponseMessage resp = await c.GetAsync(
+            $"/auth/discord/callback?code={FakeDiscordResolver.CodeFor(subject)}&state={state}");
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        JsonElement body = await Json(resp);
+        Assert.Equal("ok", body.GetProperty("verdict").GetString());
+        Assert.Equal("none", body.GetProperty("tier").GetString());
+
+        KgsmUser? provisioned = factory.AccountOf(FakeDiscordResolver.IdentityFor(subject));
+        Assert.NotNull(provisioned);
+        Assert.Equal(UserStatus.Pending, provisioned!.Status);
+        Assert.Equal(TierSource.Derived, provisioned.TierSource);
+    }
+
+    [Fact]
+    public async Task Callback_AtThePendingCap_503_NotAccepting()
+    {
+        // Anyone who can complete a login at the provider can add a row here, so the table has a
+        // ceiling. Refusing to hold more is not the same as turning this person away, and it does not
+        // read like it: 503 and a code naming the host's state, not a denial.
+        using WebApplicationFactory<Program> f = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Api:UsersDbPath"] =
+                        Path.Combine(Path.GetTempPath(), $"kgsm-api-cap-users-{Guid.NewGuid():N}.db"),
+                    ["Api:PendingUserCap"] = "1",
+                })));
+
+        (HttpClient first, string stateFirst) = await BeginLoginOn(f);
+        HttpResponseMessage accepted = await first.GetAsync(
+            $"/auth/discord/callback?code={FakeDiscordResolver.CodeFor("cap-one")}&state={stateFirst}");
+        Assert.Equal(HttpStatusCode.OK, accepted.StatusCode);
+
+        (HttpClient second, string stateSecond) = await BeginLoginOn(f);
+        HttpResponseMessage refused = await second.GetAsync(
+            $"/auth/discord/callback?code={FakeDiscordResolver.CodeFor("cap-two")}&state={stateSecond}");
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, refused.StatusCode);
+        Assert.Equal("not_accepting_accounts",
+            (await Json(refused)).GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Callback_DisabledAccount_403_Denied()
+    {
+        // The one terminal refusal left. It is a fact about the account, not about a guild.
+        string subject = "off-" + Guid.NewGuid().ToString("N");
+        factory.SetAccount(FakeDiscordResolver.IdentityFor(subject), KgsmTier.Admin, UserStatus.Disabled);
+        (HttpClient c, string state) = await BeginLogin();
+
+        HttpResponseMessage resp = await c.GetAsync(
+            $"/auth/discord/callback?code={FakeDiscordResolver.CodeFor(subject)}&state={state}");
+
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
         Assert.Equal("denied", (await Json(resp)).GetProperty("verdict").GetString());
     }
@@ -91,12 +152,15 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     }
 
     [Fact]
-    public async Task Callback_NoRole_403_OmitsBothTokenExpiries()
+    public async Task Callback_Denied_403_OmitsBothTokenExpiries()
     {
         // A denial mints no tokens -> both expiry fields are null -> WhenWritingNull omits the keys
         // entirely (not `null` literals) — assert absence, not a null value, to lock the wire shape.
+        string subject = "off-" + Guid.NewGuid().ToString("N");
+        factory.SetAccount(FakeDiscordResolver.IdentityFor(subject), KgsmTier.Viewer, UserStatus.Disabled);
         (HttpClient c, string state) = await BeginLogin();
-        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=none&state={state}");
+        HttpResponseMessage resp = await c.GetAsync(
+            $"/auth/discord/callback?code={FakeDiscordResolver.CodeFor(subject)}&state={state}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
         string raw = await resp.Content.ReadAsStringAsync();
         Assert.DoesNotContain("accessTokenExpiresAt", raw);
@@ -188,8 +252,12 @@ public sealed class AuthFlowTests(AuthTestFactory factory) : IClassFixture<AuthT
     public async Task Callback_FrontendConfigured_Denied_302_ErrorInFragment()
     {
         using WebApplicationFactory<Program> f = FrontendFactory();
+        string subject = "off-" + Guid.NewGuid().ToString("N");
+        AuthTestFactory.SetAccountOn(
+            f.Services, FakeDiscordResolver.IdentityFor(subject), KgsmTier.Viewer, UserStatus.Disabled);
         (HttpClient c, string state) = await BeginLoginOn(f);
-        HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=none&state={state}");
+        HttpResponseMessage resp = await c.GetAsync(
+            $"/auth/discord/callback?code={FakeDiscordResolver.CodeFor(subject)}&state={state}");
         Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
         Uri loc = resp.Headers.Location!;
         Assert.StartsWith("https://panel.test", loc.ToString());

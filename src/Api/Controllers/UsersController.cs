@@ -210,6 +210,12 @@ public sealed class UsersController(
                 $"'{body.Username}' is already taken on this host.");
         }
 
+        // Authority is resolved per request from a short-lived cache, so drop this account's entries
+        // rather than making the admin who just made the change watch it not take effect. Every way
+        // the account can be proved is dropped, because a session caches under the handle it signed in
+        // with. Other surfaces on this host hold their own caches and pick it up within their own TTL.
+        await users.ForgetAsync(userId, ct);
+
         await RecordChangesAsync(existing, updated, ct);
         return Ok(await ToRecordAsync(updated, ct));
     }
@@ -239,6 +245,10 @@ public sealed class UsersController(
             return Error(StatusCodes.Status409Conflict, "last_admin",
                 "That is the only active admin account on this host.");
         }
+
+        // Before the row goes: the handles are read off its credentials, and they are about to be
+        // deleted with it.
+        await users.ForgetAsync(userId, ct);
 
         await users.Store.DeleteAsync(userId, ct);
         await RecordAsync(AuditAction.UserDelete, AuditSeverity.Danger, existing,
@@ -427,14 +437,20 @@ public sealed class UsersController(
 
         if (before.Status != after.Status)
         {
-            (string action, string severity, string verb) = after.Status switch
+            // A summary rather than a verb, because the third case is not one: putting an account
+            // back to awaiting approval reads as a sentence, not as "<verb> the account".
+            (string action, string severity, string summary) = after.Status switch
             {
-                UserStatus.Active => (AuditAction.UserApprove, AuditSeverity.Warn, "approved"),
-                UserStatus.Disabled => (AuditAction.UserDisable, AuditSeverity.Danger, "disabled"),
-                _ => (AuditAction.UserDisable, AuditSeverity.Warn, "set to awaiting approval"),
+                UserStatus.Active =>
+                    (AuditAction.UserApprove, AuditSeverity.Warn, $"approved the account '{after.Username}'"),
+                UserStatus.Disabled =>
+                    (AuditAction.UserDisable, AuditSeverity.Danger, $"disabled the account '{after.Username}'"),
+                _ =>
+                    (AuditAction.UserDisable, AuditSeverity.Warn,
+                        $"returned the account '{after.Username}' to awaiting approval"),
             };
 
-            await RecordAsync(action, severity, after, $"{verb} the account '{after.Username}'",
+            await RecordAsync(action, severity, after, summary,
                 new Dictionary<string, string>
                 {
                     ["from"] = UserStatuses.ToWire(before.Status),

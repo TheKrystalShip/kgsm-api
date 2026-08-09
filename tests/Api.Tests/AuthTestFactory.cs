@@ -9,6 +9,7 @@ using TheKrystalShip.Api.Services.Auth;
 
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
+using TheKrystalShip.KGSM.Auth.Users;
 
 using TheKrystalShip.KGSM.Auth.Sessions;
 
@@ -56,6 +57,10 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 // run would hand the operator a live accounts file that nobody made. Same rule that
                 // keeps AuditJournalRelayTests off the engine's real journal.
                 ["Api:UsersDbPath"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-users-{Guid.NewGuid():N}.db"),
+                // No authority cache. A test that mints a viewer token and then an admin one asks the
+                // same question twice inside any sane TTL, and a cached first answer would make the
+                // second silently wrong. The cache has its own tests, where the TTL is the subject.
+                ["Api:AuthorityCacheSeconds"] = "0",
             });
         });
 
@@ -104,6 +109,62 @@ public class AuthTestFactory : WebApplicationFactory<Program>
         store.CreateAsync(sid, FakeDiscordResolver.Identity.Handle, opts.HostId,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(opts.SessionsRefreshAbsoluteDays),
             userAgent: null, initialJti: minted.Jti, CancellationToken.None).GetAwaiter().GetResult();
+
+        // A token says what tier it was minted at; the account store says what the holder may do, and
+        // the store is what every gate reads. So a token minted at a tier only means anything if the
+        // account behind it holds that tier — which is the production rule, not a test convenience,
+        // and giving the fake identity a real account here is what keeps these tests exercising the
+        // real path rather than a softer one.
+        GiveTheFakeIdentityAnAccount(services, tier);
         return minted.Token;
+    }
+
+    /// <summary>Create or move the account behind the fake identity to <paramref name="tier"/>.</summary>
+    internal static void GiveTheFakeIdentityAnAccount(IServiceProvider services, KgsmTier tier)
+    {
+        // A factory pointed at a store that will not open is testing exactly that, and minting a
+        // token for it must not be the thing that fails.
+        if (services.GetRequiredService<UserDirectory>().Available)
+            SetAccountOn(services, FakeDiscordResolver.Identity, tier);
+    }
+
+    /// <summary>
+    /// Give an identity an account on this host at a tier and status of the test's choosing — the
+    /// setup a login test does before driving the callback, because what a login yields is decided by
+    /// the account and not by anything the provider says.
+    /// </summary>
+    public KgsmUser SetAccount(KgsmIdentity identity, KgsmTier tier, UserStatus status = UserStatus.Active) =>
+        SetAccountOn(Services, identity, tier, status);
+
+    /// <summary>The account an identity proves here, or <see langword="null"/>.</summary>
+    public KgsmUser? AccountOf(KgsmIdentity identity) =>
+        Services.GetRequiredService<UserDirectory>().Store
+            .FindByCredentialAsync(identity.Handle).GetAwaiter().GetResult();
+
+    internal static KgsmUser SetAccountOn(
+        IServiceProvider services, KgsmIdentity identity, KgsmTier tier,
+        UserStatus status = UserStatus.Active)
+    {
+        var users = services.GetRequiredService<UserDirectory>();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        KgsmUser? existing = users.Store.FindByCredentialAsync(identity.Handle).GetAwaiter().GetResult();
+
+        KgsmUser account;
+        if (existing is not null)
+        {
+            account = existing with { Tier = tier, Status = status, Updated = now };
+            users.Store.UpdateAsync(account).GetAwaiter().GetResult();
+        }
+        else
+        {
+            account = users.Linking
+                .ProvisionAsync(identity, tier, TierSource.Granted, status, now)
+                .GetAwaiter().GetResult().User!;
+        }
+
+        // The cache is off in this factory, but a derived one may not be, and a stale answer here
+        // would look like the gate being wrong rather than the setup being stale.
+        users.Authority.ForgetAll();
+        return account;
     }
 }

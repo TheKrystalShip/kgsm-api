@@ -194,7 +194,9 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     [Fact]
     public async Task Login_WritesAuthLoginAudit_Readable()
     {
-        // Drive a real callback through the CSRF round-trip (the FakeDiscordResolver: code=operator).
+        // Drive a real callback through the CSRF round-trip. The tier the row records is the one the
+        // ACCOUNT holds, so the account is what this states.
+        factory.SetAccount(FakeDiscordResolver.Identity, KgsmTier.Operator);
         HttpClient login = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false,

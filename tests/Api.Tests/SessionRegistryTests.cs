@@ -98,6 +98,7 @@ public sealed class SessionRegistryTests(AuthTestFactory factory) : IClassFixtur
     [Fact]
     public async Task Login_AuditMetaCarriesSid_LinkingToSessionRow()
     {
+        factory.SetAccount(FakeDiscordResolver.Identity, KgsmTier.Operator);
         (HttpClient c, string state) = await BeginLogin();
         HttpResponseMessage resp = await c.GetAsync($"/auth/discord/callback?code=operator&state={state}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);

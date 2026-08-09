@@ -28,32 +28,29 @@ public class Program
         // command line: the host feeds args to the configuration binder, where `user create` would
         // bind to nothing, and the CLI needs the words themselves.
         if (args.Length > 0 && args[0] == UserCli.Verb)
-            return UserCli.RunAsync(args, ResolveUsersDbPath(args)).GetAwaiter().GetResult();
+            return UserCli.RunAsync(args, CliOptions(args)).GetAwaiter().GetResult();
 
         CreateHostBuilder(args).Build().Run();
         return 0;
     }
 
     /// <summary>
-    /// Where the accounts are, resolved exactly as the running service resolves it — the settings
-    /// file beside the binary, then the environment, then the command line.
+    /// The settings the CLI runs on, resolved exactly as the running service resolves them — the
+    /// settings file beside the binary, then the environment, then the command line.
     /// </summary>
     /// <remarks>
     /// Built from the same sources in the same order rather than reading one of them, because a CLI
     /// that writes a different file from the one the service reads is worse than no CLI: the account
-    /// it creates simply never appears.
+    /// it creates simply never appears. The shared <c>KgsmAuth</c> values a seed needs come from the
+    /// environment, which under systemd is <c>/etc/kgsm/discord-auth.env</c> and at a shell is
+    /// whatever the operator has sourced.
     /// </remarks>
-    private static string ResolveUsersDbPath(string[] args)
-    {
-        IConfigurationRoot config = new ConfigurationBuilder()
+    private static ApiOptions CliOptions(string[] args) =>
+        ApiOptions.FromConfiguration(new ConfigurationBuilder()
             .AddJsonFile(Path.Combine(AppContext.BaseDirectory, SettingsFile), optional: true)
             .AddEnvironmentVariables()
             .AddCommandLine(args)
-            .Build();
-
-        string? path = config[$"{ApiSettings.Section}:{nameof(ApiSettings.UsersDbPath)}"];
-        return string.IsNullOrWhiteSpace(path) ? UserStoreOptions.DefaultPath : path;
-    }
+            .Build());
 
     public static IHostBuilder CreateHostBuilder(string[] args) =>
         Host.CreateDefaultBuilder(args)

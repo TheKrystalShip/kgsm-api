@@ -107,6 +107,31 @@ def resolve_db_path(explicit: str | None, env_file: str) -> str:
     return "/var/lib/kgsm-api/kgsm-api.db"
 
 
+def read_account(users_db: str, username: str):
+    """The KGSM account behind `username`: (user_id, username, display_name), or exit.
+
+    Authority is resolved from the account store on every request, so a dev token only means
+    anything if there is an account behind it. Reading the store rather than taking a `usr_` id on
+    the command line is what keeps the two from drifting apart silently.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{users_db}?mode=ro", uri=True, timeout=5)
+    except sqlite3.Error as e:
+        sys.exit(f"error: could not open the account store at {users_db}: {e}")
+    try:
+        row = conn.execute(
+            "SELECT user_id, username, display_name FROM users WHERE username_key = ?",
+            (username.strip().lower(),)).fetchone()
+    except sqlite3.Error as e:
+        sys.exit(f"error: could not read the account store at {users_db}: {e}")
+    finally:
+        conn.close()
+    if row is None:
+        sys.exit(f"error: no KGSM account '{username}' on this host "
+                 f"(create one: kgsm-api user create --username {username} --tier admin)")
+    return row
+
+
 def insert_session(db_path: str, sid: str, sub: str, host: str, jti: str,
                    now_s: int, exp_s: int, user_agent: str) -> None:
     # Insert the operational session row the M4·c validator requires (row exists, not revoked,
@@ -145,7 +170,16 @@ def main() -> None:
     ap.add_argument("--username", default="claude", help="Discord username -> audit actor (discord:<username>)")
     ap.add_argument("--display", default="Claude (agent)", help="display name (profile snapshot)")
     ap.add_argument("--user-id", default="claude", help="sub becomes discord:<user-id>")
-    ap.add_argument("--tier", default="admin", choices=["viewer", "operator", "admin"])
+    ap.add_argument("--account", default=None,
+                    help="mint AS a KGSM account (sub becomes local:<usr_ id>, read from the account "
+                         "store). Authority comes from that account, so this is what a token needs "
+                         "to be worth anything; --user-id mints an external identity instead.")
+    ap.add_argument("--users-db", default="/var/lib/kgsm/auth/users.db",
+                    help="the account store --account is read from")
+    ap.add_argument("--tier", default="admin", choices=["viewer", "operator", "admin"],
+                    help="the token's tier claim. A display hint only — every gate resolves "
+                         "authority from the account store, so this is what the ACCOUNT holds or "
+                         "the request is refused at the real one.")
     ap.add_argument("--host", default="hotrod", help="host id == token audience (Api__HostId, default machine name)")
     ap.add_argument("--ttl", default="12h", help="lifetime: 30m / 12h / 7d (default 12h)")
     ap.add_argument("--env-file", default="/etc/kgsm-api/kgsm-api.env", help="EnvironmentFile holding the signing key")
@@ -162,7 +196,13 @@ def main() -> None:
 
     now = int(time.time())
     exp = now + parse_ttl(args.ttl)
-    sub = f"discord:{args.user_id}"
+    username, display = args.username, args.display
+    if args.account:
+        user_id, username, display_name = read_account(args.users_db, args.account)
+        sub = f"local:{user_id}"
+        display = display_name or display
+    else:
+        sub = f"discord:{args.user_id}"
     # M4·c: a stable session id (sid_<guid>) checked against the sessions table, and a per-token jti.
     sid = "sid_" + uuid.uuid4().hex
     jti = uuid.uuid4().hex
@@ -176,8 +216,8 @@ def main() -> None:
         "tkn": "access",
         "sid": sid,
         "jti": jti,
-        "uname": args.username,
-        "disp": args.display,
+        "uname": username,
+        "disp": display,
         "scope": "identify guilds",
         "iat": now,
         "nbf": now,
@@ -196,12 +236,12 @@ def main() -> None:
     if not args.no_session:
         db_path = resolve_db_path(args.db, args.env_file)
         insert_session(db_path, sid, sub, args.host, jti, now, exp,
-                       user_agent=f"mint-dev-token ({args.username})")
+                       user_agent=f"mint-dev-token ({username})")
 
     print(token)
     # Diagnostics to stderr so `TOKEN=$(mint-dev-token.py)` stays clean.
     session_note = "no session row (--no-session)" if args.no_session else f"session {sid}"
-    print(f"# identity=discord:{args.username} tier={args.tier} aud={args.host} "
+    print(f"# identity={sub} actor={username} tier={args.tier} aud={args.host} "
           f"ttl={args.ttl} (exp in {exp - now}s) · {session_note}", file=sys.stderr)
 
 

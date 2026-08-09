@@ -207,7 +207,7 @@ public sealed class ClusterSsoTests
     }
 
     [Fact]
-    public async Task Vouch_UnparseableTier_FloorsToViewer_NeverEscalated()
+    public async Task Vouch_APeersAssertedTierIsNotAuthorityOnTheReceivingNode()
     {
         const string secret = "sso-floor-secret";
         string dbB = NewDbPath("sso-floor");
@@ -217,13 +217,18 @@ public sealed class ClusterSsoTests
             string clusterToken = factoryB.Services.GetRequiredService<IClusterTokenService>().Mint().Token;
             string discordId = "sso-floor-user-" + Guid.NewGuid().ToString("N")[..12];
 
+            // This node's own record says viewer. The peer is about to assert admin, loudly and in a
+            // perfectly valid token, and it must change nothing.
+            ApproveOn(factoryB, discordId, KgsmTier.Viewer);
+
             using HttpClient clientB = factoryB.CreateClient();
             JsonElement body = await Json(await PostClusterSessionAsync(
-                clientB, clusterToken, discordId, "flooruser", "Floor User", "totally-not-a-real-tier"));
+                clientB, clusterToken, discordId, "flooruser", "Floor User", "admin"));
             string accessToken = body.GetProperty("accessToken").GetString()!;
 
-            // An operator-gated endpoint must 403 (never 401 — the bearer IS valid) for a floored-to-
-            // viewer token: proves the unparseable tier landed at viewer, not escalated past it.
+            // An operator-gated endpoint must 403 (never 401 — the bearer IS valid): the asserted
+            // admin bought nothing, because a peer establishes who somebody is and never what they
+            // may do here.
             var commandRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/servers/nope/commands")
             {
                 Content = JsonContent.Create(new { verb = "start" }),
@@ -250,6 +255,11 @@ public sealed class ClusterSsoTests
                 "node-a", "host-a", secret, dbPath: dbA, drainerHandlerFactory: () => handlerToB);
 
             string discordId = "logout-user-" + Guid.NewGuid().ToString("N")[..12];
+
+            // Each node decides for itself what this person may do, so each node is told. Without it
+            // both vouched sessions authenticate at `none` and cannot even end themselves.
+            ApproveOn(factoryA, discordId, KgsmTier.Viewer);
+            ApproveOn(factoryB, discordId, KgsmTier.Viewer);
 
             // The SAME user has a live session on BOTH nodes — minted via each node's own vouch
             // endpoint (self-mint cluster token), which also hands back the sid directly.
@@ -328,6 +338,9 @@ public sealed class ClusterSsoTests
                 "node-a", "host-a", secret, dbPath: dbA, drainerHandlerFactory: () => handlerToB);
 
             string discordId = "hearsay-user-" + Guid.NewGuid().ToString("N")[..12];
+            // A's own store decides what this vouched person may do; without an account they land at
+            // `none` and cannot end their own session.
+            ApproveOn(factoryA, discordId, KgsmTier.Viewer);
             string tokenA = factoryA.Services.GetRequiredService<IClusterTokenService>().Mint().Token;
             using HttpClient clientA = factoryA.CreateClient();
             JsonElement bodyA = await Json(await PostClusterSessionAsync(
@@ -444,6 +457,9 @@ public sealed class ClusterSsoTests
                 "node-a", "host-a", secret, dbPath: dbA, drainerHandlerFactory: () => toggle);
 
             string discordId = "downup-user-" + Guid.NewGuid().ToString("N")[..12];
+            // Each node's own store decides what this vouched person may do there.
+            ApproveOn(factoryA, discordId, KgsmTier.Viewer);
+            ApproveOn(factoryB, discordId, KgsmTier.Viewer);
             string tokenA = factoryA.Services.GetRequiredService<IClusterTokenService>().Mint().Token;
             using HttpClient clientA = factoryA.CreateClient();
             JsonElement bodyA = await Json(await PostClusterSessionAsync(
@@ -676,7 +692,7 @@ public sealed class ClusterSsoTests
     }
 
     [Fact]
-    public async Task VouchRequest_TierComesFromCallerClaims_ViewerFloorsOperatorPasses()
+    public async Task VouchRequest_CarriesIdentityOnly_TheReceivingNodeDecidesAuthority()
     {
         const string secret = "sso-request-tier-secret";
         string dbA = NewDbPath("sso-request-tier-a"), dbB = NewDbPath("sso-request-tier-b");
@@ -692,24 +708,25 @@ public sealed class ClusterSsoTests
             using HttpClient clientA = factoryA.CreateClient();
             using HttpClient clientB = factoryB.CreateClient();
 
-            // The request body never carries a tier — only nodeId. Each caller's tier must come from
-            // THEIR OWN validated session claims on A, not anything the body could assert.
-            JsonElement viewerBody = await Json(await PostVouchRequestAsync(
-                clientA, factoryA.AccessToken(KgsmTier.Viewer), "node-b"));
-            string viewerAccessTokenB = viewerBody.GetProperty("accessToken").GetString()!;
+            // The request body never carries a tier — only nodeId — and A reads the caller's identity
+            // off their own validated session. What that identity is worth on B is B's answer: an
+            // operator on A is nobody on B until B's store says otherwise.
+            string subject = FakeDiscordResolver.Identity.Subject;
 
-            JsonElement operatorBody = await Json(await PostVouchRequestAsync(
+            JsonElement strangerBody = await Json(await PostVouchRequestAsync(
                 clientA, factoryA.AccessToken(KgsmTier.Operator), "node-b"));
-            string operatorAccessTokenB = operatorBody.GetProperty("accessToken").GetString()!;
+            HttpResponseMessage strangerCmd = await SendCommandAsync(
+                clientB, strangerBody.GetProperty("accessToken").GetString()!);
+            Assert.Equal(HttpStatusCode.Forbidden, strangerCmd.StatusCode);
 
-            // An operator-gated action on B: a viewer-floored token must 403 (never escalated); an
-            // operator token must pass the gate (404 for "no such server", not 403 for "wrong tier") —
-            // same idiom as Vouch_UnparseableTier_FloorsToViewer_NeverEscalated above.
-            HttpResponseMessage viewerCmd = await SendCommandAsync(clientB, viewerAccessTokenB);
-            Assert.Equal(HttpStatusCode.Forbidden, viewerCmd.StatusCode);
-
-            HttpResponseMessage operatorCmd = await SendCommandAsync(clientB, operatorAccessTokenB);
-            Assert.Equal(HttpStatusCode.NotFound, operatorCmd.StatusCode);
+            // The same person, once B knows them: the gate is passed (404 for "no such server", not
+            // 403 for "wrong tier"). Nothing about the vouch changed — only B's own record did.
+            ApproveOn(factoryB, subject, KgsmTier.Operator);
+            JsonElement knownBody = await Json(await PostVouchRequestAsync(
+                clientA, factoryA.AccessToken(KgsmTier.Operator), "node-b"));
+            HttpResponseMessage knownCmd = await SendCommandAsync(
+                clientB, knownBody.GetProperty("accessToken").GetString()!);
+            Assert.Equal(HttpStatusCode.NotFound, knownCmd.StatusCode);
         }
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
     }
@@ -840,7 +857,7 @@ public sealed class ClusterSsoTests
 
     /// <summary>An operator-gated action against a server id that doesn't exist — <c>404</c> proves the
     /// bearer passed the tier gate (only "no such server" is left to complain about); <c>403</c> proves it
-    /// didn't. The same discriminator <see cref="Vouch_UnparseableTier_FloorsToViewer_NeverEscalated"/> uses.</summary>
+    /// didn't. The same discriminator <see cref="Vouch_APeersAssertedTierIsNotAuthorityOnTheReceivingNode"/> uses.</summary>
     private static Task<HttpResponseMessage> SendCommandAsync(HttpClient client, string bearer)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/servers/nope/commands")
@@ -882,6 +899,20 @@ public sealed class ClusterSsoTests
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
         return client.SendAsync(request);
     }
+
+    /// <summary>
+    /// Give a vouched Discord identity a real, approved account on one node.
+    /// </summary>
+    /// <remarks>
+    /// A vouch establishes who somebody is and nothing more — the node it lands on reads its own
+    /// account store for what they may do. So a cluster test that needs a working session on a node
+    /// has to say what that node's store says about them, exactly as an admin on that node would.
+    /// </remarks>
+    private static void ApproveOn(ClusterNodeFactory node, string discordId, KgsmTier tier) =>
+        AuthTestFactory.SetAccountOn(
+            node.Services,
+            new KgsmIdentity(KgsmActorProvider.Discord, discordId, "user" + discordId, "User", null, []),
+            tier);
 
     private static string NewDbPath(string label) =>
         Path.Combine(Path.GetTempPath(), $"kgsm-api-cluster-sso-{label}-{Guid.NewGuid():N}.db");

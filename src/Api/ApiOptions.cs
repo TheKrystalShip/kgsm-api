@@ -637,12 +637,57 @@ public sealed class ApiOptions
     /// </remarks>
     public string UsersDbPath { get; init; } = UserStoreOptions.DefaultPath;
 
-    /// <summary>Discord role ids granting the <c>admin</c> tier (comma-separated;
-    /// <c>KgsmAuth__RoleAdminIds</c>).</summary>
+    /// <summary>
+    /// How long a resolved tier is reused before the account store is read again
+    /// (<c>Api__AuthorityCacheSeconds</c>, default 5, floor 0 = never cache).
+    /// </summary>
+    /// <remarks>
+    /// Authority is resolved on every request rather than read off the token, so this is the
+    /// staleness bound on a demotion: how long after an admin lowers someone's tier that their next
+    /// request can still pass at the old one. The read behind it is a local point query, so there is
+    /// little to buy by making it long.
+    /// </remarks>
+    public int AuthorityCacheSeconds { get; init; } = 5;
+
+    /// <summary>
+    /// The most accounts awaiting approval to hold at once (<c>Api__PendingUserCap</c>, default 32,
+    /// floor 1).
+    /// </summary>
+    /// <remarks>
+    /// Signing in through an identity provider with no account here provisions one, unapproved and at
+    /// no tier. That is reachable by anyone who can complete a login at that provider, so the table it
+    /// grows needs a ceiling however little each row can do.
+    /// </remarks>
+    public int PendingUserCap { get; init; } = 32;
+
+    /// <summary>
+    /// How long an unapproved, self-provisioned account survives unattended
+    /// (<c>Api__PendingUserTtlDays</c>, default 14, floor 1).
+    /// </summary>
+    /// <remarks>
+    /// What keeps <see cref="PendingUserCap"/> from becoming a lockout: without expiry, one burst of
+    /// arrivals fills the cap permanently and the next real person is refused. Only ever removes an
+    /// account that arrived this way, is still unapproved, and has no password.
+    /// </remarks>
+    public int PendingUserTtlDays { get; init; } = 14;
+
+    /// <summary>
+    /// Discord role ids granting the <c>admin</c> tier (comma-separated;
+    /// <c>KgsmAuth__RoleAdminIds</c>).
+    /// </summary>
+    /// <remarks>
+    /// Read by <c>kgsm-api user seed-discord</c>, which is a shell command an operator runs, and by
+    /// nothing on the request path. Authority comes from the account store; a guild role is what a
+    /// seed reads once to decide what tier to write onto an account, and never consulted again.
+    /// </remarks>
     public required IReadOnlyList<string> RoleAdminIds { get; init; }
     /// <summary>Discord role ids granting the <c>operator</c> tier
-    /// (<c>KgsmAuth__RoleOperatorIds</c>).</summary>
+    /// (<c>KgsmAuth__RoleOperatorIds</c>). Seed input only, like <see cref="RoleAdminIds"/>.</summary>
     public required IReadOnlyList<string> RoleOperatorIds { get; init; }
+
+    /// <summary>How this host bounds unapproved arrivals.</summary>
+    public PendingPolicy PendingPolicy =>
+        new(PendingUserCap, TimeSpan.FromDays(PendingUserTtlDays));
 
     /// <summary>Auth is on unless the dev escape hatch is set.</summary>
     public bool AuthEnabled => !AuthDisabled;
@@ -901,6 +946,9 @@ public sealed class ApiOptions
             // own database: accounts belong to the host, and a private copy would be a second set of
             // users the assistant beside us cannot see.
             UsersDbPath = BlankFallback(s.UsersDbPath, UserStoreOptions.DefaultPath),
+            AuthorityCacheSeconds = Math.Max(0, s.AuthorityCacheSeconds ?? 5),
+            PendingUserCap = Math.Max(1, s.PendingUserCap ?? 32),
+            PendingUserTtlDays = Math.Max(1, s.PendingUserTtlDays ?? 14),
             RoleAdminIds = roleMap.AdminRoleIds,
             RoleOperatorIds = roleMap.OperatorRoleIds,
 
