@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Connected accounts** (`/auth/identities`) — the caller's own sign-in methods, and attaching or
+  detaching one. Any Discord account can be attached to any KGSM account: guild membership means
+  nothing here and is never consulted. `POST /auth/identities/discord/start` returns the authorize
+  URL (the SPA follows it — a bearer does not survive a top-level navigation) and sets a one-time
+  ticket cookie; **⚠ the link callback is its own redirect URI and has to be registered on the
+  Discord application** alongside the login one (it is derived from `Api__DiscordRedirectUri`, so the
+  two always name the same origin), or Discord refuses the bounce before it starts; the callback attaches the verified identity to the account that started the link,
+  refusing one already attached elsewhere rather than re-pointing it. `DELETE
+  /auth/identities/{credentialId}` detaches, refuses the last way in, and revokes the sessions that
+  identity established — the point of disconnecting an account is that it stops getting in.
+- **`POST /auth/reauth`** and `Api__ReauthWindowMinutes` (default 5) — both writes above need a
+  credential proved within that window, because a link outlives the session that makes it and a live
+  session can be a borrowed unlocked laptop. Signing in counts as proving it, so the common path
+  never sees a prompt. Kept in memory: a restart makes everyone prove themselves again.
+
+### Removed
+
+- **The Discord guild, bot token and role→tier map are no longer read.** `KgsmAuth__GuildId`,
+  `KgsmAuth__BotToken`, `KgsmAuth__RoleAdminIds` and `KgsmAuth__RoleOperatorIds` belong to kgsm-bot —
+  the one surface that authorizes from a guild role, because it has no login of its own — and are
+  gone from this API's settings, its leaf descriptor and its options. Signing someone in needs the
+  application and this host's redirect URI, and nothing else.
+- **`kgsm-api user seed-discord`**, whose whole input was the role map it read once to give existing
+  Discord identities the accounts their guild roles said they should have. That has run.
+
 ### Changed
 
 - **Authority comes from the account store, and is resolved on every request.** A guild role is a

@@ -501,10 +501,9 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<ISessionTokenService>(sp => new SessionTokenService(
             sp.GetRequiredService<ApiOptions>().ToSessionTokenOptions(),
             sp.GetRequiredService<ILogger<SessionTokenService>>()));
-        // The callback URL is this surface's own; the app, guild, token and role map are the host's.
-        // All of it is projected from ApiOptions rather than re-read from configuration: ApiOptions is
-        // the single place any key is interpreted, and a second reader is how two halves of one
-        // setting drift apart.
+        // The callback URL is this surface's own; the application is the host's. Both are projected
+        // from ApiOptions rather than re-read from configuration: ApiOptions is the single place any
+        // key is interpreted, and a second reader is how two halves of one setting drift apart.
         services.AddSingleton(sp =>
         {
             ApiOptions o = sp.GetRequiredService<ApiOptions>();
@@ -512,19 +511,14 @@ public class Startup(IConfiguration configuration)
             {
                 ClientId = o.DiscordClientId,
                 ClientSecret = o.DiscordClientSecret,
-                BotToken = o.DiscordBotToken,
-                GuildId = o.DiscordGuildId,
             };
         });
         // "identify guilds", not the package's leaner "identify" default: the granted scopes are
         // surfaced on GET /auth/session and /me and the SPA reads them, so narrowing the set would be
-        // a visible contract change. Roles still come from the bot token — `guilds` buys nothing for
-        // authorization, it is just what this surface has always asked for.
+        // a visible contract change. Neither scope contributes to authority — nothing Discord grants
+        // does.
         services.AddSingleton(sp => new DiscordOAuthEndpoints(
             sp.GetRequiredService<ApiOptions>().DiscordRedirectUri, "identify guilds"));
-        services.AddSingleton(sp => new KgsmRoleMap(
-            sp.GetRequiredService<ApiOptions>().RoleAdminIds,
-            sp.GetRequiredService<ApiOptions>().RoleOperatorIds));
         // This host's own accounts. A singleton because it wraps one SQLite file that every request
         // reads — the store opens connections per operation and pools them, so nothing is held. It is
         // NOT on AppDbContext: this API's database is operational state and is wiped whenever its
@@ -536,9 +530,9 @@ public class Startup(IConfiguration configuration)
         // The two halves of a sign-in come from two different places, which is the whole reason they
         // are separate seams. Discord says WHO someone is (IIdentityProvider) and contributes nothing
         // else; the account store says what they may DO (IAuthorityProvider), and is the only thing
-        // that ever does. A guild role is not an answer to the second question — it is a fact about a
-        // chat server, read once by `kgsm-api user seed-discord` to decide what tier to write onto an
-        // account, and never consulted on a request.
+        // that ever does. A guild role is not an answer to the second question and is not read here at
+        // all: any Discord account can be attached to any KGSM account, and which server it is in says
+        // nothing about either.
         //
         // The Discord half stays TRANSIENT, like the typed client it wraps. Holding a typed HttpClient
         // in a singleton pins one handler for the process lifetime, so the factory's rotation — and
@@ -546,6 +540,16 @@ public class Startup(IConfiguration configuration)
         // UserDirectory, because it is one file and one cache.
         services.AddHttpClient<DiscordDirectory>(c => c.Timeout = TimeSpan.FromSeconds(10));
         services.AddTransient<IIdentityProvider>(sp => sp.GetRequiredService<DiscordDirectory>());
+        // The same provider pointed at the LINK callback. A sign-in and an attach end differently —
+        // one mints a session, the other adds a credential to an account that already exists — so
+        // they are separate addresses, and Discord is told which one at both the bounce and the
+        // exchange (it requires the two to match). Keyed rather than a second type: it is the same
+        // chokepoint to discord.com, configured differently.
+        services.AddKeyedTransient<IIdentityProvider>(Controllers.IdentitiesController.LinkProviderKey, (sp, _) =>
+            new DiscordDirectory(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(DiscordDirectory)),
+                sp.GetRequiredService<KgsmAuthOptions>(),
+                new DiscordOAuthEndpoints(sp.GetRequiredService<ApiOptions>().DiscordLinkRedirectUri)));
         services.AddTransient<IAuthorityProvider, DirectoryAuthority>();
         services.AddTransient<ISignInService>(sp => new SignInService(
             sp.GetRequiredService<IIdentityProvider>(),
@@ -553,6 +557,14 @@ public class Startup(IConfiguration configuration)
 
         // Authority on every request, from the store, replacing the tier the token was minted with.
         services.AddSingleton<LiveAuthority>();
+
+        // Changing what proves an account needs the credential proved again, and a link in flight has
+        // to remember whose account it is without telling the browser. Both are per-process on purpose
+        // (see LinkFlow.cs): a restart makes everyone prove themselves again and drops links in flight,
+        // which costs a click and cannot grant anything.
+        services.AddSingleton(sp => new ReauthGate(
+            TimeSpan.FromMinutes(sp.GetRequiredService<ApiOptions>().ReauthWindowMinutes)));
+        services.AddSingleton<LinkTicketStore>();
         services.AddSingleton<IAuthorizationHandler, TierAuthorizationHandler>();
 
         // Auth is ON by default; Api__AuthDisabled=true swaps the default scheme for a synthetic-admin
@@ -729,8 +741,9 @@ public class Startup(IConfiguration configuration)
                 + "This is the pre-M4 open trust window; never enable it on an exposed host.");
         else if (!options.DiscordConfigured)
             startupLog.LogWarning(
-                "Auth is ON but Discord is not fully configured — the /auth/discord/* login endpoints "
-                + "will 503 until the Api__Discord* settings are set. Protected endpoints require a bearer (401).");
+                "Auth is ON but Discord is not configured — the /auth/discord/* login endpoints and "
+                + "identity linking will 503 until the application and this host's redirect URI are "
+                + "set. A KGSM password still signs anyone in; protected endpoints require a bearer (401).");
 
         // Same-origin SPA delivery: when the Control Panel SPA's built bundle is present in the web root
         // (the deploy drops kgsm-web's dist/ into wwwroot), Kestrel serves it at / on the SAME origin as

@@ -331,8 +331,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
 
 
         AuthDisabled = true, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
-        DiscordRedirectUri = "", DiscordBotToken = "", DiscordGuildId = "", AuthFrontendUrl = "",
-        RoleAdminIds = [], RoleOperatorIds = [],
+        DiscordRedirectUri = "", AuthFrontendUrl = "",
         SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
         ClusterSecret = "", ClusterSecretPrevious = "", NodeId = "test",
     };

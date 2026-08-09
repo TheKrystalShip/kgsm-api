@@ -104,6 +104,15 @@ public class LeafDescriptorSelfTests
 
     /// <summary>The env-var spelling of every property the API binds.</summary>
     /// <summary>
+    /// The properties of the shared <c>KgsmAuth</c> block that <em>this</em> surface reads. The type
+    /// carries more — the guild, the bot token and the role ids — and they belong to kgsm-bot, the one
+    /// surface that authorizes from a guild role because it has no login of its own. Declaring one
+    /// here would put a knob on this leaf's configuration page that binds to a property nothing on
+    /// this host reads.
+    /// </summary>
+    private static readonly string[] SharedAuthKeysThisApiReads = ["ClientId", "ClientSecret"];
+
+    /// <summary>
     /// Every key the settings file can bind, across BOTH bound types. The <c>Api</c> section is this
     /// API's own; <c>KgsmAuth</c> is the ecosystem's shared authorization block, bound from the same
     /// file to a type in <c>TheKrystalShip.KGSM.Auth</c> so every surface on the host reads the same
@@ -113,7 +122,7 @@ public class LeafDescriptorSelfTests
     [
         .. typeof(ApiSettings).GetProperties().Select(p => $"{ApiSettings.Section}__{p.Name}"),
         .. typeof(KgsmAuthOptions).GetProperties()
-            .Where(p => p.CanWrite)
+            .Where(p => p.CanWrite && SharedAuthKeysThisApiReads.Contains(p.Name))
             .Select(p => $"{KgsmAuthOptions.Section}__{p.Name}"),
     ];
 
@@ -305,8 +314,8 @@ public class LeafDescriptorSelfTests
         }
     }
 
-    /// <summary>Every secret this API holds — the signing key, the Discord credentials, the relay and
-    /// cluster secrets — must be typed as one, or a read would echo it back to the panel.</summary>
+    /// <summary>Every secret this API holds — the signing key, the Discord client secret, the relay
+    /// and cluster secrets — must be typed as one, or a read would echo it back to the panel.</summary>
     [Fact]
     public void Credentials_are_typed_as_secrets()
     {
@@ -314,7 +323,6 @@ public class LeafDescriptorSelfTests
         [
             "Api__SigningKey",
             "KgsmAuth__ClientSecret",
-            "KgsmAuth__BotToken",
             "Api__AssistantRelaySecret",
             "Api__ClusterSecret",
             "Api__ClusterSecretPrevious",

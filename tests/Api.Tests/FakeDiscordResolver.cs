@@ -21,13 +21,17 @@ namespace TheKrystalShip.Api.Tests;
 /// exactly what makes a fake order-dependent.
 /// </para>
 /// <para>
+/// It serves the identity seam as well as the composed one, because linking an account uses the
+/// identity half alone — there is no tier in that flow at all, which is the point of it.
+/// </para>
+/// <para>
 /// The <b>tier</b> it reports is inert: authority comes from the account store, so what a login gets
 /// is decided by the account the arriving identity proves and not by anything a provider says. The
 /// tiered codes are kept because they read clearly at a call site, not because they still choose
 /// anything.
 /// </para>
 /// </summary>
-public sealed class FakeDiscordResolver : ISignInService
+public sealed class FakeDiscordResolver : ISignInService, IIdentityProvider
 {
     public static readonly KgsmIdentity Identity =
         new(KgsmActorProvider.Discord, "198772043", "haru", "haru",
@@ -48,6 +52,13 @@ public sealed class FakeDiscordResolver : ISignInService
     {
         LastCodeVerifier = codeVerifier;
         return Resolve(code);
+    }
+
+    /// <summary>The identity half on its own — what attaching an account to an existing one uses.</summary>
+    public async Task<KgsmIdentity?> VerifyAsync(string code, string codeVerifier, CancellationToken ct)
+    {
+        LastCodeVerifier = codeVerifier;
+        return (await Resolve(code))?.Identity;
     }
 
     /// <summary>The OAuth code that arrives as <paramref name="subject"/> rather than as the standing

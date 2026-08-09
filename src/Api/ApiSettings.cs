@@ -250,6 +250,13 @@ public sealed class ApiSettings
     [LeafField("pendingUserTtlDays", "Approval request lifetime", Group = "auth", Min = 1, Unit = "days")]
     public int? PendingUserTtlDays { get; set; }
 
+    /// <summary>How long a proved credential keeps a session allowed to change what proves it. Floor 1.</summary>
+    /// <panel>How long after entering their password someone may attach or detach a sign-in method.
+    /// Past it they are asked for it again — a borrowed unlocked laptop should not be able to attach a
+    /// permanent way back in.</panel>
+    [LeafField("reauthWindowMinutes", "Re-authentication window", Group = "auth", Min = 1, Unit = "min")]
+    public int? ReauthWindowMinutes { get; set; }
+
 
     // ── Sessions ──────────────────────────────────────────────────────
     /// <summary>Turns the session registry inert, leaving revocation unenforceable.</summary>

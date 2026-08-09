@@ -103,3 +103,53 @@ public sealed record SetPasswordRequest(string? Password);
 /// temporary compromise becomes a permanent one.
 /// </remarks>
 public sealed record ChangePasswordRequest(string? CurrentPassword, string? NewPassword);
+
+// ── Connected accounts ────────────────────────────────────────────────────────
+// The caller's own sign-in methods. An account is the primary object and a provider identity is one
+// credential attached to it, so this surface is about what proves an account — never about what it
+// may do, which is the admin surface above and comes from the account alone.
+
+/// <summary>
+/// <c>GET /auth/identities</c> — what can sign the caller in, and what more could.
+/// </summary>
+/// <param name="Reauth">
+/// Whether this session has proved a credential recently enough to change what proves it. The panel
+/// reads it to ask for a password before starting a link, rather than after.
+/// </param>
+public sealed record IdentitiesResponse(
+    string UserId,
+    string Username,
+    bool HasPassword,
+    IReadOnlyList<UserIdentityRecord> Identities,
+    IReadOnlyList<LinkableProvider> Providers,
+    ReauthState Reauth);
+
+/// <summary>A provider this host can attach, and whether it is attached already.</summary>
+/// <param name="Configured">
+/// Whether this host is wired to it at all. Unconfigured is not an error and not a failure to report
+/// later — the panel simply does not offer it.
+/// </param>
+public sealed record LinkableProvider(string Provider, bool Configured, bool Linked);
+
+/// <summary>
+/// How long the caller may keep changing their sign-in methods, and whether they may right now.
+/// </summary>
+/// <param name="ExpiresAt">When the current proof lapses, or null when there is none.</param>
+/// <param name="WindowMinutes">How long a proof lasts on this host, so the panel can say so.</param>
+public sealed record ReauthState(bool Fresh, DateTimeOffset? ExpiresAt, int WindowMinutes);
+
+/// <summary><c>POST /auth/reauth</c> — prove the caller's KGSM password again.</summary>
+public sealed record ReauthRequest(string? Password);
+
+/// <summary>The proof, and when it lapses.</summary>
+public sealed record ReauthResult(DateTimeOffset ExpiresAt);
+
+/// <summary>
+/// <c>POST /auth/identities/discord/start</c> — where to send the browser to attach a Discord account.
+/// </summary>
+/// <remarks>
+/// A URL rather than a redirect: the caller is an authenticated XHR carrying a bearer, and a bearer
+/// does not survive a top-level navigation. The SPA follows this itself, and the ticket cookie set
+/// alongside it is what the callback comes back with.
+/// </remarks>
+public sealed record LinkStartResponse(string Url);

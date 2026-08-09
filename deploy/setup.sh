@@ -87,21 +87,21 @@ if [[ ! -f "$SHARED_AUTH_FILE" ]]; then
     $SUDO install -m 0600 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" /dev/null "$SHARED_AUTH_FILE"
     $SUDO tee "$SHARED_AUTH_FILE" >/dev/null <<'SHARED_AUTH'
 # ── KGSM shared authorization — read by every surface on this host ────────────
-# The Discord application, the guild, the role-lookup token and the role map. Loaded by each leaf's
-# unit BEFORE its own env file, so a leaf can still override deliberately — but doing so is how one
-# person ends up with different authority on different surfaces. Prefer changing it here.
+# The Discord application, and the guild block kgsm-bot reads. Loaded by each leaf's unit BEFORE its
+# own env file, so a leaf can still override deliberately — but then two surfaces sign people in
+# through different applications. Prefer changing it here.
 #
-# Guild membership is the access gate and floors a member at VIEWER (they can read).
-# The role ids below elevate. Both lists empty means nobody can act, from any surface.
-# Roles are read with the BOT TOKEN — the sign-in scopes never carry them — so a surface that
-# resolves authority needs it even when it runs no bot of its own.
+# A sign-in through the application establishes WHO someone is. What they may do is on their KGSM
+# account and nowhere else, so no surface with a login of its own reads the guild block below.
 
-KgsmAuth__GuildId=
 KgsmAuth__ClientId=
 KgsmAuth__ClientSecret=
-KgsmAuth__BotToken=
 
-# Comma-separated Discord role ids.
+# kgsm-bot only: a person typing a slash command has proved nothing but their Discord account, so the
+# bot maps a guild role to a tier. Roles are read with the BOT TOKEN. Both lists empty means nobody
+# can act through the bot.
+KgsmAuth__GuildId=
+KgsmAuth__BotToken=
 KgsmAuth__RoleAdminIds=
 KgsmAuth__RoleOperatorIds=
 SHARED_AUTH

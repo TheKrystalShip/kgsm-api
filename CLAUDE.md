@@ -148,16 +148,18 @@ host), `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A).
 **`kgsm-api.settings.json` declares the whole configurable surface** — every key with its
 default, under one `Api` section that `ApiSettings` binds 1:1. It covers host identity, the kgsm
 engine path/journal, the monitor/watchdog/assistant/scheduler/firewall endpoints, the bind address
-and DB path, the CORS allowlist, and the auth keys (the Discord app/bot/guild and the role→tier
-map). `ApiOptions.FromSettings` is the one place any of it is interpreted; nothing reads
+and DB path, the CORS allowlist, and the auth keys (the Discord application, the account store, and
+how long an answer from it is reused). `ApiOptions.FromSettings` is the one place any of it is interpreted; nothing reads
 configuration by string key.
 
-**Who may do what is the ecosystem's, not this API's.** The Discord application, guild, role-lookup
-token and role→tier map live once, in `/etc/kgsm/discord-auth.env`, bound from the shared `KgsmAuth`
+**Who someone is comes from a shared application; what they may do comes from their KGSM account.**
+The Discord application lives once, in `/etc/kgsm/discord-auth.env`, bound from the shared `KgsmAuth`
 section that `TheKrystalShip.KGSM.Auth` owns. Every unit loads that file *before* its own env file, so
-a leaf can still override deliberately — and doing so is exactly how one person ends up with different
-authority on different surfaces, so prefer the shared file. This host's own OAuth callback is **not**
-shared and stays `Api__DiscordRedirectUri`.
+a leaf can still override deliberately — and doing so means two surfaces signing people in through
+different applications, so prefer the shared file. The guild, bot token and role ids in that same
+file are **kgsm-bot's** — the one surface that authorizes from a guild role, because it has no login
+of its own — and bind to nothing here. This host's own OAuth callback is **not** shared and stays
+`Api__DiscordRedirectUri`. Authority is the account store (`Api__UsersDbPath`), read on every request.
 
 An environment variable **overrides one key** by spelling that key's path with `__`
 (`Api__DomainPollMs`, `Logging__LogLevel__Default`, `Kestrel__Certificates__Default__Path`), and env
@@ -176,9 +178,9 @@ request. Mechanism: `../kgsm-leafconfig/README.md`.
 
 Two consequences worth knowing: **secrets are declared blank here and set for real only in the
 root-owned `/etc/kgsm-api/kgsm-api.env`**, and the boolean knobs take **`true`/`false` only** — the
-older `1`/`0`/`yes`/`on` spellings are refused at startup with an error naming the key. The Discord app/guild/bot-token/role ids are
-**shared external config** (the same values the host's Discord bot uses) — configuration, not a
-process dependency on kgsm-bot (keystone §4). **`tests/Api.Tests/`** (xUnit + `WebApplicationFactory`,
+older `1`/`0`/`yes`/`on` spellings are refused at startup with an error naming the key. The Discord
+application is **shared external config** (the same one the host's Discord bot and assistant use) —
+configuration, not a process dependency on kgsm-bot (keystone §4). **`tests/Api.Tests/`** (xUnit + `WebApplicationFactory`,
 the Discord seam faked) stands up at M4·a — `dotnet test kgsm-api.slnx`; it owns the 401/403/tier
 matrix + the callback/refresh/session flow, with smoke covering the HTTP contract surface.
 

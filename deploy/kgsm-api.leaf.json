@@ -354,19 +354,10 @@
       "risk": "safe"
     },
     {
-      "key": "authGuildId",
-      "env": "KgsmAuth__GuildId",
-      "label": "Discord server id",
-      "description": "The Discord server whose membership decides who may sign in. Everyone in it can at least look; roles decide the rest. Shared with every other surface on this host.",
-      "group": "auth",
-      "type": "string",
-      "risk": "wiring"
-    },
-    {
       "key": "authClientId",
       "env": "KgsmAuth__ClientId",
       "label": "Discord application id",
-      "description": "The Discord application users sign in through.",
+      "description": "The Discord application users sign in through. A sign-in proves who someone is; the KGSM account they prove decides what they may do.",
       "group": "auth",
       "type": "string",
       "risk": "wiring"
@@ -379,33 +370,6 @@
       "group": "auth",
       "type": "secret",
       "risk": "wiring"
-    },
-    {
-      "key": "authBotToken",
-      "env": "KgsmAuth__BotToken",
-      "label": "Discord bot token",
-      "description": "Token for the same application, used to read whether someone is in the server and which roles they hold. Sign-in itself never asks Discord for roles, so without this nobody can be elevated above read-only.",
-      "group": "auth",
-      "type": "secret",
-      "risk": "wiring"
-    },
-    {
-      "key": "authRoleAdminIds",
-      "env": "KgsmAuth__RoleAdminIds",
-      "label": "Administrator roles",
-      "description": "Comma-separated Discord role ids granted full control, including configuring leaves and connecting hosts. Admin includes everything an operator may do.",
-      "group": "auth",
-      "type": "csv",
-      "risk": "destructive"
-    },
-    {
-      "key": "authRoleOperatorIds",
-      "env": "KgsmAuth__RoleOperatorIds",
-      "label": "Operator roles",
-      "description": "Comma-separated Discord role ids allowed to run and change servers, but not to administer the host itself. Empty means nobody can act, from any surface.",
-      "group": "auth",
-      "type": "csv",
-      "risk": "destructive"
     },
     {
       "key": "authDisabled",
@@ -487,6 +451,18 @@
       "default": "14",
       "min": 1,
       "unit": "days",
+      "risk": "safe"
+    },
+    {
+      "key": "reauthWindowMinutes",
+      "env": "Api__ReauthWindowMinutes",
+      "label": "Re-authentication window",
+      "description": "How long after entering their password someone may attach or detach a sign-in method. Past it they are asked for it again — a borrowed unlocked laptop should not be able to attach a permanent way back in.",
+      "group": "auth",
+      "type": "int",
+      "default": "5",
+      "min": 1,
+      "unit": "min",
       "risk": "safe"
     },
     {

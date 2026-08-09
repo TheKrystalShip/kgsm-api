@@ -41,10 +41,9 @@ file is the local "what you must not break."
   separately here, and **they come from two different places**: `IIdentityProvider` is
   `DiscordDirectory` (who someone is, and the one chokepoint to `discord.com` — **never** call
   `discord.com` from anywhere else), and `IAuthorityProvider` is the account store (what they may
-  do). A guild role is a fact about a chat server, not about this host: it is read once by
-  `kgsm-api user seed-discord` and never on a request. The seam is what makes the whole 401/403/tier
-  matrix testable in-process with a fake (`tests/Api.Tests`) and keeps two surfaces from resolving
-  the same person differently.
+  do). A guild role is a fact about a chat server, not about this host, and nothing here reads one.
+  The seam is what makes the whole 401/403/tier matrix testable in-process with a fake
+  (`tests/Api.Tests`) and keeps two surfaces from resolving the same person differently.
   ⚠ The Discord registrations stay **transient**, matching the typed `HttpClient` underneath. A
   singleton would pin one handler for the process lifetime and stop `HttpClientFactory` rotating it;
   `AuthServiceGraphTests.TheSignInGraphIsTransient` is what holds that line. The authority half
@@ -80,12 +79,26 @@ file is the local "what you must not break."
   every gate refuses it); an **unreadable store** answers `502 authority_unavailable` via
   `OnChallenge` — never a `401`, which would send a browser to a sign-in that reads the same file, and
   never the token's own tier, which would let a demoted admin stay one for the length of the outage.
-- **Roles come from the bot token when a seed asks for them**, and only then.
-  `GET /guilds/{guild}/members/{user}` with the **bot token** — the only path, because the
-  `identify guilds` user scopes don't carry roles (`architecture.html:570`). The Discord
-  app/bot-token/guild/role-map are **shared external config** (the same values the host's Discord bot
-  uses) — **NOT a process dependency on kgsm-bot** (keystone §4). Hold our own copy in config; never
-  reach into the bot.
+- **Signing in needs the application and this host's callback, and nothing else.** The Discord
+  application is **shared external config** (the same one the host's bot and the assistant use) —
+  **NOT a process dependency on kgsm-bot** (keystone §4); hold our own copy in config and never reach
+  into the bot. The guild, the bot token and the role ids in that same shared file are kgsm-bot's:
+  they bind to nothing here, and describing one on this leaf's configuration page would offer an
+  operator a knob that changes nothing.
+- **Connecting a provider account is self-service, and both writes need the credential proved again**
+  (`IdentitiesController`, `ReauthGate`). A link outlives the session that makes it — afterwards,
+  whoever holds that provider account can sign in as this one — and a live session can be a borrowed
+  unlocked laptop, so it asks. Signing in stamps the session it mints, so the common path is never
+  prompted. The start is an XHR returning a URL (a bearer does not survive a top-level navigation)
+  and hands the browser a one-time ticket cookie; the account being changed stays server-side in
+  `LinkTicketStore`, because a cookie is a value the browser holds and the browser is not the
+  authority on whose account this is. Detaching revokes the sessions that identity established, and
+  the last credential is refused.
+  ⚠ **A link runs on its own redirect URI** (`ApiOptions.DiscordLinkRedirectUri`, derived from the
+  login one so the two cannot name different origins) and Discord accepts only registered URIs — so
+  `/auth/identities/discord/callback` must be registered on the application beside the login
+  callback. Both flows use the same `DiscordDirectory`, keyed apart at composition, because the
+  redirect sent at the bounce and at the exchange must match.
 - **A verified identity with no account here is provisioned, not denied.** It gets an unapproved
   account and a real session holding `none`, so a surface can say "awaiting approval" rather than
   showing somebody who just proved who they are a bare `403`. That is an unauthenticated write
@@ -136,9 +149,9 @@ file is the local "what you must not break."
 
 ## M4 status — backend built & live-validated (2026-06-15)
 
-`DiscordIdentityResolver` (the real HTTP impl) is now **live-validated** on the trusted host: a real
-Discord login resolved an in-guild member's roles → `admin`, minted the bearer, and that bearer passed
-live tier-gating end-to-end (PLAN.md §8 M4·b). The login endpoints `503` only until
+The real HTTP identity provider is **live-validated** on the trusted host: a real Discord login
+verified an identity, the account it proved decided the tier, the bearer was minted, and that bearer
+passed live tier-gating end-to-end (PLAN.md §8 M4·b). The login endpoints `503` only until
 the `Api__Discord*` settings are configured. **What's still owed for the *full* M4: only the frontend gate**
 (the per-host session state machine + tier-gated controls — the SPA, still `planned`). Op note: dev ran an
 **ephemeral** signing key (`Api__SigningKey` blank → tokens die on restart) — set a stable secret

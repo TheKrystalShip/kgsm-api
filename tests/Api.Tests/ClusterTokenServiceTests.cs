@@ -35,8 +35,7 @@ public sealed class ClusterTokenServiceTests
         LeafDescriptorDir = "/tmp/kgsm-api-test-descriptors", LeafDropInDir = "/tmp/kgsm-api-test-dropins",
         DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000, UpdateCheckPollMs = 600000,
         AuthDisabled = false, SigningKey = "", DiscordClientId = "", DiscordClientSecret = "",
-        DiscordRedirectUri = "", DiscordBotToken = "", DiscordGuildId = "", AuthFrontendUrl = "",
-        RoleAdminIds = [], RoleOperatorIds = [],
+        DiscordRedirectUri = "", AuthFrontendUrl = "",
         SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
         ClusterSecret = secret, ClusterSecretPrevious = previousSecret, NodeId = nodeId,
     };

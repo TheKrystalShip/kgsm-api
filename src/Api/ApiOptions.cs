@@ -603,12 +603,6 @@ public sealed class ApiOptions
     /// <summary>The host's OAuth redirect URI — this host's <c>/auth/discord/callback</c>
     /// (<c>Api__DiscordRedirectUri</c>).</summary>
     public required string DiscordRedirectUri { get; init; }
-    /// <summary>Bot token used to read guild member roles via the Discord REST API
-    /// (<c>KgsmAuth__BotToken</c>) — the only path to roles, since the
-    /// <c>identify guilds</c> user scopes don't carry them. Same token the host's bot uses.</summary>
-    public required string DiscordBotToken { get; init; }
-    /// <summary>The Discord guild whose roles authorize this host (<c>KgsmAuth__GuildId</c>).</summary>
-    public required string DiscordGuildId { get; init; }
 
     /// <summary>
     /// The SPA origin/URL the OAuth callback hands the session back to
@@ -672,18 +666,16 @@ public sealed class ApiOptions
     public int PendingUserTtlDays { get; init; } = 14;
 
     /// <summary>
-    /// Discord role ids granting the <c>admin</c> tier (comma-separated;
-    /// <c>KgsmAuth__RoleAdminIds</c>).
+    /// How long after proving a credential a session may attach or detach one
+    /// (<c>Api__ReauthWindowMinutes</c>, default 5, floor 1).
     /// </summary>
     /// <remarks>
-    /// Read by <c>kgsm-api user seed-discord</c>, which is a shell command an operator runs, and by
-    /// nothing on the request path. Authority comes from the account store; a guild role is what a
-    /// seed reads once to decide what tier to write onto an account, and never consulted again.
+    /// Linking is the one write that outlives the session making it: afterwards, whoever holds that
+    /// provider account can sign in as this one forever. A live session is not proof enough for that —
+    /// it can be a borrowed unlocked laptop — so the credential has to have been proved recently, and
+    /// this is how recently. Signing in counts as proving it, so the common path never sees a prompt.
     /// </remarks>
-    public required IReadOnlyList<string> RoleAdminIds { get; init; }
-    /// <summary>Discord role ids granting the <c>operator</c> tier
-    /// (<c>KgsmAuth__RoleOperatorIds</c>). Seed input only, like <see cref="RoleAdminIds"/>.</summary>
-    public required IReadOnlyList<string> RoleOperatorIds { get; init; }
+    public int ReauthWindowMinutes { get; init; } = 5;
 
     /// <summary>How this host bounds unapproved arrivals.</summary>
     public PendingPolicy PendingPolicy =>
@@ -745,16 +737,33 @@ public sealed class ApiOptions
     public bool SessionsProvisioned => SessionsEnabled;
 
     /// <summary>
-    /// Whether the Discord OAuth login flow can run — all of client id/secret, redirect URI, bot
-    /// token and guild id are configured. Auth (JWT validation, tier gates) is enforced regardless;
-    /// this only gates the <em>login</em> endpoints (the M4·b live half), which 503 when unconfigured.
+    /// Whether the Discord OAuth flow can run — the application's client id and secret, and this
+    /// host's own redirect URI. That is the whole of what signing someone in through Discord needs:
+    /// no guild, and no bot token, because a login establishes who someone is and the account store
+    /// alone says what they may do. Auth (JWT validation, tier gates) is enforced regardless; this
+    /// gates the <em>login</em> and <em>linking</em> endpoints, which 503 when unconfigured.
     /// </summary>
     public bool DiscordConfigured =>
         !string.IsNullOrWhiteSpace(DiscordClientId)
         && !string.IsNullOrWhiteSpace(DiscordClientSecret)
-        && !string.IsNullOrWhiteSpace(DiscordRedirectUri)
-        && !string.IsNullOrWhiteSpace(DiscordBotToken)
-        && !string.IsNullOrWhiteSpace(DiscordGuildId);
+        && !string.IsNullOrWhiteSpace(DiscordRedirectUri);
+
+    /// <summary>
+    /// Where Discord returns a browser that is <em>attaching</em> an account rather than signing in —
+    /// this host's <c>/auth/identities/discord/callback</c>, derived from
+    /// <see cref="DiscordRedirectUri"/> so the two can never name different origins.
+    /// </summary>
+    /// <remarks>
+    /// A separate address because the two flows end differently: one mints a session, the other
+    /// attaches a credential to an account that already exists. ⚠ Discord accepts only redirect URIs
+    /// registered on the application, so <b>this one has to be registered alongside the login
+    /// callback</b> or a link is refused at discord.com before it starts. That refusal is loud and
+    /// names the URI.
+    /// </remarks>
+    public string DiscordLinkRedirectUri =>
+        Uri.TryCreate(DiscordRedirectUri, UriKind.Absolute, out Uri? login)
+            ? new Uri(login, "/auth/identities/discord/callback").ToString()
+            : string.Empty;
 
     /// <summary>Whether the OAuth callback redirects the session back to the SPA (fragment handoff)
     /// rather than returning JSON. True iff a frontend URL is configured.</summary>
@@ -799,13 +808,12 @@ public sealed class ApiOptions
     public static ApiOptions FromSettings(
         ApiSettings s, MetricsThresholdPolicy policy, KgsmAuthOptions? auth = null)
     {
-        // The Discord app, guild, bot token and role map are the ECOSYSTEM's, not this API's: the bot
-        // and the assistant authorize against the same values, and a host that sets them per-leaf ends
-        // up granting one person different authority depending on which surface they reach it through.
-        // They arrive from the shared KgsmAuth section. The redirect URI is not among them — each
-        // surface has its own callback.
+        // The Discord application is the ECOSYSTEM's, not this API's — the assistant beside us signs
+        // people in through the same one — so it arrives from the shared KgsmAuth section. The
+        // redirect URI is not among them: each surface has its own callback. The guild, the bot token
+        // and the role ids in that same section belong to kgsm-bot and are not read here, because a
+        // guild role is not an answer to what anyone may do on this host.
         auth ??= new KgsmAuthOptions();
-        KgsmRoleMap roleMap = auth.ToRoleMap();
         string hostId = Clean(s.HostId) ?? Environment.MachineName;
 
         // Computed ahead of the object initializer so ClusterRetentionDays's floor can reference it
@@ -939,8 +947,6 @@ public sealed class ApiOptions
             DiscordClientId = auth.ClientId,
             DiscordClientSecret = auth.ClientSecret,
             DiscordRedirectUri = Defaulted(s.DiscordRedirectUri, ""),
-            DiscordBotToken = auth.BotToken,
-            DiscordGuildId = auth.GuildId,
             AuthFrontendUrl = Defaulted(s.AuthFrontendUrl, ""),
             // Blank falls back to the shared host location rather than to a file beside this API's
             // own database: accounts belong to the host, and a private copy would be a second set of
@@ -949,8 +955,7 @@ public sealed class ApiOptions
             AuthorityCacheSeconds = Math.Max(0, s.AuthorityCacheSeconds ?? 5),
             PendingUserCap = Math.Max(1, s.PendingUserCap ?? 32),
             PendingUserTtlDays = Math.Max(1, s.PendingUserTtlDays ?? 14),
-            RoleAdminIds = roleMap.AdminRoleIds,
-            RoleOperatorIds = roleMap.OperatorRoleIds,
+            ReauthWindowMinutes = Math.Max(1, s.ReauthWindowMinutes ?? 5),
 
             // Sessions. SessionsEnabled is the default-ON twin of the written SessionsDisabled
             // (a disable-flag with inverted polarity). The cache TTL bounds the revocation lag;

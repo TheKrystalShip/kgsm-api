@@ -41,6 +41,7 @@ public sealed class AuthController(
     ISessionTokenService tokens,
     SessionStore sessions,
     ISessionValidator sessionValidator,
+    ReauthGate reauth,
     ApiOptions options,
     AuditService audit,
     IClusterTokenService clusterTokens,
@@ -629,6 +630,7 @@ public sealed class AuthController(
                 {
                     await sessions.RevokeAsync(sid, ct);
                     sessionValidator.Evict(sid);
+                    reauth.Forget(sid);
                 }
                 catch (Exception ex)
                 {
@@ -688,6 +690,11 @@ public sealed class AuthController(
                 "Session row insert failed (non-fatal to the sign-in, but the validator will reject sid={Sid} — forced relogin follows)",
                 sessionId);
         }
+
+        // Whoever just came through this door proved a credential to do it, which is the same proof
+        // attaching or detaching one asks for. Stamping here is what keeps the common path — sign in,
+        // connect an account — from asking for a password that was typed seconds ago.
+        reauth.Stamp(sessionId);
 
         return new MintedSession(sessionId, access, refresh);
     }

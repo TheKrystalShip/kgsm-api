@@ -35,13 +35,11 @@ public class AuthTestFactory : WebApplicationFactory<Program>
             {
                 ["Api:HostId"] = HostId,
                 ["Api:SigningKey"] = SigningKey,
-                // DiscordConfigured = true so the callback path runs; the FAKE replaces the real HTTP.
-                // The app, guild and role-lookup token live in the ecosystem's shared KgsmAuth section;
-                // the redirect URI is this surface's own and stays on Api.
+                // DiscordConfigured = true so the login and linking paths run; the FAKE replaces the
+                // real HTTP. The application lives in the ecosystem's shared KgsmAuth section; the
+                // redirect URI is this surface's own and stays on Api.
                 ["KgsmAuth:ClientId"] = "test-client",
                 ["KgsmAuth:ClientSecret"] = "test-secret",
-                ["KgsmAuth:BotToken"] = "test-bot-token",
-                ["KgsmAuth:GuildId"] = "1234567890",
                 ["Api:DiscordRedirectUri"] = "https://host.test/auth/discord/callback",
                 // Callback returns JSON by default (the contract these tests assert). The fragment-
                 // handoff variant overrides this per-test. Pin it empty so a dev appsettings value
@@ -66,8 +64,20 @@ public class AuthTestFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // One fake behind both seams, and the SAME instance behind both: a test asserts on what
+            // the callback presented (LastCodeVerifier), and two instances would record into whichever
+            // one the flow under test did not use.
             services.RemoveAll<ISignInService>();
-            services.AddSingleton<ISignInService, FakeDiscordResolver>();
+            services.RemoveAll<IIdentityProvider>();
+            services.AddSingleton<FakeDiscordResolver>();
+            services.AddSingleton<ISignInService>(sp => sp.GetRequiredService<FakeDiscordResolver>());
+            services.AddSingleton<IIdentityProvider>(sp => sp.GetRequiredService<FakeDiscordResolver>());
+            // The link flow resolves its provider by key, because it runs against a different
+            // redirect URI. Same fake behind it: a test that reached the real one would reach
+            // discord.com.
+            services.AddKeyedSingleton<IIdentityProvider>(
+                Controllers.IdentitiesController.LinkProviderKey,
+                (sp, _) => sp.GetRequiredService<FakeDiscordResolver>());
         });
     }
 

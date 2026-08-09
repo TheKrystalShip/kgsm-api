@@ -41,9 +41,7 @@ public class Program
     /// <remarks>
     /// Built from the same sources in the same order rather than reading one of them, because a CLI
     /// that writes a different file from the one the service reads is worse than no CLI: the account
-    /// it creates simply never appears. The shared <c>KgsmAuth</c> values a seed needs come from the
-    /// environment, which under systemd is <c>/etc/kgsm/discord-auth.env</c> and at a shell is
-    /// whatever the operator has sourced.
+    /// it creates simply never appears.
     /// </remarks>
     private static ApiOptions CliOptions(string[] args) =>
         ApiOptions.FromConfiguration(new ConfigurationBuilder()
