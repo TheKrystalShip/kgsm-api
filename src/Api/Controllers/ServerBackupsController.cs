@@ -16,14 +16,23 @@ namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
 /// Per-server backups (Tier-1 ops) — <c>GET /servers/{id}/backups</c> (list), <c>POST /servers/{id}/backups</c>
-/// (create), and <c>POST /servers/{id}/backups/restore</c> (restore from a named snapshot). The list is a
-/// viewer-gated synchronous read (kgsm <c>instances backups</c> is quick); create and restore are operator-gated
-/// and async — they reuse the shared <see cref="JobRegistry"/>/<see cref="CommandRunner"/> (one job model, one
-/// in-flight slot per server) exactly like install/uninstall, returning <c>202</c> + a job. Restore lives on its
-/// own sub-route (not a <c>/commands</c> verb) because it carries a <c>backup</c> name and the command verbs are
-/// param-less; create is symmetric with it. Both are audited via the kgsm event echo
-/// (<c>instance_backup_created</c> → <c>backup.create</c>, <c>instance_backup_restored</c> → <c>backup.restore</c>) —
-/// no direct audit write (the no-double-write contract).
+/// (create), <c>POST /servers/{id}/backups/restore</c> (restore from a named snapshot),
+/// <c>DELETE /servers/{id}/backups/{backupId}</c> (remove one), and the two-step archive download
+/// (<c>POST …/download-ticket</c> then <c>GET …/archive</c>). The list is a viewer-gated synchronous read
+/// (kgsm <c>instances backups</c> is quick); everything that mutates or hands over bytes is operator-gated.
+/// <para>
+/// Create and restore are async — they reuse the shared <see cref="JobRegistry"/>/<see cref="CommandRunner"/>
+/// (one job model, one in-flight slot per server) exactly like install/uninstall, returning <c>202</c> + a job.
+/// Delete answers inside the request instead, because removing a backup is an unlink: it still takes the same
+/// in-flight slot, so it can never run alongside the restore that reads what it is removing. Restore and delete
+/// live on their own routes rather than as <c>/commands</c> verbs because they name a backup and the command
+/// verbs are param-less; create is symmetric with them.
+/// </para>
+/// Every mutation is audited via the kgsm event echo (<c>instance_backup_created</c> → <c>backup.create</c>,
+/// <c>instance_backup_restored</c> → <c>backup.restore</c>, <c>instance_backup_deleted</c> →
+/// <c>backup.delete</c>) — no direct audit write (the no-double-write contract). The one exception is
+/// <c>backup.download</c>, which no engine command produces: nothing happens on the host when an archive is
+/// served, so the API is the only witness and writes that row itself.
 /// </summary>
 [ApiController]
 [Route("api/v1/servers/{id}/backups")]
@@ -158,6 +167,81 @@ public sealed class ServerBackupsController(
         string? actor = AuditPrincipal.ActorString(User);
         runner.StartBackupRestore(job, backup, actor, origin);
         return StatusCode(StatusCodes.Status202Accepted, new CommandAccepted(job));
+    }
+
+    /// <summary>
+    /// Delete one backup (operator). Synchronous — removing a backup is an unlink, not a transfer, so it
+    /// answers within the request and the caller can re-list immediately; there is no job to await and
+    /// nothing to show progress for. Audited via the kgsm event echo (<c>instance_backup_deleted</c> →
+    /// <c>backup.delete</c>, at warn) — no direct write here.
+    /// <list type="bullet">
+    /// <item><c>400</c> — a bad origin.</item>
+    /// <item><c>404</c> — unknown server id, or no such backup (the engine owns the name set and refuses
+    /// an id it does not itself list, which is what stops an arbitrary directory being named and removed).</item>
+    /// <item><c>409</c> — a command is already in flight for this server: a restore reads the very bytes a
+    /// delete would remove, so the two are never allowed to overlap.</item>
+    /// <item><c>503</c> — the kgsm engine is not provisioned on this host.</item>
+    /// <item><c>204</c> — deleted.</item>
+    /// </list>
+    /// </summary>
+    [HttpDelete("{backupId}")]
+    [Authorize(Policy = AuthPolicy.Operator)] // mutation, and an irreversible one — operator and up
+    public async Task<IActionResult> Delete(
+        string id, string backupId, [FromQuery] string? origin, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(backupId))
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "backup id is required");
+
+        // A DELETE carries no body, so the driving surface rides the query string. Same vocabulary and
+        // same refusal as the POST bodies — the audit row must not be able to claim an origin nobody can
+        // declare, whichever verb produced it.
+        if (!TryResolveOrigin(origin, out string resolvedOrigin))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "unknown origin; expected one of: ui, assistant, discord, api");
+
+        if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the kgsm engine is not provisioned on this host");
+
+        if (!await ExistsAsync(id, ct).ConfigureAwait(false))
+            return NotFound();
+
+        // Claim the server's single in-flight slot for the duration, exactly as create and restore do.
+        // The slot is the only thing that makes "no delete during a restore" true rather than merely
+        // likely: a check that only reads the registry leaves a window between the read and the unlink,
+        // and the loser of that race is a restore reading a directory that is disappearing underneath it.
+        if (TryStart(id, CommandVerb.BackupDelete, out Job job, out IActionResult conflict) is false)
+            return conflict;
+
+        KgsmResult result;
+        try
+        {
+            result = instances.DeleteBackup(id, backupId, AuditPrincipal.ActorString(User), resolvedOrigin);
+        }
+        catch (Exception ex)
+        {
+            jobs.Update(job with { State = JobState.Failed, SettledAt = DateTimeOffset.UtcNow, Error = ex.Message });
+            logger.LogWarning(ex, "Failed to delete backup {Backup} of {Server}", backupId, id);
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable", "could not delete the backup");
+        }
+
+        jobs.Update(job with
+        {
+            State = result.IsSuccess ? JobState.Succeeded : JobState.Failed,
+            SettledAt = DateTimeOffset.UtcNow,
+            Error = result.IsSuccess ? null : result.Stderr?.Trim(),
+        });
+
+        if (result.IsSuccess)
+            return NoContent();
+
+        // The engine refuses an id it does not list, which is the same answer as "no such backup" — and
+        // the SPA's row is stale either way, so 404 is the honest code. Its own message carries through
+        // rather than a guess at what went wrong.
+        string message = string.IsNullOrWhiteSpace(result.Stderr)
+            ? $"could not delete the backup (exit {result.ExitCode})"
+            : result.Stderr.Trim();
+        return Error(StatusCodes.Status404NotFound, "not_found", message);
     }
 
     /// <summary>

@@ -99,6 +99,12 @@ public static class CommandVerb
     /// machinery (the install/uninstall pattern — verbs are param-less, this is not).</summary>
     public const string BackupRestore = "backup_restore";
 
+    /// <summary>Delete one named backup (Tier-1 ops — <c>DELETE /servers/{id}/backups/{backupId}</c>). NOT in
+    /// <see cref="IsKnown"/>. Unlike the other backup verbs this one is <em>synchronous</em>: it borrows the
+    /// registry's per-server in-flight slot purely as a mutex — a restore reads the bytes a delete removes —
+    /// and settles within the request, so no job is ever handed to a caller to await.</summary>
+    public const string BackupDelete = "backup_delete";
+
     public static bool IsKnown(string? verb) => verb is Start or Stop or Restart or Update;
 }
 

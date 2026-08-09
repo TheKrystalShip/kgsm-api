@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Backup deletion** — `DELETE /servers/{id}/backups/{backupId}` (operator) removes one snapshot and
+  answers `204`.
+
+  **Synchronous, unlike its siblings.** Create and restore are `202` + a job because they copy an
+  instance's whole install; deleting one is an unlink, so it settles inside the request and the caller
+  re-lists immediately — there is no progress to show and nothing to await.
+
+  It still takes the server's **in-flight command slot** for the duration. That is not symmetry for its
+  own sake: a restore reads the very directory a delete removes, and a check that only *reads* the job
+  registry leaves a window between the check and the unlink whose loser is a restore reading a
+  directory disappearing underneath it. Taking the slot is atomic, so the two can never overlap; a
+  delete attempted during any in-flight command is a `409`. The slot is released on both the success
+  and the failure path — a synchronous verb that claimed it and forgot would wedge the server's every
+  later command behind a permanent `409` pointing nowhere near here.
+
+  **The engine owns which ids are real.** kgsm refuses an id it does not itself list — which is what
+  stops an arbitrary directory in the backups store, including a half-written snapshot still being
+  staged, from being named and removed — and its own message carries through as the `404` body rather
+  than a guess formed here. Audited on the echo path (`instance_backup_deleted` → `backup.delete`, at
+  warn, no undo behind it), never written twice.
+
 - **Backup download** — `POST /servers/{id}/backups/{backupId}/download-ticket` (operator) mints a
   short-lived handle, and `GET /servers/{id}/backups/{backupId}/archive?ticket=…` streams the archive,
   range-capable so a broken transfer resumes.
