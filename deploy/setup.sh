@@ -118,6 +118,20 @@ if [[ -n "${LEAF_DESCRIPTOR:-}" && -f "$LEAF_DESCRIPTOR" && ! -d "$LEAF_DESCRIPT
     $SUDO install -d -m 0755 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" "$LEAF_DESCRIPTOR_DIR"
 fi
 
+# ── 2b·ii. The shared account store's directory ───────────────────────────────
+# Where this host's KGSM accounts live. Shared like the descriptor directory above and created by
+# whichever project's setup.sh runs first, owned by the deploying user so the service — and
+# `kgsm-api user …` — write it with no privilege.
+#
+# 0700, and a directory rather than a bare file under /var/lib/kgsm, for two separate reasons. It
+# holds password hashes, which is the one thing on this host a local read is worth anything against;
+# and SQLite creates the -wal and -shm files BESIDE the database, so write permission on the file is
+# not enough — WAL needs the directory, and /var/lib/kgsm itself is root-owned.
+if [[ ! -d "$KGSM_AUTH_DIR" ]]; then
+    log "creating ${KGSM_AUTH_DIR} (owned by ${DEPLOY_USER}, 0700) — the KGSM account store"
+    $SUDO install -d -m 0700 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" "$KGSM_AUTH_DIR"
+fi
+
 # ── 2c. The public vhost fragment ─────────────────────────────────────────────
 # This leaf's own nginx server block, if the host runs nginx as its public multiplexer. Each leaf
 # ships and installs its own fragment: a leaf owns its vhost and appears or disappears independently

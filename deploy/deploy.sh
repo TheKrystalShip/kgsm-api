@@ -145,6 +145,19 @@ log "waiting for ${SERVICE} to report healthy at ${HEALTH_URL} ..."
 if wait_health; then
     log "kgsm-api is up and healthy ✓"
     systemctl --no-pager --lines=0 status "$SERVICE" 2>/dev/null | head -n 4 || true
+
+    # ── 5. The first administrator ────────────────────────────────────────────
+    # A host with no KGSM accounts has nobody who can sign in to create one, and with no identity
+    # provider configured there is no other door either. So the very first successful deploy makes
+    # one and prints its generated password once.
+    #
+    # Safe to run every time: `user bootstrap` is a no-op the moment any account exists, so this
+    # fires exactly once per host and never touches accounts afterwards. It writes the same store the
+    # running service reads — two processes on one SQLite file is what the store is built for — so
+    # nothing needs restarting. A failure here is reported and does not fail the deploy: the service
+    # is up and healthy, which is what this script promised.
+    "${PREFIX}/${PROJECT}" user bootstrap \
+        || warn "could not create the first administrator; run '${PREFIX}/${PROJECT} user bootstrap' by hand."
 else
     err "service started but ${HEALTH_URL} did not return 200 within ${HEALTH_TRIES}s."
     err "recent logs:"

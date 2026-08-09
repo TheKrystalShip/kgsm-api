@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **KGSM owns the accounts.** `POST /auth/login` signs somebody in with a KGSM username and password,
+  minting exactly the session the OAuth callback does — the door that needs no identity provider
+  configured on this host at all. An unknown username and a wrong password give one answer at one
+  cost, a run of failures locks the account with a `Retry-After`, and an account awaiting approval
+  signs in holding `none` so the panel can say so rather than showing a bare denial.
+- **`/auth/users` — the account surface** (admin): list, create, patch, delete, and set someone's
+  password. With the store as the sole authority this is the only way anyone's authority on this host
+  changes, so every write leaves its own audit row (`user.provision`, `user.approve`, `user.disable`,
+  `user.tier_change`, `user.delete`, `user.password`) naming the account acted upon in meta and never
+  a password in any form. The only active admin cannot be demoted, disabled or deleted.
+- **`POST /auth/password`** — the caller changes their own password, proving the current one. A
+  session can be a borrowed laptop, and one that could change the password would make a temporary
+  compromise permanent.
+- **`kgsm-api user …`** — accounts from the shell, for the two moments the panel cannot help: a host
+  with nobody who can sign in, and being locked out. `bootstrap` creates the first administrator and
+  prints a generated password once, and is a no-op the moment any account exists, so `deploy.sh` runs
+  it on every deploy and it fires exactly once per host. Also `create`, `passwd` and `list`.
+- **`Api__UsersDbPath`** (default `/var/lib/kgsm/auth/users.db`) — the host's shared account store,
+  read directly by every KGSM surface on the box. Deliberately not this API's own database, which is
+  operational state and is wiped whenever its schema changes. `setup.sh` provisions the directory
+  `0700` and owned by the service user; a store that cannot be opened leaves the account endpoints
+  answering `503` with the reason and everything else working.
+
 ### Changed
 
 - **The login path no longer names an identity provider.** `AuthController` depends on the shared

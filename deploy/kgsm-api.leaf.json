@@ -445,6 +445,16 @@
       "risk": "safe"
     },
     {
+      "key": "usersDbPath",
+      "env": "Api__UsersDbPath",
+      "label": "Account store",
+      "description": "The file this host keeps its KGSM accounts and passwords in. Every KGSM service on the host reads the same file, so pointing this somewhere else signs people out of the panel while leaving the assistant on the old one.",
+      "group": "auth",
+      "type": "path",
+      "default": "/var/lib/kgsm/auth/users.db",
+      "risk": "wiring"
+    },
+    {
       "key": "sessionsDisabled",
       "env": "Api__SessionsDisabled",
       "label": "Disable the session registry",

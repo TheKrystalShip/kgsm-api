@@ -85,6 +85,8 @@
       "DiscordRedirectUri": "",
       // SPA origin the OAuth callback hands the session back to. Blank returns JSON.
       "AuthFrontendUrl": "",
+      // The host's shared KGSM account store. Every surface on this host reads the same file.
+      "UsersDbPath": "/var/lib/kgsm/auth/users.db",
 
       // ── Sessions ──
       // Turns the session registry inert, leaving revocation unenforceable.

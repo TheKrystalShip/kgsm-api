@@ -547,6 +547,13 @@ public class Startup(IConfiguration configuration)
             DiscordDirectory discord = sp.GetRequiredService<DiscordDirectory>();
             return new SignInService(discord, discord);
         });
+        // This host's own accounts. A singleton because it wraps one SQLite file that every request
+        // reads — the store opens connections per operation and pools them, so nothing is held. It is
+        // NOT on AppDbContext: this API's database is operational state and is wiped whenever its
+        // schema changes, and accounts cannot be. Opening it can fail (a permission problem, or a file
+        // written by a newer sibling on this host); UserDirectory captures that as a capability rather
+        // than letting it decide whether the Control Panel starts.
+        services.AddSingleton<UserDirectory>();
         services.AddSingleton<IAuthorizationHandler, TierAuthorizationHandler>();
 
         // Auth is ON by default; Api__AuthDisabled=true swaps the default scheme for a synthetic-admin

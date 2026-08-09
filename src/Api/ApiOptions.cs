@@ -1,6 +1,7 @@
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Sessions;
+using TheKrystalShip.KGSM.Auth.Users;
 
 namespace TheKrystalShip.Api;
 
@@ -619,6 +620,23 @@ public sealed class ApiOptions
     /// </summary>
     public required string AuthFrontendUrl { get; init; }
 
+    /// <summary>
+    /// The host's shared KGSM account store (<c>Api__UsersDbPath</c>, default
+    /// <c>/var/lib/kgsm/auth/users.db</c>) — where local accounts, their credentials and their tiers live.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately outside <see cref="DbPath"/>. This API's own database is its operational state and
+    /// is wiped when its schema changes; accounts are the <em>host's</em>, shared with every other KGSM
+    /// surface running beside it and never wiped. Pointing this at a file the assistant does not read
+    /// gives the two surfaces different accounts.
+    /// </remarks>
+    /// <remarks>
+    /// Not <c>required</c>, unlike the secrets beside it: this has one correct value on every host in
+    /// the ecosystem, so a default here is the shared location rather than a guess. What must never
+    /// default is a credential.
+    /// </remarks>
+    public string UsersDbPath { get; init; } = UserStoreOptions.DefaultPath;
+
     /// <summary>Discord role ids granting the <c>admin</c> tier (comma-separated;
     /// <c>KgsmAuth__RoleAdminIds</c>).</summary>
     public required IReadOnlyList<string> RoleAdminIds { get; init; }
@@ -879,6 +897,10 @@ public sealed class ApiOptions
             DiscordBotToken = auth.BotToken,
             DiscordGuildId = auth.GuildId,
             AuthFrontendUrl = Defaulted(s.AuthFrontendUrl, ""),
+            // Blank falls back to the shared host location rather than to a file beside this API's
+            // own database: accounts belong to the host, and a private copy would be a second set of
+            // users the assistant beside us cannot see.
+            UsersDbPath = BlankFallback(s.UsersDbPath, UserStoreOptions.DefaultPath),
             RoleAdminIds = roleMap.AdminRoleIds,
             RoleOperatorIds = roleMap.OperatorRoleIds,
 

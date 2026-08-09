@@ -194,6 +194,28 @@ public static class AuditAction
     // per-node value, so Origin stays "api" and the node id is the forensic detail).
     public const string AuthClusterSession = "auth.cluster_session";
 
+    // user.* — API-internal admin actions on a KGSM account (the host's own identity store). kgsm runs
+    // nothing and emits no event, so these are DIRECT writes, the auth.* case — no echo, no
+    // double-write risk. They are privilege events and the trail's most sensitive rows: a tier change
+    // is somebody's authority changing, and with the account store as the sole authority it is the ONLY
+    // way anyone's authority ever changes. meta carries the target `userId` and the before/after tier
+    // or status; never a password, in any form, hashed or otherwise.
+    public const string UserProvision = "user.provision";
+    public const string UserApprove = "user.approve";
+    public const string UserDisable = "user.disable";
+    public const string UserTierChange = "user.tier_change";
+    public const string UserDelete = "user.delete";
+
+    // user.password — a password was set or changed. Recorded because losing the ability to see that
+    // someone else set your password is losing the only signal an account takeover leaves. meta names
+    // whose account it was and whether the holder or an admin did it — never the password.
+    public const string UserPassword = "user.password";
+
+    // identity.* — an external identity was attached to or detached from an account. A link is a
+    // privilege event: afterwards, whoever controls that provider account can sign in as this one.
+    public const string IdentityLink = "identity.link";
+    public const string IdentityUnlink = "identity.unlink";
+
     // service.* — API-internal admin actions on a leaf service (the leaf-runtime-provisioning/config
     // feature). kgsm runs nothing and emits no event, so these are DIRECT writes (the auth.* case — no echo,
     // no double-write). connect/disconnect flip a leaf's runtime provisioning; config applies a config
@@ -226,6 +248,11 @@ public static class ActorProvider
     public const string Discord = "discord";
     public const string System = "system";
     public const string Api = "api";
+
+    // A KGSM account signed in with its own password — no external provider involved. Distinct from
+    // "api" (a token, not a person) and from "system" (nobody). Beyond the doc's set; the frontend
+    // accepts unknown providers forward-compat.
+    public const string Local = "local";
 }
 
 /// <summary>Target kinds (architecture.html §3·d <c>target.kind</c>).</summary>

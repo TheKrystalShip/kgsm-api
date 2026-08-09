@@ -222,6 +222,14 @@ public sealed class ApiSettings
     [LeafField("authFrontendUrl", "Panel URL", Group = "auth", NoDefault = true)]
     public string? AuthFrontendUrl { get; set; }
 
+    /// <summary>The host's shared KGSM account store. Blank falls back to /var/lib/kgsm/auth/users.db.</summary>
+    /// <panel>The file this host keeps its KGSM accounts and passwords in. Every KGSM service on the
+    /// host reads the same file, so pointing this somewhere else signs people out of the panel while
+    /// leaving the assistant on the old one.</panel>
+    [LeafField("usersDbPath", "Account store", Group = "auth", Type = LeafType.Path,
+        Risk = LeafRisk.Wiring)]
+    public string? UsersDbPath { get; set; }
+
 
     // ── Sessions ──────────────────────────────────────────────────────
     /// <summary>Turns the session registry inert, leaving revocation unenforceable.</summary>

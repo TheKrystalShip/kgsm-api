@@ -16,6 +16,7 @@ using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
 
 using TheKrystalShip.KGSM.Auth.Sessions;
+using TheKrystalShip.KGSM.Auth.Users;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -36,6 +37,7 @@ namespace TheKrystalShip.Api.Controllers;
 [ApiController]
 public sealed class AuthController(
     ISignInService signIn,
+    UserDirectory users,
     ISessionTokenService tokens,
     SessionStore sessions,
     ISessionValidator sessionValidator,
@@ -150,41 +152,11 @@ public sealed class AuthController(
                     // null — WhenWritingNull omits them, keeping this branch's wire shape unchanged.
                     new CallbackResult("denied", null, null, null, userHandle, null, null));
 
-        // M4·c — generate the session id, mint both tokens carrying it (each also carries its own jti
-        // for reuse-detection on the refresh path), and persist the session row (the registry is the
-        // authority the per-request validator reads to decide "is this session still alive"). The row's
-        // `Expires` starts at now + SessionsRefreshAbsoluteDays (the 30d cap, kept in lockstep with
-        // SessionTokenService.RefreshTtl); the window is now SLIDING (user directive) — each successful
-        // /refresh slides Expires forward + rotates CurrentJti, so a user who opens the panel at least
-        // once inside the window stays logged in indefinitely. The row stores the refresh's jti as its
-        // initial CurrentJti (the reuse-detection key the refresh action validates against).
-        string sessionId = "sid_" + Guid.NewGuid().ToString("N");
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        MintedToken access = tokens.MintAccess(resolved.Identity, resolved.Tier, sessionId);
-        MintedToken refresh = tokens.MintRefresh(resolved.Identity, resolved.Tier, sessionId);
-
-        // Persist the session row. Best-effort: a failed write must never break login — BUT log it
-        // loudly, because the per-request validator rejects a token whose sid has no row (D10 clean break,
-        // live since Increment 4), so a silent insert failure would defeat the milestone at the next
-        // request. The honest recovery for a missing row is a forced relogin (≤15min, the access TTL hard
-        // ceiling); we surface the failure as a warning so the operator notices. The row stores the
-        // refresh's jti as its initial CurrentJti — the reuse-detection key the refresh action validates.
-        string? userAgent = Request.Headers.UserAgent.ToString();
-        if (string.IsNullOrWhiteSpace(userAgent)) userAgent = null;
-        try
-        {
-            await sessions.CreateAsync(
-                sessionId, userHandle, options.HostId,
-                created: now,
-                expires: now + TimeSpan.FromDays(options.SessionsRefreshAbsoluteDays),
-                userAgent, refresh.Jti, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "Session row insert failed (non-fatal to login, but the validator will reject sid={Sid} — forced relogin follows)",
-                sessionId);
-        }
+        string? userAgent = UserAgent();
+        MintedSession minted = await MintSessionAsync(resolved.Identity, resolved.Tier, userAgent, ct);
+        string sessionId = minted.SessionId;
+        MintedToken access = minted.Access;
+        MintedToken refresh = minted.Refresh;
 
         // M5: an auth.login is an API-internal action (no kgsm event), so it is written directly here
         // — no double-write risk. Best-effort: a failed audit write must never break the login. M4·c
@@ -209,6 +181,81 @@ public sealed class AuthController(
             ? FrontendRedirect(Frag(("access", access.Token), ("refresh", refresh.Token)))
             : Ok(new CallbackResult("ok", KgsmTiers.ToWire(resolved.Tier), access.Token, refresh.Token, userHandle,
                 access.ExpiresAt, refresh.ExpiresAt));
+    }
+
+    /// <summary>
+    /// <c>POST /auth/login</c> — sign in with a KGSM password. The door that needs no identity
+    /// provider configured on this host at all, and the one an admin created at setup comes through.
+    /// <list type="bullet">
+    /// <item><c>200</c> <see cref="LoginResult"/> — a minted session, exactly as the OAuth callback
+    /// hands one over. <c>status:"pending"</c> with <c>tier:"none"</c> is a real session for an
+    /// account awaiting approval, not a failure.</item>
+    /// <item><c>400</c> <c>bad_request</c> — no username or no password.</item>
+    /// <item><c>401</c> <c>invalid_credentials</c> — wrong username <b>or</b> wrong password, one
+    /// answer at one cost. Never tell a caller which.</item>
+    /// <item><c>403</c> <c>account_disabled</c> — right password, account switched off.</item>
+    /// <item><c>429</c> <c>too_many_attempts</c> + <c>Retry-After</c> — locked out.</item>
+    /// <item><c>503</c> <c>users_unavailable</c> — the account store could not be opened.</item>
+    /// </list>
+    /// </summary>
+    [AllowAnonymous]
+    [HttpPost("/auth/login")]
+    public async Task<IActionResult> Login([FromBody] LoginRequest? body, CancellationToken ct)
+    {
+        if (!users.Available)
+            return Error(StatusCodes.Status503ServiceUnavailable, "users_unavailable",
+                users.UnavailableReason ?? "The KGSM account store is unavailable on this host.");
+
+        if (body is null || string.IsNullOrWhiteSpace(body.Username) || string.IsNullOrWhiteSpace(body.Password))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "username and password are required");
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        LocalSignInResult result;
+        try
+        {
+            result = await users.SignIn.SignInAsync(body.Username, body.Password, now, ct);
+        }
+        catch (Exception ex)
+        {
+            // The store went away between startup and now. An outage, never a denial — the same rule
+            // as an unreachable identity provider.
+            logger.LogError(ex, "Local sign-in failed: the KGSM account store could not be read.");
+            return Error(StatusCodes.Status503ServiceUnavailable, "users_unavailable",
+                "The KGSM account store could not be read.");
+        }
+
+        switch (result.Outcome)
+        {
+            case LocalSignInOutcome.InvalidCredentials:
+                // Logged with the username that was tried, so an operator can still see a run of
+                // attempts against one name — the distinction the wire deliberately does not carry.
+                logger.LogInformation("Local sign-in refused for '{Username}'.", body.Username);
+                return Error(StatusCodes.Status401Unauthorized, "invalid_credentials",
+                    "That username and password do not match an account here.");
+
+            case LocalSignInOutcome.LockedOut:
+                int seconds = Math.Max(1, (int)Math.Ceiling(((result.RetryAfter ?? now) - now).TotalSeconds));
+                Response.Headers.RetryAfter = seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return Error(StatusCodes.Status429TooManyRequests, "too_many_attempts",
+                    $"Too many failed attempts. Try again in {seconds}s.");
+
+            case LocalSignInOutcome.Disabled:
+                return Error(StatusCodes.Status403Forbidden, "account_disabled",
+                    "That account is disabled on this host.");
+        }
+
+        ResolvedPrincipal principal = result.Principal!;
+        string? userAgent = UserAgent();
+        MintedSession minted = await MintSessionAsync(principal.Identity, principal.Tier, userAgent, ct);
+
+        await RecordAuthAsync(AuditAction.AuthLogin, principal.Identity, principal.Tier,
+            $"{principal.Identity.Display} signed in with a password", minted.SessionId, userAgent, ct);
+
+        return Ok(new LoginResult(
+            minted.Access.Token, minted.Refresh.Token, KgsmTiers.ToWire(principal.Tier),
+            principal.Identity.Handle, UserStatuses.ToWire(result.User!.Status),
+            minted.Access.ExpiresAt, minted.Refresh.ExpiresAt));
     }
 
     /// <summary>
@@ -263,33 +310,13 @@ public sealed class AuthController(
         // the token subject, the session row's key — has to know that.
         var identity = new KgsmIdentity(
             KgsmActorProvider.Discord, body.DiscordId, body.Username, body.DisplayName, null, []);
-        string userHandle = identity.Handle;
 
-        // Mirror Callback's mint+persist sequence exactly (same jti choice, same expiry choice): a
-        // fresh sid, both tokens minted carrying it, the refresh's jti stored as the row's initial
-        // CurrentJti (the reuse-detection key /refresh validates against).
-        string sessionId = "sid_" + Guid.NewGuid().ToString("N");
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        MintedToken access = tokens.MintAccess(identity, tier, sessionId);
-        MintedToken refresh = tokens.MintRefresh(identity, tier, sessionId);
-
-        // Best-effort, same posture as Callback: a failed row insert must never fail the vouch, but the
-        // per-request validator rejects a token whose sid has no row — the honest recovery is a forced
-        // re-vouch/relogin, so log it loudly.
-        try
-        {
-            await sessions.CreateAsync(
-                sessionId, userHandle, options.HostId,
-                created: now,
-                expires: now + TimeSpan.FromDays(options.SessionsRefreshAbsoluteDays),
-                userAgent: null, refresh.Jti, ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "cluster-session row insert failed (non-fatal to the vouch, but the validator will reject sid={Sid} — forced re-vouch follows)",
-                sessionId);
-        }
+        // No userAgent: a vouch is a node-to-node call, and the calling node's HTTP client is not a
+        // device anyone would recognise in their own session list.
+        MintedSession minted = await MintSessionAsync(identity, tier, userAgent: null, ct);
+        string sessionId = minted.SessionId;
+        MintedToken access = minted.Access;
+        MintedToken refresh = minted.Refresh;
 
         // API-internal, no kgsm event -> written directly (the auth.* posture, no double-write risk).
         // origin="api" (NOT the default "ui" — this is a node-to-node call, not a browser session).
@@ -541,6 +568,61 @@ public sealed class AuthController(
                 $"{id.Display} logged out", sid, null, ct);
         }
         return NoContent();
+    }
+
+    /// <summary>A freshly minted session: the id both tokens carry, and the tokens themselves.</summary>
+    private readonly record struct MintedSession(string SessionId, MintedToken Access, MintedToken Refresh);
+
+    /// <summary>
+    /// Mint a session for a verified identity and persist its registry row. Every door into this host
+    /// — the OAuth callback, a password, a peer's vouch — goes through here, so a session means the
+    /// same thing whichever one it came through.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both tokens carry the same <c>sid</c> for the session's whole life; each carries its own
+    /// <c>jti</c>, and the refresh's becomes the row's <c>CurrentJti</c> — the key reuse detection
+    /// compares against on the refresh path. The row's <c>Expires</c> starts at
+    /// <c>now + SessionsRefreshAbsoluteDays</c> and slides forward on each successful refresh.
+    /// </para>
+    /// <para>
+    /// The row write is best-effort and must never fail a login — but it is logged loudly, because the
+    /// per-request validator rejects a token whose <c>sid</c> has no row. The honest recovery is a
+    /// forced relogin within the access token's ~15-minute ceiling; a silent failure would look like
+    /// a login that worked and then stopped.
+    /// </para>
+    /// </remarks>
+    private async Task<MintedSession> MintSessionAsync(
+        KgsmIdentity identity, KgsmTier tier, string? userAgent, CancellationToken ct)
+    {
+        string sessionId = "sid_" + Guid.NewGuid().ToString("N");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        MintedToken access = tokens.MintAccess(identity, tier, sessionId);
+        MintedToken refresh = tokens.MintRefresh(identity, tier, sessionId);
+
+        try
+        {
+            await sessions.CreateAsync(
+                sessionId, identity.Handle, options.HostId,
+                created: now,
+                expires: now + TimeSpan.FromDays(options.SessionsRefreshAbsoluteDays),
+                userAgent, refresh.Jti, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Session row insert failed (non-fatal to the sign-in, but the validator will reject sid={Sid} — forced relogin follows)",
+                sessionId);
+        }
+
+        return new MintedSession(sessionId, access, refresh);
+    }
+
+    /// <summary>The calling device, for a human reading their own session list. Never authority.</summary>
+    private string? UserAgent()
+    {
+        string? userAgent = Request.Headers.UserAgent.ToString();
+        return string.IsNullOrWhiteSpace(userAgent) ? null : userAgent;
     }
 
     // The bearer from the Authorization header, or null. Used by /refresh (which can't use [Authorize]:

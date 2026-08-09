@@ -51,6 +51,11 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 ["Api:MonitorSocketPath"] = "/tmp/kgsm-api-tests-no-monitor.sock",
                 ["Api:WatchdogSocketPath"] = "",
                 ["Api:DbPath"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-{Guid.NewGuid():N}.db"),
+                // ⚠ Never the default. /var/lib/kgsm/auth/users.db is the HOST's real account store, shared
+                // with every KGSM service on the box, and opening it CREATES it — so an unpinned test
+                // run would hand the operator a live accounts file that nobody made. Same rule that
+                // keeps AuditJournalRelayTests off the engine's real journal.
+                ["Api:UsersDbPath"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-users-{Guid.NewGuid():N}.db"),
             });
         });
 

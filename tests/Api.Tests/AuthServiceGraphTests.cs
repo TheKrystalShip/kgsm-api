@@ -1,5 +1,9 @@
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+
+using TheKrystalShip.Api.Services.Auth;
 
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
@@ -15,10 +19,57 @@ namespace TheKrystalShip.Api.Tests;
 /// </summary>
 public sealed class AuthServiceGraphTests
 {
+    /// <summary>
+    /// The production graph, with exactly one setting pinned.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <c>Api:UsersDbPath</c> defaults to <c>/var/lib/kgsm/auth/users.db</c> — the HOST's real account
+    /// store, shared with every KGSM service on the box — and resolving <c>UserDirectory</c> opens it,
+    /// which creates it. A graph test must not hand the operator a live accounts file nobody made, so
+    /// this one setting is redirected and nothing else is. Everything the tests below assert is built
+    /// exactly as production builds it.
+    /// </remarks>
+    private static WebApplicationFactory<Program> RealGraph() =>
+        new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Api:UsersDbPath"] =
+                        Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-users-{Guid.NewGuid():N}.db"),
+                })));
+
+    [Fact]
+    public void TheRealAccountStoreGraphCanBeConstructed()
+    {
+        // The other half of the login path, and the one no other test here builds: a store that
+        // cannot be constructed is a 503 on every password sign-in against a deployed host.
+        using WebApplicationFactory<Program> factory = RealGraph();
+        using IServiceScope scope = factory.Services.CreateScope();
+
+        UserDirectory users = scope.ServiceProvider.GetRequiredService<UserDirectory>();
+
+        Assert.True(users.Available, users.UnavailableReason);
+        Assert.NotNull(users.SignIn);
+    }
+
+    [Fact]
+    public void TheAccountStoreIsOneInstanceForTheProcess()
+    {
+        // Unlike the sign-in seams, which are transient because a typed HttpClient underneath them
+        // must keep rotating. This one wraps a file: a second instance would re-run the schema check
+        // on every request for nothing.
+        using WebApplicationFactory<Program> factory = RealGraph();
+        using IServiceScope scope = factory.Services.CreateScope();
+
+        Assert.Same(
+            scope.ServiceProvider.GetRequiredService<UserDirectory>(),
+            scope.ServiceProvider.GetRequiredService<UserDirectory>());
+    }
+
     [Fact]
     public void TheRealSignInGraphCanBeConstructed()
     {
-        using var factory = new WebApplicationFactory<Program>();
+        using WebApplicationFactory<Program> factory = RealGraph();
         using IServiceScope scope = factory.Services.CreateScope();
 
         ISignInService signIn = scope.ServiceProvider.GetRequiredService<ISignInService>();
@@ -35,7 +86,7 @@ public sealed class AuthServiceGraphTests
         // Identity and authority are separate seams deliberately, but on this host one implementation
         // answers both. Resolving each on its own proves the registrations exist and are satisfiable —
         // a half nothing supplies is a 500 on the first login, and no other test constructs these.
-        using var factory = new WebApplicationFactory<Program>();
+        using WebApplicationFactory<Program> factory = RealGraph();
         using IServiceScope scope = factory.Services.CreateScope();
 
         Assert.IsType<DiscordDirectory>(scope.ServiceProvider.GetRequiredService<IIdentityProvider>());
@@ -48,7 +99,7 @@ public sealed class AuthServiceGraphTests
         // A typed HttpClient held in a singleton pins one handler forever, so HttpClientFactory stops
         // rotating and a DNS change never lands. This is the assertion that keeps someone from
         // "optimising" the sign-in registrations to singletons later.
-        using var factory = new WebApplicationFactory<Program>();
+        using WebApplicationFactory<Program> factory = RealGraph();
         using IServiceScope scope = factory.Services.CreateScope();
 
         Assert.NotSame(

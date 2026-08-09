@@ -134,6 +134,12 @@ LEAF_DESCRIPTOR_DIR="${KGSM_LEAF_DESCRIPTOR_DIR:-/var/lib/kgsm/leaves}"
 # different surfaces. Each unit loads it before its own env file; setup.sh seeds it blank.
 SHARED_AUTH_FILE="${KGSM_SHARED_AUTH_FILE:-/etc/kgsm/discord-auth.env}"
 
+# Where this host keeps its KGSM accounts — the store every surface on the box reads directly, so
+# one person is one account whichever door they come through. A directory of its own rather than a
+# file under /var/lib/kgsm: SQLite writes -wal/-shm BESIDE the database, so WAL needs write
+# permission on the DIRECTORY, and /var/lib/kgsm itself is root-owned.
+KGSM_AUTH_DIR="${KGSM_AUTH_DIR:-/var/lib/kgsm/auth}"
+
 # Privileged-call indirection, used by setup.sh ONLY. deploy.sh never calls this. An automated
 # run can set SUDO='sudo -A' + SUDO_ASKPASS=… to provision without an interactive prompt; no
 # password is ever stored in the repo.
