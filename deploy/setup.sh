@@ -73,37 +73,30 @@ else
 fi
 
 # ── 2a. The shared authorization file ─────────────────────────────────────────
-# Who may do what on this host, in one place: the Discord application, the guild, the role-lookup
-# token and the role map. Every KGSM surface authorizes against these, and a host that sets them
-# per-leaf ends up granting the same person different authority depending on which surface they
-# reach it through — which is the drift this file exists to prevent.
+# The Discord application this host signs people in through, in one place. A host that set it
+# per-leaf would sign the same person in through two different applications — which is the drift
+# this file exists to prevent. What anyone may do is not here: that is their KGSM account, in the
+# account store, set in the Control Panel.
 #
 # Created by whichever project's setup.sh runs first, seeded blank, and NEVER overwritten: a
 # re-run on a configured host must not wipe the operator's values. Owned by the deploying user so
-# it can be edited without privilege; 0600 because it holds two secrets.
+# it can be edited without privilege; 0600 because it holds the application secret.
 if [[ ! -f "$SHARED_AUTH_FILE" ]]; then
-    log "seeding ${SHARED_AUTH_FILE} — EDIT IT: until the role ids are set, nobody can act"
+    log "seeding ${SHARED_AUTH_FILE} — EDIT IT: sign-in needs the Discord application id and secret"
     $SUDO install -d -m 0755 "$(dirname "$SHARED_AUTH_FILE")"
     $SUDO install -m 0600 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" /dev/null "$SHARED_AUTH_FILE"
     $SUDO tee "$SHARED_AUTH_FILE" >/dev/null <<'SHARED_AUTH'
-# ── KGSM shared authorization — read by every surface on this host ────────────
-# The Discord application, and the guild block kgsm-bot reads. Loaded by each leaf's unit BEFORE its
-# own env file, so a leaf can still override deliberately — but then two surfaces sign people in
-# through different applications. Prefer changing it here.
+# ── KGSM shared sign-in — read by every surface on this host ──────────────────
+# The Discord application people sign in through. Loaded by each leaf's unit BEFORE its own env
+# file, so a leaf can still override it deliberately — but then two surfaces sign people in through
+# different applications. Prefer changing it here.
 #
-# A sign-in through the application establishes WHO someone is. What they may do is on their KGSM
-# account and nowhere else, so no surface with a login of its own reads the guild block below.
+# WHO MAY DO WHAT IS NOT HERE. A sign-in establishes who someone is; what they may do is on their
+# KGSM account, in the account store at /var/lib/kgsm/auth/users.db, and it is set in the Control
+# Panel. No group, guild or role grants anything on any surface.
 
 KgsmAuth__ClientId=
 KgsmAuth__ClientSecret=
-
-# kgsm-bot only: a person typing a slash command has proved nothing but their Discord account, so the
-# bot maps a guild role to a tier. Roles are read with the BOT TOKEN. Both lists empty means nobody
-# can act through the bot.
-KgsmAuth__GuildId=
-KgsmAuth__BotToken=
-KgsmAuth__RoleAdminIds=
-KgsmAuth__RoleOperatorIds=
 SHARED_AUTH
     $SUDO chown "${DEPLOY_USER}:${DEPLOY_GROUP}" "$SHARED_AUTH_FILE"
 fi

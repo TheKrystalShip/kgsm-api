@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Tracks `TheKrystalShip.KGSM.Auth` 2.0.0, which drops `KgsmRoleMap` and the guild/role/bot-token
+  keys off `KgsmAuthOptions` now that no surface derives authority from a Discord role. This API
+  already bound only `ClientId`/`ClientSecret`, so nothing here changes behaviour; `setup.sh` no
+  longer seeds the dead keys into `/etc/kgsm/discord-auth.env`.
+
 ### Added
 
 - **Connected accounts** (`/auth/identities`) — the caller's own sign-in methods, and attaching or
