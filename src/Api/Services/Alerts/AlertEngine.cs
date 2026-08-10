@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
@@ -64,10 +65,17 @@ namespace TheKrystalShip.Api.Services.Alerts;
 /// metric alert unchanged — the same honest-unknown posture as a failed watchdog poll. A metric alert's
 /// <c>resolution.actionId</c> is always <see langword="null"/> (the bridge is crash-specific) and
 /// <c>Escalated</c> is always <see langword="false"/> (a metric in the danger band still auto-resolves).</para>
+/// <para><b>The engine source.</b> A third producer, <see cref="TickUpdates"/>, mirrors update availability
+/// into the feed as <c>update:&lt;serverId&gt;</c> <c>info</c> alerts. It is the one source that measures
+/// nothing: kgsm records what the scheduler's networked check found beside each instance, so the condition is
+/// read off the same fast status the roster is built from — no probe, no network, no extra call. It needs
+/// nothing provisioned (kgsm is this API's base dependency), which is why the loop runs even on a host with
+/// neither a watchdog nor a threshold policy.</para>
 /// <para><b>Threading.</b> The alert state (<see cref="_firing"/>/<see cref="_resolved"/>/<see cref="_clearSince"/>/
-/// <see cref="_breachSince"/>) is mutated ONLY by <see cref="Tick"/> and <see cref="TickMetrics"/>, both on the
-/// single poll-loop thread (sequentially, never concurrently); the controller reads the volatile immutable
-/// <see cref="_snapshot"/>; <see cref="_lastStartAction"/> is concurrent. No locks.</para>
+/// <see cref="_breachSince"/>) is mutated ONLY by <see cref="Tick"/>, <see cref="TickMetrics"/> and
+/// <see cref="TickUpdates"/>, all on the single poll-loop thread (sequentially, never concurrently); the
+/// controller reads the volatile immutable <see cref="_snapshot"/>; <see cref="_lastStartAction"/> is
+/// concurrent. No locks.</para>
 /// </remarks>
 public sealed class AlertEngine : BackgroundService
 {
@@ -92,6 +100,7 @@ public sealed class AlertEngine : BackgroundService
     private readonly ApiOptions _options;
     private readonly IServiceProvider _services;
     private readonly MonitorClient _monitor;
+    private readonly InstanceCache _instances;
     private readonly StreamHub _hub;
     private readonly ILogger<AlertEngine> _logger;
 
@@ -112,11 +121,12 @@ public sealed class AlertEngine : BackgroundService
 
     private volatile Snapshot _snapshot = Snapshot.Empty;
 
-    public AlertEngine(ApiOptions options, IServiceProvider services, MonitorClient monitor, StreamHub hub, ILogger<AlertEngine> logger)
+    public AlertEngine(ApiOptions options, IServiceProvider services, MonitorClient monitor, InstanceCache instances, StreamHub hub, ILogger<AlertEngine> logger)
     {
         _options = options;
         _services = services;
         _monitor = monitor;
+        _instances = instances;
         _hub = hub;
         _logger = logger;
     }
@@ -148,11 +158,11 @@ public sealed class AlertEngine : BackgroundService
     {
         if (!_options.WatchdogProvisioned && !_options.MetricsThresholdProvisioned)
         {
-            // Neither a crash source nor a metrics-threshold source on this host — GET /alerts serves an
-            // empty feed, the WS topic stays silent.
+            // Neither optional source on this host. The loop still runs: the engine source needs nothing
+            // provisioned — kgsm is this API's base dependency, and a host with no engine configured simply
+            // leaves the instance cache empty, which produces no alerts rather than a wrong feed.
             _logger.LogInformation(
-                "Alerts: no crash or metrics-threshold source provisioned — empty feed.");
-            return;
+                "Alerts: no crash or metrics-threshold source provisioned — update availability is the only producer.");
         }
 
         await PollAsync(stoppingToken).ConfigureAwait(false); // warm immediately
@@ -188,6 +198,12 @@ public sealed class AlertEngine : BackgroundService
             Snap.Snapshot? snapshot = await _monitor.GetLatestAsync(ct).ConfigureAwait(false); // null when monitor down
             TickMetrics(snapshot, now);
         }
+
+        // No I/O of its own: the instance cache already holds the fast status read every other surface is
+        // served from, and update availability rides on it. A cache whose last engine read FAILED is holding
+        // stale rows, so the pass is skipped rather than reconciled against them — the same honest-unknown
+        // posture as a blind watchdog poll.
+        if (_instances.EngineRead) TickUpdates(_instances.Statuses, now);
     }
 
     // The watchdog crash-source scrape, split out of PollAsync so it can be skipped entirely when the
@@ -448,6 +464,103 @@ public sealed class AlertEngine : BackgroundService
         }
     }
 
+    /// <summary>
+    /// One reconcile of the update-available conditions against the instance cache's latest fast status
+    /// read — the <c>engine</c> source. Pure over the engine's in-memory state (no I/O beyond the hub
+    /// publish) and single-threaded, the unit-test seam, mirroring <see cref="Tick"/> and
+    /// <see cref="TickMetrics"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This measures nothing.</b> kgsm establishes update availability — the scheduler's sweep runs
+    /// the networked check and the engine records what it found beside the instance — so this pass reads a
+    /// fact off a status read that touches no network, and its whole job is to mirror that fact into the
+    /// feed. Nothing here compares versions or asks an upstream.</para>
+    /// <para><b>Neither dwell applies.</b> The metric dwells exist because a measured value can spike; an
+    /// update record cannot. It is written once, by a check that already completed, and stays written until
+    /// the update is applied — so there is no blip to debounce on the way in, and the clear is a real
+    /// transition (the game was updated) that an operator should see reflected at once rather than 30
+    /// seconds later.</para>
+    /// <para><b>Three states, not two.</b> <c>UpdatesAvailable</c> is <see langword="null"/> until something
+    /// has checked, and that is not "no update" — it holds, exactly like a non-measured reading does. Only a
+    /// measured <see langword="false"/> clears. An instance that disappears from the roster entirely was
+    /// uninstalled, and a pending update on something that no longer exists is retracted, not resolved.</para>
+    /// </remarks>
+    internal void TickUpdates(IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> statuses, DateTimeOffset now)
+    {
+        foreach ((string serverId, Reading<InstanceRuntimeStatus> reading) in statuses)
+        {
+            if (reading is not { IsMeasured: true, Value: { } runtime }) continue; // honest-unknown: hold
+            bool? available = runtime.Version.UpdatesAvailable;
+            if (available is null) continue;                                       // never checked: hold
+
+            string id = UpdateAlertId(serverId);
+            if (available is true)
+            {
+                Alert candidate = BuildUpdateFiring(serverId, runtime.Version,
+                    _firing.TryGetValue(id, out Alert? held) ? held.RaisedAt : now);
+
+                // Re-push only on a changed record: a second build landing upstream before the operator
+                // applies the first moves the target version, and the card would otherwise keep naming the
+                // build they already read about.
+                if (held is null || held.Detail != candidate.Detail || held.Title != candidate.Title)
+                {
+                    _firing[id] = candidate;
+                    Publish(StreamProtocol.AlertRaise, id, candidate);
+                }
+                continue;
+            }
+
+            if (!_firing.TryGetValue(id, out Alert? firingRecord)) continue;
+            _firing.Remove(id);
+            var resolution = new AlertResolution(
+                AlertResolvedBy.System, AlertSource.Engine,
+                string.IsNullOrWhiteSpace(runtime.Version.Current)
+                    ? "Up to date."
+                    : $"Up to date — running {runtime.Version.Current}.",
+                ActionId: null);
+            _resolved.Add(firingRecord with { Status = AlertStatus.Resolved, ResolvedAt = now, Resolution = resolution });
+            Publish(StreamProtocol.AlertResolve, id, new AlertResolved(id, resolution));
+        }
+
+        // Uninstalled while an update was pending. Scoped to update: ids — _firing is shared with the crash
+        // and metric sources, and their rows are theirs to reconcile.
+        foreach (string id in _firing.Keys.ToList())
+        {
+            if (!id.StartsWith(UpdateIdPrefix, StringComparison.Ordinal)) continue;
+            if (statuses.ContainsKey(_firing[id].ServerId!)) continue;
+            _firing.Remove(id);
+            Publish(StreamProtocol.AlertRetract, id, new AlertRetracted(id));
+        }
+
+        RebuildSnapshot(now);
+    }
+
+    /// <summary>The firing record for an available game update (<c>engine</c> source). <see cref="Alert.Escalated"/>
+    /// is always <see langword="false"/> and <see cref="Alert.Attempts"/> always 0 — nothing is retrying, and
+    /// nothing gives up: the condition simply waits for someone to apply the update.</summary>
+    private Alert BuildUpdateFiring(string serverId, VersionInfo version, DateTimeOffset raisedAt)
+    {
+        // Both halves are separately unknown-able. The engine records a version string it read from upstream,
+        // and an instance whose installed version it cannot determine still gets an honest headline rather
+        // than one built around an empty string.
+        string installed = string.IsNullOrWhiteSpace(version.Current) ? "unknown" : version.Current;
+        string latest = string.IsNullOrWhiteSpace(version.Latest) ? "unknown" : version.Latest!;
+
+        return new Alert(
+            Id: UpdateAlertId(serverId),
+            Severity: AlertSeverity.Info,
+            Source: AlertSource.Engine,
+            Title: $"{serverId} has an update available",
+            Detail: $"Installed {installed} · latest {latest}.",
+            ServerId: serverId,
+            HostId: _options.HostId,
+            Anchor: new AlertAnchor(AlertSurface.Server, _options.HostId, Tab: null, Ref: serverId),
+            Status: AlertStatus.Firing,
+            RaisedAt: raisedAt,
+            Escalated: false,
+            Attempts: 0);
+    }
+
     private Alert BuildFiring(string serverId, Observed obs, DateTimeOffset raisedAt)
     {
         string severity = obs.Escalated ? AlertSeverity.Danger : AlertSeverity.Warn;
@@ -592,6 +705,9 @@ public sealed class AlertEngine : BackgroundService
 
     private const string CrashIdPrefix = "crash:";
     private static string AlertId(string serverId) => $"{CrashIdPrefix}{serverId}";
+
+    private const string UpdateIdPrefix = "update:";
+    private static string UpdateAlertId(string serverId) => $"{UpdateIdPrefix}{serverId}";
 
     // The watchdog-observed crash condition for one instance (the inputs that shape the firing record).
     private readonly record struct Observed(bool Escalated, int Attempts, string Reason);

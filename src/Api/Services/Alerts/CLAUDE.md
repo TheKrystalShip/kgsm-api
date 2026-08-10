@@ -134,6 +134,31 @@ resolved condition to the audit action that fixed it.
   from the full `_firing`/`_resolved` (crash + metric together) — order-independent, one authority, one
   retention, no second engine.
 
+### Engine source — update availability
+
+- **Source `engine`, id namespace `update:<serverId>`, severity `info`.** A third producer,
+  `TickUpdates`, mirrors update availability into the feed: firing while a newer game build exists,
+  resolved when the update is applied. `Escalated` is always `false` and `Attempts` always `0` —
+  nothing is retrying and nothing gives up; the condition waits for a person.
+- **It measures nothing, and that is the point.** kgsm establishes the fact (the scheduler's sweep
+  runs the networked check, the engine records what it found beside the instance), so this pass reads
+  it off `InstanceCache.Statuses` — the same fast status the roster is built from. **Never add a probe,
+  a version comparison or an upstream call here**; that is exactly what `UpdateCheckCache` was, and it
+  was deleted.
+- **Neither dwell applies, deliberately.** The metric fire-dwell exists because a value can spike and an
+  update record cannot; the clear-probation exists because a crash-loop flaps and an applied update does
+  not. A raise and a clear both take effect on the tick that observes them.
+- **Three states, not two.** `UpdatesAvailable` is `null` until something has checked — that HOLDS, it
+  does not clear. Only a measured `false` resolves. A non-measured `Reading` holds, and a cache whose
+  last engine read failed skips the pass entirely (`InstanceCache.EngineRead`) — the same honest-unknown
+  posture as a blind watchdog poll.
+- **An uninstall retracts, it does not resolve.** A pending update on an instance that no longer exists
+  was never fixed. Like the other two passes, the sweep is scoped to its own id prefix (`update:`) —
+  `_firing` is shared, and the crash/metric rows are theirs to reconcile.
+- **The loop runs even with nothing provisioned.** kgsm is this API's base dependency, so the engine
+  source needs no capability; a host with no engine configured leaves the cache empty, which produces no
+  alerts rather than a wrong feed.
+
 ## WS message contract (architecture.html §3·c)
 
 - `alert.raise` → the **full `Alert`** record (status `firing`). Re-pushed to flip `escalated`/`attempts`.

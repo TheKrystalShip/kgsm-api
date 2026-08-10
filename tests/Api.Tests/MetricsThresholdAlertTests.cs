@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using TheKrystalShip.Api;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Models;
@@ -271,7 +272,11 @@ public sealed class MetricsThresholdAlertTests
     // --- engine wiring (mirrors AlertEngineTests; the MonitorClient is never invoked — TickMetrics takes
     //     the snapshot as an argument) ---------------------------------------------------------------
     private static AlertEngine Engine(ApiOptions options) =>
-        new(options, new StubProvider(), Monitor(options), Hub(), NullLogger<AlertEngine>.Instance);
+        new(options, new StubProvider(), Monitor(options), Instances(options), Hub(), NullLogger<AlertEngine>.Instance);
+
+    // Inert, like the MonitorClient beside it — TickMetrics never reads the instance cache.
+    private static InstanceCache Instances(ApiOptions options) =>
+        new(new StubProvider(), options, NullLogger<InstanceCache>.Instance);
 
     private static ApiOptions OptionsWith(params ThresholdRule[] rules)
     {

@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using TheKrystalShip.Api;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Models;
@@ -297,8 +298,14 @@ public sealed class AlertEngineTests
     private static AlertEngine Engine()
     {
         ApiOptions options = BuildOptions();
-        return new(options, new StubProvider(), Monitor(options), Hub(), NullLogger<AlertEngine>.Instance);
+        return new(options, new StubProvider(), Monitor(options), Instances(options), Hub(), NullLogger<AlertEngine>.Instance);
     }
+
+    // A real InstanceCache, never refreshed by these tests (TickUpdates takes the status map as an argument
+    // and never reads the cache) — it exists only to satisfy the ctor. Construction is inert: the engine is
+    // read on StartAsync, which nothing here calls.
+    private static InstanceCache Instances(ApiOptions options) =>
+        new(new StubProvider(), options, NullLogger<InstanceCache>.Instance);
 
     // A real MonitorClient, never invoked by the crash tests (Tick takes watchdog states as an argument and
     // never scrapes) — it exists only to satisfy the ctor. Both it and its LeafRegistry construct lazily: the

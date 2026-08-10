@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — an available game update is a condition on the alert feed
+
+A third producer joins the `AlertEngine` beside crash and metric thresholds: `TickUpdates` raises
+`update:<serverId>` as an `info` alert while a newer build exists, and resolves it when the update is
+applied. New `AlertSource.Engine` (`"engine"`) — kgsm is the one that establishes the fact, and the
+source names it. `GET /alerts` and the `alerts` stream topic are unchanged; nothing new is exposed.
+
+**It measures nothing and costs nothing.** The condition is read off the instance cache's existing
+fast status — the same reading the roster is built from — so the pass makes no call, opens no socket
+and asks no upstream. The networked check is the scheduler's, once an hour.
+
+**Neither dwell applies.** The metric dwells exist because a measured value can spike; an update
+record cannot. It is written by a check that already completed and stays written until the update
+lands, so there is no blip to debounce going in, and the clear is a real transition an operator
+should see at once.
+
+**Three states, not two.** `updatesAvailable` is null until something has checked, and that is not
+"no update" — an unchecked instance holds, exactly like a non-measured reading. Only a measured
+`false` resolves. An instance uninstalled while an update was pending is **retracted**, not resolved:
+it was never fixed, it is simply gone.
+
+Because the alert source is the engine, the loop now runs on a host with neither a watchdog nor a
+threshold policy provisioned — kgsm is this API's base dependency, and a host with no engine
+configured leaves the instance cache empty, which yields no alerts rather than a wrong feed.
+
 ### Changed — update availability is the engine's fact, echoed like every other
 
 `UpdateCheckCache` is gone, and with it the last domain fact this API authored rather than echoed.

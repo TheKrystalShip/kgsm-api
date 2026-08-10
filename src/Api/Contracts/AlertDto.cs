@@ -97,6 +97,11 @@ public static class AlertSource
     public const string HostMonitor = "host-monitor";
     public const string Metrics = "metrics";
     public const string Assistant = "assistant";
+
+    /// <summary>kgsm itself — a condition the engine records beside an instance rather than one the API
+    /// measures. Update availability is the one wired: the scheduler's sweep does the networked check and
+    /// kgsm keeps the answer, so the API reads a fact it never establishes.</summary>
+    public const string Engine = "engine";
 }
 
 /// <summary><see cref="AlertResolution.By"/> is always this — the server observed the clear, never the
