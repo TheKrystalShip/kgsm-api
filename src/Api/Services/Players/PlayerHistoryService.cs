@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
@@ -18,10 +19,14 @@ namespace TheKrystalShip.Api.Services.Players;
 /// <para><b>Composed, not independent.</b> Like <see cref="PlayerRosterService"/>, this service
 /// does NOT register its own <c>IEventService</c> handler — it is called FROM
 /// <see cref="Audit.KgsmAuditConsumer"/>'s existing handlers for the single-handler-per-type reason.</para>
-/// <para><b>Reconcile on startup.</b> On API startup, the watchdog's live session map is queried
-/// to determine who is currently online. Players in the snapshot are marked online; everyone
-/// else is marked offline. This replaces the old "mark unknown" behavior — the watchdog snapshot
-/// IS the ground truth. If the watchdog is absent/down, falls back to marking unknown (honest).</para>
+/// <para><b>Reconcile on startup.</b> On API startup the watchdog's live session map says who is
+/// connected, joined against what the engine says is running: players in the snapshot are marked
+/// online, everyone else offline, and a snapshot entry for a server the engine reports stopped is
+/// treated as ended rather than believed. Presence and run-state are two readings from two
+/// authorities, and combining them is the only honest answer — a session map is in-memory
+/// bookkeeping, so its word alone cannot establish that someone is connected to a process that is
+/// not running. With no snapshot at all (watchdog absent or down), an online player resolves to
+/// offline where the server is measurably stopped and to unknown everywhere else.</para>
 /// <para><b>Write pattern.</b> Follows the <see cref="Audit.AuditService"/> pattern: singleton,
 /// own DI scope per write, serialized writes via <see cref="SemaphoreSlim"/> (SQLite single-writer),
 /// <c>EnsureCreated</c> with double-checked locking.</para>
@@ -30,6 +35,7 @@ public sealed class PlayerHistoryService(
     IServiceScopeFactory scopeFactory,
     IServiceProvider serviceProvider,
     StreamHub hub,
+    InstanceCache instances,
     ILogger<PlayerHistoryService> logger)
 {
     // serverId -> (playerIdentity -> player). In-memory cache for fast reads + WS coalescing.
@@ -83,9 +89,27 @@ public sealed class PlayerHistoryService(
 
         // Build the set of currently-online player identities from the watchdog snapshot.
         // Indexed by instance name → set of all identity fields for cross-matching.
+        //
+        // A server the engine reports as stopped contributes nothing, whatever its entry says: a
+        // process that is not running has no connections, so a session it still names describes
+        // something that cannot exist. This is the same status-from-the-authority join every other
+        // surface makes (keystone §4) rather than a second opinion about presence — and it matters
+        // most here, because this method writes to the PERMANENT roster: an unjoined snapshot is how
+        // a stale session became a durable "online" that outlived several restarts.
         var onlineByInstance = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var liveSessions = new Dictionary<string, IReadOnlyList<WatchdogPlayer>>(StringComparer.Ordinal);
         foreach (var kvp in watchdogSessions)
         {
+            if (IsMeasuredStopped(kvp.Key))
+            {
+                if (kvp.Value.Count > 0)
+                    logger.LogWarning(
+                        "Player history: watchdog reports {Count} session(s) for {Server}, which the engine "
+                        + "reports as stopped — treating them as ended", kvp.Value.Count, kvp.Key);
+                continue;
+            }
+
+            liveSessions[kvp.Key] = kvp.Value;
             var online = new HashSet<string>(StringComparer.Ordinal);
             foreach (var session in kvp.Value)
             {
@@ -140,8 +164,10 @@ public sealed class PlayerHistoryService(
             }
         }
 
-        // Phase 2: discover new players from watchdog that aren't in the DB yet.
-        foreach (var kvp in watchdogSessions)
+        // Phase 2: discover new players from watchdog that aren't in the DB yet. Only from the sessions
+        // that survived the run-state join — minting a brand-new online row for a stopped server would
+        // be inventing a player, not recovering one.
+        foreach (var kvp in liveSessions)
         {
             string serverId = kvp.Key;
             foreach (var session in kvp.Value)
@@ -187,7 +213,7 @@ public sealed class PlayerHistoryService(
         await RebuildCacheAsync(ct).ConfigureAwait(false);
 
         // Publish WS frames for newly discovered online players so open tabs update.
-        foreach (var kvp in watchdogSessions)
+        foreach (var kvp in liveSessions)
         {
             string serverId = kvp.Key;
             foreach (var session in kvp.Value)
@@ -205,8 +231,20 @@ public sealed class PlayerHistoryService(
         }
     }
 
-    /// <summary>Mark all <c>online</c> players as <c>unknown</c> on API startup. Fallback when
-    /// the watchdog is unavailable. Rebuilds the in-memory cache from DB.</summary>
+    /// <summary>
+    /// Whether the engine reports this server as stopped — a measured "there is no process", not an
+    /// absent or unreadable status. An unmeasured reading answers <see langword="false"/>, so an
+    /// engine this API cannot read leaves presence exactly as it found it rather than declaring
+    /// everyone gone on a reading it does not have.
+    /// </summary>
+    private bool IsMeasuredStopped(string serverId) =>
+        instances.Statuses.TryGetValue(serverId, out Reading<InstanceRuntimeStatus>? reading)
+        && reading is { IsMeasured: true, Value.Status: false };
+
+    /// <summary>Resolve every <c>online</c> player on API startup without a watchdog snapshot:
+    /// <c>offline</c> where the engine reports the server stopped (a measurement — nobody can be
+    /// connected to it), <c>unknown</c> everywhere else (we missed events while down, and no
+    /// reading says otherwise). Rebuilds the in-memory cache from DB.</summary>
     private async Task MarkUnknownFallbackAsync(CancellationToken ct)
     {
         await _writeGate.WaitAsync(ct).ConfigureAwait(false);
@@ -215,13 +253,27 @@ public sealed class PlayerHistoryService(
             using IServiceScope scope = scopeFactory.CreateScope();
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            int count = await db.PlayerHistory
+            PlayerRecord[] stillOnline = await db.PlayerHistory
                 .Where(p => p.Status == PlayerStatus.online)
-                .ExecuteUpdateAsync(s => s.SetProperty(p => p.Status, PlayerStatus.unknown), ct)
+                .ToArrayAsync(ct)
                 .ConfigureAwait(false);
 
-            if (count > 0)
-                logger.LogInformation("Player history: marked {Count} online players as unknown on startup", count);
+            int offline = 0;
+            int unknown = 0;
+            foreach (PlayerRecord record in stillOnline)
+            {
+                bool stopped = IsMeasuredStopped(record.ServerId);
+                record.Status = stopped ? PlayerStatus.offline : PlayerStatus.unknown;
+                if (stopped) offline++; else unknown++;
+            }
+
+            if (stillOnline.Length > 0)
+            {
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                logger.LogInformation(
+                    "Player history: no watchdog snapshot on startup — {Offline} players marked offline "
+                    + "(their server is stopped), {Unknown} marked unknown", offline, unknown);
+            }
         }
         finally
         {

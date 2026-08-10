@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a stopped server has no players, on every path that gets there
+
+The Control Panel reported two players online for a server that had been stopped for hours. The
+roster reset on stop had fired correctly; what put them back was the startup reconcile, which took the
+watchdog's session map as the whole answer. That map had outlived the process it described, so an API
+restart during the down-window copied phantom sessions into the permanent roster — where they then
+survived every later restart, because each one re-read the same stale snapshot.
+
+- **The reconcile joins presence against run-state.** A snapshot entry for a server the engine reports
+  stopped is treated as ended rather than believed, and Phase 2 mints no new row for one — that would
+  be inventing a player, not recovering one. An *unmeasured* run-state changes nothing: "we cannot
+  read the engine" must not become "the server is down". Logged loudly when a snapshot and the engine
+  disagree, since that disagreement is a real condition and not a routine one.
+- **The no-watchdog fallback resolves to offline where the server is measurably stopped**, unknown
+  only where nothing is known. Unknown means "we missed events while down" — it is the wrong word for
+  a server we can see is not running.
+- **`instance_crashed` and `instance_failed` reset the roster**, like the stop/start/restart handlers
+  already did. A crash emits no per-player leave lines, and `instance_failed` is the branch nothing
+  else covers: the supervisor has given up, so no restart is coming to clear those entries.
+
+Fixed in kgsm-watchdog 1.18.1 as well, at the source: a session map no longer outlives the process it
+describes, so `GET /players` stops reporting connections to a server that is not running.
+
 ### Added
 
 - **A provider catalog** (`Services/Auth/AuthProviderCatalog.cs`) — the identity providers this host

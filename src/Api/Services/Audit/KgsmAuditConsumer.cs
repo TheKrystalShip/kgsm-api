@@ -302,15 +302,24 @@ public sealed class KgsmAuditConsumer(
         // server.crash — the resident supervisor's autonomous signals (kgsm-watchdog, kgsm-lib 1.9.0),
         // both stamped Actor/Origin = "system" upstream. Per-event policy (action/severity/summary/meta)
         // lives in the pure AuditMapping mappers so it is unit-tested without a live socket (M6·0).
+        // Both reset the roster for the same reason the stop handler above does, and the reason is
+        // starker here: the process died, so every session it held ended, and a crash emits no
+        // per-player "left" line to end them one at a time. instance_failed is the branch nothing else
+        // covers — the supervisor has given up, so no restart is coming and no later event will clear
+        // these entries.
         events.RegisterHandler<InstanceCrashedData>(d =>
         {
             instanceCache.UpdateStatus(d.InstanceName, false);
+            roster.Reset(d.InstanceName);
+            history.Reset(d.InstanceName);
             PublishLive(AuditMapping.FromCrashEvent(d, options.HostId));
             return Task.CompletedTask;
         });
         events.RegisterHandler<InstanceFailedData>(d =>
         {
             instanceCache.UpdateStatus(d.InstanceName, false);
+            roster.Reset(d.InstanceName);
+            history.Reset(d.InstanceName);
             PublishLive(AuditMapping.FromFailedEvent(d, options.HostId));
             return Task.CompletedTask;
         });

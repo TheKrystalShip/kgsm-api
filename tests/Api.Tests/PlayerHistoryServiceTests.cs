@@ -1,11 +1,17 @@
 using Microsoft.AspNetCore.Http.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Players;
+using TheKrystalShip.KGSM.Core.Interfaces;
+using TheKrystalShip.KGSM.Core.Models;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -24,7 +30,19 @@ public sealed class PlayerHistoryServiceTests
         var scopeFactory = services.GetRequiredService<IServiceScopeFactory>();
         var hub = new StreamHub(Options.Create(new JsonOptions()));
         var logger = new LoggerFactory().CreateLogger<PlayerHistoryService>();
-        return new PlayerHistoryService(scopeFactory, services, hub, logger);
+        return new PlayerHistoryService(scopeFactory, services, hub, NewInstanceCache(), logger);
+    }
+
+    /// <summary>
+    /// A run-state cache with no engine behind it — every status reads as unmeasured, so it never
+    /// influences the cache-level tests below. <see cref="InstanceCache.UpdateStatus"/> is the seam a
+    /// test uses to state that a server is running or stopped.
+    /// </summary>
+    private static InstanceCache NewInstanceCache()
+    {
+        IServiceProvider services = new ServiceCollection().BuildServiceProvider();
+        ApiOptions options = ApiOptions.FromConfiguration(new ConfigurationBuilder().Build());
+        return new InstanceCache(services, options, NullLogger<InstanceCache>.Instance);
     }
 
     [Fact]
