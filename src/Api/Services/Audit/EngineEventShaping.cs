@@ -72,6 +72,8 @@ public static class EngineEventShaping
             "instance_version_updated" => Map<InstanceVersionUpdatedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerUpdate, AuditSeverity.Info, "updated", hostId,
                     Meta(("oldVersion", d.OldVersion), ("newVersion", d.NewVersion)))),
+            "instance_update_available" => Map<InstanceUpdateAvailableData>(item,
+                d => AuditMapping.FromUpdateAvailableEvent(d, hostId)),
             "instance_installed" => Map<InstanceInstalledData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerInstall, AuditSeverity.Success, "installed", hostId,
                     Meta(("blueprint", d.Blueprint)))),

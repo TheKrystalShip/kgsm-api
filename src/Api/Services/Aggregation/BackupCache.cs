@@ -21,7 +21,7 @@ public sealed record BackupReading(ServerBackup? Latest, int? Count)
 /// <summary>
 /// In-memory cache of each instance's backup standing, so <see cref="Contracts.Server.LastBackup"/> and
 /// <see cref="Contracts.Server.BackupCount"/> can ride the server list without a per-request engine spawn.
-/// Sits beside <see cref="InstanceCache"/> and <see cref="UpdateCheckCache"/> and follows the same shape: a
+/// Sits beside <see cref="InstanceCache"/> and follows the same shape: a
 /// singleton <see cref="IHostedService"/> with a <see cref="PeriodicTimer"/>, a <see cref="SemaphoreSlim"/>
 /// gate against concurrent refreshes, and a lock-free reference swap on read.
 /// </summary>

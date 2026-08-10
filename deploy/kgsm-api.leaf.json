@@ -286,18 +286,6 @@
       "risk": "safe"
     },
     {
-      "key": "updateCheckPollMs",
-      "env": "Api__UpdateCheckPollMs",
-      "label": "Update check interval",
-      "description": "How often each server is checked for an available update.",
-      "group": "polling",
-      "type": "int",
-      "default": "600000",
-      "min": 60000,
-      "unit": "ms",
-      "risk": "safe"
-    },
-    {
       "key": "backupScanPollMs",
       "env": "Api__BackupScanPollMs",
       "label": "Backup scan interval",
@@ -307,16 +295,6 @@
       "default": "300000",
       "min": 30000,
       "unit": "ms",
-      "risk": "safe"
-    },
-    {
-      "key": "updateCheckDisabled",
-      "env": "Api__UpdateCheckDisabled",
-      "label": "Disable update checks",
-      "description": "Stops checking whether servers have updates available. The panel then shows no update state at all rather than a stale one.",
-      "group": "polling",
-      "type": "bool",
-      "default": "false",
       "risk": "safe"
     },
     {

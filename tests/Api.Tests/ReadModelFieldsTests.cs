@@ -190,25 +190,8 @@ public sealed class ReadModelFieldsTests
             {
                 services.RemoveAll<IInstanceService>();
                 services.AddSingleton<IInstanceService>(new StatusFakeInstanceService());
-                // Seed the UpdateCheckCache synchronously before the first request: its background initial
-                // refresh runs after a 5s delay (so prod startup isn't blocked on the slow probe), but the
-                // fake IInstanceService returns instantly, so a one-shot hosted service that calls
-                // PollNowAsync on StartAsync populates the cache deterministically. WebApplicationFactory
-                // awaits all StartAsync calls, so the cache is populated before the test issues its first GET.
-                services.AddHostedService<UpdateCheckSeeder>();
             });
         }
-    }
-
-    /// <summary>One-shot hosted service that forces the UpdateCheckCache's slow probe once on startup, so
-    /// the test's first GET /servers sees the populated update fields (the fake engine returns instantly,
-    /// so this is deterministic — no 5s background delay).</summary>
-    private sealed class UpdateCheckSeeder : IHostedService
-    {
-        private readonly UpdateCheckCache _cache;
-        public UpdateCheckSeeder(UpdateCheckCache cache) => _cache = cache;
-        public Task StartAsync(CancellationToken cancellationToken) => _cache.PollNowAsync(cancellationToken);
-        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     /// <summary>
@@ -271,7 +254,7 @@ public sealed class ReadModelFieldsTests
         public KgsmResult Restart(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult GetInstalledVersion(string instanceName) => throw new NotImplementedException();
         public KgsmResult GetLatestVersion(string instanceName) => throw new NotImplementedException();
-        public KgsmResult CheckUpdate(string instanceName) => throw new NotImplementedException();
+        public KgsmResult CheckUpdate(string instanceName, bool emit = false) => throw new NotImplementedException();
         public KgsmResult Update(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult GetBackups(string instanceName) => throw new NotImplementedException();
         public List<InstanceBackup> GetBackupsDetailed(string instanceName) => throw new NotImplementedException();

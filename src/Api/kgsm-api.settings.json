@@ -63,12 +63,8 @@
       "MetricsPollMs": 1000,
       // How often the Services board re-reads leaf liveness. Floor 2000.
       "ServicesPollMs": 5000,
-      // How often the slow fleet-wide update probe runs. Floor 60000.
-      "UpdateCheckPollMs": 600000,
       // How often each instance's backups are re-scanned. Floor 30000.
       "BackupScanPollMs": 300000,
-      // Kill-switch for the always-on update-check probe.
-      "UpdateCheckDisabled": false,
       // Instance in-memory cache TTL. Floor 10.
       "InstanceCacheTtlSeconds": 60,
       // Blueprint in-memory cache TTL. Floor 10.

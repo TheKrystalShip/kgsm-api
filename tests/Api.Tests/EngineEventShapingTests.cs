@@ -107,6 +107,28 @@ public sealed class EngineEventShapingTests
         Assert.Equal("mc", shaped.ServerId);
     }
 
+    // The read-back half of the update-available echo. Both paths that turn this event into a row — the
+    // live push and this one — have to name the same action, or the row a client saw over SSE and the row
+    // it finds in GET /audit are two different facts. Shaping it generically (engine.instance_*) is what
+    // that looks like when only one of the two is wired.
+    [Fact]
+    public void Shape_UpdateAvailable_ShapesToServerUpdateAvailable_CarryingBothVersions()
+    {
+        var item = new EventHistoryEntry(
+            "evt_upd1", Ts, "instance_update_available", "starbound", null, "system:scheduler", "system", null,
+            Data(new { InstanceName = "starbound", CurrentVersion = "16000000", LatestVersion = "16302742" }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.NotNull(shaped);
+        Assert.Equal(AuditAction.ServerUpdateAvailable, shaped!.Action);
+        Assert.Equal(AuditSeverity.Info, shaped.Severity);
+        Assert.Equal("update available for starbound", shaped.Summary);
+        Assert.Equal("16000000", shaped.Meta!["currentVersion"]);
+        Assert.Equal("16302742", shaped.Meta!["latestVersion"]);
+        Assert.Equal("starbound", shaped.ServerId);
+    }
+
     [Fact]
     public void Shape_BackupsPruned_ShapesToBackupPrune_CarryingTheCounts()
     {

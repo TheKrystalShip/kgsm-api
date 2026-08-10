@@ -202,16 +202,6 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<InstanceCache>();
         services.AddHostedService(sp => sp.GetRequiredService<InstanceCache>());
 
-        // Update-check cache: the slow, networked per-instance probe (the fast-mode 60s InstanceCache
-        // refresh deliberately skips the version check). Runs its own dedicated UpdateCheckPollMs cadence
-        // (10-min default) so upstream API pressure stays gentle; always-on so REST GET /servers lights the
-        // SPA's Update chip with no SSE client connected. Sits beside InstanceCache and reads its Roster for
-        // the authoritative id set. ServerAggregator.BuildServer reads from this to populate the
-        // Server.UpdateAvailable/LatestVersion/UpdateCheckedAt contract fields, which are honest-null
-        // (today's behavior) until the first successful check completes.
-        services.AddSingleton<UpdateCheckCache>();
-        services.AddHostedService(sp => sp.GetRequiredService<UpdateCheckCache>());
-
         // Backup cache: each instance's newest snapshot + how many it holds, populating the
         // Server.LastBackup/BackupCount contract fields. Listing backups is a kgsm process spawn per
         // instance, so like the update check it runs on its own relaxed BackupScanPollMs cadence rather than

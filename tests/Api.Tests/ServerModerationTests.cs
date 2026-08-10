@@ -381,7 +381,7 @@ public sealed class ServerModerationTests
         public KgsmResult Restart(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult GetInstalledVersion(string instanceName) => throw new NotImplementedException();
         public KgsmResult GetLatestVersion(string instanceName) => throw new NotImplementedException();
-        public KgsmResult CheckUpdate(string instanceName) => throw new NotImplementedException();
+        public KgsmResult CheckUpdate(string instanceName, bool emit = false) => throw new NotImplementedException();
         public KgsmResult GenerateId(string blueprintName, string? customName = null) => throw new NotImplementedException();
         public KgsmResult Save(string instanceName) => throw new NotImplementedException();
         public KgsmResult SendInput(string instanceName, string command, string? actor = null, string? origin = null) => throw new NotImplementedException();

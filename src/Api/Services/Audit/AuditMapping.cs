@@ -187,30 +187,33 @@ public static class AuditMapping
             AuditSeverity.Warn);
 
     /// <summary>
-    /// Map an API-internal "update available" detection (from <see cref="Aggregation.UpdateCheckCache"/>) to
-    /// a <c>server.update_available</c> row at <see cref="AuditSeverity.Info"/>. This is a direct write
-    /// (the <c>auth.*</c> case) — the update check is API-owned, not a kgsm engine event, so there is no
-    /// echo and no double-write. Provenance is <c>system:api</c> (an autonomous API-scheduled probe).
-    /// <c>meta</c> carries the current version (from the instance cache) and the latest available version
-    /// (from the slow probe) so the audit trail records the exact "from → to" version pair at detection time.
+    /// Map a kgsm <c>instance_update_available</c> event to a <c>server.update_available</c> row at
+    /// <see cref="AuditSeverity.Info"/> — an engine echo like every other <c>server.*</c> action, with no
+    /// second writer. kgsm records what each check found beside the instance and emits only for a version
+    /// it has not announced before, so this is one row per new build, not one per check.
+    /// <para>
+    /// Provenance comes off the envelope: a scheduled sweep carries the leaf's own actor/origin, a check
+    /// run by hand carries the person's — the same two independent axes as everywhere else, never derived
+    /// from one another. <c>meta</c> keeps the installed and upstream versions so a reader learns the exact
+    /// "from → to" pair rather than just that something was newer.
+    /// </para>
     /// </summary>
-    public static AuditWrite FromUpdateAvailable(
-        string instanceName, string? currentVersion, string? latestVersion, string hostId)
+    public static AuditWrite FromUpdateAvailableEvent(InstanceUpdateAvailableData d, string hostId)
     {
-        string instance = string.IsNullOrEmpty(instanceName) ? "" : instanceName;
+        string instance = string.IsNullOrEmpty(d.InstanceName) ? "" : d.InstanceName;
         IReadOnlyDictionary<string, string>? meta = null;
-        if (!string.IsNullOrEmpty(currentVersion) || !string.IsNullOrEmpty(latestVersion))
+        if (!string.IsNullOrEmpty(d.CurrentVersion) || !string.IsNullOrEmpty(d.LatestVersion))
         {
             var m = new Dictionary<string, string>();
-            if (!string.IsNullOrEmpty(currentVersion)) m["currentVersion"] = currentVersion;
-            if (!string.IsNullOrEmpty(latestVersion)) m["latestVersion"] = latestVersion;
+            if (!string.IsNullOrEmpty(d.CurrentVersion)) m["currentVersion"] = d.CurrentVersion;
+            if (!string.IsNullOrEmpty(d.LatestVersion)) m["latestVersion"] = d.LatestVersion;
             meta = m;
         }
 
         return new AuditWrite(
-            Ts: DateTimeOffset.UtcNow,
-            Origin: AuditOrigin.System,
-            Actor: new AuditActor(ActorKind.System, "api", ActorProvider.System),
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
             Action: AuditAction.ServerUpdateAvailable,
             Severity: AuditSeverity.Info,
             Target: new AuditTarget(AuditTargetKind.Server, instance, instance),

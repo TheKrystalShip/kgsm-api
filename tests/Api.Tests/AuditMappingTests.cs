@@ -582,18 +582,31 @@ public sealed class AuditMappingTests
         Assert.Null(w.Meta);
     }
 
-    // --- FromUpdateAvailable: API-internal "update available" detection -----------------------------------
+    // --- FromUpdateAvailableEvent: the engine's instance_update_available echo -----------------------
 
     [Fact]
     public void FromUpdateAvailable_WithVersions_CarryMeta()
     {
-        AuditWrite w = AuditMapping.FromUpdateAvailable("factorio-01", "1.0.0", "1.1.0", hostId: "primary");
+        var ts = new DateTimeOffset(2026, 8, 10, 12, 9, 21, TimeSpan.Zero);
+        var data = new InstanceUpdateAvailableData
+        {
+            InstanceName = "factorio-01",
+            CurrentVersion = "1.0.0",
+            LatestVersion = "1.1.0",
+            Timestamp = ts,
+            Actor = "system:scheduler",
+            Origin = "system",
+        };
+
+        AuditWrite w = AuditMapping.FromUpdateAvailableEvent(data, hostId: "primary");
 
         Assert.Equal(AuditAction.ServerUpdateAvailable, w.Action);
         Assert.Equal(AuditSeverity.Info, w.Severity);
+        // Provenance off the envelope, not assumed: a sweep is the leaf's, a hand-run check is a person's.
+        Assert.Equal(ts, w.Ts);
         Assert.Equal(AuditOrigin.System, w.Origin);
         Assert.Equal(ActorKind.System, w.Actor.Kind);
-        Assert.Equal("api", w.Actor.Name);
+        Assert.Equal("scheduler", w.Actor.Name);
         Assert.Equal(ActorProvider.System, w.Actor.Provider);
         Assert.Equal("factorio-01", w.ServerId);
         Assert.Equal(AuditTargetKind.Server, w.Target!.Kind);
@@ -603,10 +616,34 @@ public sealed class AuditMappingTests
         Assert.Equal("1.1.0", w.Meta!["latestVersion"]);
     }
 
+    // A check run by hand carries the person who ran it, through whatever surface ran it — the two axes
+    // stay independent and neither is derived from the other.
+    [Fact]
+    public void FromUpdateAvailable_CarriesAHumanActorWhenTheCheckWasRunByHand()
+    {
+        var data = new InstanceUpdateAvailableData
+        {
+            InstanceName = "factorio-01",
+            CurrentVersion = "1.0.0",
+            LatestVersion = "1.1.0",
+            Actor = "discord:haru",
+            Origin = "ui",
+        };
+
+        AuditWrite w = AuditMapping.FromUpdateAvailableEvent(data, hostId: "primary");
+
+        Assert.Equal(ActorKind.User, w.Actor.Kind);
+        Assert.Equal("haru", w.Actor.Name);
+        Assert.Equal(ActorProvider.Discord, w.Actor.Provider);
+        Assert.Equal(AuditOrigin.Ui, w.Origin);
+    }
+
     [Fact]
     public void FromUpdateAvailable_NullVersions_OmitsEmptyMeta()
     {
-        AuditWrite w = AuditMapping.FromUpdateAvailable("factorio-01", null, null, hostId: "primary");
+        var data = new InstanceUpdateAvailableData { InstanceName = "factorio-01" };
+
+        AuditWrite w = AuditMapping.FromUpdateAvailableEvent(data, hostId: "primary");
 
         Assert.Equal(AuditAction.ServerUpdateAvailable, w.Action);
         Assert.Null(w.Meta);  // both versions null → meta omitted, never stored as ""
@@ -615,7 +652,14 @@ public sealed class AuditMappingTests
     [Fact]
     public void FromUpdateAvailable_EmptyInstanceName_FallsBackToDisplay()
     {
-        AuditWrite w = AuditMapping.FromUpdateAvailable("", "1.0.0", "1.1.0", hostId: "primary");
+        var data = new InstanceUpdateAvailableData
+        {
+            InstanceName = "",
+            CurrentVersion = "1.0.0",
+            LatestVersion = "1.1.0",
+        };
+
+        AuditWrite w = AuditMapping.FromUpdateAvailableEvent(data, hostId: "primary");
 
         Assert.Equal("update available for instance", w.Summary);  // Display() fallback
         Assert.Equal("", w.ServerId);  // empty string, same as FromServerEvent

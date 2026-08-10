@@ -328,7 +328,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
         FilesMaxEntries = 200, FilesMaxEditBytes = 2 * 1024 * 1024, BlueprintMaxEditBytes = 256 * 1024,
         LeafOverridesDir = "/tmp/kgsm-api-test-overrides", LeafApplyCanaryMs = 15000,
         LeafDescriptorDir = "/tmp/kgsm-api-test-descriptors", LeafDropInDir = "/tmp/kgsm-api-test-dropins",
-        DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000, UpdateCheckPollMs = 600000,
+        DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000,
 
 
         AuthDisabled = true, SigningKey = "", OAuth = new KgsmAuthOptions(),

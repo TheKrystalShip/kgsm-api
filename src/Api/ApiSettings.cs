@@ -161,23 +161,12 @@ public sealed class ApiSettings
     [LeafField("servicesPollMs", "Services refresh", Group = "polling", Min = 2000, Unit = "ms")]
     public int? ServicesPollMs { get; set; }
 
-    /// <summary>How often the slow fleet-wide update probe runs. Floor 60000.</summary>
-    /// <panel>How often each server is checked for an available update.</panel>
-    [LeafField("updateCheckPollMs", "Update check interval", Group = "polling", Min = 60000, Unit = "ms")]
-    public int? UpdateCheckPollMs { get; set; }
-
     /// <summary>How often each instance's backups are re-scanned. Floor 30000.</summary>
     /// <panel>How often each server's backups are re-scanned for the panel's backup KPIs. A backup taken
     /// or restored through KGSM refreshes that server immediately, so this only bounds how quickly
     /// other changes are noticed.</panel>
     [LeafField("backupScanPollMs", "Backup scan interval", Group = "polling", Min = 30000, Unit = "ms")]
     public int? BackupScanPollMs { get; set; }
-
-    /// <summary>Kill-switch for the always-on update-check probe.</summary>
-    /// <panel>Stops checking whether servers have updates available. The panel then shows no update state
-    /// at all rather than a stale one.</panel>
-    [LeafField("updateCheckDisabled", "Disable update checks", Group = "polling")]
-    public bool? UpdateCheckDisabled { get; set; }
 
     /// <summary>Instance in-memory cache TTL. Floor 10.</summary>
     /// <panel>How long a server's detail is reused before being re-read from the engine.</panel>

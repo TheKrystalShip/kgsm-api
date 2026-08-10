@@ -41,7 +41,6 @@ public sealed class KgsmAuditConsumer(
     PlayerHistoryService history,
     InstanceCache instanceCache,
     Services.Library.BlueprintCache blueprintCache,
-    Aggregation.UpdateCheckCache updateCheckCache,
     Aggregation.BackupCache backupCache,
     ApiOptions options,
     StreamHub hub,
@@ -178,16 +177,24 @@ public sealed class KgsmAuditConsumer(
             return WriteServer(d, AuditAction.ServerUninstall, AuditSeverity.Warn, "uninstalled");
         });
 
+        // server.update_available — a newer build exists upstream. kgsm establishes this: it records
+        // what each check found beside the instance and emits only for a version it has not announced
+        // before, so this is one row per new build rather than one per check. The API echoes it like
+        // every other engine event and holds no opinion of its own about update availability.
+        events.RegisterHandler<InstanceUpdateAvailableData>(d =>
+            WriteUpdateAvailable(d));
+
         // server.update — sourced from the version-changed event (it carries the meaningful old→new
         // detail). A plain instance_updated with no version change produces no row (nothing material
         // changed) — an honest boundary, documented in PLAN §8.
-        // The handler also immediately voids the stale "update available" reading for this instance
-        // (via UpdateCheckCache.MarkUpdated) so the next server.patch carries the cleared state —
-        // this is the authoritative fallback for CLI-driven updates; the API-command path does the
-        // same synchronously in CommandRunner.RunUpdate (the fast-path guarantee).
+        // The handler also re-reads the roster, because an applied update makes the engine's own
+        // "update available" answer go false: the state lives beside the instance, and refreshing is
+        // how the cleared value reaches the next server.patch. Re-reading rather than clearing a local
+        // copy is the point — a second opinion about update availability is exactly what this API no
+        // longer keeps.
         events.RegisterHandler<InstanceVersionUpdatedData>(d =>
         {
-            updateCheckCache.MarkUpdated(d.InstanceName);
+            instanceCache.TryRefresh();
             SettleObserved(d.InstanceName);
             return WriteServer(d, AuditAction.ServerUpdate, AuditSeverity.Info, "updated",
                 Meta(("oldVersion", d.OldVersion), ("newVersion", d.NewVersion)));
@@ -571,6 +578,12 @@ public sealed class KgsmAuditConsumer(
                     instanceName);
             }
         });
+    }
+
+    private Task WriteUpdateAvailable(InstanceUpdateAvailableData d)
+    {
+        PublishLive(AuditMapping.FromUpdateAvailableEvent(d, options.HostId));
+        return Task.CompletedTask;
     }
 
     private Task WriteServer(

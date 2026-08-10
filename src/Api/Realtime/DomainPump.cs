@@ -28,7 +28,6 @@ namespace TheKrystalShip.Api.Realtime;
 public sealed class DomainPump(
     StreamHub hub,
     InstanceCache cache,
-    UpdateCheckCache updateChecks,
     BackupCache backups,
     MonitorClient monitor,
     Services.Commands.JobRegistry jobs,
@@ -120,7 +119,7 @@ public sealed class DomainPump(
                     // Build the current server list from cache data.
                     var byId = new Dictionary<string, Server>(StringComparer.Ordinal);
                     foreach ((string id, var instance) in roster)
-                        byId[id] = ServerAggregator.BuildServer(id, instance, statuses, updateChecks.Readings,
+                        byId[id] = ServerAggregator.BuildServer(id, instance, statuses,
                             backups.Readings, metricsById, options.HostId, cache.IsStarting, jobs.InFlightFor);
 
                     if (!primed)
@@ -164,9 +163,10 @@ public sealed class DomainPump(
     }
 
     // Ignores the metrics block on purpose — see the class remarks (status/roster, not the metric firehose).
-    // The update fields (UpdateAvailable/LatestVersion/UpdateCheckedAt) ride along: a flip is low-frequency
-    // (the slow probe ticks at Api__UpdateCheckPollMs, ~10min per instance), so carrying it here never
-    // turns the `servers` topic into a firehose — it is the status/roster cadence, not the metric one.
+    // The update fields (UpdateAvailable/LatestVersion/UpdateCheckedAt) ride along: a flip happens when the
+    // scheduler's sweep finds a new build, which is hourly at most and usually far rarer, so carrying it
+    // here never turns the `servers` topic into a firehose — it is the status/roster cadence, not the
+    // metric one.
     // The note rides here for the same reason as the update fields: an operator edits it by hand, so
     // a flip is rare, and carrying it means an edit made in one browser reaches every other open panel
     // without a refresh. `record` equality compares the note's body + attribution structurally.

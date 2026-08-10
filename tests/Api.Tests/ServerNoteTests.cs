@@ -399,7 +399,7 @@ public sealed class ServerNoteTests
         public KgsmResult Restart(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult GetInstalledVersion(string instanceName) => throw new NotImplementedException();
         public KgsmResult GetLatestVersion(string instanceName) => throw new NotImplementedException();
-        public KgsmResult CheckUpdate(string instanceName) => throw new NotImplementedException();
+        public KgsmResult CheckUpdate(string instanceName, bool emit = false) => throw new NotImplementedException();
         public KgsmResult Update(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult GetBackups(string instanceName) => throw new NotImplementedException();
         public List<InstanceBackup> GetBackupsDetailed(string instanceName) => throw new NotImplementedException();

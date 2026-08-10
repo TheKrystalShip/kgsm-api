@@ -273,29 +273,6 @@ public sealed class ApiOptions
     public required int ServicesPollMs { get; init; }
 
     /// <summary>
-    /// How often the always-on <see cref="UpdateCheckCache"/> runs the per-instance networked update check
-    /// — the fleet-wide <c>kgsm instances list --status --json</c> SLOW read
-    /// (<c>Api__UpdateCheckPollMs</c>, default 600000 = 10min, floor 60000 = 1min). The slow read
-    /// probes SteamCMD / per-game upstream APIs for <c>Version.Latest</c>/<c>UpdatesAvailable</c>, which the
-    /// instance cache's <c>--fast</c> refresh deliberately skips; running it on the relaxed 10-min cadence
-    /// keeps upstream API pressure gentle while still lighting the SPA's "Update available" surfaces within
-    /// minutes of a release. A failed read keeps the prior snapshot (never wipes); the cache starts
-    /// honest-null (today's behavior) until the first successful check. NOT gated on subscribers — the
-    /// REST <c>GET /servers</c> "Update" chip lights up with no SSE client connected.
-    /// </summary>
-    public required int UpdateCheckPollMs { get; init; }
-
-    /// <summary>
-    /// Kill-switch for the always-on update-check probe (<c>Api__UpdateCheckDisabled</c>,
-    /// "1"/"true"/"yes"/"on"). Off by default — the probe runs and populates
-    /// <see cref="Contracts.Server.UpdateAvailable"/>/<c>LatestVersion</c>/<c>UpdateCheckedAt</c>.
-    /// Set it on a host where the slow (networked) probe must stay inert (a deterministic test harness,
-    /// an offline smoke, a host with no outbound network) — the fields stay honest-null until the probe
-    /// is re-enabled. Independent of <see cref="UpdateCheckPollMs"/> (the cadence).
-    /// </summary>
-    public bool UpdateCheckDisabled { get; init; }
-
-    /// <summary>
     /// How often the always-on <see cref="Services.Aggregation.BackupCache"/> re-scans each instance's
     /// backups (<c>Api__BackupScanPollMs</c>, default 300000 = 5min, floor 30000 = 30s). Listing
     /// backups is a kgsm process spawn per instance, so it cannot ride the roster refresh that serves
@@ -877,12 +854,7 @@ public sealed class ApiOptions
             // Update-check poll — the slow (networked) fleet-wide probe's cadence. Relaxed (10min default,
             // 1min floor): the per-game upstream API hit makes it the slowest surface, so it runs on its own
             // dedicated cadence — independent of the fast-mode 60s instance cache. NOT subscriber-gated.
-            UpdateCheckPollMs = Math.Max(60_000, s.UpdateCheckPollMs ?? 600_000),
             BackupScanPollMs = Math.Max(30_000, s.BackupScanPollMs ?? 300_000),
-            // Kill-switch for the always-on update-check probe. Off by default; set to inert it (a test harness,
-            // an offline smoke) so the slow probe never fires and the update fields stay honest-null.
-            UpdateCheckDisabled = s.UpdateCheckDisabled ?? false,
-
             // Library RAWG cover/metadata. Opt-in (blank key => worker no-ops). The cache dir always resolves
             // to a concrete path: an explicit RawgCacheDir wins, else a covers/ subdir beside the SQLite DB,
             // so it lands in the StateDirectory the deployed unit sets. (BlankFallback, not Defaulted — a

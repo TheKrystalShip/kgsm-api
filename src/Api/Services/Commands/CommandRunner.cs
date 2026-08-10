@@ -36,7 +36,6 @@ public sealed class CommandRunner(
     StreamHub hub,
     ServerAggregator aggregator,
     JobRegistry registry,
-    Aggregation.UpdateCheckCache updateCheckCache,
     ILogger<CommandRunner> logger)
 {
     /// <summary>
@@ -241,17 +240,12 @@ public sealed class CommandRunner(
             return (false, "engine not provisioned");
 
         KgsmResult result = instances.Update(job.ServerId, actor, origin);
-        if (result.IsSuccess)
-        {
-            // Immediately void the stale "update available" reading for this instance so the
-            // verify server.patch (built right after this returns) carries the cleared state.
-            // The kgsm event echo (instance_version_updated) does the same via KgsmAuditConsumer
-            // for CLI-driven updates outside this API; this is the synchronous fast-path for the
-            // API-command path — the audit consumer's call is the authoritative fallback.
-            updateCheckCache.MarkUpdated(job.ServerId);
-            return (true, null);
-        }
-        return (false, Detail(result));
+        // Nothing to clear here: whether an update is available is the engine's own answer, read from
+        // the record beside the instance, and an applied update makes it false at the source. The
+        // instance_version_updated echo re-reads the roster (KgsmAuditConsumer) for an update driven
+        // from anywhere — this API, the CLI, the assistant — so one path keeps it true rather than
+        // this one holding a local copy it has to remember to void.
+        return result.IsSuccess ? (true, null) : (false, Detail(result));
     }
 
     // backup_create (Tier-1 ops) — snapshot the instance. Echo-path discipline: kgsm emits

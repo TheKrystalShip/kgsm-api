@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — update availability is the engine's fact, echoed like every other
+
+`UpdateCheckCache` is gone, and with it the last domain fact this API authored rather than echoed.
+kgsm establishes whether a newer build exists, records it beside each instance, and emits
+`instance_update_available`; the scheduler owns the cadence and does the networked check. This API
+reads all three fields — `updateAvailable`, `latestVersion`, `updateCheckedAt` — straight off the
+same fast status reading it already takes for the version, and runs no probe of its own. The wire
+contract, the audit action and the notification catalog entry are unchanged.
+
+Four things follow from the fact living in the engine rather than in one process's memory:
+
+- **It survives a restart.** The fields were null after every restart until a ten-minute sweep had
+  completed at least once. They are now answered from disk on the first read.
+- **`server.update_available` is an engine echo**, mapped in `KgsmAuditConsumer` and
+  `EngineEventShaping` like every other `server.*` action, with provenance off the envelope — a
+  scheduled sweep carries the leaf, a check run by hand carries the person. Both paths are wired: the
+  live push and the journal read-back name the same action, or a row seen over SSE and the same row in
+  `GET /audit` would be two different facts.
+- **One row per new build, not one per detection.** The engine records what it announced, so a
+  repeated sweep is silent — the transition-detection this API used to do is what that replaced.
+- **`Api__UpdateCheckPollMs` and `Api__UpdateCheckDisabled` are removed.** The cadence and the
+  off-switch are the scheduler's (`Scheduler__UpdateCheckIntervalMinutes`,
+  `Scheduler__UpdateCheckEnabled`). Until this landed, both daemons swept, so each host asked its
+  upstreams about twice as often as either intended.
+
+`MarkUpdated` is gone from both call sites. An applied update makes the engine's own answer false, so
+the `instance_version_updated` echo re-reads the roster instead of this API clearing a local copy it
+had to remember to void.
+
 ### Fixed — the repository contains all of its own source
 
 `.gitignore` carried three unanchored rules from the stock Visual Studio template — `[Ll]og/`,
