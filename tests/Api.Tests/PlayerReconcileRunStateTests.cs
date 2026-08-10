@@ -217,8 +217,16 @@ public sealed class PlayerReconcileRunStateTests : IDisposable
     private sealed class FakeWatchdog(IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>> sessions)
         : IWatchdogClient
     {
-        public Task<IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>?> GetAllPlayersAsync(
-            CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>?>(sessions);
+        // The supervisor reports detection beside the sessions. These tests are about the run-state
+        // join, so every instance they name is one it can observe — an undetectable one would be
+        // testing a different refusal.
+        public Task<IReadOnlyDictionary<string, WatchdogInstancePresence>?> GetPlayerPresenceAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, WatchdogInstancePresence>?>(
+                sessions.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => new WatchdogInstancePresence { Detection = "log", Players = [.. kvp.Value] },
+                    StringComparer.Ordinal));
 
         public void Dispose() { }
 

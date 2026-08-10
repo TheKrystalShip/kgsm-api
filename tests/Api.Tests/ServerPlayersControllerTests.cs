@@ -27,9 +27,10 @@ namespace TheKrystalShip.Api.Tests;
 public sealed class ServerPlayersControllerTests
     : IClassFixture<ServerPlayersControllerTests.PlayersTestFactory>, IClassFixture<AuthTestFactory>
 {
-    private const string Detected = "factorio-1";   // both regexes configured
-    private const string JoinOnly = "valheim-1";    // only the join regex configured — still "configured"
-    private const string NoDetection = "rust-1";    // neither regex configured — "unknown"
+    private const string Detected = "factorio-1";   // the supervisor matches its log — "configured"
+    private const string JoinOnly = "valheim-1";    // join line only, still matched — "configured"
+    private const string RconOnly = "zomboid-1";    // no log patterns at all, polled over RCON — "configured"
+    private const string NoDetection = "rust-1";    // nothing observes it — "unknown"
 
     private readonly PlayersTestFactory _engine;
     private readonly AuthTestFactory _noEngine;
@@ -80,8 +81,8 @@ public sealed class ServerPlayersControllerTests
     [Fact]
     public async Task NoDetectionConfigured_Unknown_PlayersForcedEmpty()
     {
-        // The central honesty rule (§5): NEITHER regex set → detection:"unknown" and players MUST be []
-        // regardless of whatever the history projection happens to hold for this id.
+        // The central honesty rule (§5): nothing observes this instance → detection:"unknown" and
+        // players MUST be [] regardless of whatever the history projection holds for this id.
         HttpResponseMessage resp = await Client(_engine, KgsmTier.Operator).GetAsync($"/api/v1/servers/{NoDetection}/players");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -99,6 +100,39 @@ public sealed class ServerPlayersControllerTests
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         Assert.Equal("configured", doc.RootElement.GetProperty("detection").GetString());
+        Assert.Empty(doc.RootElement.GetProperty("players").EnumerateArray());
+    }
+
+    /// <summary>
+    /// A game whose presence is polled over RCON declares no log patterns at all, and is observed
+    /// perfectly well. Deriving detection from the instance's regex fields called every such server
+    /// unknowable while the supervisor was actively reading its roster — the reason this answer comes
+    /// from the supervisor now.
+    /// </summary>
+    [Fact]
+    public async Task RconPolled_IsConfigured_ThoughItDeclaresNoLogPatterns()
+    {
+        HttpResponseMessage resp = await Client(_engine, KgsmTier.Operator).GetAsync($"/api/v1/servers/{RconOnly}/players");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.Equal("configured", doc.RootElement.GetProperty("detection").GetString());
+    }
+
+    /// <summary>
+    /// An unreachable supervisor is "unknown", never "configured". Not knowing whether presence is
+    /// observable is the same refusal as knowing it is not — this host cannot stand behind a roster
+    /// either way, and the empty list must not be read as nobody playing.
+    /// </summary>
+    [Fact]
+    public async Task SupervisorUnreachable_Unknown_NotConfigured()
+    {
+        using var factory = new UnreachableWatchdogFactory();
+        HttpResponseMessage resp = await Client(factory, KgsmTier.Operator).GetAsync($"/api/v1/servers/{Detected}/players");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.Equal("unknown", doc.RootElement.GetProperty("detection").GetString());
         Assert.Empty(doc.RootElement.GetProperty("players").EnumerateArray());
     }
 
@@ -139,8 +173,76 @@ public sealed class ServerPlayersControllerTests
             {
                 services.RemoveAll<IInstanceService>();
                 services.AddSingleton<IInstanceService>(new FakePresenceInstanceService());
+
+                // Detection is the supervisor's answer, so the supervisor is what these tests
+                // configure. Note RconOnly declares no regexes at all and is still observable —
+                // deriving detection from the instance's patterns is exactly what used to call
+                // an actively-polled roster unknowable.
+                services.RemoveAll<IWatchdogClient>();
+                services.AddSingleton<IWatchdogClient>(new FakePresenceWatchdog(new Dictionary<string, string>
+                {
+                    [Detected] = "log",
+                    [JoinOnly] = "log",
+                    [RconOnly] = "rcon",
+                    [NoDetection] = "none",
+                }));
             });
         }
+    }
+
+    /// <summary>
+    /// The same engine seam with a supervisor that cannot be reached — kgsm-lib reports that as a null
+    /// presence map, not an exception.
+    /// </summary>
+    private sealed class UnreachableWatchdogFactory : AuthTestFactory
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IInstanceService>();
+                services.AddSingleton<IInstanceService>(new FakePresenceInstanceService());
+
+                services.RemoveAll<IWatchdogClient>();
+                services.AddSingleton<IWatchdogClient>(new FakePresenceWatchdog(null));
+            });
+        }
+    }
+
+    /// <summary>
+    /// An <see cref="IWatchdogClient"/> answering a canned detection per instance, or a null map for
+    /// an unreachable daemon. Every other member throws: this endpoint calls exactly one, and a test
+    /// that starts depending on a second should say so.
+    /// </summary>
+    private sealed class FakePresenceWatchdog(IReadOnlyDictionary<string, string>? detection) : IWatchdogClient
+    {
+        public Task<IReadOnlyDictionary<string, WatchdogInstancePresence>?> GetPlayerPresenceAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(detection?.ToDictionary(
+                    kvp => kvp.Key,
+                    kvp => new WatchdogInstancePresence { Detection = kvp.Value },
+                    StringComparer.Ordinal)
+                as IReadOnlyDictionary<string, WatchdogInstancePresence>);
+
+        public void Dispose() { }
+
+        // ---- unused by these tests ----
+        public Task<bool> IsReadyAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogReadyState?> GetReadyAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogActionResult> StartAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogActionResult> StopAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogActionResult> EnableAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogActionResult> DisableAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<string>> GetEnabledNamesAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogActionResult> ForgetAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogActionResult> SetCpuPriorityAsync(string instanceName, string priority, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogActionResult> RestartAsync(string instanceName, string origin = "scheduler", CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogInstanceState?> GetStatusAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<WatchdogInstanceState>> ListAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public IAsyncEnumerable<string> FollowConsoleAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<string>> GetConsoleTailAsync(string instanceName, int lines, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogUpnpList?> GetUpnpAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
     }
 
     private sealed class FakePresenceInstanceService : IInstanceService
@@ -160,6 +262,9 @@ public sealed class ServerPlayersControllerTests
                 PlayerJoinedRegex = @"Got character ZDOID from (?<name>.+?) : (?<key>\d+):\d+",
                 PlayerLeftRegex = "",
             },
+            // Deliberately no player regexes: its presence is polled over RCON, which is a fact
+            // about what the supervisor does and not one legible in these fields.
+            [RconOnly] = new Instance { Name = RconOnly, BlueprintFile = "projectzomboid.bp.yaml" },
             [NoDetection] = new Instance { Name = NoDetection, BlueprintFile = "rust.bp.yaml" },
         };
 
@@ -167,6 +272,7 @@ public sealed class ServerPlayersControllerTests
         {
             [Detected] = Reading<InstanceRuntimeStatus>.Measured(new InstanceRuntimeStatus { InstanceName = Detected, Status = true }),
             [JoinOnly] = Reading<InstanceRuntimeStatus>.Measured(new InstanceRuntimeStatus { InstanceName = JoinOnly, Status = true }),
+            [RconOnly] = Reading<InstanceRuntimeStatus>.Measured(new InstanceRuntimeStatus { InstanceName = RconOnly, Status = true }),
             [NoDetection] = Reading<InstanceRuntimeStatus>.Measured(new InstanceRuntimeStatus { InstanceName = NoDetection, Status = true }),
         };
 

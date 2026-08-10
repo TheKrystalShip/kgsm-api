@@ -66,12 +66,12 @@ public sealed class PlayerHistoryService(
             return;
         }
 
-        IReadOnlyDictionary<string, IReadOnlyList<WatchdogPlayer>>? watchdogSessions;
+        IReadOnlyDictionary<string, WatchdogInstancePresence>? watchdogSessions;
         try
         {
             using var probe = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, probe.Token);
-            watchdogSessions = await watchdog.GetAllPlayersAsync(linked.Token).ConfigureAwait(false);
+            watchdogSessions = await watchdog.GetPlayerPresenceAsync(linked.Token).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -100,18 +100,20 @@ public sealed class PlayerHistoryService(
         var liveSessions = new Dictionary<string, IReadOnlyList<WatchdogPlayer>>(StringComparer.Ordinal);
         foreach (var kvp in watchdogSessions)
         {
+            IReadOnlyList<WatchdogPlayer> sessions = kvp.Value.Players;
+
             if (IsMeasuredStopped(kvp.Key))
             {
-                if (kvp.Value.Count > 0)
+                if (sessions.Count > 0)
                     logger.LogWarning(
                         "Player history: watchdog reports {Count} session(s) for {Server}, which the engine "
-                        + "reports as stopped — treating them as ended", kvp.Value.Count, kvp.Key);
+                        + "reports as stopped — treating them as ended", sessions.Count, kvp.Key);
                 continue;
             }
 
-            liveSessions[kvp.Key] = kvp.Value;
+            liveSessions[kvp.Key] = sessions;
             var online = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var session in kvp.Value)
+            foreach (var session in sessions)
             {
                 if (session.SessionKey is not null) online.Add(session.SessionKey);
                 if (session.Id is not null) online.Add(session.Id);

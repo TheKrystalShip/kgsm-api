@@ -22,10 +22,18 @@ namespace TheKrystalShip.Api.Controllers;
 /// <para><b>Gated at operator</b> — a roster names real people/addresses, a step more sensitive
 /// than a config value or a backup list.</para>
 /// <para><b>Honest-unknown, never a fabricated empty.</b> <see cref="PlayersResponse.Detection"/> is
-/// <see cref="PlayerDetection.Unknown"/> when the instance declares NEITHER
-/// <c>Instance.PlayerJoinedRegex</c> nor <c>Instance.PlayerLeftRegex</c> — presence is unknowable, not
-/// "nobody's here", so <see cref="PlayersResponse.Players"/> is forced to <c>[]</c> in that case
-/// regardless of what the history projection holds for this id.</para>
+/// <see cref="PlayerDetection.Unknown"/> when this host cannot observe the instance's players at all
+/// — presence is unknowable, not "nobody's here", so <see cref="PlayersResponse.Players"/> is forced
+/// to <c>[]</c> in that case regardless of what the history projection holds for this id.</para>
+/// <para><b>The supervisor answers that, not this controller.</b> Detection is read from
+/// <c>IWatchdogClient.GetPlayerPresenceAsync</c> — the same predicate the ingesters gate on, which
+/// accounts for RCON polling as well as log matching and for whether a pattern actually
+/// <i>compiles</i>. Deriving it here from the instance's regex fields under-reported every
+/// RCON-polled game as unknowable while the supervisor was actively reading its roster, and it is
+/// not a derivation a consumer can get right in any case.</para>
+/// <para><b>An unreachable supervisor is <see cref="PlayerDetection.Unknown"/>, never configured.</b>
+/// Not knowing whether presence is observable is the same refusal as knowing it is not: in both cases
+/// this host cannot stand behind a roster.</para>
 /// </remarks>
 [ApiController]
 [Route("api/v1/servers/{id}/players")]
@@ -63,8 +71,7 @@ public sealed class ServerPlayersController(ServerAggregator aggregator, PlayerH
         // conflate "we cannot see the players" with "this game cannot be moderated".
         ModerationCapability moderation = ModerationTargetResolver.Describe(instance);
 
-        bool unknown = string.IsNullOrEmpty(instance.PlayerJoinedRegex) && string.IsNullOrEmpty(instance.PlayerLeftRegex);
-        if (unknown)
+        if (!await IsObservableAsync(id, ct).ConfigureAwait(false))
             return Ok(new PlayersResponse(PlayerDetection.Unknown, [], moderation));
 
         return Ok(new PlayersResponse(PlayerDetection.Configured, history.GetRoster(id), moderation));
@@ -194,6 +201,30 @@ public sealed class ServerPlayersController(ServerAggregator aggregator, PlayerH
     {
         IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct).ConfigureAwait(false);
         return servers.Any(s => string.Equals(s.Id, id, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Whether this host can observe who is connected to <paramref name="id"/> — the supervisor's
+    /// answer, not a second opinion derived from the same instance config.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every "no" arrives here as false, and they are deliberately not distinguished.</b> The
+    /// supervisor not being provisioned, not being reachable, not knowing this instance, and knowing
+    /// it reports nothing are four different reasons for one answer: this host cannot stand behind a
+    /// roster. Reporting any of them as <c>configured</c> would put a roster the API cannot vouch for
+    /// in front of an operator.
+    /// </remarks>
+    private async Task<bool> IsObservableAsync(string id, CancellationToken ct)
+    {
+        if (HttpContext.RequestServices.GetService(typeof(IWatchdogClient)) is not IWatchdogClient watchdog)
+            return false;
+
+        IReadOnlyDictionary<string, WatchdogInstancePresence>? presence =
+            await watchdog.GetPlayerPresenceAsync(ct).ConfigureAwait(false);
+
+        return presence is not null
+            && presence.TryGetValue(id, out WatchdogInstancePresence? instance)
+            && instance.IsDetected;
     }
 
     private ObjectResult Error(int statusCode, string code, string message) =>

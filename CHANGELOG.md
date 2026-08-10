@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — an RCON-polled game is no longer reported as unable to report players
+
+`GET /servers/{id}/players` decided `detection` by checking whether the instance declared
+`player_joined_regex` or `player_left_regex`. That is only one of the two ways this host observes
+presence: the supervisor also polls games over RCON, and a game detected that way declares no log
+patterns at all — so every one of them answered `detection:"unknown"` with an empty roster while the
+supervisor was actively reading who was connected. On this host that was Project Zomboid.
+
+Detection now comes from the supervisor (`IWatchdogClient.GetPlayerPresenceAsync`, kgsm-lib 4.6.0) —
+the same predicate its ingesters gate on, covering log matching, RCON polling, and whether a pattern
+actually *compiles*. That last part is why this was never a derivation a consumer could get right,
+and three surfaces each deriving it is how they came to disagree.
+
+**An unreachable supervisor is `unknown`, never `configured`.** Not knowing whether presence is
+observable is the same refusal as knowing it is not: either way this host cannot stand behind a
+roster, so the empty list must not be read as nobody playing.
+
 ### Added — an available game update is a condition on the alert feed
 
 A third producer joins the `AlertEngine` beside crash and metric thresholds: `TickUpdates` raises
