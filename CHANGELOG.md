@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the repository contains all of its own source
+
+`.gitignore` carried three unanchored rules from the stock Visual Studio template — `[Ll]og/`,
+`[Ll]ogs/` and `Backup*/` — which match at any depth, not just at the build output they were
+written for. Two application source directories sat inside that match and had never been committed:
+
+- `src/Api/Services/Logs/JournalReader.cs` — the systemd-journal reader behind `GET /hosts/{id}/logs`
+- `src/Api/Services/Backups/BackupDownloadTickets.cs` — the single-use download ticket store
+
+The code existed only on the machine it was written on. A clone did not compile, and
+`tests/Api.Tests/BackupDownloadTests.cs` was a tracked test for an untracked type. The three rules
+are now anchored to the repository root, where the template intends them, and both files are
+tracked. Verified by building a fresh worktree of the commit with nothing copied into it.
+
 ### Fixed — a stopped server has no players, on every path that gets there
 
 The Control Panel reported two players online for a server that had been stopped for hours. The
