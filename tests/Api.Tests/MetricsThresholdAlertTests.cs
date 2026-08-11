@@ -1,10 +1,8 @@
-using System.Globalization;
 using Microsoft.AspNetCore.Http.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using TheKrystalShip.Api;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
@@ -16,227 +14,298 @@ using Snap = TheKrystalShip.KGSM.Monitor.Contracts;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// Increment-1 coverage for the metrics-threshold alert source (<c>metrics-threshold-alerts-plan.md</c>) —
-/// the <see cref="AlertEngine.TickMetrics"/> reconcile driven with crafted monitor snapshots + controlled
-/// time. Load-bearing invariants: a one-tick spike never fires (the fire-dwell); a sustained breach fires
-/// once with the honest source/anchor; crossing the danger band re-pushes (never auto-resolves on severity);
-/// a value in the hysteresis deadband never flaps; a resolution is always <c>by:system</c> with
-/// <c>actionId:null</c> (no audit bridge for metrics); a not-evaluable field holds; a down monitor
-/// (<c>null</c> snapshot) changes nothing; a vanished server row resolves only when the monitor is up; a
-/// fan-out rule yields one alert per target; and the metric pass never disturbs a crash alert in the shared
-/// firing set (the namespacing the crash <c>Tick</c> guards).
+/// The metric-threshold alert source: <see cref="AlertEngine.TickConditions"/> driven with crafted monitor
+/// frames. kgsm-monitor decides which values are over their line and for how long — every dwell, deadband
+/// and hysteresis case is pinned in that repo's <c>ConditionEvaluatorTests</c>, against the samples it took.
+/// What is pinned HERE is the half this API owns: a condition becomes an alert with the right source,
+/// severity, anchor and words; a condition that stops appearing resolves at once, because the monitor
+/// already verified the clear; and a monitor that says nothing at all changes nothing, which is a different
+/// answer from a monitor that says all-clear.
 /// </summary>
 public sealed class MetricsThresholdAlertTests
 {
     private static readonly DateTimeOffset T0 = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
-    // --- 1. a one-tick spike never fires (the fire-dwell kills it) ---------------------------------
+    // --- 1. a condition becomes a firing alert with the honest shape ---------------------------------
     [Fact]
-    public void Spike_UnderFireDwell_NeverFires()
+    public void HostCondition_Raises_WithHostSourceAndAnchor()
     {
-        AlertEngine engine = Engine(OptionsWith(Mem(warn: 90, fireForSec: 60)));
-
-        engine.TickMetrics(MemAt(95), T0);            // breach begins — dwell 60s not yet met
-        Assert.Empty(engine.Firing);
-
-        engine.TickMetrics(MemAt(10), T0 + Secs(5));  // recovered well before the dwell elapsed
-        Assert.Empty(engine.Firing);
-        Assert.Empty(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
-    }
-
-    // --- 2. a sustained breach fires once after FireForSec, with the honest shape ------------------
-    [Fact]
-    public void SustainedBreach_Fires_AfterDwell_WithHostAnchor()
-    {
-        ApiOptions options = OptionsWith(Mem(warn: 90, fireForSec: 60));
+        ApiOptions options = ApiOpts();
         AlertEngine engine = Engine(options);
 
-        engine.TickMetrics(MemAt(95), T0);            // pending
-        Assert.Empty(engine.Firing);
+        engine.TickConditions(With(MemCondition(95)), T0);
 
-        engine.TickMetrics(MemAt(95), T0 + Secs(61)); // dwell met → fire
         Alert a = Assert.Single(engine.Firing);
-        Assert.Equal("metric:t-mem", a.Id);
+        Assert.Equal("metric:host-mem", a.Id);
         Assert.Equal(AlertSeverity.Warn, a.Severity);
-        Assert.Equal(AlertSource.HostMonitor, a.Source);     // host-scope rule → host-monitor source
-        Assert.Null(a.ServerId);                              // host-scope → no server
-        Assert.False(a.Escalated);                           // metrics never escalate
+        Assert.Equal(AlertSource.HostMonitor, a.Source);
+        Assert.Null(a.ServerId);
+        Assert.False(a.Escalated);          // metrics never escalate — severity carries how bad it is
+        Assert.Equal(0, a.Attempts);
         Assert.Equal(AlertStatus.Firing, a.Status);
+        Assert.Equal(options.HostId, a.HostId);
         Assert.NotNull(a.Anchor);
         Assert.Equal(AlertSurface.Host, a.Anchor!.Surface);
-        Assert.Equal(options.HostId, a.HostId);
+        Assert.Equal("resources", a.Anchor.Tab);
+        Assert.Contains("memory at 95%", a.Title);
     }
 
-    // --- 3. crossing the danger band re-pushes the SAME record (raisedAt preserved) ---------------
     [Fact]
-    public void CrossingDanger_RePushes_SameRecord_NeverResolvesOnSeverity()
+    public void ServerCondition_Raises_WithMetricsSourceAndServerAnchor()
     {
-        AlertEngine engine = Engine(OptionsWith(Mem(warn: 90, danger: 97, fireForSec: 0)));
+        AlertEngine engine = Engine(ApiOpts());
 
-        engine.TickMetrics(MemAt(92), T0);            // fires warn immediately (dwell 0)
+        engine.TickConditions(With(Condition("srv-pids", "ServerPids", scope: "server",
+            serverId: "factorio-test", value: 1500, windowMax: 1500, threshold: 1000)), T0);
+
+        Alert a = Assert.Single(engine.Firing);
+        Assert.Equal("metric:srv-pids:factorio-test", a.Id);
+        Assert.Equal(AlertSource.Metrics, a.Source);
+        Assert.Equal("factorio-test", a.ServerId);
+        Assert.Equal(AlertSurface.Server, a.Anchor!.Surface);
+        Assert.Equal("performance", a.Anchor.Tab);
+        Assert.Contains("factorio-test processes at 1500 pids", a.Title);
+    }
+
+    // --- 2. the API adds no dwell of its own ---------------------------------------------------------
+    [Fact]
+    public void Raise_IsImmediate_TheDwellAlreadyHappenedUpstream()
+    {
+        AlertEngine engine = Engine(ApiOpts());
+
+        // The monitor only publishes a condition once its own fire dwell is satisfied. Re-running a
+        // probation here would delay every alert by a second dwell nobody configured.
+        engine.TickConditions(With(MemCondition(95)), T0);
+        Assert.Single(engine.Firing);
+    }
+
+    [Fact]
+    public void Resolve_IsImmediate_OnAbsence()
+    {
+        AlertEngine engine = Engine(ApiOpts());
+        engine.TickConditions(With(MemCondition(95)), T0);
+
+        // Absent from the frame = the monitor ran its clear dwell and closed it. Holding it open here
+        // would delay a recovery that was already verified against every sample.
+        engine.TickConditions(Empty(), T0 + Secs(5));
+
+        Assert.Empty(engine.Firing);
+        Alert resolved = Assert.Single(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
+        Assert.Equal("metric:host-mem", resolved.Id);
+        Assert.Equal(AlertStatus.Resolved, resolved.Status);
+        Assert.Equal(T0 + Secs(5), resolved.ResolvedAt);
+    }
+
+    // --- 3. resolution provenance --------------------------------------------------------------------
+    [Fact]
+    public void Resolution_IsBySystem_WithNoActionId()
+    {
+        AlertEngine engine = Engine(ApiOpts());
+        engine.TickConditions(With(MemCondition(95)), T0);
+        engine.TickConditions(Empty(), T0 + Secs(5));
+
+        Alert resolved = Assert.Single(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
+        Assert.NotNull(resolved.Resolution);
+        Assert.Equal(AlertResolvedBy.System, resolved.Resolution!.By);
+        Assert.Equal(AlertSource.HostMonitor, resolved.Resolution.Source);
+
+        // The actionId bridge is crash-specific: a threshold clears because the value receded, not
+        // because anybody did anything. Never a fabricated link.
+        Assert.Null(resolved.Resolution.ActionId);
+    }
+
+    // --- 4. band changes upsert, steady state does not re-push ---------------------------------------
+    [Fact]
+    public void CrossingIntoDanger_RePushes_SameRecord_KeepingRaisedAt()
+    {
+        AlertEngine engine = Engine(ApiOpts());
+
+        engine.TickConditions(With(MemCondition(95)), T0);
         Alert warn = Assert.Single(engine.Firing);
         Assert.Equal(AlertSeverity.Warn, warn.Severity);
 
-        engine.TickMetrics(MemAt(98), T0 + Secs(1));  // crosses danger → re-push
+        engine.TickConditions(With(MemCondition(98, band: "danger", threshold: 97)), T0 + Secs(5));
         Alert danger = Assert.Single(engine.Firing);
+
         Assert.Equal(AlertSeverity.Danger, danger.Severity);
-        Assert.Equal(warn.RaisedAt, danger.RaisedAt);        // upsert, not a fresh raise
-        Assert.Empty(engine.ResolvedSince(T0 - TimeSpan.FromDays(1))); // a severity change is not a resolve
-    }
-
-    // --- 4. a value in the hysteresis deadband never flaps the feed --------------------------------
-    [Fact]
-    public void Deadband_HoldsFiring_NoFlap()
-    {
-        AlertEngine engine = Engine(OptionsWith(Mem(warn: 90, clearMargin: 5, clearForSec: 30, fireForSec: 0)));
-
-        engine.TickMetrics(MemAt(92), T0);                   // fires
-        Assert.Single(engine.Firing);
-
-        engine.TickMetrics(MemAt(88), T0 + Secs(1));         // 88 in (85,90] deadband — not cleared
-        engine.TickMetrics(MemAt(88), T0 + Secs(40));        // still deadband, 40s > clearForSec, still NO resolve
-        Assert.Single(engine.Firing);
+        Assert.Equal(warn.Id, danger.Id);
+        Assert.Equal(warn.RaisedAt, danger.RaisedAt);   // the same condition getting worse, not a new one
         Assert.Empty(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
-
-        engine.TickMetrics(MemAt(80), T0 + Secs(41));        // drops past the margin (<=85) → clear arms
-        engine.TickMetrics(MemAt(80), T0 + Secs(72));        // held clear >= 30s → resolves
-        Assert.Empty(engine.Firing);
-        Assert.Single(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
     }
 
-    // --- 5. a metric resolution is always by:system with actionId:null (no audit bridge) ----------
     [Fact]
-    public void Resolution_IsHonestNull_BySystem()
+    public void AnUnchangedCondition_DoesNotRePush()
     {
-        AlertEngine engine = Engine(OptionsWith(Mem(warn: 90, clearMargin: 5, clearForSec: 0, fireForSec: 0)));
+        AlertEngine engine = Engine(ApiOpts());
 
-        engine.TickMetrics(MemAt(95), T0);                   // fire
-        engine.TickMetrics(MemAt(80), T0 + Secs(1));         // clear arms
-        engine.TickMetrics(MemAt(80), T0 + Secs(2));         // resolves
+        engine.TickConditions(With(MemCondition(95)), T0);
+        Alert first = Assert.Single(engine.Firing);
 
-        Alert resolved = Assert.Single(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
-        Assert.Equal(AlertStatus.Resolved, resolved.Status);
-        Assert.NotNull(resolved.Resolution);
-        Assert.Equal(AlertResolvedBy.System, resolved.Resolution!.By);
-        Assert.Null(resolved.Resolution.ActionId);           // the actionId↔audit bridge is crash-only
-        Assert.Equal(AlertSource.HostMonitor, resolved.Resolution.Source);
+        engine.TickConditions(With(MemCondition(95)), T0 + Secs(5));
+        engine.TickConditions(With(MemCondition(95)), T0 + Secs(10));
+        Alert last = Assert.Single(engine.Firing);
+
+        // The engine builds a candidate every tick but only stores-and-publishes a changed one, so the
+        // record surviving by reference IS the no-re-push. It polls every few seconds and a condition can
+        // last hours; a frame per scrape to every open browser is what this guard prevents.
+        Assert.Same(first, last);
     }
 
-    // --- 6. a not-evaluable field holds (never fires) ----------------------------------------------
     [Fact]
-    public void NotEvaluableField_Holds_NeverFires()
+    public void AChangedValue_RePushes()
     {
-        // HostLoadPerCore needs Cpu.Info.Cores; with Info null it is not evaluable even at a huge load.
-        AlertEngine engine = Engine(OptionsWith(Load(warn: 1.0, fireForSec: 0)));
-        Snap.Snapshot b = Base();
-        Snap.Snapshot noCpuInfo = b with
-        {
-            Cpu = b.Cpu with { Info = null, Load = new Snap.LoadAvg(100, 100, 100) },
-        };
+        AlertEngine engine = Engine(ApiOpts());
 
-        engine.TickMetrics(noCpuInfo, T0);
-        Assert.Empty(engine.Firing);                         // Observe skipped it → no fabricated breach
+        engine.TickConditions(With(MemCondition(95)), T0);
+        Alert first = Assert.Single(engine.Firing);
+
+        engine.TickConditions(With(MemCondition(96)), T0 + Secs(5));
+        Alert second = Assert.Single(engine.Firing);
+
+        Assert.NotSame(first, second);           // the headline number moved, so the card has to
+        Assert.Equal(first.RaisedAt, second.RaisedAt);
     }
 
-    // --- 7. a down monitor (null snapshot) changes nothing -----------------------------------------
+    // --- 5. honest-unknown ---------------------------------------------------------------------------
     [Fact]
     public void MonitorDown_NullSnapshot_HoldsFiring()
     {
-        AlertEngine engine = Engine(OptionsWith(Mem(warn: 90, fireForSec: 0)));
-        engine.TickMetrics(MemAt(95), T0);                   // fire
-        Assert.Single(engine.Firing);
+        AlertEngine engine = Engine(ApiOpts());
+        engine.TickConditions(With(MemCondition(95)), T0);
 
-        engine.TickMetrics(null, T0 + Secs(10));             // monitor down → honest-unknown
-        Assert.Single(engine.Firing);                        // not resolved, not retracted
+        // No frame at all is not all-clear. Resolving here would report a recovery nobody measured.
+        engine.TickConditions(null, T0 + Secs(5));
+
+        Assert.Single(engine.Firing);
         Assert.Empty(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
     }
 
-    // --- 8. a vanished server row resolves — but NOT on a monitor blackout -------------------------
+    // --- 6. the detail line reports the peak, not just the latest reading -----------------------------
     [Fact]
-    public void VanishedServerRow_Resolves_ButNotOnBlackout()
+    public void Detail_NamesThePeak_WhenItDiffersFromTheCurrentValue()
     {
-        AlertEngine engine = Engine(OptionsWith(Pids(warn: 1000, clearForSec: 30, fireForSec: 0)));
+        AlertEngine engine = Engine(ApiOpts());
 
-        engine.TickMetrics(WithServers(Server("factorio-test", pids: 1500)), T0); // fire server-scope
+        engine.TickConditions(With(MemCondition(92, windowMax: 99)), T0);
+
         Alert a = Assert.Single(engine.Firing);
-        Assert.Equal("metric:t-pids:factorio-test", a.Id);
-        Assert.Equal(AlertSource.Metrics, a.Source);         // per-server rule → metrics source
-        Assert.Equal("factorio-test", a.ServerId);
-        Assert.Equal(AlertSurface.Server, a.Anchor!.Surface);
+        Assert.Contains("92%", a.Title);            // what it reads now
+        Assert.Contains("peaking at 99%", a.Detail); // what actually justified the alarm
 
-        engine.TickMetrics(null, T0 + Secs(60));             // a blackout must NOT resolve a vanished-looking row
-        Assert.Single(engine.Firing);
-
-        engine.TickMetrics(WithServers(), T0 + Secs(61));    // monitor UP, row gone → clear arms
-        engine.TickMetrics(WithServers(), T0 + Secs(92));    // held >= 30s → resolves
-        Assert.Empty(engine.Firing);
-        Alert resolved = Assert.Single(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
-        Assert.Null(resolved.Resolution!.ActionId);
+        // The distinction the whole source exists for: a scrape at 92 would never have known about 99.
+        Assert.DoesNotContain("99", a.Title);
     }
 
-    // --- 9. a fan-out rule yields one alert per target ---------------------------------------------
     [Fact]
-    public void DiskRule_FansOut_OneAlertPerMount()
+    public void Detail_OmitsThePeak_WhenItIsTheSameNumber()
     {
-        AlertEngine engine = Engine(OptionsWith(Disk(warn: 90, fireForSec: 0)));
-        Snap.Snapshot b = Base();
-        Snap.Snapshot twoMountsOver = b with
-        {
-            Disk = new Snap.DiskMetrics(
-                Mounts:
-                [
-                    new Snap.MountUsage("/", "ext4", 92, 100, 92.0, Device: null),
-                    new Snap.MountUsage("/data", "ext4", 96, 100, 96.0, Device: null),
-                ],
-                Io: new Snap.DiskIo(0, 0)),
-        };
+        AlertEngine engine = Engine(ApiOpts());
+        engine.TickConditions(With(MemCondition(95, windowMax: 95)), T0);
 
-        engine.TickMetrics(twoMountsOver, T0);
-        Assert.Equal(2, engine.Firing.Count);
-        Assert.Contains(engine.Firing, x => x.Id == "metric:t-disk:/");
-        Assert.Contains(engine.Firing, x => x.Id == "metric:t-disk:/data");
+        Alert a = Assert.Single(engine.Firing);
+        Assert.DoesNotContain("peaking", a.Detail);
     }
 
-    // --- 10. the metric pass and a crash alert coexist; a crash poll never disturbs a metric alert -
+    // --- 7. fan-out targets are independent alerts ---------------------------------------------------
     [Fact]
-    public void CrashAndMetric_Coexist_CrashTickDoesNotRetractMetric()
+    public void FanOut_YieldsOneAlertPerTarget()
     {
-        AlertEngine engine = Engine(OptionsWith(Mem(warn: 90, fireForSec: 0)));
+        AlertEngine engine = Engine(ApiOpts());
 
-        engine.Tick([Crashing("srv1")], T0);                 // crash alert
-        engine.TickMetrics(MemAt(95), T0);                   // metric alert (shared firing set)
-        Assert.Equal(2, engine.Firing.Count);
-        Assert.Contains(engine.Firing, x => x.Id == "crash:srv1");
-        Assert.Contains(engine.Firing, x => x.Id == "metric:t-mem");
+        engine.TickConditions(With(
+            Condition("host-disk", "HostDiskUsedPct", refKey: "/", value: 94, windowMax: 94, threshold: 90),
+            Condition("host-disk", "HostDiskUsedPct", refKey: "/data", value: 96, windowMax: 96, threshold: 90)), T0);
 
-        // A subsequent crash poll (srv1 still crashing) must NOT retract/resolve the metric alert even though
-        // its id is not in the watchdog's present/firingNow sets — the crash pass owns only crash: ids.
-        engine.Tick([Crashing("srv1")], T0 + Secs(1));
         Assert.Equal(2, engine.Firing.Count);
-        Assert.Contains(engine.Firing, x => x.Id == "metric:t-mem");
+        Assert.Contains(engine.Firing, a => a.Id == "metric:host-disk:/");
+        Assert.Contains(engine.Firing, a => a.Id == "metric:host-disk:/data");
+        Assert.Contains(engine.Firing, a => a.Anchor!.Ref == "/data");
+    }
+
+    [Fact]
+    public void OneFanOutTargetResolving_LeavesTheOtherFiring()
+    {
+        AlertEngine engine = Engine(ApiOpts());
+        engine.TickConditions(With(
+            Condition("host-disk", "HostDiskUsedPct", refKey: "/", value: 94, windowMax: 94, threshold: 90),
+            Condition("host-disk", "HostDiskUsedPct", refKey: "/data", value: 96, windowMax: 96, threshold: 90)), T0);
+
+        engine.TickConditions(With(
+            Condition("host-disk", "HostDiskUsedPct", refKey: "/data", value: 96, windowMax: 96, threshold: 90)), T0 + Secs(5));
+
+        Alert still = Assert.Single(engine.Firing);
+        Assert.Equal("metric:host-disk:/data", still.Id);
+        Assert.Equal("metric:host-disk:/", Assert.Single(engine.ResolvedSince(T0 - TimeSpan.FromDays(1))).Id);
+    }
+
+    // --- 8. the alert id survives a condition clearing and recurring ---------------------------------
+    [Fact]
+    public void AlertId_IsStable_AcrossANewEpisode()
+    {
+        AlertEngine engine = Engine(ApiOpts());
+
+        engine.TickConditions(With(MemCondition(95, episodeId: "host-mem::1000")), T0);
+        engine.TickConditions(Empty(), T0 + Secs(5));
+        engine.TickConditions(With(MemCondition(95, episodeId: "host-mem::9999")), T0 + Secs(10));
+
+        // The monitor's episode id changes; this feed's id must not. An operator looking at "metric:host-mem"
+        // is looking at the host's memory, and a recurrence upserts that card rather than opening a second.
+        Alert a = Assert.Single(engine.Firing);
+        Assert.Equal("metric:host-mem", a.Id);
+        Assert.Equal(T0 + Secs(10), a.RaisedAt);   // but it IS a new occurrence, dated as one
+    }
+
+    // --- 9. the shared firing set stays partitioned by source ----------------------------------------
+    [Fact]
+    public void CrashAndMetric_Coexist_NeitherTickDisturbsTheOther()
+    {
+        AlertEngine engine = Engine(ApiOpts());
+
+        engine.Tick([Crashing("factorio-test")], T0);
+        engine.TickConditions(With(MemCondition(95)), T0);
+        Assert.Equal(2, engine.Firing.Count);
+
+        // A crash tick sees no metric target in the watchdog's state and must not read that as a reason to
+        // retract the metric alert; a condition tick must not touch the crash alert either.
+        engine.Tick([Crashing("factorio-test")], T0 + Secs(5));
+        engine.TickConditions(With(MemCondition(95)), T0 + Secs(5));
+
+        Assert.Equal(2, engine.Firing.Count);
+        Assert.Contains(engine.Firing, a => a.Id == "crash:factorio-test");
+        Assert.Contains(engine.Firing, a => a.Id == "metric:host-mem");
         Assert.Empty(engine.ResolvedSince(T0 - TimeSpan.FromDays(1)));
     }
 
-    // --- rules -------------------------------------------------------------------------------------
-    private static ThresholdRule Mem(double warn, double? danger = null, int fireForSec = 60,
-        int clearForSec = 120, double clearMargin = 5) =>
-        new("t-mem", ThresholdMetric.HostMemUsedPct, warn, danger, fireForSec, clearForSec, clearMargin, Enabled: true);
+    // --- 10. a frame with no conditions at all --------------------------------------------------------
+    [Fact]
+    public void AnEmptyConditionsArray_IsAllClear_NotUnknown()
+    {
+        AlertEngine engine = Engine(ApiOpts());
+        engine.TickConditions(Empty(), T0);
+        Assert.Empty(engine.Firing);
+    }
 
-    private static ThresholdRule Load(double warn, int fireForSec = 60) =>
-        new("t-load", ThresholdMetric.HostLoadPerCore, warn, Danger: null, fireForSec, ClearForSec: 120,
-            ClearMargin: 0.1, Enabled: true);
+    // --- helpers --------------------------------------------------------------------------------------
 
-    private static ThresholdRule Disk(double warn, int fireForSec = 60) =>
-        new("t-disk", ThresholdMetric.HostDiskUsedPct, warn, Danger: null, fireForSec, ClearForSec: 120,
-            ClearMargin: 3, Enabled: true);
+    private static TimeSpan Secs(int s) => TimeSpan.FromSeconds(s);
 
-    private static ThresholdRule Pids(double warn, int clearForSec = 120, int fireForSec = 60) =>
-        new("t-pids", ThresholdMetric.ServerPids, warn, Danger: null, fireForSec, clearForSec,
-            ClearMargin: 50, Enabled: true);
+    private static Snap.ConditionReading MemCondition(
+        double value, double? windowMax = null, string band = "warn", double threshold = 90,
+        string episodeId = "host-mem::1000") =>
+        Condition("host-mem", "HostMemUsedPct", value: value, windowMax: windowMax ?? value,
+            band: band, threshold: threshold, episodeId: episodeId);
 
-    // --- snapshot builders -------------------------------------------------------------------------
-    // A benign baseline: every metric well below any threshold. Tests override only the field under test.
-    private static Snap.Snapshot Base() => new(
+    private static Snap.ConditionReading Condition(
+        string ruleKey, string metric, double value, double windowMax, double threshold,
+        string scope = "host", string? refKey = null, string? serverId = null, string band = "warn",
+        string episodeId = "ep") =>
+        new(EpisodeId: episodeId, RuleKey: ruleKey, Metric: metric, Scope: scope, Ref: refKey,
+            ServerId: serverId, Band: band, Value: value, WindowMax: windowMax, Threshold: threshold,
+            Since: 1_000);
+
+    private static Snap.Snapshot Empty() => With();
+
+    private static Snap.Snapshot With(params Snap.ConditionReading[] conditions) => new(
         Ts: 1_000, IntervalMs: 1000, Hostname: "hotrod", UptimeSec: 100,
         Cpu: new Snap.CpuMetrics(TotalPct: 5, PerCore: [5, 5],
             Load: new Snap.LoadAvg(0.1, 0.1, 0.1),
@@ -249,55 +318,23 @@ public sealed class MetricsThresholdAlertTests
         Net: new Snap.NetworkMetrics(Ifaces: []),
         Sensors: [new Snap.SensorReading("k10temp", "Tctl", 30.0)],
         Servers: [],
-        Leaves: []);
+        Leaves: [],
+        Conditions: conditions);
 
-    private static Snap.Snapshot MemAt(double usedPct)
-    {
-        Snap.Snapshot b = Base();
-        return b with { Mem = b.Mem with { UsedPct = usedPct } };
-    }
+    // --- engine wiring (mirrors AlertEngineTests; the MonitorClient is never invoked — TickConditions
+    //     takes the frame as an argument) -------------------------------------------------------------
+    private static AlertEngine Engine(ApiOptions options, StreamHub? hub = null) =>
+        new(options, new StubProvider(), Monitor(options), Instances(options), hub ?? Hub(),
+            NullLogger<AlertEngine>.Instance);
 
-    private static Snap.Snapshot WithServers(params Snap.ServerMetrics[] servers)
-    {
-        Snap.Snapshot b = Base();
-        return b with { Servers = servers };
-    }
-
-    private static Snap.ServerMetrics Server(string id, int pids) =>
-        new(id, id, "native", CpuPctCore: 10, MemBytes: 100, IoReadBps: null, IoWriteBps: null,
-            Pids: pids, DiskBytes: null, RxBps: null, TxBps: null);
-
-    private static TimeSpan Secs(int s) => TimeSpan.FromSeconds(s);
-
-    // --- engine wiring (mirrors AlertEngineTests; the MonitorClient is never invoked — TickMetrics takes
-    //     the snapshot as an argument) ---------------------------------------------------------------
-    private static AlertEngine Engine(ApiOptions options) =>
-        new(options, new StubProvider(), Monitor(options), Instances(options), Hub(), NullLogger<AlertEngine>.Instance);
-
-    // Inert, like the MonitorClient beside it — TickMetrics never reads the instance cache.
+    // Inert, like the MonitorClient beside it — TickConditions never reads the instance cache.
     private static InstanceCache Instances(ApiOptions options) =>
         new(new StubProvider(), options, NullLogger<InstanceCache>.Instance);
 
-    private static ApiOptions OptionsWith(params ThresholdRule[] rules)
-    {
-        var dict = new Dictionary<string, string?> { ["Api:HostId"] = "hotrod" };
-        for (int i = 0; i < rules.Length; i++)
-        {
-            ThresholdRule r = rules[i];
-            string p = $"MetricsThresholds:Rules:{i}:";
-            dict[p + "Key"] = r.Key;
-            dict[p + "Metric"] = r.Metric.ToString();
-            dict[p + "Warn"] = r.Warn.ToString(CultureInfo.InvariantCulture);
-            // Always emit Danger (null when warn-only) — mirrors appsettings.json, which always carries the
-            // key. Omitting it entirely makes the positional-record list binder fall back to Default.
-            dict[p + "Danger"] = r.Danger is { } d ? d.ToString(CultureInfo.InvariantCulture) : null;
-            dict[p + "FireForSec"] = r.FireForSec.ToString(CultureInfo.InvariantCulture);
-            dict[p + "ClearForSec"] = r.ClearForSec.ToString(CultureInfo.InvariantCulture);
-            dict[p + "ClearMargin"] = r.ClearMargin.ToString(CultureInfo.InvariantCulture);
-            dict[p + "Enabled"] = r.Enabled ? "true" : "false";
-        }
-        return ApiOptions.FromConfiguration(new ConfigurationBuilder().AddInMemoryCollection(dict).Build());
-    }
+    private static ApiOptions ApiOpts() =>
+        ApiOptions.FromConfiguration(new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["Api:HostId"] = "hotrod" })
+            .Build());
 
     private static StreamHub Hub() => new(Options.Create(new JsonOptions()));
 

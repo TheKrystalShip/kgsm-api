@@ -33,7 +33,8 @@ public sealed class HostDiagnosticsMappingTests
             Ifaces: [new Snap.InterfaceRate("eth0", 100, 200, 1, 2, Mac: "aa:bb:cc:dd:ee:ff", Errors: 0)]),
         Sensors: [new Snap.SensorReading("k10temp", "Tctl", 42.5)],
         Servers: [],
-        Leaves: []);
+        Leaves: [],
+        Conditions: []);
 
     // --- dynamic depth: rides ToHostMetrics (so it mirrors onto both the REST element and the WS tick) ---
 

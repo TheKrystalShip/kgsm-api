@@ -5,25 +5,15 @@ surface. `GET /api/v1/alerts?status=firing|resolved&since=24h` + the `alerts` WS
 (`alert.raise`/`resolve`/`retract`). Built; the contract is frozen in `PLAN.md §6` (alert row) + `§8`
 (M6·a log). This file is the local "what you must not break."
 
-**Increment 1 BUILT + unit-tested (2026-06-30):** a second producer — the metrics-threshold source — is
-folded into this same engine per `metrics-threshold-alerts-plan.md`, so a sustained host or per-server
-metric breach raises/resolves through this **same** `/alerts` REST + `alerts` WS surface, no new endpoint,
-no protocol change. Build 0-warn, full suite 474/474 (+10 `TickMetrics` tests in
-`tests/Api.Tests/MetricsThresholdAlertTests.cs`) + **LIVE-VALIDATED 2026-07-01** (dev build on `:8098` vs the real
-monitor: `metric:host-mem` danger raise + `metric:srv-pids:factorio-test` warn raise, then a `factorio-test` stop →
-vanished-row resolve `by:system`/`actionId:null`). **Still UNCOMMITTED and not deployed to `:8097`.** The locked
-decisions below cover both the crash source (shipped) and the metrics-threshold source.
+**Three producers, one engine.** The watchdog crash source and the engine update-availability source are
+polled by this API; the metrics-threshold source is **mirrored from kgsm-monitor**, which evaluates the
+rules itself. All three share one `_firing`/`_resolved` set, one snapshot, one retention and one REST + SSE
+surface. The locked decisions below are grouped by producer.
 
-**Two things you must not break (the unit tests caught both during the build):**
-- **Bind `MetricsThresholds:Rules` through the mutable `ThresholdRuleBinding` DTO, never the positional
-  `ThresholdRule` record directly.** The config binder cannot construct a record whose `double? Danger` ctor
-  param has no value and silently returns an empty list — so a single warn-only rule (`danger` absent/null,
-  like the default `srv-*` rules) would drop the operator's whole custom policy back to `Default`. See
-  `ApiOptions.LoadThresholdPolicy`.
-- **The crash `Tick` resolve/retract loop must stay scoped to `crash:` ids** (`CrashIdPrefix`). Crash and
-  metric alerts share `_firing`; without the guard a watchdog poll retracts/resolves a live `metric:` alert
-  (its serverId isn't in the watchdog's `present`/`firingNow` sets). `TickMetrics` is symmetrically scoped to
-  `metric:` ids.
+**The one thing to check before touching the shared state:** each producer's resolve/retract sweep is
+**scoped to its own id prefix** — `crash:`, `metric:`, `update:`. They share `_firing`, so without those
+guards a watchdog poll retracts a live metric alert (its target is not in the watchdog's `present` set) and
+a condition tick resolves a live crash alert.
 
 ## What an alert is (and is NOT)
 
@@ -36,19 +26,14 @@ resolved condition to the audit action that fixed it.
 
 ## Locked decisions (do not relitigate)
 
-- **Crash source (M6·a, shipped) + metrics-threshold source (increment 1, being wired).** The
-  watchdog-crash producer is unchanged: polled via kgsm-lib `IWatchdogClient.ListAsync()` (the
-  C#↔engine chokepoint — **never a raw socket**). A `Desired="running"` instance with
-  `Phase="restart-pending"` is a firing `warn`; `Phase="failed"` (the supervisor exhausted retries and
-  **gave up**) is an `escalated` `danger`. Everything is measured from the kernel (`cgroup.events`) —
-  **never fabricated**. A **second producer is now being folded in** (per
-  `metrics-threshold-alerts-plan.md`): sustained host/per-server metric breaches read from the monitor
-  `Snapshot`, populating the previously-reserved `host-monitor`/`metrics` `AlertSource` values — see the
-  dedicated bullets below for the locked shape. Still deferred (no honest source): leaf-down (already on
-  the `capabilities.patch` axis — a leaf is infrastructure, not a §3·c game-server condition),
-  port-unreachable (no upstream prober). **Honest boundary:** the watchdog supervises **native** instances
-  only — container crashes are out of scope until a Docker event source exists. Don't add a source whose
-  signal you can't honestly measure.
+- **Crash source.** Polled via kgsm-lib `IWatchdogClient.ListAsync()` (the C#↔engine chokepoint — **never a
+  raw socket**). A `Desired="running"` instance with `Phase="restart-pending"` is a firing `warn`;
+  `Phase="failed"` (the supervisor exhausted retries and **gave up**) is an `escalated` `danger`. Everything
+  is measured from the kernel (`cgroup.events`) — **never fabricated**. **Honest boundary:** the watchdog
+  supervises **native** instances only, so container crashes are out of scope until a Docker event source
+  exists. Still deferred for want of an honest source: leaf-down (already on the `capabilities.patch` axis —
+  a leaf is infrastructure, not a §3·c game-server condition) and port-unreachable (no upstream prober).
+  Don't add a source whose signal you can't honestly measure.
 - **The poll IS the authority, and the poll interval IS the raise debounce.** We do **not** event-fast-path
   a raise — a crash that recovers faster than one poll tick is never seen down, so it never fires (exactly
   §3·c's "don't fire on a blip"). Firing on every transient crash would be the noise the dwell exists to
@@ -91,48 +76,43 @@ resolved condition to the audit action that fixed it.
   which is now belt-and-braces. *(The watchdog-emit halves are live-validated on the wire; the full on-host
   bridge round-trip with a running API is owed.)*
 
-### Metrics-threshold source (increment 1, being wired — `metrics-threshold-alerts-plan.md`)
+### Metrics-threshold source — mirrored from kgsm-monitor
 
-- **Sources: `host-monitor` (host-scope rules) + `metrics` (per-server rules).** Both previously reserved on
-  `AlertSource` (no honest source), now populated by a sustained-breach reconcile pass over the monitor
-  `Snapshot`. New `AlertSurface.Host` anchors a host-scope alert to the host (`tab:"performance"`); a
-  server-scope metric alert keeps `AlertSurface.Server`, same as crash.
-- **Policy = appsettings + env, not DB-backed, at increment 1.** A baked-in `MetricsThresholdPolicy.Default`
-  in code; an optional `MetricsThresholds` config section overrides it **wholesale**; env wins per the
-  ecosystem convention. DB-backed, panel-editable policy is **increment 2** — out of scope here. **Caveat to
-  state plainly, not a missing feature:** tuning a threshold or enabling a per-server rule means editing
-  `appsettings.json`/the env file and **restarting the API** — that is the expected increment-1 UX.
-- **Scope: host rules ship ON, per-server rules ship OFF.** Host rules are universal `%`-based thresholds
-  (disk/mem/swap/load/temp) — safe defaults on any host. Per-server rules are absolute byte/CPU/pid
-  thresholds — game-specific, so they ship disabled; an operator opts a rule in per-server via config.
-- **Alert id namespace: `metric:<ruleKey>[:<ref-or-serverId>]`** — a distinct namespace from `crash:<serverId>`,
-  so the two sources can never collide on an id. A rule that fans out (per-mount disk, per-sensor temp)
-  yields one observation — and one alert id — per target (e.g. `metric:host-disk:/` and
-  `metric:host-disk:/data` as two independent alerts).
-- **Anti-flap has two dwells, not crash's one.** Crash never needed a fire-dwell — its poll interval is its
-  own debounce. A metric value can spike, so a rule must breach for `FireForSec` (tracked per-id in a new
-  `_breachSince` map) before it raises. Clearing reuses the existing clear-probation (`ClearForSec`) but adds
-  a **hysteresis deadband** (`ClearMargin`): the value must drop `ClearMargin` *below* `Warn` before the clear
-  clock even starts, so a value hovering right at the threshold can't flap the feed.
-- **Honest-unknown, metrics edition.** Monitor down (`snap == null`) → **skip the metric pass entirely** for
-  that tick — never resolve or retract a metric alert on absence (mirrors crash's blind-poll honesty). A
-  null field (a nullable per-server metric), a null `Cpu.Info`, or an empty `Sensors` array → that rule is
-  **not evaluable** on that tick (hold: never fires, never advances the clear). A server row that **vanishes
-  from a *non-null* snapshot** (the monitor is up, this row is just gone) is treated as cleared and resolves
-  after the normal clear-dwell — distinct from a monitor blackout, which never resolves anything.
-- **`resolution.actionId` is ALWAYS `null` for a metric alert.** The actionId↔audit bridge above
-  (`NoteRecoveryAction`) is crash-specific — a metric alert clears because the measured value receded, not
-  because an operator or system action ran. `resolution.by` still stays `system` (the server observed the
-  clear, never the client).
-- **Metric `danger` ≠ `escalated`.** Crash's `escalated` means "the supervisor gave up, never auto-resolves."
-  A metric in the danger band still auto-resolves once it recedes below the clear margin, so metric alerts
-  keep `Escalated = false` **always** — severity alone carries how bad it is, never `escalated`.
-- **Folded into the existing `AlertEngine` — the single-writer invariant below still holds.** `Tick` (crash)
-  keeps its exact current signature and behavior (so `AlertEngineTests` pass unchanged); the new
-  `internal TickMetrics(Snapshot? snap, DateTimeOffset now)` is the metric seam, run on the **same**
-  poll-loop thread. Both end by calling the **one** shared `RebuildSnapshot()`, which projects `_snapshot`
-  from the full `_firing`/`_resolved` (crash + metric together) — order-independent, one authority, one
-  retention, no second engine.
+- **The monitor detects; this engine presents.** kgsm-monitor evaluates the threshold rules against every
+  sample it takes and publishes the verdict as `Snapshot.Conditions` (`ConditionReading`); `TickConditions`
+  turns each one into a `metric:<ruleKey>[:<ref-or-serverId>]` alert. **Do not reintroduce a threshold
+  comparison, a dwell, or a policy here.** The API scrapes every 5s against a 1 Hz sampler, so a
+  "sustained breach" it decided for itself would be a claim about a window it saw a fifth of — that is the
+  defect the split exists to remove, and re-adding either half recreates it.
+- **What this engine contributes is everything the leaf deliberately does not know:** `AlertSource`
+  (`host-monitor` for `scope:"host"`, `metrics` for `scope:"server"`), `AlertSeverity` (from the condition's
+  band), the `AlertAnchor` deep-link, and the words on the card (`ConditionDisplay`). The monitor's whole
+  vocabulary on this side is two band names and two scope names.
+- **Present means firing; absent means resolved, immediately.** The monitor publishes breaching conditions
+  only, having already run its clear dwell. A probation here would delay a recovery it already verified
+  against every sample. This is the one place the metric source and the crash source deliberately differ —
+  crash resolution IS probation-gated, because the watchdog poll is this API's own and carries no dwell.
+- **The alert id is derived from rule + target, never from the monitor's `episodeId`.** An episode id
+  changes every time a condition clears and recurs; the feed's contract is that one condition keeps one id
+  so a re-fire upserts the card an operator is already looking at. The episode id is the monitor's identity
+  for one continuous breach and is what the audit rows dedup on — a different question.
+- **Re-push only on a changed record.** A condition can last hours and the loop polls every few seconds; a
+  frame per scrape to every open browser is what the `Severity`/`Title`/`Detail` comparison prevents.
+- **Honest-unknown, and the distinction is the point.** `snap == null` (monitor down) holds every metric
+  alert unchanged. An empty `Conditions` array means all-clear; no frame at all means nobody knows. Never
+  collapse the two.
+- **`resolution.actionId` is ALWAYS `null` for a metric alert.** The `NoteRecoveryAction` bridge is
+  crash-specific — a threshold clears because the measured value receded, not because anybody acted.
+  `resolution.by` stays `system`.
+- **Metric `danger` ≠ `escalated`.** Crash's `escalated` means "the supervisor gave up, never auto-resolves".
+  A metric in the danger band still resolves once it recedes, so metric alerts keep `Escalated = false`
+  always — severity alone carries how bad it is.
+- **`TickConditions` is scoped to `metric:` ids** and the crash `Tick` to `crash:`, symmetrically. They share
+  `_firing`; without the guards a watchdog poll retracts a live metric alert (its target is not in the
+  watchdog's `present` set) and a condition tick resolves a live crash alert.
+- **The detail line reports `windowMax`.** The headline value is whatever the metric read when the frame was
+  built; the peak is what actually justified the alarm, and on a moving value those are not the same number.
+  It is only stated when it differs from the headline.
 
 ### Engine source — update availability
 
@@ -172,7 +152,7 @@ resolved condition to the audit action that fixed it.
 
 ## Invariants when you touch this
 
-- **`Tick` and `TickMetrics` are the only writers of alert state**, both on the one poll-loop thread (never
+- **`Tick`, `TickConditions` and `TickUpdates` are the only writers of alert state**, all on the one poll-loop thread (never
   concurrently — `PollAsync` calls them sequentially each tick); the controller reads the volatile
   immutable snapshot. `_lastStartAction` is the only cross-thread state (concurrent). Keep it that way —
   don't mutate `_firing`/`_resolved`/`_clearSince`/`_breachSince` off the loop, or you reintroduce a lock.

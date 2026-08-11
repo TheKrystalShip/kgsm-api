@@ -178,11 +178,6 @@ public sealed class ApiSettings
     [LeafField("blueprintCacheTtlSec", "Blueprint cache", Group = "polling", Min = 10, Unit = "s")]
     public int? BlueprintCacheTtlSeconds { get; set; }
 
-    /// <summary>Kill-switch for the whole metric-threshold alert pass.</summary>
-    /// <panel>Stops raising alerts when host or server resource use crosses a threshold.</panel>
-    [LeafField("metricsThresholdsDisabled", "Disable resource alerts", Group = "polling")]
-    public bool? MetricsThresholdsDisabled { get; set; }
-
 
     // ── Authentication ──────────────────────────────────────────────────────
     /// <summary>Dev escape hatch: authenticate every request as a synthetic admin.</summary>

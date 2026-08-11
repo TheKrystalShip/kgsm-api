@@ -322,16 +322,6 @@
       "risk": "safe"
     },
     {
-      "key": "metricsThresholdsDisabled",
-      "env": "Api__MetricsThresholdsDisabled",
-      "label": "Disable resource alerts",
-      "description": "Stops raising alerts when host or server resource use crosses a threshold.",
-      "group": "polling",
-      "type": "bool",
-      "default": "false",
-      "risk": "safe"
-    },
-    {
       "key": "authClientId",
       "env": "KgsmAuth__Providers__discord__ClientId",
       "label": "Discord application id",

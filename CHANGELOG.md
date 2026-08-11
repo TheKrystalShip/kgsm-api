@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — threshold detection moved to kgsm-monitor
+
+Whether a metric is over its line, and whether it has been for long enough to count, is now decided by
+kgsm-monitor and mirrored here. The API was evaluating the rules itself against a 5-second scrape of a
+1 Hz sampler, so a rule asking whether a value held for 30 seconds was deciding from six of the thirty
+readings that existed, and a value oscillating across its line read as a continuous breach because the
+dips fell between polls.
+
+`AlertEngine.TickConditions` replaces `TickMetrics`: it reads `Snapshot.Conditions` (kgsm-monitor
+contracts **1.5.0**) and adds the half the leaf deliberately does not know — source, severity, anchor and
+the words on the card. It holds no dwell of its own, and a condition that stops appearing resolves at
+once, because the monitor already ran the clear dwell against every sample. A down monitor still holds
+every metric alert unchanged: an empty conditions array is all-clear, no frame at all is nobody knows.
+
+Alert ids, sources, severities and anchors are unchanged, so nothing downstream needs to move. The
+detail line gains the peak reading recorded across the breach, which the API previously had no way to
+know.
+
+**Configuration moved with it.** `Api__MetricsThresholdsDisabled` and the `MetricsThresholds` section are
+gone; the rules live in kgsm-monitor (`Monitor__ThresholdsDisabled`, and a policy file). A host that set
+either key here has to set it there instead.
+
 ### Added — each person picks which notifications they get
 
 Push delivery now passes **two** gates instead of one. The admin's host-wide rule still decides what

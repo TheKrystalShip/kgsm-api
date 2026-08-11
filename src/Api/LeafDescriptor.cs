@@ -38,12 +38,6 @@ using TheKrystalShip.KGSM.LeafConfig;
 [assembly: LeafFrameworkNamespace("Kestrel__",
     "the HTTPS certificate keys are Kestrel's own, and its configuration surface is not this API's to enumerate")]
 
-// A list of rule objects, read by section lookup rather than bound to an ApiSettings property. One
-// environment variable cannot express a list of objects, so no field could ever deliver it — these
-// rules are edited in the settings file.
-[assembly: LeafFrameworkNamespace("MetricsThresholds__",
-    "the threshold rules are a list of objects; no single variable can express one")]
-
 // ASP.NET's own host-filtering key, read by the framework before any of this API's types exist.
 [assembly: LeafFrameworkNamespace("AllowedHosts",
     "host filtering belongs to the framework, not to this API's configuration surface")]

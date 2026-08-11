@@ -70,7 +70,6 @@
       // Blueprint in-memory cache TTL. Floor 10.
       "BlueprintCacheTtlSeconds": 60,
       // Kill-switch for the whole metric-threshold alert pass.
-      "MetricsThresholdsDisabled": false,
 
       // ── Authentication ──
       // Dev escape hatch: authenticate every request as a synthetic admin.
@@ -197,19 +196,6 @@
         "ClientSecret": ""
       }
     }
-  },
-
-  "MetricsThresholds": {
-    "Rules": [
-      { "key": "host-disk", "metric": "HostDiskUsedPct", "warn": 90,   "danger": 95,   "fireForSec": 60,  "clearForSec": 300, "clearMargin": 3,   "enabled": true  },
-      { "key": "host-mem",  "metric": "HostMemUsedPct",  "warn": 90,   "danger": 97,   "fireForSec": 120, "clearForSec": 120, "clearMargin": 5,   "enabled": true  },
-      { "key": "host-swap", "metric": "HostSwapUsedPct", "warn": 50,   "danger": 90,   "fireForSec": 120, "clearForSec": 120, "clearMargin": 10,  "enabled": true  },
-      { "key": "host-load", "metric": "HostLoadPerCore", "warn": 1.5,  "danger": 4.0,  "fireForSec": 120, "clearForSec": 120, "clearMargin": 0.3, "enabled": true  },
-      { "key": "host-temp", "metric": "HostTempC",       "warn": 85,   "danger": 95,   "fireForSec": 30,  "clearForSec": 60,  "clearMargin": 5,   "enabled": true  },
-      { "key": "srv-pids",  "metric": "ServerPids",      "warn": 1000, "danger": null, "fireForSec": 120, "clearForSec": 120, "clearMargin": 50,  "enabled": false },
-      { "key": "srv-mem",   "metric": "ServerMemBytes",  "warn": 0,    "danger": null, "fireForSec": 120, "clearForSec": 120, "clearMargin": 0,   "enabled": false },
-      { "key": "srv-cpu",   "metric": "ServerCpuPctCore","warn": 0,    "danger": null, "fireForSec": 120, "clearForSec": 120, "clearMargin": 0,   "enabled": false }
-    ]
   },
 
   // --- Standard ASP.NET Core keys ---------------------------------------------------------------

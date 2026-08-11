@@ -186,8 +186,8 @@ key the settings file never declared. A blank leaf endpoint reports its capabili
 **`deploy/kgsm-api.leaf.json` is generated, not written.** `TheKrystalShip.KGSM.LeafConfig` rewrites
 it on every build from `[LeafField]` attributes and `<panel>` doc tags on `ApiSettings` — so edit the
 settings class, never the JSON, and commit what the build produces. A settings key nothing describes
-fails the build naming it; `MetricsThresholds` and `AllowedHosts` are declared exempt, the first
-because a list of rule objects is not something one variable can deliver. This API is the one leaf
+fails the build naming it; `AllowedHosts` is declared exempt, because host filtering belongs to the
+framework rather than to this API's configuration surface. This API is the one leaf
 whose descriptor says `readOnly` — applying a change here means restarting the process serving the
 request. Mechanism: `../kgsm-leafconfig/README.md`.
 

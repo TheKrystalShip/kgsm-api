@@ -286,33 +286,6 @@ public sealed class ApiOptions
     // Metrics history is owned by kgsm-monitor now (the API relays GET /metrics/history verbatim);
     // no history persistence config lives here.
 
-    // --- Metric-threshold alerts (the alerts `metrics`/`host-monitor` source, increment 1 of 2 — see
-    //     metrics-threshold-alerts-plan.md). Policy storage is the settings file/env: a
-    //     baked-in Default, optionally wholesale-overridden by the MetricsThresholds:Rules config section.
-    //     DB-backed/panel-editable policy is increment 2, out of scope. ----------------------------------
-
-    /// <summary>
-    /// The active metric-threshold policy. Defaults to <see cref="MetricsThresholdPolicy.Default"/>; a
-    /// present, non-empty <c>MetricsThresholds:Rules</c> config section overrides it WHOLESALE (not
-    /// merged field-by-field). Tuning a threshold or enabling a per-server rule means editing
-    /// <c>kgsm-api.settings.json</c>/the env file and restarting the API.
-    /// </summary>
-    public MetricsThresholdPolicy Policy { get; init; } = MetricsThresholdPolicy.Default;
-
-    /// <summary>Kill-switch for the whole metric-threshold alert pass
-    /// (<c>Api__MetricsThresholdsDisabled</c>), independent of each rule's own <c>enabled</c> flag —
-    /// flips the entire source off without touching the rule config.</summary>
-    public bool MetricsThresholdsDisabled { get; init; }
-
-    /// <summary>
-    /// Whether the metric-threshold alert source is active: the monitor capability is provisioned (metrics
-    /// are actually reachable to threshold), the kill-switch is off, and at least one rule is enabled. The
-    /// <c>AlertEngine</c> guards its metrics reconcile pass on this, mirroring
-    /// <see cref="WatchdogProvisioned"/> for the existing crash pass.
-    /// </summary>
-    public bool MetricsThresholdProvisioned =>
-        MetricsProvisioned && !MetricsThresholdsDisabled && Policy.AnyEnabled;
-
     // --- File browser (Tier 3 #12) — the GET/PUT /servers/{id}/files surface ----------------------
 
     /// <summary>
@@ -786,7 +759,6 @@ public sealed class ApiOptions
     public static ApiOptions FromConfiguration(IConfiguration configuration) =>
         FromSettings(
             configuration.GetSection(ApiSettings.Section).Get<ApiSettings>() ?? new ApiSettings(),
-            LoadThresholdPolicy(configuration),
             configuration.GetSection(KgsmAuthOptions.Section).Get<KgsmAuthOptions>() ?? new KgsmAuthOptions());
 
     /// <summary>
@@ -804,7 +776,7 @@ public sealed class ApiOptions
     /// empty string would make <c>Path.*</c> throw on.
     /// </remarks>
     public static ApiOptions FromSettings(
-        ApiSettings s, MetricsThresholdPolicy policy, KgsmAuthOptions? auth = null)
+        ApiSettings s, KgsmAuthOptions? auth = null)
     {
         // The OAuth applications are the ECOSYSTEM's, not this API's — the assistant beside us signs
         // people in through the same ones — so they arrive from the shared KgsmAuth section. The
@@ -879,12 +851,6 @@ public sealed class ApiOptions
             BlueprintCacheTtlSeconds = Math.Max(10, s.BlueprintCacheTtlSeconds ?? 60),
             // Instance in-memory cache TTL (background refresh interval). Floor 10s.
             InstanceCacheTtlSeconds = Math.Max(10, s.InstanceCacheTtlSeconds ?? 60),
-
-            // Metric-threshold alerts. The kill-switch is independent of each rule's own enabled flag;
-            // the policy itself wholesale-overrides the baked-in Default only when MetricsThresholds:Rules
-            // is present and non-empty (see LoadThresholdPolicy).
-            MetricsThresholdsDisabled = s.MetricsThresholdsDisabled ?? false,
-            Policy = policy,
 
             // File browser. Entry cap is a frontend-render bound; edit ceiling guards the
             // editor against megabyte blobs. Clamped sane: at least 1 entry, at least 1 KiB.
@@ -965,24 +931,6 @@ public sealed class ApiOptions
     {
         string? dir = string.IsNullOrWhiteSpace(dbPath) ? null : Path.GetDirectoryName(dbPath.Trim());
         return string.IsNullOrEmpty(dir) ? "covers" : Path.Combine(dir, "covers");
-    }
-
-    // MetricsThresholds:Rules binds via reflection-based config binding (JIT runtime — fine here); a
-    // present, non-empty section wins WHOLESALE over the baked-in Default (no field-by-field merge), per
-    // the locked decision in metrics-threshold-alerts-plan.md. Null/empty/absent -> Default.
-    // NB: bind to the mutable ThresholdRuleBinding, NOT the positional ThresholdRule — the binder cannot
-    // construct a record whose `double? Danger` ctor param has no value, and silently returns an empty list,
-    // so a single warn-only rule would drop the whole custom policy back to Default. A rule missing its Key
-    // is skipped (malformed), never materialized with a null id.
-    private static MetricsThresholdPolicy LoadThresholdPolicy(IConfiguration configuration)
-    {
-        List<ThresholdRuleBinding>? bound =
-            configuration.GetSection("MetricsThresholds:Rules").Get<List<ThresholdRuleBinding>>();
-        List<ThresholdRule>? rules = bound?
-            .Where(b => !string.IsNullOrWhiteSpace(b.Key))
-            .Select(b => b.ToRule())
-            .ToList();
-        return rules is { Count: > 0 } ? new MetricsThresholdPolicy(rules) : MetricsThresholdPolicy.Default;
     }
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
