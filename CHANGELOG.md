@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Web Push, as a third notification provider
+
+Fleet events can now reach a phone with the panel closed, over the browser's own push service
+(RFC 8030 delivery, RFC 8291 encryption, RFC 8292 auth). **On iPhone this only works for a panel
+installed to the Home Screen** — Safari does not deliver push to a tab — which is what the PWA work
+already in place buys.
+
+It rides the existing notification pipeline whole rather than building a second one: the bus still
+taps the audit append, and `NotificationDeliveryWorker` still applies the per-event rules and the
+per-`(provider,server,event)` anti-spam window — which matters most here, since a crash-looping
+server would otherwise wake every phone on the fleet once per watchdog backoff.
+
+Where it does not fit its siblings is storage, and that is structural: a webhook integration holds
+ONE secret for the host, while push holds one credential per **user per device**, minted by each
+browser. So `push_subscriptions` is a table of its own, `TryNormalizeSecret` refuses (there is no
+secret to paste), and the integration row carries only the host's VAPID pair plus the admin's
+enable/rules.
+
+- **The encryption is hand-rolled on the BCL and pinned to the RFC's own test vector.** Every
+  primitive needed (P-256 ECDH, HKDF, AES-GCM) ships in `System.Security.Cryptography`; the usual
+  package drags in BouncyCastle and Newtonsoft for the same ~80 lines. A mistake here would not
+  throw — it would silently deliver a body the browser discards — so `WebPushCryptoTests`
+  reproduces RFC 8291 §5 byte-for-byte, and `WebPushDeliveryTests` decrypts a real send with a
+  subscription's own private key and verifies the VAPID token the way a push service would.
+- **`/api/v1/push/*` is per-user and sits at viewer**, separately from the admin-only
+  `/integrations/{provider}`: admin configures the channel, each person registers and revokes their
+  own devices. Every read and write is scoped by the caller's subject, and one user asking to revoke
+  another's device gets a 404 — whether someone else's endpoint exists is not a thing to confirm.
+- **A 404/410 from the push service retires the row on the spot**; anything else (429, 5xx) only
+  counts toward a failure budget, because evicting a live device over a busy minute is worse than
+  retrying.
+- **The VAPID pair is generated once and never rotated** — the public half is baked into every
+  subscription a browser has already made, so regenerating it would silently orphan every device.
+
+⚠ **Operational:** `push_subscriptions` is created on an already-deployed database by
+`PushSubscriptionStore`'s idempotent `CREATE TABLE IF NOT EXISTS`, on the first call that touches
+the store — `EnsureCreated` no-ops against an existing DB and would never add it. Verified against
+the live host's database, with the audit log untouched.
+
 ### Changed — the audit feed reads the engine's classification of its own events
 
 kgsm-lib 4.8.0 ships `KgsmEventCatalog`: what each engine event is about, whether it is the news or a

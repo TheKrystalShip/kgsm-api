@@ -83,8 +83,30 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// audit log.</summary>
     public DbSet<PeerEntity> Peers => Set<PeerEntity>();
 
+    /// <summary>Web Push subscriptions — one row per (user × device), keyed by the push service's
+    /// endpoint URL. The shape that does not fit <see cref="Integrations"/>: an integration holds one
+    /// host-wide secret, push holds a per-device credential the browser mints. Created by
+    /// <c>EnsureCreated</c> on a fresh DB and by <see cref="Services.Integrations.WebPush.PushSubscriptionStore"/>'s
+    /// idempotent <c>CREATE TABLE IF NOT EXISTS</c> on the already-deployed one — never a wipe of the
+    /// shared audit log.</summary>
+    public DbSet<PushSubscriptionEntity> PushSubscriptions => Set<PushSubscriptionEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<PushSubscriptionEntity>(e =>
+        {
+            e.ToTable("push_subscriptions");
+            e.HasKey(p => p.Endpoint);
+            // Timestamps as UTC ticks — the host_settings/audit posture (SQLite has no date type).
+            e.Property(p => p.CreatedAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            e.Property(p => p.LastSeenAt).HasConversion(
+                new ValueConverter<DateTimeOffset, long>(
+                    v => v.UtcTicks,
+                    v => new DateTimeOffset(v, TimeSpan.Zero)));
+        });
+
         modelBuilder.Entity<IntegrationEntity>(e =>
         {
             e.ToTable("integrations");

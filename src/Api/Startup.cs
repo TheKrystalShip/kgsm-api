@@ -21,6 +21,7 @@ using TheKrystalShip.Api.Services.Cluster;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Files;
 using TheKrystalShip.Api.Services.Integrations;
+using TheKrystalShip.Api.Services.Integrations.WebPush;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.Api.Services.Players;
@@ -259,6 +260,19 @@ public class Startup(IConfiguration configuration)
         services.AddHttpClient<INotificationProvider, SlackNotificationProvider>(
                 c => c.Timeout = TimeSpan.FromSeconds(10))
             .RemoveAllLoggers();
+
+        // Web Push — the third provider. It fans out over per-device subscriptions instead of posting to
+        // one webhook, so the subscription table and the sender are their own services and the provider
+        // itself takes no HttpClient.
+        //
+        // RemoveAllLoggers here for the same reason as the webhook client above: a push endpoint URL is a
+        // capability to notify somebody's phone, and the default factory logging handler would write one
+        // per send into the service log.
+        services.AddHttpClient<WebPushSender>(c => c.Timeout = TimeSpan.FromSeconds(10))
+            .RemoveAllLoggers();
+        services.AddSingleton<PushSubscriptionStore>();
+        services.AddSingleton<VapidKeyStore>();
+        services.AddTransient<INotificationProvider, WebPushNotificationProvider>();
 
         // M8·c Increment B — the delivery worker. The bus is the ALWAYS-ON tap: AuditService.AppendAsync
         // publishes every audit row to it (the bus keeps only catalog-mapped actions; the worker routes to
