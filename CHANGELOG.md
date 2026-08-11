@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the alert thresholds are editable, without a restart
+
+`GET|PUT|DELETE /hosts/{id}/thresholds` — read the rules this host raises resource alerts from, apply a new
+set, or drop back to the built-in defaults. Reading sits at operator with the rest of the host's
+configuration surface; changing them is admin, because a threshold decides what the whole fleet alerts on.
+
+**This API is an editor, not the owner.** The policy lives in kgsm-monitor, which evaluates it, and every
+verb here relays to the monitor and reports what it said — including its refusals, which name the rule at
+fault. Nothing about a policy is stored on this side, so the panel and the daemon cannot drift apart. A
+change that reached no monitor is a `503`, never a 2xx: an operator told their change landed when it did not
+is the one outcome worth failing loudly over. Every attempt writes a `service.config` audit row, refusals
+included — a refused change exists nowhere else once the response is gone.
+
 ### Changed — threshold detection moved to kgsm-monitor
 
 Whether a metric is over its line, and whether it has been for long enough to count, is now decided by

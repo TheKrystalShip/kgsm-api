@@ -40,6 +40,17 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
             Task.FromResult(json);
 
         public Task<string?> GetStatsJsonAsync(CancellationToken ct) => Task.FromResult<string?>(null);
+
+        // The threshold relays share the interface but not these tests' subject. A read answers null (the
+        // honest "this monitor wouldn't say"); a write answers unreachable, which is the same statement for
+        // a verb that changes something.
+        public Task<string?> GetThresholdsJsonAsync(CancellationToken ct) => Task.FromResult<string?>(null);
+
+        public Task<LeafRelayResponse> PutThresholdsAsync(string json, CancellationToken ct) =>
+            Task.FromResult(LeafRelayResponse.Unreachable);
+
+        public Task<LeafRelayResponse> DeleteThresholdsAsync(CancellationToken ct) =>
+            Task.FromResult(LeafRelayResponse.Unreachable);
     }
 
     // --- Auth gate ---

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 using TheKrystalShip.KGSM.Monitor.Contracts;
 
@@ -23,6 +24,34 @@ public interface IMonitorHistoryClient
     /// relay (unprovisioned, unreachable, slow, non-2xx): the caller reports that it could not be read,
     /// which is a different statement from a monitor that answered with nothing recorded.</summary>
     Task<string?> GetStatsJsonAsync(CancellationToken ct);
+
+    /// <summary>Fetch the monitor's threshold policy (<c>GET /thresholds</c>) verbatim. Returns
+    /// <c>null</c> on the same terms as the other relays — the caller then reports that the policy could
+    /// not be read, which is a different statement from a host that watches nothing.</summary>
+    Task<string?> GetThresholdsJsonAsync(CancellationToken ct);
+
+    /// <summary>Apply a threshold policy (<c>PUT /thresholds</c>), relaying <paramref name="json"/>
+    /// verbatim and returning the monitor's own status and body. Unlike the read relays this does NOT
+    /// collapse a failure to null: an operator changing a policy has to be told whether it was refused
+    /// (and why) or simply could not be reached, and those are different answers.</summary>
+    Task<LeafRelayResponse> PutThresholdsAsync(string json, CancellationToken ct);
+
+    /// <summary>Drop the applied policy (<c>DELETE /thresholds</c>), returning this host to the monitor's
+    /// built-in defaults. Same reporting contract as <see cref="PutThresholdsAsync"/>.</summary>
+    Task<LeafRelayResponse> DeleteThresholdsAsync(CancellationToken ct);
+}
+
+/// <summary>
+/// What a leaf said when this API relayed a write to it: its status code and its body, both verbatim.
+/// <paramref name="Reached"/> separates "the leaf answered, with this" from "there was nothing to ask" —
+/// a distinction a status code alone cannot carry, and one an operator needs, because a refused policy is
+/// theirs to fix and an unreachable monitor is not.
+/// </summary>
+public readonly record struct LeafRelayResponse(bool Reached, int StatusCode, string? Body)
+{
+    public static LeafRelayResponse Unreachable => new(false, 0, null);
+
+    public bool IsSuccess => Reached && StatusCode is >= 200 and < 300;
 }
 
 /// <summary>
@@ -217,6 +246,70 @@ public sealed class MonitorClient : IMonitorHistoryClient, IDisposable
         catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
         {
             _logger.LogDebug(ex, "monitor /stats failed");
+            return null;
+        }
+    }
+
+    public Task<string?> GetThresholdsJsonAsync(CancellationToken ct) => GetJsonAsync("/thresholds", ct);
+
+    public Task<LeafRelayResponse> PutThresholdsAsync(string json, CancellationToken ct) =>
+        SendThresholdsAsync(HttpMethod.Put, new StringContent(json, Encoding.UTF8, "application/json"), ct);
+
+    public Task<LeafRelayResponse> DeleteThresholdsAsync(CancellationToken ct) =>
+        SendThresholdsAsync(HttpMethod.Delete, content: null, ct);
+
+    // The write relay. The monitor's answer is passed back whole — status and body — because it is the one
+    // that knows why a policy was refused, and restating its reasoning here would mean maintaining a second
+    // copy of validation rules this API deliberately does not own.
+    private async Task<LeafRelayResponse> SendThresholdsAsync(HttpMethod method, HttpContent? content, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Monitor))
+            return LeafRelayResponse.Unreachable;
+
+        try
+        {
+            using var request = new HttpRequestMessage(method, "/thresholds") { Content = content };
+            using HttpResponseMessage resp = await _http.SendAsync(request, ct).ConfigureAwait(false);
+            string body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return new LeafRelayResponse(Reached: true, (int)resp.StatusCode, body);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("monitor {Method} /thresholds timed out after {Timeout}", method, ScrapeTimeout);
+            return LeafRelayResponse.Unreachable;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogWarning(ex, "monitor {Method} /thresholds failed", method);
+            return LeafRelayResponse.Unreachable;
+        }
+    }
+
+    // The shared body of the verbatim read relays (/stats, /thresholds): provisioned-gate, GET, pass the
+    // body through, and collapse every way of not getting one to null.
+    private async Task<string?> GetJsonAsync(string path, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Monitor))
+            return null; // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            using HttpResponseMessage resp = await _http.GetAsync(path, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("monitor {Path} returned {Status}", path, (int)resp.StatusCode);
+                return null;
+            }
+            return await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("monitor {Path} timed out after {Timeout}", path, ScrapeTimeout);
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "monitor {Path} failed", path);
             return null;
         }
     }
