@@ -27,7 +27,8 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   deliberate **server-side additive** action beyond the doc's `ports.open`-only `network` set — it is
   honestly sourceable and keeps the trail symmetric (a standalone `files firewall disable` would otherwise
   leave an opened-never-closed gap); the frontend accepts unknown actions forward-compat.
-  `config.*`/`player.*`/`host.*`/… stay deferred. **The whole `network.*` set is engine-echo-only** — an
+  `host.threshold.breach`/`host.threshold.clear` are the metric-threshold pair — see below.
+  `config.*`/`player.*`/… beyond those stay deferred. **The whole `network.*` set is engine-echo-only** — an
   instance's ports and router forwards are opened by the supervisor when it starts and released when it
   stops, so the api issues no network command and has nothing to direct-write. The per-event mapping
   policy lives in the **pure** `AuditMapping.From{Crash,Failed,PortsOpened,PortsClosed,UpnpOpened,
@@ -52,6 +53,21 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   the game will accept a connection. On a big world the two are minutes apart, and the second is what
   somebody asking "when could people actually get in" is looking for. Both halves write it — the read
   path maps it, the live handler publishes it beside closing the starting latch.
+- **`host.threshold.*` is written directly and names the monitor.** kgsm-monitor evaluates the threshold
+  rules against every sample it takes and keeps the episodes; it emits no kgsm event, so this is a direct
+  write (the `auth.*` case — no echo, no double-write risk). `ThresholdAuditRecorder` transcribes them from
+  `GET /thresholds/episodes` rather than from the alert engine's in-memory firing set, which forgets on
+  restart and would lose any episode spanning one — so a restart, a slow tick and a normal poll are all one
+  code path. **Two actions, not one with a mutable state**: a breach and a recovery are separate immutable
+  facts, and the live mutable view of the same condition is the alert feed. Deduplicated on the monitor's
+  `episodeId` (carried in `meta`), with the set seeded at startup from rows already in the log.
+  **The actor is `system:monitor`** — the ecosystem's autonomous-emitter form, the same one kgsm-watchdog
+  stamps as `system:watchdog`. This API is the writer, not the source, and a bare `system` would make these
+  indistinguishable from every other unattended action. The identity comes from the **leaf the client read
+  through**, never from a field in the payload: a claim about identity made inside data is one this API
+  cannot check. `origin` stays `system` — no surface drove it, and the closed origin vocabulary has no
+  per-component value (the `auth.cluster_session` precedent: identity detail goes in the row, the
+  vocabulary is not widened).
 - **`origin` nullable** is a recorded §6 divergence, and so is **`meta.jobId`**: no id round-trips the
   stateless engine, and every action that reaches the audit log is an engine echo, so nothing here can
   populate it. Keep that limit in mind for the alert↔audit `resolution.actionId` bridge.

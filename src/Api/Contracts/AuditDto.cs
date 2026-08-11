@@ -230,6 +230,18 @@ public static class AuditAction
     public const string ServiceConnect = "service.connect";
     public const string ServiceDisconnect = "service.disconnect";
     public const string ServiceConfig = "service.config";
+
+    // host.threshold.* — a measured value crossed a line this host watches, and later came back. Recorded
+    // from the episodes kgsm-monitor keeps: the monitor establishes the fact against every sample it takes,
+    // and this API transcribes its durable record rather than deciding anything, which is why the rows carry
+    // `system:monitor` as their actor rather than a bare `system`. Written directly (the monitor emits no
+    // kgsm event), the auth.*/file.write case — no echo, no double-write risk.
+    //
+    // TWO actions, not one with a changing state: a breach and a recovery are separate immutable facts, and
+    // a single row that later mutated would break append-only. The live, mutable view of the same condition
+    // is the alert feed, which is a different surface answering a different question.
+    public const string HostThresholdBreach = "host.threshold.breach";
+    public const string HostThresholdClear = "host.threshold.clear";
 }
 
 /// <summary>Display weight for an audit record (architecture.html §3·d <c>severity</c>).</summary>

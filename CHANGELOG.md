@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — what fired now lands in the audit log
+
+`host.threshold.breach` and `host.threshold.clear`: a row when a watched metric crosses its line, and
+another when it comes back. Until now a resource alert existed only while it was firing — it aged out of
+the feed after 24 hours and vanished entirely on a restart, so "did this box run hot last week" had no
+answer anywhere.
+
+They are transcribed from the episodes kgsm-monitor keeps, not from the alert engine's in-memory set, so
+an episode that spans an API restart is picked up on the next poll rather than lost. Deduplicated on the
+monitor's episode id.
+
+**The rows name the monitor.** The actor is `system:monitor` — the same form kgsm-watchdog already stamps
+as `system:watchdog` — because this API writes these rows but does not establish the fact in them. So
+`GET /audit?actor=monitor` filters the log to what the monitor measured, and the panel's actor filter
+picks it up with no change. The identity comes from the leaf the client read through, never from a field
+in the payload. `origin` stays `system`: no surface drove it, and producer identity belongs in the actor.
+
+Notifications are unaffected — `NotificationModel` keys off a closed action map, so these do not reach
+Discord, Slack or push unless an event key is added there. That is a separate decision.
+
 ### Added — the alert thresholds are editable, without a restart
 
 `GET|PUT|DELETE /hosts/{id}/thresholds` — read the rules this host raises resource alerts from, apply a new

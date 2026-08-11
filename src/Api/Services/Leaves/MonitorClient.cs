@@ -39,6 +39,11 @@ public interface IMonitorHistoryClient
     /// <summary>Drop the applied policy (<c>DELETE /thresholds</c>), returning this host to the monitor's
     /// built-in defaults. Same reporting contract as <see cref="PutThresholdsAsync"/>.</summary>
     Task<LeafRelayResponse> DeleteThresholdsAsync(CancellationToken ct);
+
+    /// <summary>The monitor's record of what fired (<c>GET /thresholds/episodes</c>), verbatim. Returns
+    /// <c>null</c> on the same terms as the other read relays; the caller must not read that as "nothing
+    /// fired", which is what an empty list means.</summary>
+    Task<string?> GetEpisodesJsonAsync(long sinceMs, int limit, CancellationToken ct);
 }
 
 /// <summary>
@@ -251,6 +256,11 @@ public sealed class MonitorClient : IMonitorHistoryClient, IDisposable
     }
 
     public Task<string?> GetThresholdsJsonAsync(CancellationToken ct) => GetJsonAsync("/thresholds", ct);
+
+    public Task<string?> GetEpisodesJsonAsync(long sinceMs, int limit, CancellationToken ct) =>
+        GetJsonAsync(
+            $"/thresholds/episodes?since={sinceMs.ToString(CultureInfo.InvariantCulture)}" +
+            $"&limit={limit.ToString(CultureInfo.InvariantCulture)}", ct);
 
     public Task<LeafRelayResponse> PutThresholdsAsync(string json, CancellationToken ct) =>
         SendThresholdsAsync(HttpMethod.Put, new StringContent(json, Encoding.UTF8, "application/json"), ct);

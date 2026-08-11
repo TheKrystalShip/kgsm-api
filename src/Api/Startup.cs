@@ -436,6 +436,11 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<AlertEngine>();
         services.AddHostedService(sp => sp.GetRequiredService<AlertEngine>());
 
+        // The durable half of the same conditions: an audit row per threshold breach and recovery,
+        // transcribed from kgsm-monitor's own episode record rather than from the alert engine's in-memory
+        // set — which forgets on restart, and would lose any episode that spanned one.
+        services.AddHostedService<ThresholdAuditRecorder>();
+
         // Cluster message bus — Phase 1 foundation (docs/cluster-message-bus-plan.md, PLAN-peers.md §3).
         // The service-token mint/validate seam. Registered unconditionally — ClusterTokenService itself
         // degrades to a throwing Mint()/always-null ValidateAsync when Api__ClusterSecret is blank

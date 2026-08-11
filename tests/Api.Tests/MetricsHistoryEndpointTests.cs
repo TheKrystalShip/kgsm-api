@@ -51,6 +51,9 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
 
         public Task<LeafRelayResponse> DeleteThresholdsAsync(CancellationToken ct) =>
             Task.FromResult(LeafRelayResponse.Unreachable);
+
+        public Task<string?> GetEpisodesJsonAsync(long sinceMs, int limit, CancellationToken ct) =>
+            Task.FromResult<string?>(null);
     }
 
     // --- Auth gate ---
