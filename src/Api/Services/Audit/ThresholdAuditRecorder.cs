@@ -162,7 +162,19 @@ public sealed class ThresholdAuditRecorder(
             long heldSec = Math.Max(0, (ep.ClosedTs!.Value - ep.OpenedTs) / 1000);
             meta["heldSec"] = heldSec.ToString(System.Globalization.CultureInfo.InvariantCulture);
             meta["value"] = ConditionDisplay.Format(ep.Metric, ep.CloseValue ?? ep.PeakValue);
-            summary = $"{subject} {noun} back to normal after {ConditionDisplay.Duration(heldSec)}";
+            if (!string.IsNullOrEmpty(ep.CloseReason)) meta["reason"] = ep.CloseReason!;
+
+            // An episode that ended because its rule was retuned, disabled or removed did NOT recover: the
+            // value was never observed to come down. Saying "back to normal" would be reporting a
+            // measurement nobody took, which is the one thing this trail must not do.
+            summary = ep.CloseReason switch
+            {
+                // The rule was retuned, disabled or removed while this was firing.
+                "unwatched" => $"{subject} {noun} no longer watched after {ConditionDisplay.Duration(heldSec)} over its threshold",
+                // The monitor restarted while this was firing. The condition may well have still been true.
+                "interrupted" => $"{subject} {noun} still over its threshold when monitoring stopped, after {ConditionDisplay.Duration(heldSec)}",
+                _ => $"{subject} {noun} back to normal after {ConditionDisplay.Duration(heldSec)}",
+            };
         }
         else
         {
@@ -268,7 +280,8 @@ public sealed class ThresholdAuditRecorder(
                 PeakValue: Num(e, "peakValue") ?? 0,
                 OpenValue: Num(e, "openValue") ?? 0,
                 CloseValue: Num(e, "closeValue"),
-                Threshold: Num(e, "threshold") ?? 0));
+                Threshold: Num(e, "threshold") ?? 0,
+                CloseReason: Str(e, "closeReason")));
         }
         return list;
     }
@@ -282,5 +295,5 @@ public sealed class ThresholdAuditRecorder(
     private sealed record EpisodeDto(
         string EpisodeId, string RuleKey, string Metric, string Scope, string? Ref, string? ServerId,
         long OpenedTs, long? ClosedTs, string PeakBand, double PeakValue, double OpenValue,
-        double? CloseValue, double Threshold);
+        double? CloseValue, double Threshold, string? CloseReason);
 }

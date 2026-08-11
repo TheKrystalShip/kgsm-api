@@ -24,6 +24,10 @@ as `system:watchdog` — because this API writes these rows but does not establi
 picks it up with no change. The identity comes from the leaf the client read through, never from a field
 in the payload. `origin` stays `system`: no surface drove it, and producer identity belongs in the actor.
 
+A recovery row says how it ended. A condition whose rule was retuned or disabled while it was firing, and
+one that was still firing when the monitor stopped, are not recoveries — the value was never observed to
+come down — so those rows say that rather than "back to normal".
+
 Notifications are unaffected — `NotificationModel` keys off a closed action map, so these do not reach
 Discord, Slack or push unless an event key is added there. That is a separate decision.
 
