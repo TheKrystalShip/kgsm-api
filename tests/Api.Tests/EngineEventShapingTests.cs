@@ -190,6 +190,31 @@ public sealed class EngineEventShapingTests
     }
 
     /// <summary>
+    /// <b>The other direction, and the one that keeps a hand-written skip-list from growing back.</b>
+    /// Silence is the engine's classification, so an event it calls a fact reaches the trail — mapped
+    /// where a mapper exists, generically where none does, but never dropped. A type silenced by name
+    /// here would fail this the moment it was added, which is what the ten-entry list it replaced
+    /// could not do.
+    /// </summary>
+    [Fact]
+    public void Shape_EveryFactTheEngineReports_BecomesARow()
+    {
+        List<string> dropped = [];
+
+        foreach (EventDescriptor descriptor in KgsmEventCatalog.All.Where(d => d.Weight == EventWeight.Fact))
+        {
+            var item = new EventHistoryEntry(
+                "evt_x", Ts, descriptor.Type, "mc", null, null, null, null, Data(new { InstanceName = "mc" }));
+
+            if (EngineEventShaping.Shape(item, HostId) is null)
+                dropped.Add(descriptor.Type);
+        }
+
+        Assert.True(dropped.Count == 0,
+            "these events report a fact and produce no audit row: " + string.Join(", ", dropped));
+    }
+
+    /// <summary>
     /// <c>instance_ready</c> is a fact, not a refinement of <c>server.start</c>: that one says the
     /// process spawned, this one says the game will accept a connection, and on a big world the gap is
     /// minutes. It gets its own action rather than being folded into the start it followed.
