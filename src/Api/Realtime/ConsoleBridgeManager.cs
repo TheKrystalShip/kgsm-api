@@ -64,7 +64,7 @@ public sealed class ConsoleBridgeManager : BackgroundService
         _options = options;
         _services = services;
         _logger = logger;
-        _publish = hub.Publish;
+        _publish = (topic, key, message) => hub.Publish(topic, key, message);
         _hasSubscribers = hub.HasSubscribers;
         _anySubscription = hub.AnySubscription;
     }

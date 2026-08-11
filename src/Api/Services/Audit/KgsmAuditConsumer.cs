@@ -138,20 +138,18 @@ public sealed class KgsmAuditConsumer(
             domainPump.Nudge();
             return WriteServerAndBridge(d, AuditAction.ServerStart, "started");
         });
-        // instance_ready (kgsm-lib 1.35.0) — the watchdog's readiness signal: its log-scrape confirms the
-        // game finished booting, distinct from instance_started (the process merely spawned). AUDIT-SILENT
-        // by design, like the install-phase progress handlers below: server.start already recorded the
-        // meaningful fact ("this server was started"); "it finished booting" is a run-state refinement of
-        // that SAME action, not a new fact worth its own append-only row, and there is no honest slot in
-        // the closed AuditAction vocabulary for it that wouldn't just duplicate server.start. Only closes
-        // the starting latch (InstanceCache.MarkReady) so status flips starting -> running; DomainPump's
-        // existing Status diff (Realtime/CLAUDE.md) fans that out over SSE with no pump change needed.
+        // instance_ready — the watchdog's readiness signal: its log-scrape confirms the game finished
+        // booting, distinct from instance_started (the process merely spawned). It is a fact of its own
+        // (server.ready), not a refinement of server.start: on a big world the gap between the two is
+        // minutes, and it is the moment somebody asking "when could people actually get in" wants.
+        // It also closes the starting latch (InstanceCache.MarkReady) so status flips starting ->
+        // running; DomainPump's existing Status diff (Realtime/CLAUDE.md) fans that out over SSE.
         events.RegisterHandler<InstanceReadyData>(d =>
         {
             instanceCache.MarkReady(d.InstanceName);
             // starting -> running is a state change like any other: say it now, not up to a poll later.
             domainPump.Nudge();
-            return Task.CompletedTask;
+            return WriteServer(d, AuditAction.ServerReady, AuditSeverity.Info, "finished loading");
         });
         events.RegisterHandler<InstanceStoppedData>(d =>
         {

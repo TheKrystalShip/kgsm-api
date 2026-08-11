@@ -130,6 +130,103 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
     }
 
     /// <summary>
+    /// The live half of <c>server.ready</c>. Both halves of the feed have to agree about it: the merged
+    /// read shapes it out of the journal, and this is the handler that pushes it as it happens — a row a
+    /// client only ever saw on refresh would look like the panel had missed it.
+    /// </summary>
+    [Fact]
+    public async Task ReadyIsPushedLiveAndNotOnlyOnRefresh()
+    {
+        using HttpClient client = _factory.CreateClient();
+        using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
+            client, "/api/v1/stream?topics=audit", _factory.AccessToken(KgsmTier.Operator));
+        using SseFrameReader frames = await SseTestHelpers.Frames(resp);
+
+        string instance = $"ready-{Guid.NewGuid():N}";
+        JsonElement? frame = null;
+        DateTime deadline = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < deadline && frame is null)
+        {
+            _factory.AppendEvent("instance_ready", instance, actor: "system:watchdog", origin: AuditOrigin.System);
+            frame = await frames.WaitForFrame(
+                f => f.GetProperty("type").GetString() == "audit.append"
+                     && f.GetProperty("data").TryGetProperty("serverId", out JsonElement s)
+                     && s.GetString() == instance,
+                TimeSpan.FromMilliseconds(750));
+        }
+
+        Assert.NotNull(frame);
+        Assert.Equal(AuditAction.ServerReady, frame!.Value.GetProperty("data").GetProperty("action").GetString());
+    }
+
+    /// <summary>
+    /// <b>The decision this proves, end to end from the journal:</b> a player's connection address is on
+    /// the Control Panel for an operator and not below one. Both readers see the join — the row is never
+    /// withheld — and the name the game itself shows is on both, because that is what a name is for.
+    /// </summary>
+    [Fact]
+    public async Task APlayersAddressReachesAnOperatorAndNotAViewer()
+    {
+        string instance = $"addr-{Guid.NewGuid():N}";
+        _factory.AppendEvent(
+            "instance_player_joined",
+            new { InstanceName = instance, PlayerName = "bob", PlayerAddr = "95.49.44.91" },
+            actor: "system:watchdog", origin: AuditOrigin.System);
+
+        JsonElement operatorRow = await SingleRow(KgsmTier.Operator, instance);
+        JsonElement viewerRow = await SingleRow(KgsmTier.Viewer, instance);
+
+        Assert.Equal("95.49.44.91", operatorRow.GetProperty("meta").GetProperty("playerAddr").GetString());
+        Assert.Equal("bob", operatorRow.GetProperty("meta").GetProperty("playerName").GetString());
+
+        Assert.False(viewerRow.GetProperty("meta").TryGetProperty("playerAddr", out _));
+        Assert.Equal("bob", viewerRow.GetProperty("meta").GetProperty("playerName").GetString());
+
+        // Same row, same id, same history — only the value inside it differs.
+        Assert.Equal(operatorRow.GetProperty("id").GetString(), viewerRow.GetProperty("id").GetString());
+        Assert.Equal(AuditAction.PlayerJoin, viewerRow.GetProperty("action").GetString());
+    }
+
+    /// <summary>
+    /// The console command a viewer must not read is in the row's own sentence as well as its meta, and
+    /// the page has to withhold both — a summary is the part a reader actually looks at.
+    /// </summary>
+    [Fact]
+    public async Task AConsoleCommandIsWithheldFromTheSummaryAViewerReads()
+    {
+        string instance = $"cmd-{Guid.NewGuid():N}";
+        _factory.AppendEvent(
+            "instance_input_sent",
+            new { InstanceName = instance, Command = "op somebody" },
+            actor: "discord:haru", origin: AuditOrigin.Ui);
+
+        JsonElement operatorRow = await SingleRow(KgsmTier.Operator, instance);
+        JsonElement viewerRow = await SingleRow(KgsmTier.Viewer, instance);
+
+        Assert.Contains("op somebody", operatorRow.GetProperty("summary").GetString()!, StringComparison.Ordinal);
+        Assert.DoesNotContain("op somebody", viewerRow.GetProperty("summary").GetString()!, StringComparison.Ordinal);
+        Assert.Equal(JsonValueKind.Null, viewerRow.GetProperty("meta").ValueKind);
+
+        // Still there, still attributable: withholding what was typed is not hiding that it was.
+        Assert.Equal(AuditAction.ConsoleInput, viewerRow.GetProperty("action").GetString());
+        Assert.Equal("haru", viewerRow.GetProperty("actor").GetProperty("name").GetString());
+    }
+
+    /// <summary>The one row for <paramref name="instance"/> on the merged page, read at a given tier.</summary>
+    private async Task<JsonElement> SingleRow(KgsmTier tier, string instance)
+    {
+        using HttpClient client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _factory.AccessToken(tier));
+
+        HttpResponseMessage page = await client.GetAsync($"/api/v1/audit?serverId={instance}&limit=200");
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await page.Content.ReadAsStringAsync());
+        return Assert.Single(doc.RootElement.GetProperty("data").EnumerateArray()).Clone();
+    }
+
+    /// <summary>
     /// <see cref="AuthTestFactory"/> with the engine "provisioned" against a temp journal directory, so
     /// kgsm-lib's journal reader starts and tails a file this test owns. <c>KgsmPath</c> only has to be
     /// non-empty for the engine to count as provisioned; nothing here execs it (every kgsm call degrades,
@@ -167,12 +264,18 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         /// Append one event to today's segment, in the exact NDJSON envelope kgsm writes
         /// (<c>EventType</c>/<c>Data</c>/<c>Timestamp</c>/<c>Actor</c>/<c>Origin</c>/<c>Hostname</c>).
         /// </summary>
-        public void AppendEvent(string eventType, string instance, string? actor, string? origin)
+        public void AppendEvent(string eventType, string instance, string? actor, string? origin) =>
+            AppendEvent(eventType, (object)new { InstanceName = instance }, actor, origin);
+
+        /// <summary>
+        /// The same, with the event's own payload — for the events whose <em>fields</em> are the point.
+        /// </summary>
+        public void AppendEvent(string eventType, object data, string? actor, string? origin)
         {
             string line = JsonSerializer.Serialize(new
             {
                 EventType = eventType,
-                Data = new { InstanceName = instance },
+                Data = data,
                 Timestamp = DateTimeOffset.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
                 Actor = actor,
                 Origin = origin,

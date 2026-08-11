@@ -283,7 +283,7 @@ public sealed class AuditMergeTests : IDisposable
         // Newest 8 engine events are all silent; the real ones sit behind them.
         var engine = new List<EventHistoryEntry>();
         for (int i = 0; i < 8; i++)
-            engine.Add(EngineEvent($"evt_2026-08-04_{100 + i:D12}", t0.AddMinutes(100 + i), "instance_ready"));
+            engine.Add(EngineEvent($"evt_2026-08-04_{100 + i:D12}", t0.AddMinutes(100 + i), "instance_stop_started"));
         for (int i = 0; i < 8; i++)
             engine.Add(EngineEvent($"evt_2026-08-04_{i:D12}", t0.AddMinutes(i), "instance_started"));
 

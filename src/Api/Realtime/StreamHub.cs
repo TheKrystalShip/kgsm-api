@@ -61,12 +61,30 @@ public sealed class StreamHub
     /// coalescing per <paramref name="coalesceKey"/> within each connection's outbound queue. Serializes
     /// at most once, and only when there is at least one subscriber.
     /// </summary>
-    public void Publish(string topic, string coalesceKey, StreamMessage message)
+    /// <param name="belowOperator">
+    /// The message to send instead to a connection held by a reader below operator. Null — the usual
+    /// case — sends <paramref name="message"/> to everybody. This is how a frame whose <em>values</em>
+    /// depend on who is reading reaches both audiences without the topic itself being restricted: the
+    /// audit feed says the same things to everyone, and only the values inside a row differ
+    /// (<c>AuditRedaction</c>). A connection's tier is fixed at connect, like its subscriptions.
+    /// </param>
+    public void Publish(
+        string topic, string coalesceKey, StreamMessage message, StreamMessage? belowOperator = null)
     {
         ReadOnlyMemory<byte>? frame = null;
+        ReadOnlyMemory<byte>? restricted = null;
+
         foreach (StreamConnection c in _connections.Keys)
         {
             if (!c.IsSubscribed(topic)) continue;
+
+            if (belowOperator is not null && !c.IsOperator)
+            {
+                restricted ??= BuildSseFrame(belowOperator);
+                c.Enqueue(coalesceKey, restricted.Value);
+                continue;
+            }
+
             frame ??= BuildSseFrame(message);
             c.Enqueue(coalesceKey, frame.Value);
         }

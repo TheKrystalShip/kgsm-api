@@ -73,6 +73,13 @@ public static class AuditAction
 {
     // server.* — sourced from kgsm lifecycle events (the engine owns these; no API double-write).
     public const string ServerStart = "server.start";
+
+    // server.ready — the watchdog's readiness signal, and its own action rather than a refinement of
+    // server.start. The two report different moments: the process spawned, and the game finished
+    // loading and will accept a connection. The gap between them is minutes on a big world, and it is
+    // exactly the span somebody asking "when could people actually get in" is looking for.
+    public const string ServerReady = "server.ready";
+
     public const string ServerStop = "server.stop";
     public const string ServerRestart = "server.restart";
     public const string ServerUpdate = "server.update";

@@ -294,6 +294,14 @@ public sealed class InstanceFileServiceTests
         public FileOpResult<FileStat> Write(string instance, string relPath, string content, WriteOptions opts) =>
             OnWrite?.Invoke(instance, relPath, content, opts) ?? FileOpResult<FileStat>.Ok(new FileStat());
 
+        public FileOpResult<FindResult> Find(
+            string instance, string pattern, string? subdir, FindOptions? options = null) =>
+            throw new NotImplementedException("the file browser lists and reads; it does not search");
+
+        public FileOpResult<FileSearchResult> Search(
+            string instance, string pattern, string? subdir, FileSearchOptions? options = null) =>
+            throw new NotImplementedException("the file browser lists and reads; it does not search");
+
         public FileOpResult Delete(string instance, string relPath, DeleteOptions opts) =>
             throw new NotImplementedException("not wired by the file browser (Phase 3b)");
 

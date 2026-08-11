@@ -67,7 +67,8 @@ public sealed class StreamController(
             ? null
             : async (ct) => await sessions.IsValidAsync(sid, ct).ConfigureAwait(false);
 
-        var connection = new StreamConnection(Response.Body, topics, hub.Json, logger, sessionAlive);
+        var connection = new StreamConnection(
+            Response.Body, topics, hub.Json, logger, sessionAlive, isOperator);
         hub.Add(connection);
         try
         {

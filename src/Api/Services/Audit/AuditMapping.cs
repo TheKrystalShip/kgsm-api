@@ -264,7 +264,6 @@ public static class AuditMapping
         InstanceModerationDataBase d, string hostId, string action, string verb)
     {
         string instance = Instance(d);
-        string target = string.IsNullOrWhiteSpace(d.Target) ? "a player" : d.Target;
 
         Dictionary<string, string>? meta = null;
         if (!string.IsNullOrWhiteSpace(d.Target)) (meta ??= [])["target"] = d.Target;
@@ -282,9 +281,20 @@ public static class AuditMapping
             Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
             ServerId: instance,
             HostId: hostId,
-            Summary: $"{verb} {target} on {Display(instance)}",
+            Summary: ModerationSummary(verb, d.Target, instance),
             Meta: meta);
     }
+
+    /// <summary>
+    /// A moderation row's sentence, with or without the person it named.
+    /// </summary>
+    /// <remarks>
+    /// Shared with <see cref="AuditRedaction"/>, which builds the same row for a reader not permitted
+    /// the target: one function means the two cannot word the same event differently, where two would
+    /// drift the first time either sentence was reworded.
+    /// </remarks>
+    public static string ModerationSummary(string verb, string? target, string instance) =>
+        $"{verb} {(string.IsNullOrWhiteSpace(target) ? "a player" : target)} on {Display(instance)}";
 
     /// <summary>
     /// Map a kgsm <c>instance_config_changed</c> event (kgsm-lib 1.22.0) to a <c>config.set</c> row at
@@ -342,7 +352,6 @@ public static class AuditMapping
     {
         string instance = Instance(d);
         string command = string.IsNullOrEmpty(d.Command) ? "" : d.Command;
-        string shown = command.Length > 80 ? command[..79] + "…" : command;
         return new AuditWrite(
             Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
             Origin: NormalizeOrigin(d.Origin),
@@ -352,11 +361,27 @@ public static class AuditMapping
             Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
             ServerId: instance,
             HostId: hostId,
-            Summary: string.IsNullOrEmpty(command)
-                ? $"sent a console command to {Display(instance)}"
-                : $"ran '{shown}' on {Display(instance)}",
+            Summary: ConsoleInputSummary(command, instance),
             // FULL command (untruncated) — the deliberate divergence from config.set's key-only rule.
             Meta: string.IsNullOrEmpty(command) ? null : new Dictionary<string, string> { ["command"] = command });
+    }
+
+    /// <summary>
+    /// A console row's sentence, with or without what was typed. The command is truncated for the
+    /// sentence and carried whole in <c>meta</c>.
+    /// </summary>
+    /// <remarks>
+    /// Shared with <see cref="AuditRedaction"/> for the same reason as
+    /// <see cref="ModerationSummary"/>: a reader not permitted the command reads the sentence this
+    /// produces for an event that carried none, rather than a second wording of it.
+    /// </remarks>
+    public static string ConsoleInputSummary(string? command, string instance)
+    {
+        if (string.IsNullOrEmpty(command))
+            return $"sent a console command to {Display(instance)}";
+
+        string shown = command.Length > 80 ? command[..79] + "…" : command;
+        return $"ran '{shown}' on {Display(instance)}";
     }
 
     /// <summary>

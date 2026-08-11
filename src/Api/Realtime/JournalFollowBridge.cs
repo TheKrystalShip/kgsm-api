@@ -47,7 +47,7 @@ public sealed class JournalFollowBridge : BackgroundService
         _options = options;
         _reader = reader;
         _logger = logger;
-        _publish = hub.Publish;
+        _publish = (topic, key, message) => hub.Publish(topic, key, message);
         _hasSubscribers = hub.HasSubscribers;
         _topic = StreamProtocol.HostLogsTopic(options.HostId);
     }

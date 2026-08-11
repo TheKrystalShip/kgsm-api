@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the audit feed reads the engine's classification of its own events
+
+kgsm-lib 4.8.0 ships `KgsmEventCatalog`: what each engine event is about, whether it is the news or a
+step inside a larger operation, and what kind of data each payload field holds. `EngineEventShaping`
+and the read surface now ask it instead of keeping their own answers. Three visible consequences:
+
+**The install brackets stop reaching the audit trail.** Silence used to be a hand-maintained list of
+ten types; it is now every type the engine calls a step. The list had missed a whole class of them, so
+an install wrote a dozen `engine.instance_files_created`-style rows beside the install itself. Over two
+real days on this host that is 17% of the journal. A phase type added upstream is silent here the day
+the pin moves.
+
+**`server.ready` is a row.** `instance_ready` was silent on the grounds that it refined
+`server.start` — but the two report different moments (the process spawned; the game will accept a
+connection), and on a big world they are minutes apart. It is its own action, on both the live path and
+the merged read, and the SPA labels it "Ready to play".
+
+**A player's connection address needs operator.** The audit feed is gated at viewer and rendered every
+`meta` entry as a chip, so a player's IP was on the Control Panel for every account on the host.
+`AuditRedaction` now takes the fields the engine classifies as personal or privileged off a row for a
+reader below operator: a connection address, what was typed at a console, and who a moderation action
+named (the event does not say whether that is a name or an address — only the game's blueprint does).
+
+- **The row is never withheld, only values on it.** Every reader sees the same rows with the same ids,
+  actors and timestamps. A shorter feed for one tier would be two people reading one host's history and
+  being told different things.
+- **The summary counts as a value** — `console.input` and the moderation trio print theirs in the
+  sentence, so those are rebuilt through the mapper's own summary builders rather than a second wording.
+- **The live SSE frame agrees with the page.** `StreamHub` picks the shape per connection, because a
+  value withheld on refresh and pushed live is the same value published, with a delay.
+
 ### Fixed — an RCON-polled game is no longer reported as unable to report players
 
 `GET /servers/{id}/players` decided `detection` by checking whether the instance declared

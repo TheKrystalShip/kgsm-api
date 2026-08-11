@@ -95,8 +95,16 @@ public sealed class AuditService(
         // immutable facts that must never supersede one another in a slow client's outbound queue
         // (a static key would silently drop all but the latest). A truly stalled client is still torn
         // down by the send timeout and re-hydrates via GET /audit on reconnect (§3·j).
+        // Two shapes of the same row, because two tiers may be reading the topic. A viewer's live frame
+        // has to match the page they hydrate from — a value withheld on refresh but pushed live is the
+        // same value published, with a delay. Only the audit topic needs this: it is the only one whose
+        // payload carries values the engine classifies as personal or privileged.
+        AuditRecord forViewer = AuditRedaction.ForViewer(record);
         hub.Publish(StreamProtocol.AuditTopic, StreamProtocol.AuditEntityKey(record.Id),
-            new StreamMessage(StreamProtocol.AuditTopic, StreamProtocol.AuditAppend, record));
+            new StreamMessage(StreamProtocol.AuditTopic, StreamProtocol.AuditAppend, record),
+            ReferenceEquals(forViewer, record)
+                ? null
+                : new StreamMessage(StreamProtocol.AuditTopic, StreamProtocol.AuditAppend, forViewer));
 
         // Increment B (M8·c): tap the ALWAYS-ON audit path so notifications fire on every kgsm lifecycle
         // event regardless of WS subscribers (the StreamHub pumps are subscriber-gated; this publish is

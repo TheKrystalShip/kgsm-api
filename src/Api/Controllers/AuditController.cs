@@ -27,7 +27,8 @@ namespace TheKrystalShip.Api.Controllers;
 [ApiController]
 [Route("api/v1/audit")]
 [Authorize(Policy = AuthPolicy.Viewer)]
-public sealed class AuditController(AppDbContext db, ApiOptions options)
+public sealed class AuditController(
+    AppDbContext db, ApiOptions options, IAuthorizationService authorization)
     : ControllerBase
 {
     /// <summary>
@@ -55,7 +56,7 @@ public sealed class AuditController(AppDbContext db, ApiOptions options)
     /// rows, never a 500.
     /// </summary>
     [HttpGet]
-    public Task<AuditPage> GetAudit(
+    public async Task<AuditPage> GetAudit(
         [FromQuery] string? cursor,
         [FromQuery] int? limit,
         [FromQuery] string? severity,
@@ -63,8 +64,9 @@ public sealed class AuditController(AppDbContext db, ApiOptions options)
         [FromQuery] string? actor,
         [FromQuery] string? since,
         [FromQuery] string? category,
-        CancellationToken ct) =>
-        AuditQueries.PageMergedAsync(
+        CancellationToken ct)
+    {
+        AuditPage page = await AuditQueries.PageMergedAsync(
             db,
             Journal,
             options.HostId,
@@ -75,5 +77,18 @@ public sealed class AuditController(AppDbContext db, ApiOptions options)
             actor,
             since,
             category,
-            ct);
+            ct).ConfigureAwait(false);
+
+        // Below operator, the values the engine classifies as personal or privileged come off the rows
+        // — a player's connection address, what somebody typed at a console, who a ban named. The rows
+        // themselves stay, and the page is the same length: withholding a value is a different thing
+        // from reporting a shorter history to a reader, and only the first is honest. Resolved through
+        // the policy rather than off the claim so the one tier ladder decides
+        // (StreamController does the same for its operator-only topics).
+        bool isOperator =
+            (await authorization.AuthorizeAsync(User, policyName: AuthPolicy.Operator).ConfigureAwait(false))
+            .Succeeded;
+
+        return isOperator ? page : page with { Data = AuditRedaction.ForViewer(page.Data) };
+    }
 }

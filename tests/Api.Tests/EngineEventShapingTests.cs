@@ -149,9 +149,8 @@ public sealed class EngineEventShapingTests
         Assert.False(shaped.Meta.ContainsKey("source"));
     }
 
-    // --- deliberately-silent types (transient sub-phase signals) never surface, matching write-time ---
+    // --- a step inside a larger operation never surfaces; the engine decides which those are --------
     [Theory]
-    [InlineData("instance_ready")]
     [InlineData("instance_installation_started")]
     [InlineData("instance_download_started")]
     [InlineData("instance_deploy_started")]
@@ -161,10 +160,52 @@ public sealed class EngineEventShapingTests
     [InlineData("instance_stop_finished")]
     [InlineData("instance_restart_started")]
     [InlineData("instance_restart_finished")]
-    public void Shape_SilentType_ReturnsNull(string type)
+    // The install brackets, which the local skip-list never named and the generic fallback shaped into
+    // rows nobody wanted: an install produced a dozen "engine.instance_files_created" lines beside it.
+    [InlineData("instance_created")]
+    [InlineData("instance_files_created")]
+    [InlineData("instance_directories_created")]
+    [InlineData("instance_downloaded")]
+    [InlineData("instance_deployed")]
+    public void Shape_AStepInsideAnOperation_ReturnsNull(string type)
     {
         var item = new EventHistoryEntry("evt_x", Ts, type, "mc", null, null, null, null, Data(new { InstanceName = "mc" }));
         Assert.Null(EngineEventShaping.Shape(item, HostId));
+    }
+
+    /// <summary>
+    /// The silence is the engine's classification rather than a list kept here, so every type it calls
+    /// a phase is silent — including ones added upstream after this test was written.
+    /// </summary>
+    [Fact]
+    public void Shape_EveryTypeTheEngineCallsAPhase_IsSilent()
+    {
+        foreach (EventDescriptor descriptor in KgsmEventCatalog.All.Where(d => d.Weight == EventWeight.Phase))
+        {
+            var item = new EventHistoryEntry(
+                "evt_x", Ts, descriptor.Type, "mc", null, null, null, null, Data(new { InstanceName = "mc" }));
+
+            Assert.Null(EngineEventShaping.Shape(item, HostId));
+        }
+    }
+
+    /// <summary>
+    /// <c>instance_ready</c> is a fact, not a refinement of <c>server.start</c>: that one says the
+    /// process spawned, this one says the game will accept a connection, and on a big world the gap is
+    /// minutes. It gets its own action rather than being folded into the start it followed.
+    /// </summary>
+    [Fact]
+    public void Shape_Ready_IsItsOwnFactAndNotSilent()
+    {
+        var item = new EventHistoryEntry(
+            "evt_ready", Ts, "instance_ready", "mc", null, null, null, null, Data(new { InstanceName = "mc" }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.NotNull(shaped);
+        Assert.Equal(AuditAction.ServerReady, shaped!.Action);
+        Assert.NotEqual(AuditAction.ServerStart, shaped.Action);
+        Assert.Equal("mc", shaped.ServerId);
     }
 
     // --- an unclassified event type is never dropped — an honest generic fallback, no fabricated field -
@@ -172,21 +213,22 @@ public sealed class EngineEventShapingTests
     public void Shape_UnmappedType_GenericFallback_NeverDropsIt()
     {
         var item = new EventHistoryEntry(
-            "evt_unknown1", Ts, "instance_created", "mc", null, "discord:haru", "ui", null,
+            "evt_unknown1", Ts, "instance_some_future_thing", "mc", null, "discord:haru", "ui", null,
             Data(new { InstanceName = "mc", Blueprint = "factorio" }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
         Assert.Equal("evt_unknown1", shaped!.Id);
-        Assert.Equal("engine.instance_created", shaped.Action);
+        Assert.Equal("engine.instance_some_future_thing", shaped.Action);
         Assert.Equal(AuditSeverity.Info, shaped.Severity);
         Assert.Equal("mc", shaped.ServerId);
         Assert.Equal("ui", shaped.Origin);
         Assert.Equal("haru", shaped.Actor.Name);
         Assert.NotNull(shaped.Target);
         Assert.Equal("mc", shaped.Target!.Id);
-        Assert.Equal("instance_created", shaped.Meta!["eventType"]); // literal fact only, nothing fabricated
+        // literal fact only, nothing fabricated
+        Assert.Equal("instance_some_future_thing", shaped.Meta!["eventType"]);
     }
 
     [Fact]

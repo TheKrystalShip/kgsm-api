@@ -22,32 +22,30 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// </summary>
 public static class EngineEventShaping
 {
-    // Event types KgsmAuditConsumer deliberately never audits — transient
-    // sub-phase/refinement signals, not new domain facts (see the consumer's own remarks on
-    // InstanceReadyData / the PublishPhase handlers). Kept invisible in the merged feed too, so the
-    // shaped output matches write-time behavior exactly rather than surfacing previously-silent noise.
-    private static readonly HashSet<string> SilentTypes = new(StringComparer.Ordinal)
-    {
-        "instance_ready",                    // refines server.start's run-state; not a new fact
-        "instance_installation_started",     // job.patch phase signal only
-        "instance_download_started",         // job.patch phase signal only
-        "instance_deploy_started",           // job.patch phase signal only
-        "instance_update_started",           // claims the in-flight job slot; server.update is the fact
-        "instance_update_finished",          // releases it — "the run ended", not "the version moved"
-        "instance_stop_started",             // same bracket for a shutdown; server.stop is the fact
-        "instance_stop_finished",            // releases it — "the run ended", not "the instance is down"
-        "instance_restart_started",          // same bracket for a restart; server.restart is the fact
-        "instance_restart_finished",         // releases it — "the run ended", not "the instance came back"
-    };
-
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.General)
     {
         PropertyNameCaseInsensitive = true,
     };
 
     /// <summary>
+    /// Whether an event is a step inside a larger operation rather than the news itself — the brackets
+    /// kgsm puts around an install, a stop, an update. Those are live state, not history: the fact
+    /// worth an append-only row is the one in the middle.
+    /// </summary>
+    /// <remarks>
+    /// <b>The engine classifies its own events</b> (<see cref="KgsmEventCatalog"/>), so this holds no
+    /// list of its own and a phase event added upstream is silent here the day the pin moves. The live
+    /// path stays in step for a structural reason rather than a maintained one:
+    /// <see cref="KgsmAuditConsumer"/> only publishes a row for a type it registers a mapping handler
+    /// for, and the phase types it does register (the job-slot brackets) publish nothing by design —
+    /// so the two halves of the merged feed show an operation the same way.
+    /// </remarks>
+    private static bool IsPhase(string type) =>
+        KgsmEventCatalog.Describe(type).Weight == EventWeight.Phase;
+
+    /// <summary>
     /// Shape <paramref name="item"/> to its <see cref="AuditRecord"/>, or <see langword="null"/> for a
-    /// deliberately-silent type (<see cref="SilentTypes"/>) — the only case this returns null; every
+    /// step inside a larger operation (<see cref="IsPhase"/>) — the only case this returns null; every
     /// other event type is shaped, mapped when a <see cref="AuditMapping"/> mapper exists, else via an
     /// honest generic fallback (<see cref="GenericShape"/>) so a new/unclassified kgsm event is never
     /// silently dropped from the audit trail (Locked decision #8's whole point — a neutral raw store
@@ -56,13 +54,18 @@ public static class EngineEventShaping
     public static AuditRecord? Shape(EventHistoryEntry item, string hostId)
     {
         ArgumentNullException.ThrowIfNull(item);
-        if (SilentTypes.Contains(item.Type)) return null;
+        if (IsPhase(item.Type)) return null;
         if (IsNoteAttributionChange(item)) return null;
 
         AuditWrite? write = item.Type switch
         {
             "instance_started" => Map<InstanceStartedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerStart, AuditSeverity.Info, "started", hostId)),
+            // The moment players can actually connect, which server.start does not report — that one
+            // says the process spawned. Two facts about two different moments, and the second is the
+            // one somebody asking "when could people get in" is looking for.
+            "instance_ready" => Map<InstanceReadyData>(item,
+                d => AuditMapping.FromServerEvent(d, AuditAction.ServerReady, AuditSeverity.Info, "finished loading", hostId)),
             "instance_stopped" => Map<InstanceStoppedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerStop, AuditSeverity.Info, "stopped", hostId)),
             "instance_restarted" => Map<InstanceRestartedData>(item,

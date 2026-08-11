@@ -39,6 +39,19 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   `info` because they are the healthy lifetime; this one is an unhealthy condition being papered over, and
   a run of them is worth noticing. `meta.ports` carries **only the subset that was missing**, so a partial
   loss never reads as the whole set having gone.
+- **What is a step and what is the news is the engine's answer, not a list here.** `EngineEventShaping`
+  shapes nothing for a type `KgsmEventCatalog` classifies `Phase` — the brackets kgsm puts around an
+  install, a stop, an update. Those are live state (they claim and release the in-flight job slot), and
+  the fact worth an append-only row is the one in the middle. **Do not reintroduce a local skip-list**:
+  it drifts silently, and the version that did missed the whole install bracket, so an install wrote a
+  dozen `engine.instance_files_created` rows beside itself. The live path stays in step structurally —
+  `KgsmAuditConsumer` publishes only for the types it maps, and the phase types it registers publish
+  nothing.
+- **`server.ready` is its own action, not a refinement of `server.start`.** The engine emits both:
+  `instance_started` says the process spawned, `instance_ready` says the watchdog's log-scrape confirms
+  the game will accept a connection. On a big world the two are minutes apart, and the second is what
+  somebody asking "when could people actually get in" is looking for. Both halves write it — the read
+  path maps it, the live handler publishes it beside closing the starting latch.
 - **`origin` nullable** is a recorded §6 divergence, and so is **`meta.jobId`**: no id round-trips the
   stateless engine, and every action that reaches the audit log is an engine echo, so nothing here can
   populate it. Keep that limit in mind for the alert↔audit `resolution.actionId` bridge.
@@ -89,8 +102,28 @@ tolerates a directory that does not exist yet, so it never throws here). An auth
 write is best-effort — a failed write must never break login. **Honest boundary:** events emitted while the
 API isn't listening are **not** audited (stateless engine, no backfill) — state it, don't try to backfill.
 
-## Auth (M4·a)
+## Auth
 
 `GET /audit` is `[Authorize(Policy = viewer)]` — a core read surface ("every 'what happened' view reads
-here"). The `audit` WS topic rides the same viewer-gated `/stream` socket. Trivially bump to operator if the
-feed is later deemed sensitive — but viewer is the deliberate default.
+here"). The `audit` SSE topic rides the same viewer-gated `/stream` connection.
+
+**The gate is on the feed; a few values inside it are on a second one.** `AuditRedaction` takes the
+personal and privileged fields off a row for a reader below operator — a player's connection address,
+what somebody typed at a console, who a moderation action named. Three rules hold it together:
+
+- **Which values those are is the engine's classification, not this API's.** `KgsmEventCatalog`
+  (kgsm-lib) says what each payload field holds; the Control Panel turns "not public" into "operator
+  and above". A field reclassified upstream changes what a viewer sees with no edit here, and a field
+  name is classified the same way on every event that carries it, which is what makes the lookup on a
+  shaped row sound.
+- **The row is never withheld — only values on it.** Every reader sees that a ban happened and that a
+  command was run, with the same id, timestamp and actor. A shorter feed for one tier would be two
+  people reading one host's history and being told different things.
+- **The summary counts as a value.** Two actions print a restricted value in their own sentence
+  (`console.input`, the moderation trio), so the redactor rebuilds those through `AuditMapping`'s own
+  summary builders — the same call the mapper makes for an event that carried no such value, so the
+  two cannot word one row differently.
+
+**The live topic answers the same way.** `AuditService` publishes both shapes and `StreamHub` picks per
+connection (`StreamConnection.IsOperator`, fixed at connect like the subscriptions), because a value
+withheld on refresh and pushed live is the same value published, with a delay.

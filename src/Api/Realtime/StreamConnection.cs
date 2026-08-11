@@ -62,13 +62,21 @@ public sealed class StreamConnection
     /// is no session to check — an auth-disabled host's synthetic principal carries no <c>sid</c> — in
     /// which case the stream runs exactly as it did before, unchecked.
     /// </param>
+    /// <param name="isOperator">
+    /// Whether the reader behind this connection holds operator or above. Read by the hub for the few
+    /// frames whose values differ by tier (the audit feed's personal and privileged fields). Fixed at
+    /// connect, like the subscriptions — a demotion reaches this stream when the reader reconnects,
+    /// the same bound the operator-only topics already carry. <b>Defaults to false</b>: a connection
+    /// nobody stated a tier for is the restricted one.
+    /// </param>
     public StreamConnection(
         Stream body,
         IEnumerable<string> topics,
         JsonSerializerOptions json,
         ILogger logger,
-        Func<CancellationToken, ValueTask<bool>>? sessionAlive = null)
-        : this(body, topics, json, logger, sessionAlive, SessionRecheckInterval)
+        Func<CancellationToken, ValueTask<bool>>? sessionAlive = null,
+        bool isOperator = false)
+        : this(body, topics, json, logger, sessionAlive, SessionRecheckInterval, isOperator)
     {
     }
 
@@ -83,16 +91,21 @@ public sealed class StreamConnection
         JsonSerializerOptions json,
         ILogger logger,
         Func<CancellationToken, ValueTask<bool>>? sessionAlive,
-        TimeSpan sessionRecheckInterval)
+        TimeSpan sessionRecheckInterval,
+        bool isOperator = false)
     {
         _body = body;
         _json = json;
         _logger = logger;
         _sessionAlive = sessionAlive;
         _sessionRecheckInterval = sessionRecheckInterval;
+        IsOperator = isOperator;
         foreach (string t in topics)
             _subscriptions.Add(t);
     }
+
+    /// <summary>Whether this connection's reader holds operator or above. See the constructor.</summary>
+    public bool IsOperator { get; }
 
     // --- subscription state (read by the hub on every publish) ---
 
