@@ -91,8 +91,24 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// shared audit log.</summary>
     public DbSet<PushSubscriptionEntity> PushSubscriptions => Set<PushSubscriptionEntity>();
 
+    /// <summary>Per-account push preferences — which catalog events a person wants on their devices,
+    /// keyed by (account, event). Holds only explicit choices: no row means the default, which is ON.
+    /// Created by <c>EnsureCreated</c> on a fresh DB and by
+    /// <see cref="Services.Integrations.WebPush.PushPreferenceStore"/>'s idempotent
+    /// <c>CREATE TABLE IF NOT EXISTS</c> on an existing one.</summary>
+    public DbSet<PushPreferenceEntity> PushPreferences => Set<PushPreferenceEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<PushPreferenceEntity>(e =>
+        {
+            e.ToTable("push_preferences");
+            e.HasKey(p => new { p.UserSubject, p.CatalogId });
+            e.Property(p => p.UpdatedAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+        });
+
         modelBuilder.Entity<PushSubscriptionEntity>(e =>
         {
             e.ToTable("push_subscriptions");

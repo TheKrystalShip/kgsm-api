@@ -271,6 +271,7 @@ public class Startup(IConfiguration configuration)
         services.AddHttpClient<WebPushSender>(c => c.Timeout = TimeSpan.FromSeconds(10))
             .RemoveAllLoggers();
         services.AddSingleton<PushSubscriptionStore>();
+        services.AddSingleton<PushPreferenceStore>();
         services.AddSingleton<VapidKeyStore>();
         services.AddTransient<INotificationProvider, WebPushNotificationProvider>();
 

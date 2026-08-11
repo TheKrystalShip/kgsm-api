@@ -51,3 +51,23 @@ public sealed record PushDeviceView(
 
 /// <summary>GET /push/subscriptions — the caller's devices plus whether the channel is on at all.</summary>
 public sealed record PushDevicesResponse(bool Enabled, IReadOnlyList<PushDeviceView> Devices);
+
+/// <summary>
+/// One catalog event as it appears on a person's own notification settings.
+/// <para>
+/// <paramref name="Enabled"/> is THEIR choice; <paramref name="AvailableOnHost"/> is the admin's
+/// host-wide rule for the push channel. Both are reported because both gate delivery, and showing
+/// only the personal one would let somebody switch an event on and hear nothing with no explanation.
+/// </para>
+/// </summary>
+public sealed record PushPreferenceView(
+    string Id, string Title, string Description, bool Enabled, bool AvailableOnHost);
+
+/// <summary>GET /push/preferences — the whole catalog with this caller's choices applied.</summary>
+/// <param name="Enabled">Whether the push channel is on for the host at all.</param>
+public sealed record PushPreferencesResponse(bool Enabled, IReadOnlyList<PushPreferenceView> Events);
+
+/// <summary>PATCH /push/preferences — a sparse update; only the ids present change.</summary>
+public sealed record PushPreferencePatch(IReadOnlyList<PushPreferenceChange>? Events);
+
+public sealed record PushPreferenceChange(string Id, bool Enabled);

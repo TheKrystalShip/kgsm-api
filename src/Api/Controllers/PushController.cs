@@ -29,6 +29,7 @@ namespace TheKrystalShip.Api.Controllers;
 [Authorize(Policy = AuthPolicy.Viewer)]
 public sealed class PushController(
     PushSubscriptionStore subscriptions,
+    PushPreferenceStore preferences,
     VapidKeyStore vapid,
     IntegrationStore integrations,
     ILogger<PushController> logger) : ControllerBase
@@ -132,6 +133,48 @@ public sealed class PushController(
 
         bool removed = await subscriptions.DeleteAsync(subject, endpoint, ct);
         return removed ? NoContent() : Error(StatusCodes.Status404NotFound, "not_found", "no such device for this account");
+    }
+
+    /// <summary>
+    /// The caller's own notification choices, over the host's catalog.
+    /// </summary>
+    [HttpGet("preferences")]
+    public async Task<IActionResult> GetPreferences(CancellationToken ct)
+    {
+        if (Subject() is not { } subject) return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no valid session");
+        IntegrationRecord record = await integrations.GetAsync(VapidKeyStore.ProviderId, ct);
+        IReadOnlyDictionary<string, bool> mine = await preferences.ForUserAsync(subject, ct);
+
+        var hostRules = record.Events.ToDictionary(e => e.Id, StringComparer.Ordinal);
+        var events = NotificationCatalog.Events.Select(c => new PushPreferenceView(
+            c.Id, c.Title, c.Description,
+            // No stored choice means ON: subscribing a device is already the opt-in, and a catalog
+            // event added later should arrive rather than sit silently off until it is discovered.
+            Enabled: !mine.TryGetValue(c.Id, out bool want) || want,
+            AvailableOnHost: !hostRules.TryGetValue(c.Id, out NotificationRule? r) || r.Enabled)).ToList();
+
+        return Ok(new PushPreferencesResponse(record.Enabled, events));
+    }
+
+    /// <summary>Change some of the caller's own choices. Sparse — absent ids are untouched.</summary>
+    [HttpPatch("preferences")]
+    public async Task<IActionResult> PatchPreferences([FromBody] PushPreferencePatch? body, CancellationToken ct)
+    {
+        if (Subject() is not { } subject) return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no valid session");
+        if (body?.Events is null || body.Events.Count == 0)
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "events is required");
+
+        var choices = new Dictionary<string, bool>(StringComparer.Ordinal);
+        foreach (PushPreferenceChange change in body.Events)
+        {
+            // Reject an unknown id rather than storing a row nothing will ever read.
+            if (!NotificationCatalog.IsKnown(change.Id))
+                return Error(StatusCodes.Status400BadRequest, "bad_request", $"unknown event '{change.Id}'");
+            choices[change.Id] = change.Enabled;
+        }
+
+        await preferences.SetAsync(subject, choices, ct);
+        return await GetPreferences(ct);
     }
 
     /// <summary>A short, stable, non-reversible handle for a device row. The endpoint itself is a

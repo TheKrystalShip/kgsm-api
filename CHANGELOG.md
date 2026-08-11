@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — each person picks which notifications they get
+
+Push delivery now passes **two** gates instead of one. The admin's host-wide rule still decides what
+the channel carries; a new per-account preference decides which of those a person actually wants.
+Both must say yes, and `GET /api/v1/push/preferences` reports both axes per event, so the panel can
+show an event as switched off by an admin rather than letting somebody enable it and hear nothing.
+
+- `push_preferences` is keyed by (account, event) and holds **only explicit choices**. No row means
+  ON: subscribing a device is already the opt-in, and an event added to the catalog later should
+  arrive rather than sit silently off until it is discovered. Read "absent" as OFF anywhere — the
+  view, the fan-out filter — and people quietly stop getting notifications they never turned off, so
+  the default is pinned by test in each place.
+- Filtering happens inside the push provider's existing fan-out, so **the bus, the delivery worker
+  and `INotificationProvider` are untouched**. Preferences are read once per event rather than once
+  per device.
+- **A channel test ignores preferences on purpose** — it answers "does push work at all", which is
+  not a catalog event and not something anyone opted out of.
+- Nobody wanting an event is a **success**, not a delivery failure; reporting it as one would log an
+  error every time somebody has a switch off.
+- Choices are per **account**, not per device: the answer to "do I want to hear about crashes" is
+  about a person, not about which phone is in their hand.
+
+⚠ **Operational:** `push_preferences` reaches an already-deployed database the same way
+`push_subscriptions` did — an idempotent `CREATE TABLE IF NOT EXISTS` in its store, on the first
+call that touches it. Verified on the live host.
+
 ### Added — Web Push, as a third notification provider
 
 Fleet events can now reach a phone with the panel closed, over the browser's own push service

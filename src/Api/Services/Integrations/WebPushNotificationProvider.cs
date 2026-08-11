@@ -24,6 +24,7 @@ namespace TheKrystalShip.Api.Services.Integrations;
 /// </summary>
 public sealed class WebPushNotificationProvider(
     PushSubscriptionStore subscriptions,
+    PushPreferenceStore preferences,
     WebPushSender sender,
     ApiOptions options,
     ILogger<WebPushNotificationProvider> logger) : INotificationProvider
@@ -66,7 +67,9 @@ public sealed class WebPushNotificationProvider(
             return new NotificationTestResult(false, null, null, "no devices are subscribed to push on this host");
 
         byte[] payload = Payload("KGSM Control Panel", "Test notification — push is wired up correctly.", null);
-        (int sent, string? firstError) = await FanOutAsync(devices, payload, keys, ct).ConfigureAwait(false);
+        // A test deliberately ignores per-user event choices: it answers "does this channel work at
+        // all", which is not a catalog event and not something a person opted out of.
+        (int sent, string? firstError) = await FanOutAsync(devices, payload, keys, wanted: null, ct).ConfigureAwait(false);
 
         // Honest: if nothing landed, say so with the real reason rather than reporting a send we know failed.
         return sent > 0
@@ -84,19 +87,34 @@ public sealed class WebPushNotificationProvider(
         // Not an error: an enabled integration with nobody subscribed simply has nowhere to go.
         if (devices.Count == 0) return new NotificationDeliveryResult(true, null);
 
+        // The SECOND gate. The worker has already applied the host-wide rule for this event; this
+        // narrows it to the people who want it. One read for every account, because the alternative is
+        // a query per device.
+        IReadOnlyDictionary<(string, string), bool> prefs = await preferences.AllAsync(ct).ConfigureAwait(false);
+        bool Wanted(PushSubscriptionEntity d) =>
+            // No stored row means yes — see PushPreferenceEntity: the table holds deviations only.
+            !prefs.TryGetValue((d.UserSubject, ev.CatalogId), out bool want) || want;
+
         byte[] payload = Payload(Title(ev), ev.Summary, ev.ServerId);
-        (int sent, string? firstError) = await FanOutAsync(devices, payload, keys, ct).ConfigureAwait(false);
+        (int sent, string? firstError) = await FanOutAsync(devices, payload, keys, Wanted, ct).ConfigureAwait(false);
+
+        // Nobody wanting this event is a correct outcome, not a failure — reporting it as one would
+        // make the worker log an error every time somebody has an event switched off.
+        if (sent == 0 && firstError is null) return new NotificationDeliveryResult(true, null);
         return sent > 0
             ? new NotificationDeliveryResult(true, null)
-            : new NotificationDeliveryResult(false, firstError ?? "no device accepted the push");
+            : new NotificationDeliveryResult(false, firstError);
     }
 
     /// <summary>
     /// Push every device, then record each outcome. A dead subscription (404/410) is deleted on the
     /// spot — a browser that unsubscribed or cleared its data would otherwise be retried forever.
     /// </summary>
+    /// <param name="wanted">Per-device filter — the owner's choice about this event. Null pushes to
+    /// every device (a channel test, which no catalog preference applies to).</param>
     private async Task<(int Sent, string? FirstError)> FanOutAsync(
-        IReadOnlyList<PushSubscriptionEntity> devices, byte[] payload, VapidKeyPair keys, CancellationToken ct)
+        IReadOnlyList<PushSubscriptionEntity> devices, byte[] payload, VapidKeyPair keys,
+        Func<PushSubscriptionEntity, bool>? wanted, CancellationToken ct)
     {
         string subject = VapidSubject();
         int sent = 0;
@@ -104,6 +122,7 @@ public sealed class WebPushNotificationProvider(
 
         foreach (PushSubscriptionEntity device in devices)
         {
+            if (wanted is not null && !wanted(device)) continue;
             PushResult result = await sender.SendAsync(device, payload, keys, subject, ct).ConfigureAwait(false);
             switch (result.Outcome)
             {
