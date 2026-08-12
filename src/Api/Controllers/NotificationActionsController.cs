@@ -90,52 +90,63 @@ public sealed class NotificationActionsController(
         if (authority.Outcome == AuthorityOutcome.Disabled)
             return Refuse("That account has been switched off.");
 
+        if (PushActionKind.VerbFor(action.Kind) is { } verb)
+            return await LifecycleAsync(action, verb, identity, authority.Tier, ct);
+
         return action.Kind switch
         {
-            PushActionKind.ServerUpdate => await UpdateAsync(action, identity, authority.Tier, ct),
             PushActionKind.ConditionSnooze => await SnoozeAsync(action, ct),
             _ => Refuse("This build does not know how to do that."),
         };
     }
 
     /// <summary>
-    /// Apply the available update. The same gates the panel's own command path applies, in the same
-    /// order — the tier, the observed run state, and the one-in-flight claim — because a shortcut from a
-    /// lock screen must not be a shortcut past any of them.
+    /// Run one lifecycle verb against the staged server.
     /// </summary>
-    private async Task<IActionResult> UpdateAsync(
-        PushActionEntity action, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
+    /// <remarks>
+    /// The same gates the panel's own command path applies, in the same order — the tier, the observed
+    /// run state, and the one-in-flight claim — because a shortcut from a lock screen must not be a
+    /// shortcut past any of them. Notably the state gate is not softened for arriving late: a person
+    /// tapping Start on a server somebody else already started is told it is already running, rather than
+    /// having the tap quietly do nothing.
+    /// </remarks>
+    private async Task<IActionResult> LifecycleAsync(
+        PushActionEntity action, string verb, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
     {
         // The ordinal IS the hierarchy (admin ⊇ operator ⊇ viewer) — the same comparison the policy
         // handler makes for the panel's own command route.
         if (tier < KgsmTier.Operator)
-            return Refuse("That account is not allowed to update a server.");
+            return Refuse($"That account is not allowed to {verb} a server.");
 
         IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct);
         Server? server = servers.FirstOrDefault(s => string.Equals(s.Id, action.Target, StringComparison.Ordinal));
         if (server is null)
             return Refuse($"{action.Target} is not on this host any more.");
 
-        if (CommandGate.Inadmissible(CommandVerb.Update, server.Status) is { } noop)
-            return Refuse(noop);
+        if (CommandGate.Inadmissible(verb, server.Status) is { } noop)
+            return Refuse(Capitalize(noop) + ".");
 
         string jobId = "job_" + Guid.NewGuid().ToString("N")[..8];
-        Job? job = jobs.TryStart(jobId, action.Target, CommandVerb.Update, DateTimeOffset.UtcNow);
+        Job? job = jobs.TryStart(jobId, action.Target, verb, DateTimeOffset.UtcNow);
         if (job is null)
             return Refuse($"Something is already running on {action.Target}.");
 
-        // Stamped, not written: server.update is kgsm's event to emit, so the provenance rides the
+        // Stamped, not written: every verb here is kgsm's event to emit, so the provenance rides the
         // engine call and the audit row comes from the echo. A second writer for an action the engine
         // already emits is what the audit model forbids.
         runner.Start(job, identity.ActorString, AuditOrigin.Notification);
         logger.LogInformation(
-            "notification action: update {ServerId} job={JobId} (actor={Actor}, via push)",
-            action.Target, job.Id, identity.ActorString);
+            "notification action: {Verb} {ServerId} job={JobId} (actor={Actor}, via push)",
+            verb, action.Target, job.Id, identity.ActorString);
 
-        // What has happened is that kgsm was asked. Whether the server ends up updated is the job's
-        // answer, minutes from now, and claiming it here would be reporting an outcome nobody has.
-        return Ok(new PushActionResult(true, $"Asked kgsm to update {action.Target}."));
+        // What has happened is that kgsm was asked. Whether the server ends up in that state is the job's
+        // answer, and claiming it here would be reporting an outcome nobody has yet.
+        return Ok(new PushActionResult(true, $"Asked kgsm to {verb} {action.Target}."));
     }
+
+    // The gate's reasons are written as sentence fragments for an error envelope ("server is already
+    // stopped"); here they are the whole message a person reads on a notification.
+    private static string Capitalize(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
     /// <summary>
     /// Silence one condition on the tapping person's own devices. Needs nothing above the account

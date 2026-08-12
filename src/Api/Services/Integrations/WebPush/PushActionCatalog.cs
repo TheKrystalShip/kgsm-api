@@ -31,17 +31,30 @@ public static class PushActionCatalog
 
     public static IReadOnlyList<PushActionOffer> For(NotificationEvent ev)
     {
-        // An update is the one lifecycle verb a tap can mean exactly one thing by: it applies the
-        // build the engine has already established is available, to the server the row names.
-        if (ev.CatalogId == "update_available" && !string.IsNullOrEmpty(ev.ServerId))
-            return [new PushActionOffer(PushActionKind.ServerUpdate, ev.ServerId!, "Update now")];
-
         // A breach cannot be fixed from a lock screen, but it can be acknowledged. The target is the
         // condition rather than the host: silencing "this NVMe is hot" is not asking to stop hearing
         // about temperature.
         if (ev.CatalogId == "threshold_breach" && ev.SubjectKey is { Length: > 0 } condition)
             return [new PushActionOffer(PushActionKind.ConditionSnooze, condition, "Snooze 4h")];
 
-        return [];
+        if (string.IsNullOrEmpty(ev.ServerId)) return [];
+
+        return ev.CatalogId switch
+        {
+            // The one lifecycle verb a tap can mean exactly one thing by: apply the build the engine has
+            // already established is available, to the server the row names.
+            "update_available" => [new PushActionOffer(PushActionKind.ServerUpdate, ev.ServerId!, "Update now")],
+
+            // Being told a server went down and being able to answer "put it back" is the whole point of
+            // hearing about it away from a desk.
+            "offline" => [new PushActionOffer(PushActionKind.ServerStart, ev.ServerId!, "Start")],
+
+            // Stop, not restart. The watchdog is already restarting it — that is what makes a crash
+            // notification arrive repeatedly — so the button that changes anything is the one that
+            // changes the desired state and lets it stay down.
+            "crash" => [new PushActionOffer(PushActionKind.ServerStop, ev.ServerId!, "Stop")],
+
+            _ => [],
+        };
     }
 }

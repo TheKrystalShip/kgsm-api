@@ -58,9 +58,31 @@ public static class PushActionKind
     /// <summary>Apply the available update to <c>Target</c>. Needs operator, like every other mutation.</summary>
     public const string ServerUpdate = "server.update";
 
+    /// <summary>Bring <c>Target</c> back up. The reply to being told it went down.</summary>
+    public const string ServerStart = "server.start";
+
+    /// <summary>
+    /// Take <c>Target</c> down and leave it down. Offered on a crash, where it is the one thing a person
+    /// actually wants and the watchdog will not do for them: the watchdog's job is to bring a crashed
+    /// server back, so a server crashing repeatedly is being restarted repeatedly, and the way out is to
+    /// change what its desired state is. "Restart it" is not offered because that is already happening.
+    /// </summary>
+    public const string ServerStop = "server.stop";
+
     /// <summary>Stop pushing <c>Target</c> — one watched condition — to this person for a few hours.
     /// Their own phone, so it needs nothing above viewer.</summary>
     public const string ConditionSnooze = "condition.snooze";
 
-    public static bool IsKnown(string? kind) => kind is ServerUpdate or ConditionSnooze;
+    public static bool IsKnown(string? kind) =>
+        kind is ServerUpdate or ServerStart or ServerStop or ConditionSnooze;
+
+    /// <summary>The engine verb a server-scoped kind runs, or <see langword="null"/> when the kind is not
+    /// a lifecycle command at all. One place, so the redemption path cannot drift from the panel's.</summary>
+    public static string? VerbFor(string kind) => kind switch
+    {
+        ServerUpdate => Contracts.CommandVerb.Update,
+        ServerStart => Contracts.CommandVerb.Start,
+        ServerStop => Contracts.CommandVerb.Stop,
+        _ => null,
+    };
 }

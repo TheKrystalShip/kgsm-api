@@ -134,6 +134,24 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
         Assert.Contains("switched off", await res.Content.ReadAsStringAsync());
     }
 
+    [Theory]
+    [InlineData(PushActionKind.ServerStart, "start")]
+    [InlineData(PushActionKind.ServerStop, "stop")]
+    [InlineData(PushActionKind.ServerUpdate, "update")]
+    public async Task Every_lifecycle_button_runs_the_panel_gates(string kind, string verb)
+    {
+        // A viewer is refused by the tier gate before anything is looked up, and the message names the
+        // verb rather than a generic "not allowed" — the person is reading one line on a lock screen.
+        KgsmIdentity who = Account("act-tier-" + verb, KgsmTier.Viewer);
+        string handle = await Staged.StageAsync(kind, "factorio-01", who.Handle, who.Username, Endpoint, "Go");
+
+        HttpResponseMessage res = await factory.CreateClient()
+            .PostAsync($"/api/v1/notifications/actions/{handle}", From(Endpoint));
+
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+        Assert.Contains($"not allowed to {verb}", await res.Content.ReadAsStringAsync());
+    }
+
     [Fact]
     public async Task Snoozing_silences_that_condition_for_that_person()
     {
@@ -234,15 +252,43 @@ public class PushActionCatalogTests
         Assert.Equal("host-temp/k10temp/Tctl/", only.Target);
     }
 
+    [Fact]
+    public void Being_told_a_server_went_down_offers_to_put_it_back()
+    {
+        PushActionOffer only = Assert.Single(PushActionCatalog.For(Event("offline", "factorio-01")));
+        Assert.Equal(PushActionKind.ServerStart, only.Kind);
+    }
+
+    [Fact]
+    public void A_crash_offers_STOP_not_restart()
+    {
+        // The watchdog is already restarting it — that is why a crash notification arrives repeatedly —
+        // so a Restart button would offer to do the thing that is happening anyway. Stop is the one that
+        // changes the desired state and breaks the loop.
+        PushActionOffer only = Assert.Single(PushActionCatalog.For(Event("crash", "factorio-01")));
+        Assert.Equal(PushActionKind.ServerStop, only.Kind);
+    }
+
     [Theory]
-    [InlineData("crash")]
     [InlineData("online")]
-    [InlineData("offline")]
     [InlineData("backup")]
+    [InlineData("update")]
+    [InlineData("installed")]
     // A recovery needs no reply, and there is no honest one-tap remedy for the rest.
     [InlineData("threshold_clear")]
-    public void Most_events_offer_nothing(string catalogId) =>
+    public void The_rest_offer_nothing(string catalogId) =>
         Assert.Empty(PushActionCatalog.For(Event(catalogId, "srv", "some/condition/")));
+
+    [Theory]
+    [InlineData(PushActionKind.ServerUpdate, CommandVerb.Update)]
+    [InlineData(PushActionKind.ServerStart, CommandVerb.Start)]
+    [InlineData(PushActionKind.ServerStop, CommandVerb.Stop)]
+    public void Each_server_kind_names_the_engine_verb_it_runs(string kind, string verb) =>
+        Assert.Equal(verb, PushActionKind.VerbFor(kind));
+
+    [Fact]
+    public void A_snooze_is_not_an_engine_verb() =>
+        Assert.Null(PushActionKind.VerbFor(PushActionKind.ConditionSnooze));
 
     [Fact]
     public void An_update_with_no_server_named_offers_nothing() =>

@@ -9,11 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added — a notification can be acted on
 
-Two buttons, on the two events where one tap is an unambiguous instruction: **Update now** on
-`update_available`, and **Snooze 4h** on `threshold_breach`. Everything else deliberately offers
-nothing — a recovery needs no reply, and there is no honest one-tap remedy for "the box is hot", so a
-button that restarted the largest server would be this API guessing at a cause it has not established.
-Two at most in any case, because Android renders two and drops the rest.
+One button, on each of the four events where a single tap is an unambiguous instruction:
+
+| event | button | why that verb |
+|---|---|---|
+| `update_available` | **Update now** | applies the build the engine has already established is available |
+| `offline` | **Start** | being told a server went down and being able to answer "put it back" is the point of hearing about it away from a desk |
+| `crash` | **Stop** | not Restart — the watchdog is *already* restarting it, which is why a crash notification arrives repeatedly; the button that changes anything is the one that changes the desired state |
+| `threshold_breach` | **Snooze 4h** | there is no honest one-tap remedy for "the box is hot", and a button that restarted the largest server would be this API guessing at a cause it has not established |
+
+`online`, `backup`, `update` and `installed` offer nothing, and `threshold_clear` least of all — a
+recovery needs no reply. Two per notification is the ceiling in any case, because Android renders two
+and drops the rest.
+
+Every lifecycle button runs the panel's own gates in the panel's own order — tier, observed run state,
+one-in-flight claim. The state gate is deliberately not softened for a tap arriving late: somebody
+pressing Start on a server that has since been started is told it is already running, rather than having
+their tap quietly do nothing.
 
 **The operation stays on the host; the device gets a handle.** `push_actions` holds the resolved
 operation and a notification carries 32 hex characters that mean nothing on their own — the same model
@@ -26,10 +38,9 @@ service worker holds no session — it can read neither the access token in `ses
 refresh token in `localStorage` — so the handle stands in for a bearer. Four things narrow that: the
 handle names one staged operation, it is bound to the push endpoint it was staged for, it is single-use
 with a two-hour life, and **the tier is resolved at the tap from the account store**, never carried
-from staging time. Somebody demoted or switched off in between is refused. An update then runs the
-panel's own gates in the panel's own order — tier, observed run state, one-in-flight claim.
+from staging time. Somebody demoted or switched off in between is refused.
 
-**It writes no audit row of its own.** `server.update` is kgsm's event to emit, so this stamps actor and
+**It writes no audit row of its own.** Every lifecycle verb here is kgsm's event to emit, so this stamps actor and
 origin onto the engine call and the row comes from the echo — a second writer for an action the engine
 already emits is the one thing the audit model forbids. A snooze writes nothing anywhere, being a
 personal preference like every other push preference.
