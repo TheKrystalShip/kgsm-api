@@ -736,6 +736,18 @@ public sealed class ApiOptions
             ? new Uri(configured, path).ToString()
             : string.Empty;
 
+    /// <summary>
+    /// The address a browser reaches this API on, scheme and authority only — the same origin
+    /// <see cref="DiscordRedirectUri"/> establishes, which is already the one written-once statement of
+    /// this host's public address. Null when none is configured; a caller then has to say so rather
+    /// than inventing one.
+    /// </summary>
+    public string? PublicOrigin =>
+        Uri.TryCreate(DiscordRedirectUri, UriKind.Absolute, out Uri? uri)
+        && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+            ? uri.GetLeftPart(UriPartial.Authority)
+            : null;
+
     /// <summary>Whether the OAuth callback redirects the session back to the SPA (fragment handoff)
     /// rather than returning JSON. True iff a frontend URL is configured.</summary>
     public bool FrontendRedirectEnabled => !string.IsNullOrWhiteSpace(AuthFrontendUrl);

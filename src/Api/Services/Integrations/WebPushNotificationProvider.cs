@@ -25,6 +25,8 @@ namespace TheKrystalShip.Api.Services.Integrations;
 public sealed class WebPushNotificationProvider(
     PushSubscriptionStore subscriptions,
     PushPreferenceStore preferences,
+    PushSnoozeStore snoozes,
+    PushActionStore actions,
     WebPushSender sender,
     ApiOptions options,
     ILogger<WebPushNotificationProvider> logger) : INotificationProvider
@@ -66,10 +68,12 @@ public sealed class WebPushNotificationProvider(
         if (devices.Count == 0)
             return new NotificationTestResult(false, null, null, "no devices are subscribed to push on this host");
 
-        byte[] payload = Payload("KGSM Control Panel", "Test notification — push is wired up correctly.", null, null, null);
+        byte[] payload = Payload(new WebPushPayload(
+            "KGSM Control Panel", "Test notification — push is wired up correctly.", null));
         // A test deliberately ignores per-user event choices: it answers "does this channel work at
         // all", which is not a catalog event and not something a person opted out of.
-        (int sent, string? firstError) = await FanOutAsync(devices, payload, keys, wanted: null, ct).ConfigureAwait(false);
+        (int sent, string? firstError) = await FanOutAsync(
+            devices, _ => Task.FromResult(payload), keys, wanted: null, ct).ConfigureAwait(false);
 
         // Honest: if nothing landed, say so with the real reason rather than reporting a send we know failed.
         return sent > 0
@@ -91,12 +95,19 @@ public sealed class WebPushNotificationProvider(
         // narrows it to the people who want it. One read for every account, because the alternative is
         // a query per device.
         IReadOnlyDictionary<(string, string), bool> prefs = await preferences.AllAsync(ct).ConfigureAwait(false);
+        // And the THIRD, narrower still: somebody who tapped "snooze" on this exact condition. Scoped
+        // to the person and the condition, so it silences one phone about one thing.
+        IReadOnlySet<(string, string)> muted = ev.SubjectKey is { Length: > 0 }
+            ? await snoozes.ActiveAsync(ct).ConfigureAwait(false)
+            : new HashSet<(string, string)>();
+
         bool Wanted(PushSubscriptionEntity d) =>
             // No stored row means yes — see PushPreferenceEntity: the table holds deviations only.
-            !prefs.TryGetValue((d.UserSubject, ev.CatalogId), out bool want) || want;
+            (!prefs.TryGetValue((d.UserSubject, ev.CatalogId), out bool want) || want)
+            && !(ev.SubjectKey is { Length: > 0 } c && muted.Contains((d.UserSubject, c)));
 
-        byte[] payload = Payload(Title(ev), ev.Summary, ev.ServerId, ev.CatalogId, ev.SubjectKey);
-        (int sent, string? firstError) = await FanOutAsync(devices, payload, keys, Wanted, ct).ConfigureAwait(false);
+        (int sent, string? firstError) = await FanOutAsync(
+            devices, device => PayloadFor(ev, device, ct), keys, Wanted, ct).ConfigureAwait(false);
 
         // Nobody wanting this event is a correct outcome, not a failure — reporting it as one would
         // make the worker log an error every time somebody has an event switched off.
@@ -112,9 +123,12 @@ public sealed class WebPushNotificationProvider(
     /// </summary>
     /// <param name="wanted">Per-device filter — the owner's choice about this event. Null pushes to
     /// every device (a channel test, which no catalog preference applies to).</param>
+    /// <param name="payloadFor">The body for one device. Per-device rather than shared because a
+    /// notification's buttons are staged against the device that will show them, so two phones
+    /// receiving one event carry two different sets of handles.</param>
     private async Task<(int Sent, string? FirstError)> FanOutAsync(
-        IReadOnlyList<PushSubscriptionEntity> devices, byte[] payload, VapidKeyPair keys,
-        Func<PushSubscriptionEntity, bool>? wanted, CancellationToken ct)
+        IReadOnlyList<PushSubscriptionEntity> devices, Func<PushSubscriptionEntity, Task<byte[]>> payloadFor,
+        VapidKeyPair keys, Func<PushSubscriptionEntity, bool>? wanted, CancellationToken ct)
     {
         string subject = VapidSubject();
         int sent = 0;
@@ -123,6 +137,7 @@ public sealed class WebPushNotificationProvider(
         foreach (PushSubscriptionEntity device in devices)
         {
             if (wanted is not null && !wanted(device)) continue;
+            byte[] payload = await payloadFor(device).ConfigureAwait(false);
             PushResult result = await sender.SendAsync(device, payload, keys, subject, ct).ConfigureAwait(false);
             switch (result.Outcome)
             {
@@ -148,18 +163,44 @@ public sealed class WebPushNotificationProvider(
     /// sender. This host's own public callback origin is exactly that and is already configured, so no
     /// new setting is invented for it.
     /// </summary>
-    private string VapidSubject()
-    {
-        if (Uri.TryCreate(options.DiscordRedirectUri, UriKind.Absolute, out Uri? uri)
-            && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp))
-            return uri.GetLeftPart(UriPartial.Authority);
-        return "https://localhost";
-    }
+    private string VapidSubject() => options.PublicOrigin ?? "https://localhost";
 
     /// <summary>The notification body the service worker renders. Deliberately small: a push service
     /// caps the payload, and everything here is already on the panel a tap away.</summary>
-    private static byte[] Payload(string title, string body, string? serverId, string? catalogId, string? tag) =>
-        JsonSerializer.SerializeToUtf8Bytes(new WebPushPayload(title, body, serverId, catalogId, tag), Json);
+    private static byte[] Payload(WebPushPayload payload) =>
+        JsonSerializer.SerializeToUtf8Bytes(payload, Json);
+
+    /// <summary>
+    /// The body for one device, including whatever buttons it can actually draw.
+    /// </summary>
+    /// <remarks>
+    /// Three things have to hold before an action is staged, and each failing one costs the device its
+    /// buttons and nothing else — the notification still arrives and still opens the panel. The event
+    /// has to offer an action at all (most do not); the browser has to have reported that it renders
+    /// buttons, because staging a capability for a notification that will never show one leaves a live
+    /// handle nobody can use; and the row has to name the account's provider-qualified handle, since a
+    /// redemption re-resolves the tier from it and cannot do that from a bare subject.
+    /// </remarks>
+    private async Task<byte[]> PayloadFor(NotificationEvent ev, PushSubscriptionEntity device, CancellationToken ct)
+    {
+        var payload = new WebPushPayload(
+            Title(ev), ev.Summary, ev.ServerId, ev.CatalogId, ev.SubjectKey, options.PublicOrigin);
+
+        IReadOnlyList<PushActionOffer> offers = PushActionCatalog.For(ev);
+        if (offers.Count == 0 || device.MaxActions is not > 0 || string.IsNullOrEmpty(device.UserHandle))
+            return Payload(payload);
+
+        var buttons = new List<WebPushAction>();
+        foreach (PushActionOffer offer in offers.Take(device.MaxActions.Value))
+        {
+            string handle = await actions.StageAsync(
+                offer.Kind, offer.Target, device.UserHandle!, device.Username, device.Endpoint, offer.Label, ct)
+                .ConfigureAwait(false);
+            buttons.Add(new WebPushAction(handle, offer.Label));
+        }
+
+        return Payload(payload with { Actions = buttons });
+    }
 
     private static string Title(NotificationEvent ev)
     {

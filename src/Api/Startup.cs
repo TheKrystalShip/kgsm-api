@@ -272,6 +272,8 @@ public class Startup(IConfiguration configuration)
             .RemoveAllLoggers();
         services.AddSingleton<PushSubscriptionStore>();
         services.AddSingleton<PushPreferenceStore>();
+        services.AddSingleton<PushSnoozeStore>();
+        services.AddSingleton<PushActionStore>();
         services.AddSingleton<VapidKeyStore>();
         services.AddTransient<INotificationProvider, WebPushNotificationProvider>();
 

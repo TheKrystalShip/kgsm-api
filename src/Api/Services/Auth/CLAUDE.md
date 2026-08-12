@@ -111,8 +111,18 @@ file is the local "what you must not break."
 ## Invariants when you touch this
 
 - **Secure-by-default.** A `FallbackPolicy` requires an authenticated caller, so a **new endpoint is
-  gated unless it opts out**. Only `/health` + `/api/v1` carry `[AllowAnonymous]` (pre-login
-  reachability). Adding an open endpoint is a deliberate, reviewed act — not an omission.
+  gated unless it opts out**. Adding an open endpoint is a deliberate, reviewed act — not an omission.
+  Three carry `[AllowAnonymous]`: `/health` + `/api/v1` (pre-login reachability), and
+  `POST /notifications/actions/{handle}`, which is the **one anonymous write** and needs its own
+  paragraph. A service worker holds no session — it can read neither the access token in
+  `sessionStorage` nor the refresh token in `localStorage` — so a notification button has no bearer to
+  present and the handle stands in for one. What keeps that sound is that the handle names an operation
+  **staged server-side** (the assistant's model, so a request describes nothing and can poison nothing),
+  is **bound to the push endpoint** it was staged for, is **single-use with a short life**, and — the
+  load-bearing one — **resolves the tier at redemption from the account store**, never from anything
+  carried since staging. Someone demoted or switched off between the notification and the tap is
+  refused. Every refusal about the handle is one `404` with one message, because separate answers let
+  somebody probe which handles exist.
 - **Tier gating** (hierarchical: admin ⊇ operator ⊇ viewer): viewer = reads + the `/stream` WS,
   operator = the command `POST`, admin = diagnostics + reserved (settings/install/audit-config).
   `401` = no/invalid bearer (challenge); `403` = authenticated, tier too low (forbid) — keep that split.

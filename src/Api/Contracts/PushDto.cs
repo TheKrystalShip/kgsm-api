@@ -25,12 +25,38 @@ public sealed record WebPushIntegrationView(
 /// on the lock screen instead of stacking under it. It names the <em>subject</em> — one host watches
 /// several conditions at once, so keying this on the host would let a disk warning overwrite a temperature
 /// one. Absent falls back to the worker's own per-server key.</param>
+/// <param name="Api">This host's public origin, so a button's redemption reaches the API that staged
+/// it. A browser drives several nodes but runs one service worker, on whichever node serves the panel —
+/// without this it would answer a push from one host by calling another, which knows nothing about the
+/// handle. Absent when the host has no public address configured, and the worker then falls back to its
+/// own origin.</param>
+/// <param name="Actions">The buttons to draw, in order. Each carries the opaque handle that redeems it
+/// and nothing else — what would be done stays on the host. Empty for the events that offer nothing, and
+/// omitted entirely for a device that reported it renders none.</param>
 public sealed record WebPushPayload(
     string Title,
     string Body,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ServerId,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Event = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Tag = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Tag = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Api = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<WebPushAction>? Actions = null);
+
+/// <summary>One notification button on the wire.</summary>
+/// <param name="Handle">The staged action's opaque id. It is also the button's <c>action</c> value, so
+/// the worker hands back exactly what it was given and needs no map of its own.</param>
+/// <param name="Title">What the button says.</param>
+public sealed record WebPushAction(string Handle, string Title);
+
+/// <summary>POST /notifications/actions/{handle} — the service worker redeeming a button.</summary>
+/// <param name="Endpoint">This device's own push endpoint, read back from <c>getSubscription()</c>. The
+/// handle is staged against it, so a handle without its device redeems nothing.</param>
+public sealed record PushActionRedeemRequest(string? Endpoint);
+
+/// <summary>The outcome, in the words the worker shows on the follow-up notification.</summary>
+/// <param name="Message">What actually happened — never more than was established. Asking kgsm to
+/// update a server is not the same as the server having updated, and only the first has happened here.</param>
+public sealed record PushActionResult(bool Ok, string Message);
 
 /// <summary>GET /push/key — what a browser needs before it can call <c>pushManager.subscribe</c>.</summary>
 /// <param name="PublicKey">base64url VAPID public key, passed as <c>applicationServerKey</c>.</param>
@@ -40,7 +66,10 @@ public sealed record PushKeyResponse(string PublicKey, bool Enabled);
 
 /// <summary>POST /push/subscriptions — the browser's own <c>PushSubscription</c>, JSON-shaped exactly
 /// as <c>subscription.toJSON()</c> produces it so the client forwards it unchanged.</summary>
-public sealed record PushSubscribeRequest(string? Endpoint, PushKeys? Keys);
+/// <param name="MaxActions">How many notification buttons this browser renders
+/// (<c>Notification.maxActions</c>). Reported rather than inferred: the platform that renders none is
+/// also the one whose user-agent is most often imitated. Absent is treated as none.</param>
+public sealed record PushSubscribeRequest(string? Endpoint, PushKeys? Keys, int? MaxActions = null);
 
 /// <param name="P256dh">base64url P-256 public key. Named <c>p256dh</c> on the wire.</param>
 /// <param name="Auth">base64url 16-byte auth secret.</param>

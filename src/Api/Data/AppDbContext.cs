@@ -98,8 +98,37 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// <c>CREATE TABLE IF NOT EXISTS</c> on an existing one.</summary>
     public DbSet<PushPreferenceEntity> PushPreferences => Set<PushPreferenceEntity>();
 
+    /// <summary>Actions staged for a notification's buttons — the operation a tap redeems, held here so
+    /// the device only ever carries an opaque handle to it. Same creation posture as the two above.</summary>
+    public DbSet<PushActionEntity> PushActions => Set<PushActionEntity>();
+
+    /// <summary>Per-account, per-condition push snoozes, keyed by (account, condition). Expiring rows
+    /// only. Same creation posture as the two above.</summary>
+    public DbSet<PushSnoozeEntity> PushSnoozes => Set<PushSnoozeEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<PushActionEntity>(e =>
+        {
+            e.ToTable("push_actions");
+            e.HasKey(p => p.Id);
+            e.Property(p => p.CreatedAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            e.Property(p => p.ExpiresAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+        });
+
+        modelBuilder.Entity<PushSnoozeEntity>(e =>
+        {
+            e.ToTable("push_snoozes");
+            e.HasKey(p => new { p.UserSubject, p.SubjectKey });
+            e.Property(p => p.ExpiresAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+        });
+
         modelBuilder.Entity<PushPreferenceEntity>(e =>
         {
             e.ToTable("push_preferences");

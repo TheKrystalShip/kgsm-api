@@ -1,0 +1,66 @@
+namespace TheKrystalShip.Api.Data;
+
+/// <summary>
+/// One action staged for one button on one device's notification — the thing a tap redeems.
+/// <para>
+/// <b>The operation stays here; the device holds a handle to it.</b> This mirrors the assistant's
+/// <c>pending_confirmations</c>, and for the same reason: a signed envelope round-tripping through the
+/// client is a thing that has to be verified, where a handle is a thing that gets looked up. Nothing a
+/// request carries beyond the handle is read, so there is nothing in it to poison.
+/// </para>
+/// <para>
+/// <b>The handle is the capability, and that is a real difference from the assistant's.</b> A service
+/// worker holds no session — it can read neither the access token nor the refresh token — so there is
+/// no bearer on the redemption call and the handle is what stands in for one. Three things put the
+/// floor back under it: the row names the <em>device</em> it was staged for and a redemption has to
+/// present that endpoint, the tier is re-resolved from the account store at redemption rather than
+/// trusted from staging time, and it is single-use with a short life.
+/// </para>
+/// </summary>
+public sealed class PushActionEntity
+{
+    /// <summary>The opaque handle, 32 hex characters from the cryptographic RNG. Never derived from
+    /// what it redeems — it carries no meaning a holder could read or forge a sibling of.</summary>
+    public string Id { get; set; } = "";
+
+    /// <summary>Which operation this redeems — a <c>PushActionKind</c> value. Stored as the word, not
+    /// an ordinal, so reordering the set can never silently repoint a staged row.</summary>
+    public string Kind { get; set; } = "";
+
+    /// <summary>What it acts on: a server id, or the watched condition's subject for a snooze.</summary>
+    public string Target { get; set; } = "";
+
+    /// <summary>The provider-qualified handle of the account it was staged for (<c>provider:subject</c>) —
+    /// what the tier is re-resolved from. A subject alone is unique only within its provider.</summary>
+    public string UserHandle { get; set; } = "";
+
+    /// <summary>That account's username at staging time, for the audit actor. A label, never authority.</summary>
+    public string? Username { get; set; }
+
+    /// <summary>The push endpoint this was staged for. A redemption presenting a different one is
+    /// refused: a handle lifted out of this row is inert without the device it was minted for.</summary>
+    public string Endpoint { get; set; } = "";
+
+    /// <summary>What the button said, so the outcome can be reported in the same words the person read.</summary>
+    public string Label { get; set; } = "";
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>When it stops being redeemable. Short: a button on a notification is answered in the
+    /// minutes after it arrives, and a capability nobody used should not keep standing.</summary>
+    public DateTimeOffset ExpiresAt { get; set; }
+}
+
+/// <summary>The closed set of operations a notification button can redeem. Deliberately short — a verb
+/// belongs here only when a single tap, with no further context, is an unambiguous instruction.</summary>
+public static class PushActionKind
+{
+    /// <summary>Apply the available update to <c>Target</c>. Needs operator, like every other mutation.</summary>
+    public const string ServerUpdate = "server.update";
+
+    /// <summary>Stop pushing <c>Target</c> — one watched condition — to this person for a few hours.
+    /// Their own phone, so it needs nothing above viewer.</summary>
+    public const string ConditionSnooze = "condition.snooze";
+
+    public static bool IsKnown(string? kind) => kind is ServerUpdate or ConditionSnooze;
+}

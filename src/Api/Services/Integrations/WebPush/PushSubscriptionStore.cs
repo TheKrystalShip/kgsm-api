@@ -49,6 +49,23 @@ public sealed class PushSubscriptionStore(IServiceScopeFactory scopeFactory)
                     "FailureCount" INTEGER NOT NULL
                 );
                 """, ct).ConfigureAwait(false);
+
+            // Columns added after the table shipped. SQLite has no IF NOT EXISTS for a column, and
+            // re-adding one is an error rather than a no-op, so each is attempted and its duplicate
+            // rejection swallowed — the same shape kgsm-monitor's episode store uses. A row that
+            // predates them keeps NULL, which both readers treat as "this device never said".
+            // The DDL is written out per column rather than composed, because EF refuses an interpolated
+            // raw statement outright — and rightly, even where every part of it is a literal here.
+            foreach (string ddl in (string[])
+                     [
+                         "ALTER TABLE push_subscriptions ADD COLUMN \"UserHandle\" TEXT NULL;",
+                         "ALTER TABLE push_subscriptions ADD COLUMN \"MaxActions\" INTEGER NULL;",
+                     ])
+            {
+                try { await db.Database.ExecuteSqlRawAsync(ddl, ct).ConfigureAwait(false); }
+                catch (Microsoft.Data.Sqlite.SqliteException) { /* already there */ }
+            }
+
             _ensured = true;
         }
         finally { _ensureGate.Release(); }
@@ -101,9 +118,14 @@ public sealed class PushSubscriptionStore(IServiceScopeFactory scopeFactory)
                 // the row follows whoever holds it now.
                 row.UserSubject = sub.UserSubject;
                 row.Username = sub.Username;
+                row.UserHandle = sub.UserHandle ?? row.UserHandle;
                 row.P256dh = sub.P256dh;
                 row.Auth = sub.Auth;
                 row.UserAgent = sub.UserAgent ?? row.UserAgent;
+                // What a browser can render is a fact about this visit, not a high-water mark: a
+                // device that stops reporting one has changed, and keeping the old number would go on
+                // staging buttons nothing draws.
+                row.MaxActions = sub.MaxActions;
                 row.FailureCount = 0;
             }
             await db.SaveChangesAsync(ct).ConfigureAwait(false);

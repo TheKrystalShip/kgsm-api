@@ -43,6 +43,9 @@ public sealed class PushController(
     private string? Username() =>
         User.Identity is ClaimsIdentity ci && SessionClaims.ReadIdentity(ci) is { } id ? id.Username : null;
 
+    private string? Handle() =>
+        User.Identity is ClaimsIdentity ci && SessionClaims.ReadIdentity(ci) is { } id ? id.Handle : null;
+
     /// <summary>
     /// The host's VAPID public key, generated on first ask. A browser cannot subscribe without it.
     /// </summary>
@@ -110,9 +113,15 @@ public sealed class PushController(
             Endpoint = body.Endpoint,
             UserSubject = subject,
             Username = Username(),
+            // The provider-qualified handle, because an action staged for this device re-resolves its
+            // tier from it and a bare subject is unique only within its provider.
+            UserHandle = Handle(),
             P256dh = body.Keys.P256dh,
             Auth = body.Keys.Auth,
             UserAgent = Request.Headers.UserAgent.ToString() is { Length: > 0 } ua ? Truncate(ua, 200) : null,
+            // Clamped rather than trusted: this only ever decides how many buttons are staged, and a
+            // browser claiming a hundred would have us mint a hundred live capabilities per push.
+            MaxActions = body.MaxActions is { } max ? Math.Clamp(max, 0, 4) : null,
             CreatedAt = DateTimeOffset.UtcNow,
         }, ct);
 

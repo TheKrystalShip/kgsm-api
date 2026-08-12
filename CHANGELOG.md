@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a notification can be acted on
+
+Two buttons, on the two events where one tap is an unambiguous instruction: **Update now** on
+`update_available`, and **Snooze 4h** on `threshold_breach`. Everything else deliberately offers
+nothing — a recovery needs no reply, and there is no honest one-tap remedy for "the box is hot", so a
+button that restarted the largest server would be this API guessing at a cause it has not established.
+Two at most in any case, because Android renders two and drops the rest.
+
+**The operation stays on the host; the device gets a handle.** `push_actions` holds the resolved
+operation and a notification carries 32 hex characters that mean nothing on their own — the same model
+the assistant's `pending_confirmations` uses, and for the same reason: a signed envelope round-tripping
+through a client is a thing that has to be verified, where a handle is a thing that gets looked up. A
+request describes no operation, so there is nothing in it to poison.
+
+`POST /notifications/actions/{handle}` is consequently **the one anonymous write on this API**. A
+service worker holds no session — it can read neither the access token in `sessionStorage` nor the
+refresh token in `localStorage` — so the handle stands in for a bearer. Four things narrow that: the
+handle names one staged operation, it is bound to the push endpoint it was staged for, it is single-use
+with a two-hour life, and **the tier is resolved at the tap from the account store**, never carried
+from staging time. Somebody demoted or switched off in between is refused. An update then runs the
+panel's own gates in the panel's own order — tier, observed run state, one-in-flight claim.
+
+**It writes no audit row of its own.** `server.update` is kgsm's event to emit, so this stamps actor and
+origin onto the engine call and the row comes from the echo — a second writer for an action the engine
+already emits is the one thing the audit model forbids. Worth stating plainly: that row reads
+`origin: ui`, which is true and does **not** distinguish a tap on a notification from a click in the
+panel. A snooze writes nothing anywhere, being a personal preference like every other push preference.
+
+A snooze is narrower than a preference on purpose. It silences **one condition** — one rule on one
+sensor — for **one person**, and expires on its own; somebody muting a hot NVMe for the afternoon has
+not asked to stop hearing about temperature. The condition still fires, still writes its audit rows,
+still shows in the alert feed and still reaches Slack and everybody else's phone.
+
+A device says what it can render (`Notification.maxActions`) when it subscribes, and gets buttons only
+if it reported at least one. Measured rather than inferred from the user-agent, because the one platform
+that renders none — Safari, on every device — is also the one whose UA is most often imitated. A device
+registered before this shipped reports it the next time the panel's notification settings are opened on
+it, and until then gets notifications without buttons.
+
 ### Added — what fired now lands in the audit log
 
 `host.threshold.breach` and `host.threshold.clear`: a row when a watched metric crosses its line, and

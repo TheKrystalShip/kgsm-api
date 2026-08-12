@@ -29,6 +29,18 @@ public sealed class PushSubscriptionEntity
     /// The subject is the authority; this is a label (see the display-name-vs-audit rule).</summary>
     public string? Username { get; set; }
 
+    /// <summary>The owning account's provider-qualified handle (<c>provider:subject</c>) — what an
+    /// action staged for this device re-resolves its tier from. <see cref="UserSubject"/> alone cannot
+    /// do that job: a subject is unique only within its provider. Null on a row written before a device
+    /// reported one, which costs that device its buttons and nothing else, until it re-registers.</summary>
+    public string? UserHandle { get; set; }
+
+    /// <summary>How many notification buttons this browser will render, as it reported at subscribe
+    /// time (<c>Notification.maxActions</c>). Measured rather than guessed from the user-agent, because
+    /// the one platform that renders none — Safari, on every device — is also the one whose UA string is
+    /// most often imitated. Null means it never said, which is treated as none.</summary>
+    public int? MaxActions { get; set; }
+
     /// <summary>The subscription's P-256 public key, base64url (the browser's <c>p256dh</c>).</summary>
     public string P256dh { get; set; } = "";
 
