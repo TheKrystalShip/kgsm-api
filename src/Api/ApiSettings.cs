@@ -140,6 +140,23 @@ public sealed class ApiSettings
         Risk = LeafRisk.Wiring)]
     public string? KgsmJournalDir { get; set; }
 
+    /// <summary>This API's OWN append-only event journal. Blank uses events/ beside the DB.</summary>
+    /// <panel>Where this API records what it did itself — signing people in, changing an account's
+    /// authority, editing a file. Its own journal, not the engine's: every component on this host
+    /// records its own actions, and the audit page is the merge of all of them. Moving it leaves the
+    /// existing history behind at the old path.</panel>
+    [LeafField("eventJournalDir", "Panel event journal", Group = "engine", Type = LeafType.Path,
+        Risk = LeafRisk.Destructive, NoDefault = true)]
+    public string? EventJournalDir { get; set; }
+
+    /// <summary>Where per-service state directories live, scanned to find each producer's journal.</summary>
+    /// <panel>The directory holding each KGSM service's own state directory. The audit page is the merge
+    /// of every event journal found under it, so pointing it somewhere else changes which components'
+    /// history this host can show.</panel>
+    [LeafField("journalStateRoot", "Service state root", Group = "engine", Type = LeafType.Path,
+        Risk = LeafRisk.Wiring)]
+    public string? JournalStateRoot { get; set; }
+
     /// <summary>systemctl binary the Services board shells. Resolved via PATH by default.</summary>
     /// <panel>Which systemctl to run when reading a leaf's state or restarting it.</panel>
     [LeafField("systemctlPath", "systemctl path", Group = "engine", Type = LeafType.Path,

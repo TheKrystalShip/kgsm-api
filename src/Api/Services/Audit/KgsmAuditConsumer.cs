@@ -6,6 +6,7 @@ using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Players;
+using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Events;
 
@@ -56,8 +57,24 @@ public sealed class KgsmAuditConsumer(
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        // Always ensure the audit table exists — even with no engine, GET /audit and auth writes need it.
+        // Always ensure the audit table exists — it holds this host's pre-cutover history, which
+        // GET /audit still merges whether or not an engine is installed.
         await audit.EnsureCreatedAsync(cancellationToken).ConfigureAwait(false);
+
+        // Create this API's own journal directory now rather than on its first sign-in. A reader
+        // discovers a producer by finding its journal, so an API that has simply recorded nothing yet
+        // would otherwise be indistinguishable from one that writes no journal at all — and would stay
+        // invisible to every reader on the host until both an event fired and each of them restarted.
+        try
+        {
+            Directory.CreateDirectory(options.EventJournalDir);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Not fatal: the writer retries on every append and says so if it still cannot.
+            logger.LogWarning(ex, "Audit: could not create the event journal directory at {Dir}",
+                options.EventJournalDir);
+        }
 
         // Reconcile player roster from the watchdog's live session map (or mark unknown if unavailable).
         await history.ReconcileFromWatchdogAsync(cancellationToken).ConfigureAwait(false);
@@ -95,6 +112,80 @@ public sealed class KgsmAuditConsumer(
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>
+    /// The types this API writes to its own journal, and therefore the ones it publishes live off the
+    /// raw hook rather than through a typed handler.
+    /// </summary>
+    private static readonly HashSet<string> OwnEventTypes = new(StringComparer.Ordinal)
+    {
+        ApiJournal.LoginEvent, ApiJournal.LogoutEvent, ApiJournal.ClusterSessionEvent,
+        ApiJournal.SessionRevokedEvent,
+        ApiJournal.UserProvisionedEvent, ApiJournal.UserApprovedEvent, ApiJournal.UserDisabledEvent,
+        ApiJournal.UserTierChangedEvent, ApiJournal.UserDeletedEvent, ApiJournal.UserPasswordChangedEvent,
+        ApiJournal.IdentityLinkedEvent, ApiJournal.IdentityUnlinkedEvent,
+        ApiJournal.ServiceConnectedEvent, ApiJournal.ServiceDisconnectedEvent,
+        ApiJournal.ServiceConfigChangedEvent, ApiJournal.ServiceRestartedEvent,
+        ApiJournal.FileWrittenEvent, ApiJournal.BackupDownloadedEvent,
+    };
+
+    /// <summary>
+    /// Shape and announce one of this API's own journal events, so a row reaches an open browser as
+    /// soon as it is recorded rather than on the reader's next refresh.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The filter is what keeps every other event from being published twice.</b> This hook fires
+    /// for every envelope on every journal; the engine's own already have typed handlers that publish
+    /// them, so anything outside <see cref="OwnEventTypes"/> is left alone here.
+    /// </para>
+    /// <para>
+    /// The id comes from the journal position, exactly as the history read derives it — so a client
+    /// reconciling this live row against a later <c>GET /audit</c> page sees one identity, not two.
+    /// The shaping is <see cref="EngineEventShaping"/>'s, the same call the history read makes, so the
+    /// two cannot word one row differently.
+    /// </para>
+    /// </remarks>
+    private Task PublishOwnEventAsync(EventWrapper wrapper, EventPosition position)
+    {
+        if (wrapper is null || !OwnEventTypes.Contains(wrapper.EventType))
+            return Task.CompletedTask;
+
+        try
+        {
+            // Derived from the position directly rather than through the id tracker: that tracker
+            // exists because a TYPED handler never sees the envelope, and this hook does. Reading its
+            // one-shot field here would also consume a value the typed path is entitled to.
+            var entry = new EventHistoryEntry(
+                Id: position switch
+                {
+                    { IsKnown: false } => "evt_" + Guid.NewGuid().ToString("N")[..16],
+                    { Producer: { Length: > 0 } producer } =>
+                        AuditId.ForPosition(producer, position.Segment, position.Offset),
+                    _ => AuditId.ForPosition(position.Segment, position.Offset),
+                },
+                Ts: wrapper.Timestamp ?? DateTimeOffset.UtcNow,
+                Type: wrapper.EventType,
+                Instance: null,
+                Blueprint: null,
+                Actor: wrapper.Actor,
+                Origin: wrapper.Origin,
+                Hostname: wrapper.Hostname,
+                Data: wrapper.Data,
+                Producer: position.Producer);
+
+            if (EngineEventShaping.Shape(entry, options.HostId) is { } record)
+                audit.PublishLive(record);
+        }
+        catch (Exception ex)
+        {
+            // The event is already recorded — the journal is the record, and GET /audit reads it back.
+            // Failing here would lose the live push, never the fact.
+            logger.LogWarning(ex, "Audit: could not publish {Type} live", wrapper.EventType);
+        }
+
+        return Task.CompletedTask;
+    }
+
     private void RegisterHandlers(IEventService events)
     {
         // Captures the journal-position id for the envelope about to be typed-dispatched — see
@@ -103,6 +194,13 @@ public sealed class KgsmAuditConsumer(
         // but registration order here has no bearing on that — kgsm-lib always runs ALL raw handlers
         // before typed dispatch, regardless of relative registration order).
         events.RegisterRawHandler(idTracker.OnRawEvent);
+
+        // This API's OWN events, published live. They cannot go through RegisterHandler<T> like the
+        // engine's: kgsm-lib keys a typed handler on the payload CLASS, and several of these types
+        // deliberately share one — auth_login and auth_logout are the same shape, told apart by which
+        // type fired. A typed handler would get one registration for both and no way to know which
+        // arrived. The raw hook carries the type and the position, which is exactly what is missing.
+        events.RegisterRawHandler(PublishOwnEventAsync);
 
         // server.* — the closed lifecycle subset kgsm emits today. Each maps 1:1 to a dotted action.
         // server.start / server.restart additionally feed the alert↔audit bridge (M6·a): AFTER the row is

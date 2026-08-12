@@ -40,10 +40,9 @@ public sealed class SessionController(
     SessionStore sessions,
     ISessionValidator sessionValidator,
     ApiOptions options,
-    AuditService audit,
+    ApiJournal journal,
     IClusterBus clusterBus,
-    RosterClusterTargetProvider rosterTargets,
-    ILogger<SessionController> logger) : ControllerBase
+    RosterClusterTargetProvider rosterTargets) : ControllerBase
 {
     /// <summary>
     /// Fans a "log out user everywhere" out to the rest of the cluster (<c>PLAN-peers.md §P1</c>) —
@@ -132,9 +131,8 @@ public sealed class SessionController(
             IReadOnlyList<string> revokedSids = await sessions.RevokeAllForUserAsync(callerUserId, options.HostId, ct);
             foreach (string sid in revokedSids)
                 sessionValidator.Evict(sid);
-            await RecordAsync(AuditAction.AuthSessionRevokeAll, AuditSeverity.Info, ci,
-                $"{caller.Display} logged out everywhere ({revokedSids.Count} session(s))",
-                meta: new Dictionary<string, string> { ["count"] = revokedSids.Count.ToString() }, ct);
+            await RecordAsync("all", ci, sid: null, count: revokedSids.Count,
+                targetUserId: callerUserId, ct: ct);
             await FanOutRevokeAllAsync(caller.Subject, ct);
             return NoContent();
         }
@@ -164,9 +162,8 @@ public sealed class SessionController(
         // only stamp an audit row when this call actually did something (avoid a misleading "revoke"
         // trail entry for a no-op repeat call).
         if (revoked)
-            await RecordAsync(AuditAction.AuthSessionRevoke, AuditSeverity.Info, ci,
-                $"{caller.Display} revoked a session",
-                meta: new Dictionary<string, string> { ["sid"] = targetSid }, ct);
+            await RecordAsync("self", ci, sid: targetSid, count: 1,
+                targetUserId: callerUserId, ct: ct);
         return NoContent();
     }
 
@@ -188,9 +185,8 @@ public sealed class SessionController(
         sessionValidator.Evict(sid);
 
         if (User.Identity is ClaimsIdentity ci)
-            await RecordAsync(AuditAction.AuthSessionRevokeAdmin, AuditSeverity.Warn, ci,
-                $"admin revoked session {sid} for {target.UserId}",
-                meta: new Dictionary<string, string> { ["sid"] = sid, ["userId"] = target.UserId }, ct);
+            await RecordAsync("admin", ci, sid: sid, count: 1,
+                targetUserId: target.UserId, ct: ct);
         return NoContent();
     }
 
@@ -211,10 +207,8 @@ public sealed class SessionController(
             sessionValidator.Evict(sid);
 
         if (User.Identity is ClaimsIdentity ci)
-            await RecordAsync(AuditAction.AuthSessionRevokeAdmin, AuditSeverity.Warn, ci,
-                $"admin logged out {userId} everywhere ({revokedSids.Count} session(s))",
-                meta: new Dictionary<string, string> { ["userId"] = userId, ["count"] = revokedSids.Count.ToString() },
-                ct);
+            await RecordAsync("admin", ci, sid: null, count: revokedSids.Count,
+                targetUserId: userId, ct: ct);
 
         // userId is the provider-qualified handle; the cluster payload carries the bare subject, which
         // the receiving handler re-qualifies (see FanOutRevokeAllAsync + SessionRevokeHandler). An
@@ -225,35 +219,33 @@ public sealed class SessionController(
         return NoContent();
     }
 
-    // Direct-write auth.session.* audit row — same posture as AuthController.RecordAuthAsync (no
-    // kgsm event backs a revocation, so this IS the single writer, no double-write risk per
-    // invariant #5). Best-effort: a failed audit write is logged, never turns a successful revoke
-    // into an error response (the revoke itself already committed).
-    private async Task RecordAsync(string action, string severity, ClaimsIdentity ci, string summary,
-        IReadOnlyDictionary<string, string> meta, CancellationToken ct)
+    // Record a revocation in this API's own journal. No kgsm event backs a revocation — nothing runs
+    // on the engine — so this API is genuinely the author, not a second writer for somebody else's
+    // action. Best-effort: a failed write is logged and never turns a successful revoke into an error,
+    // because the revoke itself has already committed.
+    //
+    // `scope` is what separates the three: `self` (one of the caller's own), `all` (every session the
+    // caller holds), `admin` (somebody else's). It is one fact told three ways, so it is one event with
+    // a scope rather than three types — who was affected and who did it are already on the row.
+    private Task RecordAsync(
+        string scope, ClaimsIdentity ci, string? sid, int? count, string targetUserId,
+        CancellationToken ct)
     {
         KgsmIdentity? actor = SessionClaims.ReadIdentity(ci);
         if (actor is null)
-            return;
-        try
-        {
-            await audit.AppendAsync(new AuditWrite(
-                Ts: DateTimeOffset.UtcNow,
-                Origin: AuditOrigin.Ui,
-                Actor: new AuditActor(ActorKind.User, actor.Username, actor.Provider),
-                Action: action,
-                Severity: severity,
-                Target: null,
-                ServerId: null,
-                HostId: options.HostId,
-                Summary: summary,
-                Meta: meta),
-                ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "audit {Action} write failed (non-fatal)", action);
-        }
+            return Task.CompletedTask;
+
+        return journal.SessionRevokedAsync(
+            scope,
+            // Whose sessions ended — which for an admin revoke is NOT the actor. Collapsing the two
+            // would make "who was logged out" unanswerable on exactly the rows where it matters.
+            userId: targetUserId,
+            username: actor.Username,
+            sid: sid,
+            count: count,
+            actor: KgsmActor.Format(actor.Provider, actor.Username),
+            origin: AuditOrigin.Ui,
+            ct: ct);
     }
 
     private ObjectResult Error(int statusCode, string code, string message) =>

@@ -144,6 +144,30 @@ public sealed class ApiOptions
     /// </summary>
     public required string KgsmJournalDir { get; init; }
 
+    /// <summary>
+    /// This API's OWN append-only event journal (<c>Api__EventJournalDir</c>), where it records the
+    /// actions it performs itself — sign-ins, account changes, leaf configuration, file writes.
+    /// Default: an <c>events/</c> directory beside the SQLite DB, so it inherits the unit's
+    /// <c>StateDirectory</c>.
+    /// </summary>
+    /// <remarks>
+    /// Its own, not the engine's: no component writes to another's journal, and a reader tells the
+    /// producers apart by which directory a line came from rather than by anything on the line. The
+    /// audit page is the merge of every journal on the host, this one included.
+    /// </remarks>
+    public required string EventJournalDir { get; init; }
+
+    /// <summary>
+    /// Where each KGSM service keeps its state directory (<c>Api__JournalStateRoot</c>), scanned to
+    /// discover which producers have journals. Default: <c>/var/lib</c>.
+    /// </summary>
+    /// <remarks>
+    /// The audit page is the merge of every journal found under it, so this decides whose history this
+    /// host can answer for. Configurable because the ecosystem's location is a convention rather than a
+    /// fact — and because a test host must be able to read its own journals rather than the machine's.
+    /// </remarks>
+    public required string JournalStateRoot { get; init; }
+
     // --- Library RAWG.io cover-art / metadata (the M8·a library increment) ------------------------
 
     /// <summary>
@@ -834,6 +858,8 @@ public sealed class ApiOptions
             BotSocketPath = Defaulted(s.BotSocketPath, ""),
             KgsmPath = Defaulted(s.KgsmPath, "/usr/bin/kgsm"),
             KgsmJournalDir = Defaulted(s.KgsmJournalDir, "/var/lib/kgsm/events"),
+            EventJournalDir = BlankFallback(s.EventJournalDir, DefaultEventDir(s.DbPath)),
+            JournalStateRoot = Defaulted(s.JournalStateRoot, "/var/lib"),
             DbPath = BlankFallback(s.DbPath, "kgsm-api.db"),
 
             // Realtime pump cadences. The domain (instance) poll is relaxed by default (5s) — it
@@ -951,6 +977,16 @@ public sealed class ApiOptions
     {
         string? dir = string.IsNullOrWhiteSpace(dbPath) ? null : Path.GetDirectoryName(dbPath.Trim());
         return string.IsNullOrEmpty(dir) ? "covers" : Path.Combine(dir, "covers");
+    }
+
+    // This API's own journal: an events/ subdir beside the SQLite DB, on the same reasoning as the
+    // artwork cache above — it inherits whatever StateDirectory the unit points Api__DbPath into, so
+    // one setting places all of this API's state and the journal cannot end up somewhere the service
+    // user cannot write.
+    private static string DefaultEventDir(string? dbPath)
+    {
+        string? dir = string.IsNullOrWhiteSpace(dbPath) ? null : Path.GetDirectoryName(dbPath.Trim());
+        return string.IsNullOrEmpty(dir) ? "events" : Path.Combine(dir, "events");
     }
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

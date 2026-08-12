@@ -53,6 +53,10 @@
       "KgsmPath": "/usr/bin/kgsm",
       // The engine's append-only event journal the audit consumer tails.
       "KgsmJournalDir": "/var/lib/kgsm/events",
+      // This API's OWN append-only event journal. Blank uses events/ beside the DB.
+      "EventJournalDir": "",
+      // Where per-service state directories live, scanned to find each producer's journal.
+      "JournalStateRoot": "/var/lib",
       // systemctl binary the Services board shells. Resolved via PATH by default.
       "SystemctlPath": "systemctl",
       // journalctl binary the host-logs surface shells. Resolved via PATH by default.

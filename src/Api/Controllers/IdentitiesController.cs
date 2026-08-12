@@ -45,7 +45,7 @@ public sealed class IdentitiesController(
     SessionStore sessions,
     ISessionValidator sessionValidator,
     ApiOptions options,
-    AuditService audit,
+    ApiJournal journal,
     ILogger<IdentitiesController> logger) : ControllerBase
 {
     /// <summary>
@@ -255,8 +255,7 @@ public sealed class IdentitiesController(
         // account, which is a repeated click and not something to write a privilege event about.
         if (link.Outcome == LinkOutcome.Provisioned)
         {
-            await RecordAsync(AuditAction.IdentityLink, AuditSeverity.Warn, account, verified.Handle,
-                $"connected {verified.Provider} account '{verified.Username}' to '{account.Username}'", ct);
+            await RecordAsync(ApiJournal.IdentityLinkedEvent, account, verified.Provider, verified.Handle, ct);
         }
 
         return options.FrontendRedirectEnabled
@@ -322,9 +321,8 @@ public sealed class IdentitiesController(
         }
 
         await users.ForgetAsync(account.UserId, ct);
-        await RecordAsync(AuditAction.IdentityUnlink, AuditSeverity.Warn, account, credential.Handle,
-            $"disconnected {Provider(credential.Handle)} account '{credential.Label ?? credential.Handle}' " +
-            $"from '{account.Username}'", ct);
+        await RecordAsync(ApiJournal.IdentityUnlinkedEvent, account,
+            Provider(credential.Handle), credential.Handle, ct);
 
         return NoContent();
     }
@@ -398,44 +396,30 @@ public sealed class IdentitiesController(
             : Error(status, code, message);
 
     /// <summary>
-    /// Write an <c>identity.*</c> row. A direct write, the <c>auth.*</c> posture: kgsm runs nothing for
-    /// a credential change and emits no event, so there is no echo to wait for.
+    /// Record an identity being attached to or detached from an account, in this API's own journal.
+    /// Nothing runs on the engine for a credential change, so this API is the author of the fact.
     /// </summary>
     /// <remarks>
-    /// The actor is the person who acted, which here is always the account's own holder, and the handle
-    /// that was attached or detached rides in meta — never a token, and there is none to carry: a link
+    /// The actor is the person who acted, which here is always the account's own holder. The handle
+    /// that was attached or detached is on the row — never a token, and there is none to carry: a link
     /// keeps no credential at the provider.
     /// </remarks>
-    private async Task RecordAsync(
-        string action, string severity, KgsmUser account, string handle, string summary, CancellationToken ct)
+    private Task RecordAsync(
+        string type, KgsmUser account, string provider, string handle, CancellationToken ct)
     {
-        try
-        {
-            KgsmIdentity? caller = Caller();
-            await audit.AppendAsync(new AuditWrite(
-                Ts: DateTimeOffset.UtcNow,
-                Origin: AuditOrigin.Ui,
-                Actor: caller is null
-                    ? new AuditActor(ActorKind.System, "system", ActorProvider.System)
-                    : new AuditActor(ActorKind.User, caller.Username, caller.Provider),
-                Action: action,
-                Severity: severity,
-                Target: new AuditTarget("user", account.UserId, account.Username),
-                ServerId: null,
-                HostId: options.HostId,
-                Summary: caller is null ? summary : $"{caller.Display} {summary}",
-                Meta: new Dictionary<string, string>
-                {
-                    ["userId"] = account.UserId,
-                    ["username"] = account.Username,
-                    ["identity"] = handle,
-                }),
-                ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "audit {Action} write failed (non-fatal)", action);
-        }
+        KgsmIdentity? caller = Caller();
+
+        return journal.IdentityAsync(
+            type,
+            userId: account.UserId,
+            username: account.Username,
+            provider: provider,
+            handle: handle,
+            actor: caller is null
+                ? "system:api"
+                : KgsmActor.Format(caller.Provider, caller.Username),
+            origin: AuditOrigin.Ui,
+            ct: ct);
     }
 
     /// <summary>

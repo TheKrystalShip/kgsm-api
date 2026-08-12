@@ -6,13 +6,25 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
 
 ## Locked decisions (do not relitigate)
 
-- **Event-sourced, single writer, NO double-write.** kgsm **owns** `server.*`/`backup.*`. `AuditService`
-  is the one writer; engine actions land via `KgsmAuditConsumer` (the kgsm-lib `IEventService` echo) —
-  the API **never** writes an audit row when it *issues* a command. The command path only **stamps**
-  `actor`+`origin` onto `ILifecycleService.*(serverId, actor, origin)` (kgsm-lib 1.8.0) so they ride the
-  event. `auth.*` has no kgsm event → written directly (no double-write risk). **Never add a second
-  writer for an action kgsm already emits** — you can't dedup echoes, which is the whole reason provenance
-  is stamped instead.
+- **Event-sourced, and every producer records its own actions.** kgsm **owns** `server.*`/`backup.*`;
+  the watchdog owns what it supervises; the monitor owns what it measured; and this API owns `auth.*`,
+  `user.*`, `identity.*`, `service.*`, `file.write` and `backup.download`, which it writes to **its own
+  journal** (`ApiJournal` → `Api__EventJournalDir`). `GET /audit` is the merge of every journal plus the
+  local table's frozen pre-cutover rows. **Nothing writes an audit row directly** — there is no append
+  path on `AuditService`.
+  The API **never** records a row when it *issues* a command to another component: the command path only
+  **stamps** `actor`+`origin` onto `ILifecycleService.*(serverId, actor, origin)` so they ride that
+  component's own event. **Never record an action another producer already emits** — you can't dedup
+  echoes, which is the whole reason provenance is stamped instead.
+- **This API tails its own journal, and that is what publishes its rows live.** `AddKgsmJournalFederation`
+  reads every journal it discovers, and `/var/lib/kgsm-api` is one the scan matches — so writing is the
+  whole of the write path, and `KgsmAuditConsumer.PublishOwnEventAsync` shapes and announces off the raw
+  hook. ⚠ Announcing from the write site as well would emit every one of these rows **twice**. The raw
+  hook rather than `RegisterHandler<T>` because kgsm-lib keys typed handlers on the payload CLASS, and
+  several of these types deliberately share one (`auth_login`/`auth_logout` are the same shape).
+- **The API's journal is NAMED to the federation, not left to the scan** (`namedJournals:` in `Startup`).
+  Its path is configurable, and the scan only finds a producer at its default state directory — so a host
+  pointing it elsewhere would have this API writing a record it could not read back.
 - **actor and origin are independent axes.** `actor` = who (identity); `origin` = the surface. **Never
   derive origin from actor.** A missing/unknown origin is **`null`**, never a fabricated surface (the
   never-fabricate invariant). The command path's origin is **caller-declared**
@@ -58,19 +70,15 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   the game will accept a connection. On a big world the two are minutes apart, and the second is what
   somebody asking "when could people actually get in" is looking for. Both halves write it — the read
   path maps it, the live handler publishes it beside closing the starting latch.
-- **`host.threshold.*` is written directly and names the monitor.** kgsm-monitor evaluates the threshold
-  rules against every sample it takes and keeps the episodes; it emits no kgsm event, so this is a direct
-  write (the `auth.*` case — no echo, no double-write risk). `ThresholdAuditRecorder` transcribes them from
-  `GET /thresholds/episodes` rather than from the alert engine's in-memory firing set, which forgets on
-  restart and would lose any episode spanning one — so a restart, a slow tick and a normal poll are all one
-  code path. **Two actions, not one with a mutable state**: a breach and a recovery are separate immutable
-  facts, and the live mutable view of the same condition is the alert feed. Deduplicated on the monitor's
-  `episodeId` (carried in `meta`), with the set seeded at startup from rows already in the log.
+- **`host.threshold.*` comes from kgsm-monitor's own journal and names the monitor.** The monitor
+  evaluates the threshold rules against every sample it takes and records the episodes it established.
+  **Two actions, not one with a mutable state**: a breach and a recovery are separate immutable facts, and
+  the live mutable view of the same condition is the alert feed. `episodeId` (carried in `meta`) is what
+  pairs them.
   **The actor is `system:monitor`** — the ecosystem's autonomous-emitter form, the same one kgsm-watchdog
-  stamps as `system:watchdog`. This API is the writer, not the source, and a bare `system` would make these
-  indistinguishable from every other unattended action. The identity comes from the **leaf the client read
-  through**, never from a field in the payload: a claim about identity made inside data is one this API
-  cannot check. `origin` stays `system` — no surface drove it, and the closed origin vocabulary has no
+  stamps as `system:watchdog`. A bare `system` would make these indistinguishable from every other
+  unattended action. The identity comes from the **journal the line was read from**, never from a field in
+  the payload: a claim about identity made inside data is one this API cannot check. `origin` stays `system` — no surface drove it, and the closed origin vocabulary has no
   per-component value (the `auth.cluster_session` precedent: identity detail goes in the row, the
   vocabulary is not widened).
 - **`origin` nullable** is a recorded §6 divergence, and so is **`meta.jobId`**: no id round-trips the
@@ -79,11 +87,18 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
 
 ## Invariants when you touch this
 
-- **Serialized writes.** `AuditService` holds a `SemaphoreSlim` write gate (SQLite is single-writer) and
-  its **own DI scope per write** (writes arrive off the request path — the event listener). Don't capture
-  a request-scoped `AppDbContext`. Reads (`AuditController`) use the request scope directly via `AuditQueries`.
-- **Keyset pagination on `rowid`**, newest first (`RowId < cursor` `DESC`). Never offset pagination (it
-  skips/repeats as the head grows). `nextCursor` only when the page came back full.
+- **`AuditService` announces; it does not write.** It publishes to the realtime topic and the
+  notification bus, and owns `EnsureCreated` for the table holding pre-cutover history. Reads
+  (`AuditController`) use the request scope directly via `AuditQueries`. Don't reintroduce an append
+  path — a second writer for a fact a producer already records is what the journals removed.
+- **Keyset pagination on a composite `(ts, id)`**, newest first, spanning the local table and every
+  journal. Never offset pagination (it skips/repeats as the head grows). `nextCursor` only when the page
+  came back full.
+- **Every filter must be applied to BOTH halves of the merge.** `severity`, `actor` and `category` have no
+  journal-side equivalent, so they narrow the EF query in SQL and the shaped records in memory — and the
+  two must mean the same thing (`actor` matches the parsed actor NAME on both sides). ⚠ A filter
+  implemented on only one half does not return a short page; it returns *everybody's* rows from the other
+  half, which reads as a working filter until somebody checks. `actor` was in exactly that state.
 - **WS coalesce key = the unique event id** (`StreamProtocol.AuditEntityKey`), NOT a static `"audit"` key:
   audit appends are distinct facts and must never supersede one another in a slow client's queue. (Contrast
   the metric/status patches, which *are* supersede-by-latest.)
@@ -91,9 +106,10 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   derived from provider (`discord`→user, `api`→token, `system`→system); bare string = the OS-user fallback;
   unknown provider keeps the name but leaves provider `null` (never coerce). The load-bearing test is the
   **round-trip** (`discord:haru` → `{user,haru,discord}`) — keep it green when you touch the parser.
-- **kgsm-lib only / the journal is shared and read-only.** Events come through `IEventService`, never a
-  raw file read. `Api__KgsmJournalDir` names a directory the engine writes and every consumer reads —
-  the API owns nothing there and nothing on the engine side needs configuring for it to arrive.
+- **kgsm-lib only.** Events come through `IEventService`/`IEventJournalHistory`, never a raw file read,
+  and this API's own journal is written through `IEventJournalWriter` for the same reason. Every journal
+  but its own is **read-only** to it: `Api__KgsmJournalDir` and each leaf's state directory are written by
+  their owners and read by every consumer, and nothing on their side needs configuring for it to arrive.
 - **The API starts at the TAIL and keeps no cursor.** It never *persists* an engine event: it shapes each
   one into a live audit row, fans it out over SSE, and hands it to the notification bus. Replaying
   history on restart would re-announce to Discord/Slack events that were already announced. Nothing is
@@ -107,7 +123,7 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   **Resolve the reader from the request scope, not the constructor** — kgsm-lib registers only when the
   engine is provisioned, so a constructor parameter turns an engine-less host into a 500 on the one
   endpoint that explains what happened.
-- **An engine event's id is its journal position** (`AuditId.ForPosition`, `evt_<segment>_<offset>`), not
+- **An event's id is its journal position** (`AuditId.ForPosition`, `evt_<producer>_<segment>_<offset>`), not
   a hash of its contents. Content hashing could not separate two identical events inside one second —
   the engine's timestamps have one-second granularity — so the merge's dedup dropped the second one.
   The id also sorts like the journal, which is why one `(ts, id)` cursor still spans both merge sources.
@@ -116,11 +132,13 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
 
 ## Degrade gracefully (don't crash startup)
 
-`KgsmAuditConsumer.StartAsync` always `EnsureCreated`s (so `GET /audit` + auth writes work with no engine),
-then wires events **only if** the engine is provisioned and `IEventService` resolves; an unreadable or
+`KgsmAuditConsumer.StartAsync` always `EnsureCreated`s and always creates this API's journal directory
+(a reader discovers a producer by finding its journal, so one that has recorded nothing yet must still be
+visible), then wires events **only if** the engine is provisioned and `IEventService` resolves; an unreadable or
 absent journal is logged and skipped (the read loop is kgsm-lib's own fire-and-forget task, and it
-tolerates a directory that does not exist yet, so it never throws here). An auth audit
-write is best-effort — a failed write must never break login. **Honest boundary:** events emitted while the
+tolerates a directory that does not exist yet, so it never throws here). Recording is best-effort throughout —
+`ApiJournal` logs a failure and swallows it, because a sign-in that already happened must not turn into an
+error because writing it down did not work. **Honest boundary:** events emitted while the
 API isn't listening are **not** audited (stateless engine, no backfill) — state it, don't try to backfill.
 
 ## Auth

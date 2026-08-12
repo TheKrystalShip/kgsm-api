@@ -29,9 +29,8 @@ namespace TheKrystalShip.Api.Controllers;
 [Authorize(Policy = AuthPolicy.Operator)]
 public sealed class ThresholdsController(
     MonitorClient monitor,
-    AuditService audit,
-    ApiOptions options,
-    ILogger<ThresholdsController> logger) : ControllerBase
+    ApiJournal journal,
+    ApiOptions options) : ControllerBase
 {
     /// <summary><c>GET /hosts/{id}/thresholds</c> → the monitor's policy document, verbatim.</summary>
     [HttpGet]
@@ -84,17 +83,17 @@ public sealed class ThresholdsController(
     {
         if (!relay.Reached)
         {
-            await AuditAsync(verb, "unreachable", keys, AuditSeverity.Warn, ct);
+            await AuditAsync(verb, "unreachable", keys, ct);
             return MonitorUnavailable("The threshold policy could not be applied.");
         }
 
         if (relay.IsSuccess)
         {
-            await AuditAsync(verb, "applied", keys, AuditSeverity.Info, ct);
+            await AuditAsync(verb, "applied", keys, ct);
             return Content(relay.Body ?? "{}", "application/json");
         }
 
-        await AuditAsync(verb, "rejected", keys, AuditSeverity.Warn, ct);
+        await AuditAsync(verb, "rejected", keys, ct);
 
         // The monitor's refusal, in this API's error envelope. Its message names the rule at fault, which is
         // the part an operator needs; a status it chose that this API does not use is normalised to 400,
@@ -105,43 +104,19 @@ public sealed class ThresholdsController(
             status == StatusCodes.Status400BadRequest ? "bad_request" : "leaf_error", message)));
     }
 
-    private async Task AuditAsync(
-        string verb, string outcome, IReadOnlyList<string> keys, string severity, CancellationToken ct)
-    {
-        var meta = new Dictionary<string, string>
-        {
-            ["outcome"] = outcome,
-            ["keys"] = string.Join(",", keys),
-        };
-
-        var write = new AuditWrite(
-            Ts: DateTimeOffset.UtcNow,
-            Origin: AuditOrigin.Api,
-            Actor: AuditMapping.ParseActor(AuditPrincipal.ActorString(User)),
-            Action: AuditAction.ServiceConfig,
-            Severity: severity,
-            Target: new AuditTarget(AuditTargetKind.Leaf, "monitor", "Monitor"),
-            ServerId: null,
-            HostId: options.HostId,
-            Summary: outcome switch
-            {
-                "applied" => $"{verb} Monitor alert thresholds",
-                "rejected" => "rejected alert threshold change for Monitor",
-                _ => "could not reach Monitor to change alert thresholds",
-            },
-            Meta: meta);
-
-        try
-        {
-            await audit.AppendAsync(write, ct);
-        }
-        catch (Exception ex)
-        {
-            // The policy change already happened on the monitor. Failing the response over a lost audit row
-            // would tell the operator their change did not land, which would be untrue.
-            logger.LogError(ex, "could not write the threshold-change audit row");
-        }
-    }
+    // A threshold policy change is a configuration change on the monitor leaf, and is recorded as one:
+    // the rule keys that moved, and how the monitor answered. The values themselves live in the
+    // monitor's own configuration, which is where a reader should go for what a rule is set to now.
+    private Task AuditAsync(
+        string verb, string outcome, IReadOnlyList<string> keys, CancellationToken ct) =>
+        journal.ServiceConfigAsync(
+            leaf: "monitor",
+            displayName: "Monitor",
+            keys: keys,
+            outcome: outcome,
+            actor: AuditPrincipal.ActorString(User) ?? "",
+            origin: AuditOrigin.Api,
+            ct: ct);
 
     private bool IsThisHost(string id) =>
         string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase);

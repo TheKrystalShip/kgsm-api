@@ -33,7 +33,7 @@ namespace TheKrystalShip.Api.Controllers;
 [Authorize(Policy = AuthPolicy.Operator)] // read AND write are operator+ (contents hold secrets)
 public sealed class ServerFilesController(
     ServerAggregator aggregator,
-    AuditService audit,
+    ApiJournal journal,
     ApiOptions options) : ControllerBase
 {
     /// <summary>
@@ -144,28 +144,13 @@ public sealed class ServerFilesController(
 
     // ---- audit (direct write, no double-write — kgsm runs nothing here) --------------------------
 
-    private async Task WriteAuditAsync(string id, WriteResult result, string origin, CancellationToken ct)
-    {
-        var meta = new Dictionary<string, string>
-        {
-            ["path"] = result.Path,
-            ["sizeBytes"] = result.SizeBytes.ToString(System.Globalization.CultureInfo.InvariantCulture),
-        };
-        if (!string.IsNullOrEmpty(result.Etag)) meta["sha256"] = result.Etag; // sha256:<hex> — identity, never content
-
-        var write = new AuditWrite(
-            Ts: DateTimeOffset.UtcNow,
-            Origin: AuditMapping.NormalizeOrigin(origin),
-            Actor: AuditMapping.ParseActor(AuditPrincipal.ActorString(User)),
-            Action: AuditAction.FileWrite,
-            Severity: AuditSeverity.Info,
-            Target: new AuditTarget(AuditTargetKind.Server, id, id),
-            ServerId: id,
-            HostId: options.HostId,
-            Summary: $"edited file {result.Path} on {id}",
-            Meta: meta);
-        await audit.AppendAsync(write, ct).ConfigureAwait(false);
-    }
+    // The path, the size and the hash — never the content. An instance's configuration files hold
+    // rcon passwords, tokens and webhook URLs, so the record identifies the write rather than
+    // reproducing it.
+    private Task WriteAuditAsync(string id, WriteResult result, string origin, CancellationToken ct) =>
+        journal.FileWrittenAsync(
+            id, result.Path, result.SizeBytes, result.Etag,
+            AuditPrincipal.ActorString(User) ?? "", AuditMapping.NormalizeOrigin(origin), ct);
 
     // ---- shared instance/jail resolution (mirrors ServerConfigController) ------------------------
 

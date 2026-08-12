@@ -38,7 +38,7 @@ public sealed class LeafConfigService(
     IUnitController unitController,
     ILeafProbe probe,
     ILeafReachability reachability,
-    AuditService audit,
+    ApiJournal journal,
     ApiOptions options,
     ILogger<LeafConfigService> logger)
 {
@@ -140,9 +140,7 @@ public sealed class LeafConfigService(
                 string? severed = await CheckReachabilityAsync(leafId, changedFields, ct).ConfigureAwait(false);
                 string outcome = severed is null ? LeafConfigOutcome.Applied : LeafConfigOutcome.AppliedUnreachable;
 
-                await AuditAsync(leaf, outcome, changedKeys, actor, origin,
-                        severed is null ? AuditSeverity.Info : AuditSeverity.Warn, ct)
-                    .ConfigureAwait(false);
+                await AuditAsync(leaf, outcome, changedKeys, actor, origin, ct).ConfigureAwait(false);
                 LeafConfig cfg = await BuildConfigAsync(leafId, ct).ConfigureAwait(false);
 
                 if (severed is null)
@@ -174,7 +172,7 @@ public sealed class LeafConfigService(
             await unitController.RestartAsync(leaf.Unit, ct).ConfigureAwait(false);
             bool postHealthy = await PollHealthyAsync(leafId, options.LeafApplyCanaryMs, ct).ConfigureAwait(false);
 
-            await AuditAsync(leaf, LeafConfigOutcome.RolledBack, changedKeys, actor, origin, AuditSeverity.Warn, ct)
+            await AuditAsync(leaf, LeafConfigOutcome.RolledBack, changedKeys, actor, origin, ct)
                 .ConfigureAwait(false);
             LeafConfig rolledCfg = await BuildConfigAsync(leafId, ct).ConfigureAwait(false);
             int seconds = Math.Max(1, options.LeafApplyCanaryMs / 1000);
@@ -342,29 +340,14 @@ public sealed class LeafConfigService(
             ApplyMode: identity.ApplyMode, FromDescriptor: identity.FromDescriptor);
     }
 
-    private async Task AuditAsync(
+    // KEY names only, never a value — a leaf's configuration holds API keys, bot tokens and webhook
+    // URLs, and what a key was set to is not part of the fact that it changed.
+    private Task AuditAsync(
         LeafConfigIdentity leaf, string outcome, IReadOnlyList<string> changedKeys,
-        string? actor, string? origin, string severity, CancellationToken ct)
-    {
-        var meta = new Dictionary<string, string>
-        {
-            ["outcome"] = outcome,
-            ["keys"] = string.Join(",", changedKeys), // KEY names only — never a value (secret hygiene)
-        };
-        string verb = outcome == LeafConfigOutcome.RolledBack ? "rejected config change for" : "configured";
-        var write = new AuditWrite(
-            Ts: DateTimeOffset.UtcNow,
-            Origin: AuditMapping.NormalizeOrigin(origin),
-            Actor: AuditMapping.ParseActor(actor),
-            Action: AuditAction.ServiceConfig,
-            Severity: severity,
-            Target: new AuditTarget(AuditTargetKind.Leaf, leaf.Id, leaf.DisplayName),
-            ServerId: null,
-            HostId: options.HostId,
-            Summary: $"{verb} {leaf.DisplayName} ({string.Join(", ", changedKeys)})",
-            Meta: meta);
-        await audit.AppendAsync(write, ct).ConfigureAwait(false);
-    }
+        string? actor, string? origin, CancellationToken ct) =>
+        journal.ServiceConfigAsync(
+            leaf.Id, leaf.DisplayName, changedKeys, outcome,
+            actor ?? "", AuditMapping.NormalizeOrigin(origin), ct);
 
     // last-4 fingerprint, only when long enough that it reveals little — else null (never the whole secret).
     private static string? Fingerprint(string? value) =>

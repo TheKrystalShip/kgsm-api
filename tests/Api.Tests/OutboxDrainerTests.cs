@@ -281,6 +281,8 @@ public sealed class OutboxDrainerTests
         HostId = NodeId, HostLabel = NodeId,
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
         FirewallSocketPath = "", SchedulerSocketPath = "", BotSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmJournalDir = "/var/lib/kgsm/events",
+        EventJournalDir = "",
+        JournalStateRoot = "",
         BlueprintCacheTtlSeconds = 60,
         InstanceCacheTtlSeconds = 60,
         LogSources = [], JournalctlPath = "journalctl", SystemctlPath = "systemctl", LogReadTimeoutMs = 5000,

@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Audit;
+using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 
 using TheKrystalShip.KGSM.Auth;
@@ -20,8 +21,6 @@ namespace TheKrystalShip.Api.Tests;
 /// </summary>
 public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>
 {
-    private AuditService Audit => factory.Services.GetRequiredService<AuditService>();
-
     private HttpClient Viewer()
     {
         HttpClient c = factory.CreateClient();
@@ -69,8 +68,8 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     public async Task GetAudit_NewestFirst_HonestShape()
     {
         string sid = $"order-{Guid.NewGuid():N}";
-        await Audit.AppendAsync(ServerWrite(AuditAction.FileWrite, sid));
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServiceConfig, sid));
+        await factory.SeedAuditAsync(ServerWrite(AuditAction.FileWrite, sid));
+        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConfig, sid));
 
         JsonElement body = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}"));
         JsonElement[] rows = body.GetProperty("data").EnumerateArray().ToArray();
@@ -94,7 +93,7 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     {
         string sid = $"page-{Guid.NewGuid():N}";
         for (int i = 0; i < 3; i++)
-            await Audit.AppendAsync(ServerWrite(AuditAction.FileWrite, sid));
+            await factory.SeedAuditAsync(ServerWrite(AuditAction.FileWrite, sid));
 
         // Page 1: limit 2 of 3 -> full page + a cursor.
         JsonElement p1 = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&limit=2"));
@@ -114,8 +113,8 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     {
         string sid = $"filter-{Guid.NewGuid():N}";
         string actor = $"actor-{Guid.NewGuid():N}";
-        await Audit.AppendAsync(ServerWrite(AuditAction.FileWrite, sid, actor, AuditSeverity.Info));
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServiceConfig, sid, actor, AuditSeverity.Warn));
+        await factory.SeedAuditAsync(ServerWrite(AuditAction.FileWrite, sid, actor, AuditSeverity.Info));
+        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConfig, sid, actor, AuditSeverity.Warn));
 
         JsonElement warn = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn"));
         Assert.Equal(1, warn.GetProperty("data").GetArrayLength());
@@ -130,9 +129,9 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     public async Task GetAudit_MultiSeverity_OrsTheSet()
     {
         string sid = $"sev-{Guid.NewGuid():N}";
-        await Audit.AppendAsync(ServerWrite(AuditAction.FileWrite, sid, severity: AuditSeverity.Info));
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServiceConfig, sid, severity: AuditSeverity.Warn));
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServiceConnect, sid, severity: AuditSeverity.Danger));
+        await factory.SeedAuditAsync(ServerWrite(AuditAction.FileWrite, sid, severity: AuditSeverity.Info));
+        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConfig, sid, severity: AuditSeverity.Warn));
+        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConnect, sid, severity: AuditSeverity.Danger));
 
         // "attention" pushes down as warn,danger → the two, never the info row.
         JsonElement att = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn,danger"));
@@ -154,11 +153,11 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         string sid = $"since-{Guid.NewGuid():N}";
         DateTimeOffset old = DateTimeOffset.UtcNow.AddDays(-10);
         // a backdated row + a fresh one (ServerWrite stamps UtcNow)
-        await Audit.AppendAsync(new AuditWrite(old, AuditOrigin.Ui,
+        await factory.SeedAuditAsync(new AuditWrite(old, AuditOrigin.Ui,
             new AuditActor(ActorKind.User, "haru", ActorProvider.Discord),
             AuditAction.FileWrite, AuditSeverity.Info,
             new AuditTarget(AuditTargetKind.Server, sid, sid), sid, AuthTestFactory.HostId, "old", null));
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServiceConfig, sid));
+        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConfig, sid));
 
         string since = DateTimeOffset.UtcNow.AddDays(-1).ToString("o");
         JsonElement body = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&since={Uri.EscapeDataString(since)}"));
@@ -178,8 +177,8 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     public async Task GetAudit_Category_PrefixMatches()
     {
         string actor = $"cat-{Guid.NewGuid():N}";
-        await Audit.AppendAsync(ServerWrite(AuditAction.ServiceConnect, $"s-{Guid.NewGuid():N}", actor));
-        await Audit.AppendAsync(ServerWrite(AuditAction.FileWrite, $"n-{Guid.NewGuid():N}", actor));
+        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConnect, $"s-{Guid.NewGuid():N}", actor));
+        await factory.SeedAuditAsync(ServerWrite(AuditAction.FileWrite, $"n-{Guid.NewGuid():N}", actor));
 
         JsonElement file = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}&category=file"));
         Assert.Equal(1, file.GetProperty("data").GetArrayLength());
@@ -232,7 +231,12 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         JsonElement? frame = null;
         while (DateTime.UtcNow < deadline)
         {
-            await Audit.AppendAsync(ServerWrite(AuditAction.ServerStart, sid));
+            // PublishLive, not a seed: this test is about the frame reaching a subscriber, and the
+            // local table is history nothing announces. A real producer's event takes the same path —
+            // it is shaped from its journal and handed to exactly this call.
+            factory.Services.GetRequiredService<AuditService>().PublishLive(
+                AuditMapping.ToRecordDirect(ServerWrite(AuditAction.ServerStart, sid),
+                    "evt_" + Guid.NewGuid().ToString("N")[..10]));
             JsonElement? got = await frames.WaitForFrame(
                 f => f.GetProperty("type").GetString() == "audit.append", TimeSpan.FromMilliseconds(400));
             if (got is not null)

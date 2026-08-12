@@ -60,11 +60,10 @@ public sealed class ThresholdAuditProvenanceTests(AuthTestFactory factory) : ICl
     [Fact]
     public async Task ThresholdRows_AreFilterableByTheMonitorActor()
     {
-        AuditService audit = factory.Services.GetRequiredService<AuditService>();
         string marker = "thr-" + Guid.NewGuid().ToString("N")[..8];
 
-        await audit.AppendAsync(BreachWrite(marker));
-        await audit.AppendAsync(ClearWrite(marker));
+        await factory.SeedAuditAsync(BreachWrite(marker));
+        await factory.SeedAuditAsync(ClearWrite(marker));
 
         HttpClient c = Client(KgsmTier.Operator);
 
@@ -87,9 +86,8 @@ public sealed class ThresholdAuditProvenanceTests(AuthTestFactory factory) : ICl
         // echo and nothing to double-write. That means they must NOT join the engine-owned action list, or
         // GET /audit would read them from the journal (where they never appear) and this API's own rows
         // would be invisible. This asserts the outcome of that, not the list.
-        AuditService audit = factory.Services.GetRequiredService<AuditService>();
         string marker = "thr-" + Guid.NewGuid().ToString("N")[..8];
-        await audit.AppendAsync(BreachWrite(marker));
+        await factory.SeedAuditAsync(BreachWrite(marker));
 
         HttpClient c = Client(KgsmTier.Operator);
         Assert.Single(await Actions(c, "/api/v1/audit?limit=200", marker));
@@ -98,9 +96,8 @@ public sealed class ThresholdAuditProvenanceTests(AuthTestFactory factory) : ICl
     [Fact]
     public async Task ABreachRow_CarriesItsEpisodeIdAndOrigin()
     {
-        AuditService audit = factory.Services.GetRequiredService<AuditService>();
         string marker = "thr-" + Guid.NewGuid().ToString("N")[..8];
-        await audit.AppendAsync(BreachWrite(marker));
+        await factory.SeedAuditAsync(BreachWrite(marker));
 
         HttpClient c = Client(KgsmTier.Operator);
         JsonElement page = await Json(await c.GetAsync("/api/v1/audit?actor=monitor&limit=200"));

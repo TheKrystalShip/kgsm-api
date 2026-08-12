@@ -44,7 +44,7 @@ public sealed class AuthController(
     ISessionValidator sessionValidator,
     ReauthGate reauth,
     ApiOptions options,
-    AuditService audit,
+    ApiJournal journal,
     IClusterTokenService clusterTokens,
     IClusterPeerGate peerGate,
     PeersStore peers,
@@ -207,8 +207,7 @@ public sealed class AuthController(
         KgsmUser account = link.User!;
         if (link.Outcome == LinkOutcome.Provisioned)
         {
-            await RecordUserAsync(AuditAction.UserProvision, resolved.Identity, account,
-                $"{account.DisplayName} signed in for the first time and is awaiting approval", ct);
+            await RecordUserAsync(resolved.Identity, account, ct);
         }
 
         // Verified identity, and this host has switched the account off -> terminal 403, the same
@@ -239,8 +238,8 @@ public sealed class AuthController(
         // stamps `userAgent` (the same value just persisted on the session row above) so `/me`'s
         // recent-logins read can honestly label "which device" without a second UA capture — additive
         // to the existing direct-write, NOT a new writer (invariant #5).
-        await RecordAuthAsync(AuditAction.AuthLogin, resolved.Identity, tier,
-            $"{resolved.Identity.Display} logged in", sessionId, userAgent, ct);
+        await RecordAuthAsync(ApiJournal.LoginEvent, resolved.Identity, tier,
+            sessionId, userAgent, ct, userId: account.UserId);
 
         // SPA handoff (when a frontend URL is configured): 302 to the SPA with the tokens in the URL
         // FRAGMENT — never the query, so they don't reach access logs or the Referer header. The SPA
@@ -323,8 +322,8 @@ public sealed class AuthController(
         string? userAgent = UserAgent();
         MintedSession minted = await MintSessionAsync(principal.Identity, principal.Tier, userAgent, ct);
 
-        await RecordAuthAsync(AuditAction.AuthLogin, principal.Identity, principal.Tier,
-            $"{principal.Identity.Display} signed in with a password", minted.SessionId, userAgent, ct);
+        await RecordAuthAsync(ApiJournal.LoginEvent, principal.Identity, principal.Tier,
+            minted.SessionId, userAgent, ct, userId: result.User!.UserId);
 
         return Ok(new LoginResult(
             minted.Access.Token, minted.Refresh.Token, KgsmTiers.ToWire(principal.Tier),
@@ -422,8 +421,7 @@ public sealed class AuthController(
         // The closed origin vocabulary has no per-node value, so the vouching peer's node id rides in
         // Meta instead — the forensic detail ("this session was minted on a vouch FROM node X"), never
         // fabricated into a fake origin.
-        await RecordAuthAsync(AuditAction.AuthClusterSession, identity, tier,
-            $"{identity.Display} joined via a cluster vouch from node '{principal.NodeId}'",
+        await RecordAuthAsync(ApiJournal.ClusterSessionEvent, identity, tier,
             sessionId, userAgent: null, ct, peerNode: principal.NodeId, origin: AuditOrigin.Api);
 
         return StatusCode(StatusCodes.Status201Created,
@@ -664,8 +662,8 @@ public sealed class AuthController(
             // The audit Meta carries the sid (forensics: links logout → the revoked session row). No
             // userAgent here — recentLogins reads `auth.login` rows only, and logout's own UA isn't
             // otherwise useful; keep the meta minimal for the action it's on.
-            await RecordAuthAsync(AuditAction.AuthLogout, id, SessionClaims.ReadTier(ci),
-                $"{id.Display} logged out", sid, null, ct);
+            await RecordAuthAsync(ApiJournal.LogoutEvent, id, SessionClaims.ReadTier(ci),
+                sid, null, ct);
         }
         return NoContent();
     }
@@ -724,38 +722,22 @@ public sealed class AuthController(
     }
 
     /// <summary>
-    /// Write a <c>user.*</c> row for an account this login created, with the arriving identity as the
-    /// actor — nobody else was involved, and naming the API as the actor would hide who arrived.
+    /// Record an account this login created, with the arriving identity as the actor — nobody else was
+    /// involved, and naming the API as the actor would hide who arrived.
     /// </summary>
-    private async Task RecordUserAsync(
-        string action, KgsmIdentity identity, KgsmUser account, string summary, CancellationToken ct)
-    {
-        try
-        {
-            await audit.AppendAsync(new AuditWrite(
-                Ts: DateTimeOffset.UtcNow,
-                Origin: AuditOrigin.Ui,
-                Actor: new AuditActor(ActorKind.User, identity.Username, identity.Provider),
-                Action: action,
-                Severity: AuditSeverity.Warn,
-                Target: new AuditTarget("user", account.UserId, account.Username),
-                ServerId: null,
-                HostId: options.HostId,
-                Summary: summary,
-                Meta: new Dictionary<string, string>
-                {
-                    ["userId"] = account.UserId,
-                    ["identity"] = identity.Handle,
-                    ["status"] = UserStatuses.ToWire(account.Status),
-                    ["tier"] = KgsmTiers.ToWire(account.Tier),
-                }),
-                ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "audit {Action} write failed (non-fatal)", action);
-        }
-    }
+    private Task RecordUserAsync(KgsmIdentity identity, KgsmUser account, CancellationToken ct) =>
+        journal.AccountAsync(
+            ApiJournal.UserProvisionedEvent,
+            account.UserId,
+            account.Username,
+            // A provision has no "from": the account did not exist a moment ago. Recording the state it
+            // arrived in and leaving the other side null is the honest shape — a from/to pair here
+            // would invent a previous state to have moved out of.
+            toTier: KgsmTiers.ToWire(account.Tier),
+            toStatus: UserStatuses.ToWire(account.Status),
+            actor: KgsmActor.Format(identity.Provider, identity.Username),
+            origin: AuditOrigin.Ui,
+            ct: ct);
 
     /// <summary>The calling device, for a human reading their own session list. Never authority.</summary>
     private string? UserAgent()
@@ -791,49 +773,40 @@ public sealed class AuthController(
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
 
-    // Write an API-internal auth.* audit row. origin defaults to "ui": an interactive Discord OAuth
-    // login/logout is a human acting through the web surface (there is no headless login path); the
-    // cluster SSO vouch (ClusterSession) is the one caller that overrides it to "api" (origin="ui"
-    // would misattribute a node-to-node call as a browser session). actor = the Discord identity
-    // (kind=user, provider=discord) either way — a vouched session still belongs to that Discord user,
-    // just asserted by a peer instead of a fresh OAuth round-trip. Best-effort: a failed audit write is
-    // logged, never fatal. M4·c — the `sid` lands in Meta so a login/logout event links to its session
-    // row (forensics). M4·c Increment 7 — `userAgent` lands in Meta (additive to the existing
-    // direct-write, not a new action or a second writer) so `/me`'s recent-logins read can honestly
-    // report "which device"; omitted (not empty-string) when blank, matching the never-fabricate
-    // posture elsewhere in Meta. `peerNode` (the cluster SSO vouch) is the analogous additive: the
-    // vouching peer's node id, when present, so a vouched login's audit row still names which node
-    // asserted the identity.
-    private async Task RecordAuthAsync(string action, KgsmIdentity id, KgsmTier tier, string summary,
-        string? sid, string? userAgent, CancellationToken ct, string? peerNode = null, string origin = AuditOrigin.Ui)
-    {
-        try
-        {
-            var meta = new Dictionary<string, string> { ["tier"] = KgsmTiers.ToWire(tier) };
-            if (!string.IsNullOrEmpty(sid))
-                meta["sid"] = sid;
-            if (!string.IsNullOrEmpty(userAgent))
-                meta["userAgent"] = userAgent;
-            if (!string.IsNullOrEmpty(peerNode))
-                meta["peerNode"] = peerNode;
-            await audit.AppendAsync(new AuditWrite(
-                Ts: DateTimeOffset.UtcNow,
-                Origin: origin,
-                Actor: new AuditActor(ActorKind.User, id.Username, id.Provider),
-                Action: action,
-                Severity: AuditSeverity.Info,
-                Target: null,
-                ServerId: null,
-                HostId: options.HostId,
-                Summary: summary,
-                Meta: meta),
-                ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "audit {Action} write failed (non-fatal)", action);
-        }
-    }
+    // Record a session beginning or ending in this API's own journal.
+    //
+    // origin defaults to "ui": an interactive OAuth login/logout is a human acting through the web
+    // surface (there is no headless login path); the cluster SSO vouch (ClusterSession) is the one
+    // caller that overrides it to "api", since "ui" would misattribute a node-to-node call as a browser
+    // session. The actor is the arriving identity either way — a vouched session still belongs to that
+    // person, just asserted by a peer instead of a fresh OAuth round-trip.
+    //
+    // No summary parameter, deliberately. What separates "logged in" from "signed in with a password"
+    // is the PROVIDER, which is recorded — so the reader derives the sentence from a fact rather than
+    // from which code path happened to run, and improving the wording later improves every row rather
+    // than only the ones written afterwards.
+    //
+    // `sid` pairs a login with its logout; `userAgent` answers "which device" for the account's own
+    // holder; `peerNode` names the node that vouched. Each is written as a real null when absent, never
+    // an empty string.
+    private Task RecordAuthAsync(string type, KgsmIdentity id, KgsmTier tier,
+        string? sid, string? userAgent, CancellationToken ct, string? peerNode = null,
+        string origin = AuditOrigin.Ui, string? userId = null) =>
+        journal.SessionAsync(
+            type,
+            // Null rather than derived: the sign-out path holds the caller's token, not their account
+            // row, and reconstructing an id from the handle would record something nothing looked up.
+            userId: userId,
+            username: id.Username,
+            identity: id.Handle,
+            provider: id.Provider,
+            tier: KgsmTiers.ToWire(tier),
+            sid: sid,
+            userAgent: userAgent,
+            peerNode: peerNode,
+            actor: KgsmActor.Format(id.Provider, id.Username),
+            origin: origin,
+            ct: ct);
 
     // The CSRF state cookie's attributes — shared by the set (at /start) and the delete (at /callback,
     // where Path must match for the deletion to take). Secure tracks the scheme so it works on an http

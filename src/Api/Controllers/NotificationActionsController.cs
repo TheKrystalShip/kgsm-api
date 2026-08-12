@@ -58,7 +58,7 @@ public sealed class NotificationActionsController(
     JobRegistry jobs,
     CommandRunner runner,
     IUnitController units,
-    AuditService audit,
+    ApiJournal journal,
     ApiOptions options,
     ILogger<NotificationActionsController> logger) : ControllerBase
 {
@@ -142,20 +142,10 @@ public sealed class NotificationActionsController(
 
         bool ok = await units.RestartAsync(leaf.Unit, ct).ConfigureAwait(false);
 
-        await audit.AppendAsync(new AuditWrite(
-            Ts: DateTimeOffset.UtcNow,
-            Origin: AuditOrigin.Notification,
-            Actor: new AuditActor(ActorKind.User, identity.Username, identity.Provider),
-            Action: AuditAction.ServiceRestart,
-            Severity: ok ? AuditSeverity.Warn : AuditSeverity.Danger,
-            Target: new AuditTarget(AuditTargetKind.Host, leaf.Id, leaf.DisplayName),
-            ServerId: null,
-            HostId: hostId,
-            Summary: ok
-                ? $"restarted {leaf.DisplayName}"
-                : $"tried to restart {leaf.DisplayName} and systemd refused",
-            Meta: new Dictionary<string, string> { ["unit"] = leaf.Unit, ["ok"] = ok ? "true" : "false" }),
-            ct).ConfigureAwait(false);
+        await journal.ServiceRestartedAsync(
+            leaf.Id, leaf.DisplayName, leaf.Unit, ok,
+            KgsmActor.Format(identity.Provider, identity.Username), AuditOrigin.Notification, ct)
+            .ConfigureAwait(false);
 
         // A row either way: a refused restart is a thing an operator needs to be able to find later, and it
         // is the case where nobody was watching a screen to see it fail.
@@ -273,23 +263,16 @@ public sealed class NotificationActionsController(
         // person who was just let in is not still refused for the length of a TTL.
         await users.ForgetAsync(approved.UserId, ct).ConfigureAwait(false);
 
-        await audit.AppendAsync(new AuditWrite(
-            Ts: DateTimeOffset.UtcNow,
-            Origin: AuditOrigin.Notification,
-            Actor: new AuditActor(ActorKind.User, identity.Username, identity.Provider),
-            Action: AuditAction.UserApprove,
-            Severity: AuditSeverity.Warn,
-            Target: new AuditTarget("user", approved.UserId, approved.Username),
-            ServerId: null,
-            HostId: hostId,
-            Summary: $"approved the account '{approved.Username}'",
-            Meta: new Dictionary<string, string>
-            {
-                ["from"] = UserStatuses.ToWire(account.Status),
-                ["to"] = UserStatuses.ToWire(approved.Status),
-                ["tier"] = KgsmTiers.ToWire(approved.Tier),
-            }),
-            ct).ConfigureAwait(false);
+        await journal.AccountAsync(
+            ApiJournal.UserApprovedEvent,
+            approved.UserId,
+            approved.Username,
+            toTier: KgsmTiers.ToWire(approved.Tier),
+            fromStatus: UserStatuses.ToWire(account.Status),
+            toStatus: UserStatuses.ToWire(approved.Status),
+            actor: KgsmActor.Format(identity.Provider, identity.Username),
+            origin: AuditOrigin.Notification,
+            ct: ct).ConfigureAwait(false);
 
         logger.LogInformation("notification action: approved {User} as viewer (actor={Actor}, via push)",
             approved.Username, identity.ActorString);

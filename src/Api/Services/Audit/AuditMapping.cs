@@ -778,4 +778,306 @@ public static class AuditMapping
     /// and a bare <c>system</c> could not tell a measured breach from any other unattended action.
     /// </summary>
     private const string MonitorActor = "system:monitor";
+
+    // ---- this API's own events -----------------------------------------------------------------
+    //
+    // The Control Panel performs these itself — signing somebody in, changing an account's authority,
+    // reconfiguring a leaf — so it records the fact and shapes the sentence here, at read time, the
+    // same as for any other producer's journal. Nothing about these mappers knows they are reading
+    // this API's own writing.
+
+    /// <summary>Map an <c>auth_login</c> / <c>auth_logout</c> / <c>auth_cluster_session</c> event.</summary>
+    /// <remarks>
+    /// What separates "logged in" from "signed in with a password" is the identity PROVIDER, which is
+    /// on the record — not which code path ran. A wording change here therefore applies to every row
+    /// ever written, rather than only to the ones written after it.
+    /// </remarks>
+    public static AuditWrite FromAuthSessionEvent(AuthSessionEventData d, string type, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string who = string.IsNullOrEmpty(d.Username) ? d.Identity : d.Username;
+        (string action, string summary) = type switch
+        {
+            ApiJournal.LogoutEvent => (AuditAction.AuthLogout, $"{who} logged out"),
+            ApiJournal.ClusterSessionEvent => (AuditAction.AuthClusterSession,
+                string.IsNullOrEmpty(d.PeerNode)
+                    ? $"{who} joined via a cluster vouch"
+                    : $"{who} joined via a cluster vouch from node '{d.PeerNode}'"),
+            // A local credential and a bounce through an external provider are different enough that a
+            // reader auditing access wants them apart, and the provider is what says which.
+            _ when string.Equals(d.Provider, "local", StringComparison.OrdinalIgnoreCase) =>
+                (AuditAction.AuthLogin, $"{who} signed in with a password"),
+            _ => (AuditAction.AuthLogin, $"{who} logged in"),
+        };
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!string.IsNullOrEmpty(d.Tier)) meta["tier"] = d.Tier!;
+        if (!string.IsNullOrEmpty(d.Sid)) meta["sid"] = d.Sid!;
+        if (!string.IsNullOrEmpty(d.UserId)) meta["userId"] = d.UserId!;
+        if (!string.IsNullOrEmpty(d.Identity)) meta["identity"] = d.Identity;
+        if (!string.IsNullOrEmpty(d.UserAgent)) meta["userAgent"] = d.UserAgent!;
+        if (!string.IsNullOrEmpty(d.PeerNode)) meta["peerNode"] = d.PeerNode!;
+
+        return ApiWrite(d, action, AuditSeverity.Info, target: null, hostId, summary, meta);
+    }
+
+    /// <summary>Map an <c>auth_session_revoked</c> event to one of the three revocation actions.</summary>
+    public static AuditWrite FromSessionRevokedEvent(AuthSessionRevokedData d, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string who = ActorName(d.Actor) ?? d.Username;
+        int count = d.Count ?? 1;
+        string sessions = count == 1 ? "a session" : $"{count} sessions";
+
+        // An admin revoking somebody else's session is the substantial-power case and reads louder than
+        // a person managing their own, which is routine.
+        (string action, string severity, string summary) = d.Scope switch
+        {
+            "all" => (AuditAction.AuthSessionRevokeAll, AuditSeverity.Info,
+                $"{who} logged out everywhere ({count} session(s))"),
+            "admin" => (AuditAction.AuthSessionRevokeAdmin, AuditSeverity.Warn,
+                $"{who} revoked {sessions} belonging to {d.Username}"),
+            _ => (AuditAction.AuthSessionRevoke, AuditSeverity.Info, $"{who} revoked {sessions}"),
+        };
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!string.IsNullOrEmpty(d.Sid)) meta["sid"] = d.Sid!;
+        if (!string.IsNullOrEmpty(d.UserId)) meta["userId"] = d.UserId!;
+        if (d.Count is { } n) meta["count"] = n.ToString(CultureInfo.InvariantCulture);
+
+        return ApiWrite(d, action, severity, target: null, hostId, summary, meta);
+    }
+
+    /// <summary>Map one of the six <c>user_*</c> events to its account action.</summary>
+    /// <remarks>
+    /// ⚠ These are the trail's most sensitive rows: with the account store as this host's sole
+    /// authority, a tier change here is the ONLY way anybody's permissions ever move.
+    /// </remarks>
+    public static AuditWrite FromUserAccountEvent(UserAccountEventData d, string type, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string who = ActorName(d.Actor);
+        string name = d.Username;
+        (string action, string severity, string summary) = type switch
+        {
+            ApiJournal.UserProvisionedEvent => (AuditAction.UserProvision, AuditSeverity.Warn,
+                string.IsNullOrEmpty(d.ToTier)
+                    ? $"{who} created the account '{name}'"
+                    : $"{who} created the account '{name}' with the {d.ToTier} tier"),
+
+            ApiJournal.UserApprovedEvent => (AuditAction.UserApprove, AuditSeverity.Warn,
+                $"{who} approved the account '{name}'"),
+
+            // Two different endings share this event, told apart by where the account landed rather
+            // than by a verb chosen at write time: switched off, or put back to awaiting approval.
+            ApiJournal.UserDisabledEvent when
+                !string.Equals(d.ToStatus, "disabled", StringComparison.OrdinalIgnoreCase) =>
+                (AuditAction.UserDisable, AuditSeverity.Warn,
+                    $"{who} returned the account '{name}' to awaiting approval"),
+            ApiJournal.UserDisabledEvent => (AuditAction.UserDisable, AuditSeverity.Danger,
+                $"{who} disabled the account '{name}'"),
+
+            ApiJournal.UserTierChangedEvent => (AuditAction.UserTierChange, AuditSeverity.Warn,
+                $"{who} changed '{name}' from {d.FromTier ?? "none"} to {d.ToTier ?? "none"}"),
+
+            ApiJournal.UserDeletedEvent => (AuditAction.UserDelete, AuditSeverity.Danger,
+                $"{who} deleted the account '{name}'"),
+
+            // Somebody else setting your password reads completely differently from you setting it —
+            // it is the only signal an account takeover leaves — so the two get different sentences
+            // and different weights.
+            _ when d.ByHolder == true => (AuditAction.UserPassword, AuditSeverity.Info,
+                $"{who} changed their own password"),
+            _ => (AuditAction.UserPassword, AuditSeverity.Warn, $"{who} set the password on '{name}'"),
+        };
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal) { ["username"] = name };
+        if (!string.IsNullOrEmpty(d.UserId)) meta["userId"] = d.UserId!;
+        if (!string.IsNullOrEmpty(d.FromTier)) meta["fromTier"] = d.FromTier!;
+        if (!string.IsNullOrEmpty(d.ToTier)) meta["toTier"] = d.ToTier!;
+        if (!string.IsNullOrEmpty(d.FromStatus)) meta["from"] = d.FromStatus!;
+        if (!string.IsNullOrEmpty(d.ToStatus)) meta["to"] = d.ToStatus!;
+        if (d.ByHolder is { } held) meta["by"] = held ? "self" : "admin";
+
+        AuditTarget? target = string.IsNullOrEmpty(d.UserId)
+            ? null
+            : new AuditTarget("user", d.UserId!, name);
+
+        return ApiWrite(d, action, severity, target, hostId, summary, meta);
+    }
+
+    /// <summary>Map an <c>identity_linked</c> / <c>identity_unlinked</c> event.</summary>
+    /// <remarks>
+    /// A link is a privilege event: afterwards, whoever controls that provider account can sign in as
+    /// this one.
+    /// </remarks>
+    public static AuditWrite FromIdentityEvent(IdentityLinkEventData d, string type, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        bool linked = string.Equals(type, ApiJournal.IdentityLinkedEvent, StringComparison.Ordinal);
+        string who = ActorName(d.Actor);
+        string summary = linked
+            ? $"{who} connected a {d.Provider} account to '{d.Username}'"
+            : $"{who} disconnected a {d.Provider} account from '{d.Username}'";
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["username"] = d.Username,
+            ["provider"] = d.Provider,
+        };
+        if (!string.IsNullOrEmpty(d.UserId)) meta["userId"] = d.UserId!;
+        if (!string.IsNullOrEmpty(d.Handle)) meta["identity"] = d.Handle;
+
+        AuditTarget? target = string.IsNullOrEmpty(d.UserId)
+            ? null
+            : new AuditTarget("user", d.UserId!, d.Username);
+
+        return ApiWrite(d, linked ? AuditAction.IdentityLink : AuditAction.IdentityUnlink,
+            AuditSeverity.Warn, target, hostId, summary, meta);
+    }
+
+    /// <summary>Map a <c>service_connected</c> / <c>service_disconnected</c> event.</summary>
+    public static AuditWrite FromServiceProvisioningEvent(
+        ServiceProvisioningEventData d, string type, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        bool connected = string.Equals(type, ApiJournal.ServiceConnectedEvent, StringComparison.Ordinal);
+        string display = string.IsNullOrEmpty(d.DisplayName) ? d.Leaf : d.DisplayName!;
+
+        return ApiWrite(d,
+            connected ? AuditAction.ServiceConnect : AuditAction.ServiceDisconnect,
+            AuditSeverity.Info,
+            new AuditTarget(AuditTargetKind.Leaf, d.Leaf, display),
+            hostId,
+            connected ? $"connected {display}" : $"disconnected {display}",
+            meta: null);
+    }
+
+    /// <summary>Map a <c>service_config_changed</c> event.</summary>
+    /// <remarks>⚠ Keys only. A leaf's configuration holds tokens and passwords.</remarks>
+    public static AuditWrite FromServiceConfigEvent(ServiceConfigChangedEventData d, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string display = string.IsNullOrEmpty(d.DisplayName) ? d.Leaf : d.DisplayName!;
+        string[] keys = d.Keys ?? [];
+        string keyList = keys.Length == 0 ? "" : $" ({string.Join(", ", keys)})";
+
+        // A refusal is worth finding later as much as an apply, and the one that severed this API's own
+        // link to the leaf is worth finding more than either.
+        (string severity, string summary) = d.Outcome switch
+        {
+            "rolled_back" or "rejected" =>
+                (AuditSeverity.Warn, $"rejected config change for {display}{keyList}"),
+            "applied_unreachable" =>
+                (AuditSeverity.Warn, $"configured {display}{keyList}, and can no longer reach it"),
+            "unreachable" =>
+                (AuditSeverity.Warn, $"could not reach {display} to change its configuration"),
+            _ => (AuditSeverity.Info, $"configured {display}{keyList}"),
+        };
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["keys"] = string.Join(",", keys),
+        };
+        if (!string.IsNullOrEmpty(d.Outcome)) meta["outcome"] = d.Outcome!;
+
+        return ApiWrite(d, AuditAction.ServiceConfig, severity,
+            new AuditTarget(AuditTargetKind.Leaf, d.Leaf, display), hostId, summary, meta);
+    }
+
+    /// <summary>Map a <c>service_restarted</c> event.</summary>
+    /// <remarks>
+    /// A restart systemd refused gets a row too — it is exactly the case nobody was watching a screen
+    /// for, and a trail that only recorded the successes would be silent about it.
+    /// </remarks>
+    public static AuditWrite FromServiceRestartedEvent(ServiceRestartedEventData d, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string display = string.IsNullOrEmpty(d.DisplayName) ? d.Leaf : d.DisplayName!;
+
+        return ApiWrite(d, AuditAction.ServiceRestart,
+            d.Ok ? AuditSeverity.Warn : AuditSeverity.Danger,
+            new AuditTarget(AuditTargetKind.Host, d.Leaf, display),
+            hostId,
+            d.Ok ? $"restarted {display}" : $"tried to restart {display} and systemd refused",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["unit"] = d.Unit,
+                ["ok"] = d.Ok ? "true" : "false",
+            });
+    }
+
+    /// <summary>Map a <c>file_written</c> event.</summary>
+    /// <remarks>⚠ Path, size and hash — never the content.</remarks>
+    public static AuditWrite FromFileWrittenEvent(FileWrittenEventData d, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["path"] = d.Path,
+            ["sizeBytes"] = d.SizeBytes.ToString(CultureInfo.InvariantCulture),
+        };
+        if (!string.IsNullOrEmpty(d.Sha256)) meta["sha256"] = d.Sha256!;
+
+        return ApiWrite(d, AuditAction.FileWrite, AuditSeverity.Info,
+            new AuditTarget(AuditTargetKind.Server, d.InstanceName, d.InstanceName),
+            hostId, $"edited file {d.Path} on {d.InstanceName}", meta, serverId: d.InstanceName);
+    }
+
+    /// <summary>Map a <c>backup_downloaded</c> event.</summary>
+    public static AuditWrite FromBackupDownloadedEvent(BackupDownloadedEventData d, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["source"] = d.BackupId,
+            ["sizeBytes"] = d.SizeBytes.ToString(CultureInfo.InvariantCulture),
+        };
+        if (!string.IsNullOrEmpty(d.Sha256)) meta["sha256"] = d.Sha256!;
+
+        return ApiWrite(d, AuditAction.BackupDownload, AuditSeverity.Warn,
+            new AuditTarget(AuditTargetKind.Server, d.InstanceName, d.InstanceName),
+            hostId, $"downloaded a backup of {d.InstanceName}", meta, serverId: d.InstanceName);
+    }
+
+    /// <summary>
+    /// The row every event out of this API's own journal becomes, so none of them can disagree about
+    /// where the timestamp, the actor or the origin come from.
+    /// </summary>
+    /// <remarks>
+    /// All three ride on the ENVELOPE rather than the payload — the journal reader stamps them onto the
+    /// typed data before a mapper sees it — which is what lets these rows carry the same provenance
+    /// shape as every other producer's without each mapper re-deciding it.
+    /// </remarks>
+    private static AuditWrite ApiWrite(
+        KgsmEventDataBase d, string action, string severity, AuditTarget? target, string hostId,
+        string summary, Dictionary<string, string>? meta, string? serverId = null) =>
+        new(
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
+            Action: action,
+            Severity: severity,
+            Target: target,
+            ServerId: serverId,
+            HostId: hostId,
+            Summary: summary,
+            Meta: meta is { Count: > 0 } ? meta : null);
+
+    /// <summary>
+    /// The display name for whoever acted, off the envelope's actor. Falls back to a bare "somebody"
+    /// rather than to this API's own name: a row whose actor was not recorded must not read as though
+    /// the panel did it on its own.
+    /// </summary>
+    private static string ActorName(string? actor) =>
+        ParseActor(actor) is { Name.Length: > 0 } parsed ? parsed.Name : "somebody";
 }

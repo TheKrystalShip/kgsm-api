@@ -7,19 +7,21 @@ using TheKrystalShip.Api.Services.Integrations;
 namespace TheKrystalShip.Api.Services.Audit;
 
 /// <summary>
-/// The single writer of the append-only audit log (M5) — persistence downstream of the stateless
-/// engine (CLAUDE.md invariant #5). Every audit row, whatever its source (a kgsm lifecycle event via
-/// <see cref="KgsmAuditConsumer"/>, or an API-internal action like auth), lands here; the service
-/// assigns the public id, persists one row, and pushes the <c>audit.append</c> frame to the
-/// <c>audit</c> WS topic. Reads go straight to <see cref="AuditQueries"/> on the request scope.
+/// Announces audit rows on the realtime topic and the notification bus, and owns the schema of the
+/// local table that holds this host's pre-cutover history.
 /// </summary>
 /// <remarks>
-/// <para><b>Singleton.</b> Writes can arrive off the request path (the event consumer's background
-/// listener), so the service owns its own DI scope per write rather than capturing a request-scoped
-/// <see cref="AppDbContext"/> (the same scope-per-unit pattern as the command runner).</para>
-/// <para><b>Serialized.</b> SQLite is single-writer; <see cref="_writeGate"/> serializes appends so
-/// concurrent events never collide on "database is locked". Audit volume is low (lifecycle actions),
-/// so this is not a throughput concern.</para>
+/// <para>
+/// <b>It writes nothing.</b> Every producer on this host — the engine, each leaf, and this API — now
+/// records what it did in its own event journal, and <see cref="AuditQueries"/> serves the merge. A
+/// row reaches a reader by being read back off a journal, so there is no append path here to keep
+/// consistent with one, and no second writer that could disagree with a producer about its own
+/// actions.
+/// </para>
+/// <para>
+/// The local table stays because it holds real history: every row written before each producer
+/// started keeping its own journal. It is read and never added to.
+/// </para>
 /// </remarks>
 public sealed class AuditService(
     IServiceScopeFactory scopeFactory,
@@ -27,14 +29,14 @@ public sealed class AuditService(
     INotificationBus notifications,
     ILogger<AuditService> logger)
 {
-    private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly SemaphoreSlim _ensureGate = new(1, 1);
     private bool _ensured;
 
     /// <summary>
     /// Create the audit schema if it does not exist (idempotent). <c>EnsureCreated</c>, NOT a
     /// migration — see <see cref="AppDbContext"/>. Called once at startup (the consumer) so the table
-    /// exists before <c>GET /audit</c> serves or any append runs, even when the engine is absent.
+    /// exists before <c>GET /audit</c> reads this host's pre-cutover history out of it, even when the
+    /// engine is absent.
     /// </summary>
     public async Task EnsureCreatedAsync(CancellationToken ct = default)
     {
@@ -49,29 +51,6 @@ public sealed class AuditService(
             _ensured = true;
         }
         finally { _ensureGate.Release(); }
-    }
-
-    /// <summary>Append one immutable audit row and announce it on the <c>audit</c> WS topic.</summary>
-    public async Task<AuditRecord> AppendAsync(AuditWrite write, CancellationToken ct = default)
-    {
-        await EnsureCreatedAsync(ct).ConfigureAwait(false);
-
-        string id = "evt_" + Guid.NewGuid().ToString("N")[..10];
-        AuditEntry entity = AuditMapping.ToEntity(write, id);
-
-        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
-        try
-        {
-            using IServiceScope scope = scopeFactory.CreateScope();
-            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.Audit.Add(entity);
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
-        finally { _writeGate.Release(); }
-
-        AuditRecord record = AuditMapping.ToRecord(entity);
-        Publish(record, persisted: true);
-        return record;
     }
 
     /// <summary>

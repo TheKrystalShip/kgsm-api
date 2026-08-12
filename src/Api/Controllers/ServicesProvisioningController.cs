@@ -23,7 +23,7 @@ public sealed class ServicesProvisioningController(
     ServicesAggregator services,
     LeafConfigService config,
     LeafConfigCatalog catalog,
-    AuditService audit,
+    ApiJournal journal,
     ApiOptions options) : ControllerBase
 {
     /// <summary><c>POST .../services/{leaf}/connect</c> — provision (connect) a leaf at runtime; re-poll so the
@@ -98,17 +98,7 @@ public sealed class ServicesProvisioningController(
     {
         LeafDescriptor? descriptor = LeafCatalog.Default.FirstOrDefault(l => string.Equals(l.Id, leaf, StringComparison.Ordinal));
         string display = descriptor?.DisplayName ?? leaf;
-        var write = new AuditWrite(
-            Ts: DateTimeOffset.UtcNow,
-            Origin: AuditOrigin.Api,
-            Actor: AuditMapping.ParseActor(AuditPrincipal.ActorString(User)),
-            Action: provisioned ? AuditAction.ServiceConnect : AuditAction.ServiceDisconnect,
-            Severity: AuditSeverity.Info,
-            Target: new AuditTarget(AuditTargetKind.Leaf, leaf, display),
-            ServerId: null,
-            HostId: options.HostId,
-            Summary: provisioned ? $"connected {display}" : $"disconnected {display}",
-            Meta: null);
-        await audit.AppendAsync(write, ct);
+        await journal.ServiceProvisioningAsync(
+            provisioned, leaf, display, AuditPrincipal.ActorString(User) ?? "", AuditOrigin.Api, ct);
     }
 }

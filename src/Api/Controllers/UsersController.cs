@@ -35,9 +35,7 @@ namespace TheKrystalShip.Api.Controllers;
 [ApiController]
 public sealed class UsersController(
     UserDirectory users,
-    ApiOptions options,
-    AuditService audit,
-    ILogger<UsersController> logger) : ControllerBase
+    ApiJournal journal) : ControllerBase
 {
     /// <summary><c>GET /auth/users</c> — every account on this host, oldest first (admin).</summary>
     [Authorize(Policy = AuthPolicy.Admin)]
@@ -124,10 +122,8 @@ public sealed class UsersController(
         if (!string.IsNullOrEmpty(body.Password))
             await users.SignIn.SetPasswordAsync(user.UserId, body.Password, now, ct);
 
-        await RecordAsync(AuditAction.UserProvision, AuditSeverity.Warn, user,
-            $"created the account '{user.Username}' with the {KgsmTiers.ToWire(tier)} tier",
-            new Dictionary<string, string> { ["tier"] = KgsmTiers.ToWire(tier), ["status"] = UserStatuses.ToWire(status) },
-            ct);
+        await RecordAsync(ApiJournal.UserProvisionedEvent, user,
+            toTier: KgsmTiers.ToWire(tier), toStatus: UserStatuses.ToWire(status), ct: ct);
 
         return StatusCode(StatusCodes.Status201Created, await ToRecordAsync(user, ct));
     }
@@ -251,8 +247,9 @@ public sealed class UsersController(
         await users.ForgetAsync(userId, ct);
 
         await users.Store.DeleteAsync(userId, ct);
-        await RecordAsync(AuditAction.UserDelete, AuditSeverity.Danger, existing,
-            $"deleted the account '{existing.Username}'", null, ct);
+        await RecordAsync(ApiJournal.UserDeletedEvent, existing,
+            fromTier: KgsmTiers.ToWire(existing.Tier),
+            fromStatus: UserStatuses.ToWire(existing.Status), ct: ct);
 
         return NoContent();
     }
@@ -280,9 +277,7 @@ public sealed class UsersController(
             return NotFoundUser(userId);
 
         await users.SignIn.SetPasswordAsync(userId, body!.Password!, DateTimeOffset.UtcNow, ct);
-        await RecordAsync(AuditAction.UserPassword, AuditSeverity.Warn, existing,
-            $"set the password on '{existing.Username}'",
-            new Dictionary<string, string> { ["by"] = "admin" }, ct);
+        await RecordAsync(ApiJournal.UserPasswordChangedEvent, existing, byHolder: false, ct: ct);
 
         return NoContent();
     }
@@ -327,9 +322,7 @@ public sealed class UsersController(
                 "The current password is not correct.");
 
         await users.SignIn.SetPasswordAsync(user.UserId, body.NewPassword!, now, ct);
-        await RecordAsync(AuditAction.UserPassword, AuditSeverity.Info, user,
-            $"changed their own password",
-            new Dictionary<string, string> { ["by"] = "self" }, ct);
+        await RecordAsync(ApiJournal.UserPasswordChangedEvent, user, byHolder: true, ct: ct);
 
         return NoContent();
     }
@@ -425,38 +418,23 @@ public sealed class UsersController(
     {
         if (before.Tier != after.Tier)
         {
-            await RecordAsync(AuditAction.UserTierChange, AuditSeverity.Warn, after,
-                $"changed '{after.Username}' from {KgsmTiers.ToWire(before.Tier)} to {KgsmTiers.ToWire(after.Tier)}",
-                new Dictionary<string, string>
-                {
-                    ["from"] = KgsmTiers.ToWire(before.Tier),
-                    ["to"] = KgsmTiers.ToWire(after.Tier),
-                },
-                ct);
+            await RecordAsync(ApiJournal.UserTierChangedEvent, after,
+                fromTier: KgsmTiers.ToWire(before.Tier),
+                toTier: KgsmTiers.ToWire(after.Tier), ct: ct);
         }
 
         if (before.Status != after.Status)
         {
-            // A summary rather than a verb, because the third case is not one: putting an account
-            // back to awaiting approval reads as a sentence, not as "<verb> the account".
-            (string action, string severity, string summary) = after.Status switch
-            {
-                UserStatus.Active =>
-                    (AuditAction.UserApprove, AuditSeverity.Warn, $"approved the account '{after.Username}'"),
-                UserStatus.Disabled =>
-                    (AuditAction.UserDisable, AuditSeverity.Danger, $"disabled the account '{after.Username}'"),
-                _ =>
-                    (AuditAction.UserDisable, AuditSeverity.Warn,
-                        $"returned the account '{after.Username}' to awaiting approval"),
-            };
+            // Which event this is comes from where the account LANDED, not from a verb chosen here:
+            // the from/to pair travels on the row, so a reader can tell "disabled" from "returned to
+            // awaiting approval" without either being spelled into the record.
+            string type = after.Status == UserStatus.Active
+                ? ApiJournal.UserApprovedEvent
+                : ApiJournal.UserDisabledEvent;
 
-            await RecordAsync(action, severity, after, summary,
-                new Dictionary<string, string>
-                {
-                    ["from"] = UserStatuses.ToWire(before.Status),
-                    ["to"] = UserStatuses.ToWire(after.Status),
-                },
-                ct);
+            await RecordAsync(type, after,
+                fromStatus: UserStatuses.ToWire(before.Status),
+                toStatus: UserStatuses.ToWire(after.Status), ct: ct);
         }
     }
 
@@ -478,36 +456,30 @@ public sealed class UsersController(
     /// password in any form.
     /// </para>
     /// </remarks>
-    private async Task RecordAsync(
-        string action, string severity, KgsmUser subject, string summary,
-        Dictionary<string, string>? meta, CancellationToken ct)
+    private Task RecordAsync(
+        string type, KgsmUser subject, string? fromTier = null, string? toTier = null,
+        string? fromStatus = null, string? toStatus = null, bool? byHolder = null,
+        CancellationToken ct = default)
     {
-        try
-        {
-            KgsmIdentity? caller = Caller();
-            Dictionary<string, string> full = meta ?? [];
-            full["userId"] = subject.UserId;
-            full["username"] = subject.Username;
+        KgsmIdentity? caller = Caller();
 
-            await audit.AppendAsync(new AuditWrite(
-                Ts: DateTimeOffset.UtcNow,
-                Origin: AuditOrigin.Ui,
-                Actor: caller is null
-                    ? new AuditActor(ActorKind.System, "system", ActorProvider.System)
-                    : new AuditActor(ActorKind.User, caller.Username, caller.Provider),
-                Action: action,
-                Severity: severity,
-                Target: null,
-                ServerId: null,
-                HostId: options.HostId,
-                Summary: caller is null ? summary : $"{caller.Display} {summary}",
-                Meta: full),
-                ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "audit {Action} write failed (non-fatal)", action);
-        }
+        return journal.AccountAsync(
+            type,
+            // The account acted UPON. The admin who acted is the actor — the same split every admin
+            // action in this API uses, so "who did this" and "to whom" never have to be told apart by
+            // reading a sentence.
+            userId: subject.UserId,
+            username: subject.Username,
+            fromTier: fromTier,
+            toTier: toTier,
+            fromStatus: fromStatus,
+            toStatus: toStatus,
+            byHolder: byHolder,
+            actor: caller is null
+                ? "system:api"
+                : KgsmActor.Format(caller.Provider, caller.Username),
+            origin: AuditOrigin.Ui,
+            ct: ct);
     }
 
     private ObjectResult Error(int statusCode, string code, string message) =>

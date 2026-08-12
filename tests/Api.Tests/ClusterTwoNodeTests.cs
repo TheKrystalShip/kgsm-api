@@ -400,6 +400,13 @@ public sealed class ClusterNodeFactory(
                 ["Api:HostId"] = ClusterHostId,
                 ["Api:NodeId"] = NodeId,
                 ["Api:DbPath"] = DbPath,
+                ["Api:EventJournalDir"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-events-{Guid.NewGuid():N}"),
+                // Scan a directory that has no journals in it. The default is the machine's real
+                // /var/lib, so a test host would otherwise merge THIS machine's watchdog and monitor
+                // history into every assertion about what a test just did.
+                ["Api:JournalStateRoot"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-state-{Guid.NewGuid():N}"),
                 ["Api:ClusterSecret"] = clusterSecret,
                 // Clamped to a 250ms floor by ApiOptions.FromConfiguration regardless of what's passed.
                 ["Api:ClusterDrainMs"] = drainMs.ToString(CultureInfo.InvariantCulture),

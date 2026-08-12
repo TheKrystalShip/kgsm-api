@@ -106,6 +106,35 @@ public static class EngineEventShaping
             // polled out of its database and transcribed.
             "host_threshold_breached" => Map<HostThresholdBreachedData>(item, d => AuditMapping.FromThresholdBreachedEvent(d, hostId)),
             "host_threshold_cleared" => Map<HostThresholdClearedData>(item, d => AuditMapping.FromThresholdClearedEvent(d, hostId)),
+
+            // kgsm-api's own journal: what the Control Panel did itself. Shaped here like any other
+            // producer's — nothing about these mappers knows the API is reading its own writing, which
+            // is what keeps one code path serving the whole merged feed.
+            ApiJournal.LoginEvent or ApiJournal.LogoutEvent or ApiJournal.ClusterSessionEvent =>
+                Map<AuthSessionEventData>(item, d => AuditMapping.FromAuthSessionEvent(d, item.Type, hostId)),
+            ApiJournal.SessionRevokedEvent =>
+                Map<AuthSessionRevokedData>(item, d => AuditMapping.FromSessionRevokedEvent(d, hostId)),
+
+            ApiJournal.UserProvisionedEvent or ApiJournal.UserApprovedEvent
+                or ApiJournal.UserDisabledEvent or ApiJournal.UserTierChangedEvent
+                or ApiJournal.UserDeletedEvent or ApiJournal.UserPasswordChangedEvent =>
+                Map<UserAccountEventData>(item, d => AuditMapping.FromUserAccountEvent(d, item.Type, hostId)),
+
+            ApiJournal.IdentityLinkedEvent or ApiJournal.IdentityUnlinkedEvent =>
+                Map<IdentityLinkEventData>(item, d => AuditMapping.FromIdentityEvent(d, item.Type, hostId)),
+
+            ApiJournal.ServiceConnectedEvent or ApiJournal.ServiceDisconnectedEvent =>
+                Map<ServiceProvisioningEventData>(item,
+                    d => AuditMapping.FromServiceProvisioningEvent(d, item.Type, hostId)),
+            ApiJournal.ServiceConfigChangedEvent =>
+                Map<ServiceConfigChangedEventData>(item, d => AuditMapping.FromServiceConfigEvent(d, hostId)),
+            ApiJournal.ServiceRestartedEvent =>
+                Map<ServiceRestartedEventData>(item, d => AuditMapping.FromServiceRestartedEvent(d, hostId)),
+
+            ApiJournal.FileWrittenEvent =>
+                Map<FileWrittenEventData>(item, d => AuditMapping.FromFileWrittenEvent(d, hostId)),
+            ApiJournal.BackupDownloadedEvent =>
+                Map<BackupDownloadedEventData>(item, d => AuditMapping.FromBackupDownloadedEvent(d, hostId)),
             "instance_player_joined" => Map<InstancePlayerJoinedData>(item, d => AuditMapping.FromPlayerJoinedEvent(d, hostId)),
             "instance_player_left" => Map<InstancePlayerLeftData>(item, d => AuditMapping.FromPlayerLeftEvent(d, hostId)),
             "instance_player_kicked" => Map<InstancePlayerKickedData>(item,

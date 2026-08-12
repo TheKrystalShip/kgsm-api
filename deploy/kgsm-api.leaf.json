@@ -239,6 +239,25 @@
       "risk": "wiring"
     },
     {
+      "key": "eventJournalDir",
+      "env": "Api__EventJournalDir",
+      "label": "Panel event journal",
+      "description": "Where this API records what it did itself — signing people in, changing an account's authority, editing a file. Its own journal, not the engine's: every component on this host records its own actions, and the audit page is the merge of all of them. Moving it leaves the existing history behind at the old path.",
+      "group": "engine",
+      "type": "path",
+      "risk": "destructive"
+    },
+    {
+      "key": "journalStateRoot",
+      "env": "Api__JournalStateRoot",
+      "label": "Service state root",
+      "description": "The directory holding each KGSM service's own state directory. The audit page is the merge of every event journal found under it, so pointing it somewhere else changes which components' history this host can show.",
+      "group": "engine",
+      "type": "path",
+      "default": "/var/lib",
+      "risk": "wiring"
+    },
+    {
       "key": "systemctlPath",
       "env": "Api__SystemctlPath",
       "label": "systemctl path",

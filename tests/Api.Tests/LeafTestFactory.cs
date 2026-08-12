@@ -79,6 +79,13 @@ public class LeafTestFactory : AuthTestFactory
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Api:DbPath"] = _dbPath,
+                ["Api:EventJournalDir"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-events-{Guid.NewGuid():N}"),
+                // Scan a directory that has no journals in it. The default is the machine's real
+                // /var/lib, so a test host would otherwise merge THIS machine's watchdog and monitor
+                // history into every assertion about what a test just did.
+                ["Api:JournalStateRoot"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-state-{Guid.NewGuid():N}"),
                 // All four leaves start NOT provisioned (blank) → connect flips absent→provisioned.
                 ["Api:MonitorSocketPath"] = _monitorSocket,
                 ["Api:WatchdogSocketPath"] = "",

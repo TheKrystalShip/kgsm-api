@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — this API records what it did in its own event journal
+
+`auth.*`, `user.*`, `identity.*`, `service.*`, `file.write` and `backup.download` were the last audit
+rows written straight to the local table. They are now events in this API's own journal at
+`Api__EventJournalDir` (default `events/` beside the DB), written by `ApiJournal` and shaped into rows
+at read time by `AuditMapping`/`EngineEventShaping` — the same path every other producer's journal takes.
+`AuditService.AppendAsync` is gone; nothing appends to the audit table any more.
+
+**The API stops being a special case.** It already tails every journal it can discover and merges every
+journal for history, and its own state directory is one the discovery scan matches — so the write site
+writes and the existing tail shapes and publishes. Publishing from the write site as well would have
+emitted every row twice, and would have had to re-derive the journal position the id comes from.
+
+**The local table keeps this host's pre-cutover history and is read, never added to.** `EngineSourcedActions`
+is deliberately NOT extended with these actions: that set suppresses a source where two real copies of one
+fact exist, and this journal starts empty at cutover. Adding `auth.login` to it would have erased every
+login this host has recorded since M4.
+
+`/me`'s recent-logins moved to the merged read for the same reason — pointed at the local table alone it
+would have kept answering, from frozen rows only, and gone stale while still looking correct.
+
+Storing facts rather than sentences means the wording is derived, so improving it improves every row
+rather than only the ones written afterwards. A password sign-in and a provider sign-in are told apart by
+the recorded provider, not by which endpoint ran; a disable and a return-to-awaiting-approval by where the
+account landed. What is deliberately never recorded: a password, a config value, a file's contents.
+
+⚠ `Identity`, `Handle` and `UserAgent` are classified `Personal` upstream, so `AuditRedaction` withholds
+them below operator. `userAgent` was previously visible to every reader of the feed.
+
+**Fixed while proving it: `GET /audit?actor=` never filtered the journal half.** The local query narrowed
+by actor and the journal-sourced rows were passed through unfiltered, so an actor-scoped page returned
+everybody's engine history alongside one person's local rows. It surfaced the moment `/me` started reading
+the merge. The contract had claimed the filter applied to both halves all along.
+
+`Api__JournalStateRoot` (default `/var/lib`) makes the directory the journal scan walks configurable —
+previously hardcoded, which left a test host merging the real machine's watchdog and monitor history into
+its own assertions.
+
 ### Changed — the Web Push protocol moved to a shared package
 
 `WebPushCrypto`, `VapidKeyPair`/`VapidSigner` and `WebPushSender` are now

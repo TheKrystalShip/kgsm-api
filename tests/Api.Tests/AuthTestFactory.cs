@@ -1,3 +1,6 @@
+using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Services.Audit;
+using TheKrystalShip.Api.Data;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -50,6 +53,22 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 ["Api:MonitorSocketPath"] = "/tmp/kgsm-api-tests-no-monitor.sock",
                 ["Api:WatchdogSocketPath"] = "",
                 ["Api:DbPath"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-{Guid.NewGuid():N}.db"),
+                // Its own journal per factory, for the same reason it gets its own DB. The default puts
+                // events/ beside the database, which on a real host means inside this service's state
+                // directory — but every test DB lives in one shared /tmp, so the default would hand every
+                // test class the same journal and leave each one reading the others' sign-ins.
+                ["Api:EventJournalDir"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-events-{Guid.NewGuid():N}"),
+                // Scan a directory that has no journals in it. The default is the machine's real
+                // /var/lib, so a test host would otherwise merge THIS machine's watchdog and monitor
+                // history into every assertion about what a test just did.
+                ["Api:JournalStateRoot"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-state-{Guid.NewGuid():N}"),
+                // The engine's journal is named explicitly rather than scanned, so isolating the state
+                // root above does not cover it. Left at its default, every test asserting what the feed
+                // holds would be reading THIS machine's real engine history.
+                ["Api:KgsmJournalDir"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-journal-{Guid.NewGuid():N}"),
                 // ⚠ Never the default. /var/lib/kgsm/auth/users.db is the HOST's real account store, shared
                 // with every KGSM service on the box, and opening it CREATES it — so an unpinned test
                 // run would hand the operator a live accounts file that nobody made. Same rule that
@@ -171,5 +190,22 @@ public class AuthTestFactory : WebApplicationFactory<Program>
         // would look like the gate being wrong rather than the setup being stale.
         users.Authority.ForgetAll();
         return account;
+    }
+
+    /// <summary>
+    /// Seed one row straight into the local audit table.
+    /// </summary>
+    /// <remarks>
+    /// That table holds this host's pre-cutover history and nothing appends to it any more — every
+    /// producer records what it did in its own journal. Tests that exercise the LOCAL half of the merged
+    /// read (keyset order, filters, the viewer gate) seed it directly, which is what that half reads.
+    /// </remarks>
+    public async Task SeedAuditAsync(AuditWrite write)
+    {
+        using IServiceScope scope = Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Database.EnsureCreatedAsync();
+        db.Audit.Add(AuditMapping.ToEntity(write, "evt_" + Guid.NewGuid().ToString("N")[..10]));
+        await db.SaveChangesAsync();
     }
 }

@@ -5,6 +5,7 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
+using TheKrystalShip.KGSM.Core.Interfaces;
 
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Users;
@@ -40,7 +41,7 @@ namespace TheKrystalShip.Api.Controllers;
 [ApiController]
 [Route("api/v1/me")]
 [Authorize]
-public sealed class MeController(AppDbContext db, UserDirectory users) : ControllerBase
+public sealed class MeController(AppDbContext db, UserDirectory users, ApiOptions options) : ControllerBase
 {
     /// <summary>How many recent <c>auth.login</c> rows to surface — a small, fixed window (a login
     /// history, not a full audit page); matches the plan's Increment 7 spec.</summary>
@@ -58,16 +59,15 @@ public sealed class MeController(AppDbContext db, UserDirectory users) : Control
         // AuthController.RecordAuthAsync stamps Actor = new AuditActor(ActorKind.User, id.Username,
         // ActorProvider.Discord), and how GET /audit?actor=haru already filters. A fresh identity with
         // no prior login (e.g. a synthetic test/dev token) simply has no auth.login rows -> [].
-        List<AuditEntry> rows = await AuditQueries.RecentByActionAsync(
-            db, AuditAction.AuthLogin, id.Username, RecentLoginsLimit, ct);
+        // Reads the merged feed, so the list spans the moment this API started recording sign-ins in
+        // its own journal rather than stopping dead at it. The only projection this controller adds is
+        // picking `userAgent` out of the shaped row's meta as `Device`.
+        IReadOnlyList<AuditRecord> rows = await AuditQueries.RecentLoginsAsync(
+            db, HttpContext.RequestServices.GetService<IEventJournalHistory>(), options.HostId,
+            id.Username, RecentLoginsLimit, ct);
 
-        // Reuse AuditMapping.ToRecord for the Meta JSON-blob parse (same try/catch-guarded
-        // deserialization the audit read path already uses) rather than duplicating it here; the only
-        // projection this controller adds is picking `userAgent` out of the parsed Meta as `Device`.
-        IReadOnlyList<RecentLogin> recentLogins = rows
-            .Select(r => AuditMapping.ToRecord(r))
-            .Select(r => new RecentLogin(r.Ts, r.Meta?.GetValueOrDefault("userAgent")))
-            .ToList();
+        IReadOnlyList<RecentLogin> recentLogins = [.. rows
+            .Select(r => new RecentLogin(r.Ts, r.Meta?.GetValueOrDefault("userAgent")))];
 
         return new MeResponse(
             new SessionUser(id.Handle, id.Username, id.Display, id.AvatarUrl),

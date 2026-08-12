@@ -42,8 +42,7 @@ public sealed class ServerBackupsController(
     JobRegistry jobs,
     CommandRunner runner,
     BackupDownloadTickets tickets,
-    AuditService audit,
-    ApiOptions options,
+    ApiJournal journal,
     ILogger<ServerBackupsController> logger) : ControllerBase
 {
     /// <summary>
@@ -347,37 +346,14 @@ public sealed class ServerBackupsController(
         return File(archive.Content, "application/gzip", $"{backupId}.tar.gz", enableRangeProcessing: true);
     }
 
-    private async Task WriteDownloadAudit(
-        string id, string backupId, BackupArchive archive, BackupDownloadTicket ticket)
-    {
-        try
-        {
-            var meta = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["source"] = backupId,
-                ["sizeBytes"] = archive.SizeBytes.ToString(CultureInfo.InvariantCulture),
-            };
-            if (archive.Sha256 is { Length: > 0 } sha) meta["sha256"] = sha;
-
-            await audit.AppendAsync(new AuditWrite(
-                Ts: DateTimeOffset.UtcNow,
-                Origin: AuditMapping.NormalizeOrigin(ticket.Origin),
-                Actor: AuditMapping.ParseActor(ticket.Actor),
-                Action: AuditAction.BackupDownload,
-                Severity: AuditSeverity.Warn,
-                Target: new AuditTarget(AuditTargetKind.Server, id, id),
-                ServerId: id,
-                HostId: options.HostId,
-                Summary: $"downloaded a backup of {id}",
-                Meta: meta)).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // A failed audit write must never break the download that is already streaming.
-            logger.LogWarning(ex, "Failed to write the backup.download audit row for {Server}/{Backup}",
-                id, backupId);
-        }
-    }
+    // Recorded when the archive was authorised to leave, not when somebody clicked: the fact worth
+    // keeping is that a copy of a world left this host. The actor and origin come off the ticket the
+    // download was issued against, so a streamed file is still attributable to who asked for it.
+    private Task WriteDownloadAudit(
+        string id, string backupId, BackupArchive archive, BackupDownloadTicket ticket) =>
+        journal.BackupDownloadedAsync(
+            id, backupId, archive.SizeBytes, archive.Sha256,
+            ticket.Actor ?? "", AuditMapping.NormalizeOrigin(ticket.Origin));
 
     // One mapping for both archive endpoints, so the ticket probe and the download cannot disagree about
     // what a given failure means.

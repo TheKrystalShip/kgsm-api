@@ -26,6 +26,8 @@ using TheKrystalShip.Api.Services.Integrations.WebPush;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.Api.Services.Players;
+using TheKrystalShip.KGSM.Core.Interfaces;
+using TheKrystalShip.KGSM.Services;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Extensions;
 
@@ -137,6 +139,20 @@ public class Startup(IConfiguration configuration)
         // history on restart would re-announce to Discord/Slack events that were already announced.
         // Nothing is lost by starting at the tail, because the journal IS the record and GET /audit
         // reads it back from there (IEventJournalHistory, registered by AddKgsmServices below).
+        // This API's own journal — the write half. NOT conditional on the engine: signing somebody in
+        // works on a host with no kgsm installed, and so must recording that it happened. The producer
+        // id is this state directory's own name, which is what a reader scans for, so writer and
+        // readers agree on the location without either being told.
+        services.AddSingleton<IEventJournalWriter>(sp => new EventJournalWriter(
+            new EventJournalWriterOptions
+            {
+                Producer = "kgsm-api",
+                Directory = apiOptions.EventJournalDir,
+                ProducerVersion = typeof(Startup).Assembly.GetName().Version?.ToString(),
+            },
+            sp.GetRequiredService<ILogger<EventJournalWriter>>()));
+        services.AddSingleton<ApiJournal>();
+
         if (apiOptions.KgsmProvisioned)
         {
             services.AddKgsmServices(new KgsmOptions
@@ -145,24 +161,6 @@ public class Startup(IConfiguration configuration)
                 EventJournalDirectory = apiOptions.KgsmJournalDir,
                 EventStartPosition = EventStartPosition.Tail
             });
-
-            // Read EVERY producer's journal, not only the engine's. Each component records what it did
-            // in its own journal, and this API is the surface that serves the merge — it aggregates
-            // rather than owns, so the merging itself lives in kgsm-lib and every other consumer gets
-            // it too. Which journals exist is discovered from the leaf descriptors already installed in
-            // /var/lib/kgsm/leaves/, so no list is held here and a leaf that starts writing one later
-            // needs no rebuild.
-            //
-            // No cursor path, deliberately: same reasoning as the Tail start position above. This API
-            // persists no engine event — it shapes each into a live audit row, fans it out over SSE and
-            // hands it to the notification bus — so resuming a journal would re-announce to
-            // Discord/Slack things that were already announced when they happened. GET /audit reads
-            // history back off the record itself, so nothing is lost by starting every journal at its
-            // tail.
-            services.AddKgsmJournalFederation(
-                cursorPath: null,
-                startPosition: EventStartPosition.Tail,
-                engineJournalDirectory: apiOptions.KgsmJournalDir);
 
             // File browser (Tier 3 #12) — the jailed content I/O for GET/PUT /servers/{id}/files. No
             // capability axis of its own (engine-base, like config/backups): it's a thin status-mapping
@@ -179,6 +177,36 @@ public class Startup(IConfiguration configuration)
             // from RequestServices so an unprovisioned engine degrades to 503 rather than failing DI.
             services.AddTransient<IBlueprintFileService, BlueprintFileService>();
         }
+
+        // Read EVERY producer's journal, not only the engine's. Each component records what it did in
+        // its own journal, and this API is the surface that serves the merge — it aggregates rather
+        // than owns, so the merging itself lives in kgsm-lib and every other consumer gets it too.
+        // Which journals exist is discovered on disk, so no list is held here and a leaf that starts
+        // writing one later needs no rebuild.
+        //
+        // ⚠ Must stay AFTER AddKgsmServices: that call registers an IEventSource reading the engine's
+        // journal alone, and this one replaces it by being registered last. Moving this above it leaves
+        // every consumer tailing one journal while believing it tails all of them.
+        //
+        // Registered whatever the engine's state, and that is load-bearing rather than tidy: reading a
+        // journal is reading files, and THIS API's own journal is one of them. Gating the reader on
+        // kgsm being installed would leave a host with no engine writing its sign-ins to a record it
+        // then refused to read back.
+        //
+        // No cursor path, deliberately: same reasoning as the Tail start position above. This API
+        // persists no event it reads — it shapes each into a live audit row, fans it out over SSE and
+        // hands it to the notification bus — so resuming a journal would re-announce to Discord/Slack
+        // things that were already announced when they happened. GET /audit reads history back off the
+        // record itself, so nothing is lost by starting every journal at its tail.
+        services.AddKgsmJournalFederation(
+            cursorPath: null,
+            startPosition: EventStartPosition.Tail,
+            engineJournalDirectory: apiOptions.KgsmJournalDir,
+            stateRoot: apiOptions.JournalStateRoot,
+            // This API's own journal, named rather than left to the scan. The scan finds a producer at
+            // its DEFAULT state directory, and this one's path is configurable — so a host that points
+            // it elsewhere would have this API writing a record it could not then read back.
+            namedJournals: [new JournalSource("kgsm-api", apiOptions.EventJournalDir)]);
 
         // M6·b — ports. The firewall authority (kgsm-firewall) is OPT-IN like the assistant: its kgsm-lib
         // client is registered ONLY when its socket is configured (blank => firewall "absent"). It is

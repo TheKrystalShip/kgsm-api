@@ -344,7 +344,7 @@ public sealed class NotificationDeliveryE2ETests
         await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, enabled = true });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
-        await audit.AppendAsync(CrashWrite("factorio-01"));
+        audit.PublishLive(AuditMapping.ToRecordDirect(CrashWrite("factorio-01"), "evt_" + Guid.NewGuid().ToString("N")[..10]));
 
         await f.Webhook.WaitForAsync(1, Timeout); // the worker drains off-thread — wait for the POST, never assert eagerly
         Assert.True(f.Webhook.Requests.TryDequeue(out RecordedRequest? req));
@@ -365,7 +365,7 @@ public sealed class NotificationDeliveryE2ETests
         await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, enabled = false });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
-        await audit.AppendAsync(CrashWrite("factorio-01"));
+        audit.PublishLive(AuditMapping.ToRecordDirect(CrashWrite("factorio-01"), "evt_" + Guid.NewGuid().ToString("N")[..10]));
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => f.Webhook.WaitForAsync(1, TimeSpan.FromSeconds(2)));
         Assert.Empty(f.Webhook.Requests);
@@ -384,8 +384,8 @@ public sealed class NotificationDeliveryE2ETests
         });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
-        await audit.AppendAsync(CrashWrite("srv-a")); // gated by the disabled rule
-        await audit.AppendAsync(StartWrite("srv-a")); // the barrier — delivers, proving the worker passed the crash
+        audit.PublishLive(AuditMapping.ToRecordDirect(CrashWrite("srv-a"), "evt_" + Guid.NewGuid().ToString("N")[..10])); // gated by the disabled rule
+        audit.PublishLive(AuditMapping.ToRecordDirect(StartWrite("srv-a"), "evt_" + Guid.NewGuid().ToString("N")[..10])); // the barrier — delivers, proving the worker passed the crash
 
         await f.Webhook.WaitForAsync(1, Timeout);
         RecordedRequest only = Assert.Single(f.Webhook.Requests);
@@ -406,9 +406,9 @@ public sealed class NotificationDeliveryE2ETests
         });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
-        await audit.AppendAsync(CrashWrite("srv-b"));  // the first — delivers
-        await audit.AppendAsync(CrashWrite("srv-b"));  // the same news — held for a day
-        await audit.AppendAsync(StartWrite("srv-b"));  // the barrier: every → delivers, and it is sequential
+        audit.PublishLive(AuditMapping.ToRecordDirect(CrashWrite("srv-b"), "evt_" + Guid.NewGuid().ToString("N")[..10]));  // the first — delivers
+        audit.PublishLive(AuditMapping.ToRecordDirect(CrashWrite("srv-b"), "evt_" + Guid.NewGuid().ToString("N")[..10]));  // the same news — held for a day
+        audit.PublishLive(AuditMapping.ToRecordDirect(StartWrite("srv-b"), "evt_" + Guid.NewGuid().ToString("N")[..10]));  // the barrier: every → delivers, and it is sequential
 
         await f.Webhook.WaitForAsync(2, Timeout);
         RecordedRequest[] sent = f.Webhook.Requests.ToArray();
@@ -433,8 +433,8 @@ public sealed class NotificationDeliveryE2ETests
         });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
-        await audit.AppendAsync(CrashWrite("srv-d"));  // held
-        await audit.AppendAsync(StartWrite("srv-d"));  // the barrier — every → delivers
+        audit.PublishLive(AuditMapping.ToRecordDirect(CrashWrite("srv-d"), "evt_" + Guid.NewGuid().ToString("N")[..10]));  // held
+        audit.PublishLive(AuditMapping.ToRecordDirect(StartWrite("srv-d"), "evt_" + Guid.NewGuid().ToString("N")[..10]));  // the barrier — every → delivers
 
         await f.Webhook.WaitForAsync(1, Timeout);
         RecordedRequest only = Assert.Single(f.Webhook.Requests);
@@ -462,9 +462,9 @@ public sealed class NotificationDeliveryE2ETests
         });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
-        await audit.AppendAsync(CrashWrite("srv-e1"));
-        await audit.AppendAsync(CrashWrite("srv-e2"));
-        await audit.AppendAsync(StartWrite("srv-e1"));           // barrier: both crashes are now held
+        audit.PublishLive(AuditMapping.ToRecordDirect(CrashWrite("srv-e1"), "evt_" + Guid.NewGuid().ToString("N")[..10]));
+        audit.PublishLive(AuditMapping.ToRecordDirect(CrashWrite("srv-e2"), "evt_" + Guid.NewGuid().ToString("N")[..10]));
+        audit.PublishLive(AuditMapping.ToRecordDirect(StartWrite("srv-e1"), "evt_" + Guid.NewGuid().ToString("N")[..10]));           // barrier: both crashes are now held
         await f.Webhook.WaitForAsync(1, Timeout);
         f.Webhook.Requests.Clear();
 
@@ -486,9 +486,9 @@ public sealed class NotificationDeliveryE2ETests
         await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, enabled = true });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
-        await audit.AppendAsync(CrashWrite("srv-c")); // crash#1 → delivers
-        await audit.AppendAsync(CrashWrite("srv-c")); // crash#2 → suppressed (same provider:server:catalog, within 60s)
-        await audit.AppendAsync(StartWrite("srv-c")); // online → different catalog key → delivers (barrier)
+        audit.PublishLive(AuditMapping.ToRecordDirect(CrashWrite("srv-c"), "evt_" + Guid.NewGuid().ToString("N")[..10])); // crash#1 → delivers
+        audit.PublishLive(AuditMapping.ToRecordDirect(CrashWrite("srv-c"), "evt_" + Guid.NewGuid().ToString("N")[..10])); // crash#2 → suppressed (same provider:server:catalog, within 60s)
+        audit.PublishLive(AuditMapping.ToRecordDirect(StartWrite("srv-c"), "evt_" + Guid.NewGuid().ToString("N")[..10])); // online → different catalog key → delivers (barrier)
 
         await f.Webhook.WaitForAsync(2, Timeout); // exactly crash#1 + online; crash#2 never posts
         Assert.Equal(2, f.Webhook.Requests.Count);
@@ -520,9 +520,9 @@ public sealed class NotificationDeliveryE2ETests
         AuditService audit = f.Services.GetRequiredService<AuditService>();
         // Every host-scope threshold row carries a null server. Keyed on the server they would all be one
         // subject, and the disk would be silently swallowed by the sensor that breached first.
-        await audit.AppendAsync(BreachWrite("host-temp", "k10temp", "k10temp temperature crossed 70C"));
-        await audit.AppendAsync(BreachWrite("host-temp", "k10temp", "k10temp temperature crossed 70C")); // suppressed
-        await audit.AppendAsync(BreachWrite("host-disk", "root", "root disk usage crossed 90%"));
+        audit.PublishLive(AuditMapping.ToRecordDirect(BreachWrite("host-temp", "k10temp", "k10temp temperature crossed 70C"), "evt_" + Guid.NewGuid().ToString("N")[..10]));
+        audit.PublishLive(AuditMapping.ToRecordDirect(BreachWrite("host-temp", "k10temp", "k10temp temperature crossed 70C"), "evt_" + Guid.NewGuid().ToString("N")[..10])); // suppressed
+        audit.PublishLive(AuditMapping.ToRecordDirect(BreachWrite("host-disk", "root", "root disk usage crossed 90%"), "evt_" + Guid.NewGuid().ToString("N")[..10]));
 
         await f.Webhook.WaitForAsync(2, Timeout);
         Assert.Equal(2, f.Webhook.Requests.Count);
