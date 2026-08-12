@@ -35,7 +35,17 @@ public sealed class EngineEventIdTracker
     /// stashed, and <see cref="TakePendingId"/> falls back).</summary>
     public Task OnRawEvent(EventWrapper wrapper, EventPosition position)
     {
-        _pendingId = position.IsKnown ? AuditId.ForPosition(position.Segment, position.Offset) : null;
+        // The producer must ride into the id whenever the transport reports one, because the history
+        // read derives the id the same way — and a byte offset alone names a different event in every
+        // journal. Getting this wrong is invisible until a client reconciles a live-pushed row against
+        // the same event found in history and sees two ids for one fact.
+        _pendingId = position switch
+        {
+            { IsKnown: false } => null,
+            { Producer: { Length: > 0 } producer } => AuditId.ForPosition(producer, position.Segment, position.Offset),
+            _ => AuditId.ForPosition(position.Segment, position.Offset),
+        };
+
         return Task.CompletedTask;
     }
 

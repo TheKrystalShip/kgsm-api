@@ -59,10 +59,40 @@ public sealed record AuditRecord(
 /// (architecture.html invariant #4); absent/false on a healthy read, so an unmodified older client
 /// simply never notices it.
 /// </param>
+/// <param name="Journals">
+/// What each producer's event journal contributed, or <see langword="null"/> when the engine is
+/// unprovisioned and none was read. Additive (architecture.html invariant #4), so an unmodified client
+/// simply never notices it.
+/// <para>
+/// The ecosystem records events per producer — the engine writes what the engine did, each leaf writes
+/// what it did — and this page is their merge. <see cref="EngineHistoryDegraded"/> stays the answer to
+/// "can this page show engine history at all", which is what the banner in the panel is about; this
+/// says which individual producers answered, so a page missing one leaf's rows can say which leaf
+/// rather than looking complete.
+/// </para>
+/// </param>
 public sealed record AuditPage(
     IReadOnlyList<AuditRecord> Data,
     string? NextCursor,
-    bool EngineHistoryDegraded = false);
+    bool EngineHistoryDegraded = false,
+    IReadOnlyList<AuditJournalCoverage>? Journals = null);
+
+/// <summary>
+/// What one producer's event journal contributed to an audit page.
+/// </summary>
+/// <param name="Producer">The producer id — <c>kgsm</c> for the engine, <c>kgsm-&lt;leaf&gt;</c> otherwise.</param>
+/// <param name="Readable">
+/// False when that journal was absent or could not be read. A leaf that has never written an event has
+/// no journal directory yet, which reads as unreadable and is honest: this API cannot tell "recorded
+/// nothing" from "cannot be read", and must not present the first as though it had checked.
+/// </param>
+/// <param name="CoverageFrom">The oldest moment that journal can still answer for, or null if it holds nothing.</param>
+/// <param name="Truncated">True when the scan of that journal stopped at its byte budget.</param>
+public sealed record AuditJournalCoverage(
+    string Producer,
+    bool Readable,
+    DateTimeOffset? CoverageFrom,
+    bool Truncated);
 
 /// <summary>
 /// The closed, server-defined action vocabulary (architecture.html §3·d). Clients and the model can't

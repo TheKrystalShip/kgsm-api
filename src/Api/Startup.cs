@@ -146,6 +146,24 @@ public class Startup(IConfiguration configuration)
                 EventStartPosition = EventStartPosition.Tail
             });
 
+            // Read EVERY producer's journal, not only the engine's. Each component records what it did
+            // in its own journal, and this API is the surface that serves the merge — it aggregates
+            // rather than owns, so the merging itself lives in kgsm-lib and every other consumer gets
+            // it too. Which journals exist is discovered from the leaf descriptors already installed in
+            // /var/lib/kgsm/leaves/, so no list is held here and a leaf that starts writing one later
+            // needs no rebuild.
+            //
+            // No cursor path, deliberately: same reasoning as the Tail start position above. This API
+            // persists no engine event — it shapes each into a live audit row, fans it out over SSE and
+            // hands it to the notification bus — so resuming a journal would re-announce to
+            // Discord/Slack things that were already announced when they happened. GET /audit reads
+            // history back off the record itself, so nothing is lost by starting every journal at its
+            // tail.
+            services.AddKgsmJournalFederation(
+                cursorPath: null,
+                startPosition: EventStartPosition.Tail,
+                engineJournalDirectory: apiOptions.KgsmJournalDir);
+
             // File browser (Tier 3 #12) — the jailed content I/O for GET/PUT /servers/{id}/files. No
             // capability axis of its own (engine-base, like config/backups): it's a thin status-mapping
             // wrapper around kgsm-lib's IInstanceFiles (registered by AddKgsmServices above), so it is

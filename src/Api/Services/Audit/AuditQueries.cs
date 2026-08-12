@@ -123,7 +123,7 @@ public static class AuditQueries
             db, c, limit, severities, serverId, actor, sinceTs, categoryPrefix, ct).ConfigureAwait(false);
         List<AuditRecord> localRecords = localRows.Select(AuditMapping.ToRecord).ToList();
 
-        (List<AuditRecord> engineRecords, bool degraded, bool journalFull) = await QueryJournalAsync(
+        (List<AuditRecord> engineRecords, bool degraded, bool journalFull, IReadOnlyList<AuditJournalCoverage>? journals) = await QueryJournalAsync(
             journal, hostId, c, limit, severities, serverId, sinceTs?.ToUnixTimeMilliseconds(),
             categoryPrefix, ct).ConfigureAwait(false);
 
@@ -146,7 +146,7 @@ public static class AuditQueries
             ? new AuditCursor(merged[^1].Ts.ToUnixTimeMilliseconds(), merged[^1].Id).ToString()
             : null;
 
-        return new AuditPage(merged, next, degraded);
+        return new AuditPage(merged, next, degraded, journals);
     }
 
     private static async Task<List<AuditEntry>> QueryLocalAsync(
@@ -210,16 +210,17 @@ public static class AuditQueries
     /// told the feed ended.
     /// </para>
     /// </remarks>
-    private static async Task<(List<AuditRecord> Records, bool Degraded, bool JournalFull)> QueryJournalAsync(
+    private static async Task<(List<AuditRecord> Records, bool Degraded, bool JournalFull, IReadOnlyList<AuditJournalCoverage>? Journals)> QueryJournalAsync(
         IEventJournalHistory? journal, string hostId, AuditCursor? cursor, int limit,
         string[]? severities, string? serverId, long? sinceMs, string? categoryPrefix, CancellationToken ct)
     {
         // No engine provisioned on this host: there is no journal to read, which is a missing
         // capability rather than a failure. Reported the same way an unreadable one is — the
         // caller cannot have engine history either way, and must not be told it has all of it.
-        if (journal is null) return (new List<AuditRecord>(), true, false);
+        if (journal is null) return (new List<AuditRecord>(), true, false, null);
 
         var records = new List<AuditRecord>(limit);
+        IReadOnlyList<AuditJournalCoverage>? coverage = null;
         long? beforeTs = cursor?.TsMs;
         string? beforeId = cursor?.Id;
         bool more = false;
@@ -250,12 +251,16 @@ public static class AuditQueries
                 // EventJournalHistory) — this is a last-resort guard so a surprise degrades the page
                 // rather than 500ing the whole endpoint. Anything already gathered is kept: a partial
                 // engine half is still better than dropping it, and `degraded` says so.
-                return (records, true, false);
+                return (records, true, false, coverage);
             }
+
+            // Per-producer coverage, kept from the first page that reported any. Later fetches are the
+            // same set of journals, so the first answer describes the read as a whole.
+            coverage ??= Map(page.Journals);
 
             // An unreadable journal is not an empty one. Serving "no engine events" for a directory the
             // API cannot read would report silence as fact.
-            if (!page.JournalReadable) return (records, true, false);
+            if (!page.JournalReadable) return (records, true, false, coverage);
 
             foreach (EventHistoryEntry item in page.Events)
             {
@@ -296,7 +301,7 @@ public static class AuditQueries
             more = true;
         }
 
-        return (records, false, more);
+        return (records, false, more, coverage);
     }
 
     private static string[]? ParseSeverities(string? severity)
@@ -330,6 +335,21 @@ public static class AuditQueries
             .OrderByDescending(a => a.RowId)
             .Take(limit)
             .ToListAsync(ct);
+    /// <summary>
+    /// kgsm-lib's per-journal coverage, in this API's wire shape.
+    /// </summary>
+    /// <remarks>
+    /// A straight rename across a seam rather than a reinterpretation: the library reports what each
+    /// journal contributed, and this API relays it. ⚠ <c>Readable == false</c> covers both "the
+    /// directory is not there" and "it could not be read" — a leaf that has never written an event has
+    /// no journal directory yet, and this API cannot tell that from a permissions failure. Reporting
+    /// them the same way is the honest option; claiming the leaf recorded nothing would be a fact
+    /// nobody established.
+    /// </remarks>
+    private static IReadOnlyList<AuditJournalCoverage>? Map(IReadOnlyList<JournalCoverage>? journals)
+        => journals is null
+            ? null
+            : [.. journals.Select(j => new AuditJournalCoverage(j.Producer, j.Readable, j.CoverageFrom, j.Truncated))];
 }
 
 /// <summary>
