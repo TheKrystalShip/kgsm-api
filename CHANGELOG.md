@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the firewall test double compiles again
+
+`NetworkAggregatorTests.FakeFirewall` did not implement `IFirewallService`'s `actor`/`origin`
+parameters, so the whole test project failed to build. The aggregator reads only, so both mutating
+members stay unimplemented — they just have to have the right shape.
+
 ### Changed — this API records what it did in its own event journal
 
 `auth.*`, `user.*`, `identity.*`, `service.*`, `file.write` and `backup.download` were the last audit

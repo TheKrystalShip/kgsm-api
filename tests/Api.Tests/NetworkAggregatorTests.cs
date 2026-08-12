@@ -274,9 +274,11 @@ public sealed class NetworkAggregatorTests
             return Task.FromResult(OnList!(instanceName));
         }
 
-        public Task<FirewallActionResult> EnsureOpenAsync(string instanceName, IReadOnlyList<PortMapping> ports, CancellationToken cancellationToken = default) =>
+        // The mutating half carries the caller's actor/origin, which the authority repeats onto the
+        // edge it records. This aggregator only reads, so both stay unimplemented.
+        public Task<FirewallActionResult> EnsureOpenAsync(string instanceName, IReadOnlyList<PortMapping> ports, string? actor = null, string? origin = null, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
-        public Task<FirewallActionResult> RemoveAsync(string instanceName, CancellationToken cancellationToken = default) =>
+        public Task<FirewallActionResult> RemoveAsync(string instanceName, string? actor = null, string? origin = null, CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
         public Task<FirewallBackendInfo> BackendAsync(CancellationToken cancellationToken = default) =>
             throw new NotImplementedException();
