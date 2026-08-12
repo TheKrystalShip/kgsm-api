@@ -15,8 +15,13 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   is stamped instead.
 - **actor and origin are independent axes.** `actor` = who (identity); `origin` = the surface. **Never
   derive origin from actor.** A missing/unknown origin is **`null`**, never a fabricated surface (the
-  never-fabricate invariant). The command path's origin is **caller-declared** (`ui|assistant|discord|api`,
-  default `api`; `system` is reserved for autonomous engine actions and rejected at the controller).
+  never-fabricate invariant). The command path's origin is **caller-declared**
+  (`ui|assistant|discord|api`, default `api`); **two values are reserved and rejected at the controller**
+  — `system` for autonomous engine actions, and `notification` for a push-notification button this API
+  redeemed, since a caller naming either would be claiming to be something this API cannot check.
+  ⚠ `AuditOrigin.IsKnown` is a **gate, not a display list**: `AuditMapping` normalizes an unrecognised
+  origin to `null`, so a value stamped on an engine call but missing from that set comes back off the
+  echo having lost its whole provenance, silently and at runtime.
 - **Append-only & immutable.** Rows are never updated or deleted; a correction is a *new* row. Don't add
   an update/delete path. `EnsureCreated`, **not an EF migration** (dev authority — wipe the DB on a schema
   change; see the api `CLAUDE.md` gotcha).

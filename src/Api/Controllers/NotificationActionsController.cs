@@ -33,9 +33,9 @@ namespace TheKrystalShip.Api.Controllers;
 /// <para>
 /// <b>It writes no audit row of its own.</b> An update is kgsm's event to emit, so this stamps
 /// <c>actor</c> and <c>origin</c> onto the engine call and the row is written from the echo — a second
-/// writer for an action the engine already emits is the one thing the audit model forbids. The
-/// consequence is worth stating: the row reads <c>origin: ui</c>, which is true and does not distinguish
-/// a tap on a notification from a click in the panel. A snooze writes nothing anywhere, being a personal
+/// writer for an action the engine already emits is the one thing the audit model forbids. The row reads
+/// <c>origin: notification</c>, a reserved value no request may declare: a caller naming it would be
+/// claiming to be a redemption this API performed. A snooze writes nothing anywhere, being a personal
 /// preference like every other push preference.
 /// </para>
 /// </remarks>
@@ -124,10 +124,10 @@ public sealed class NotificationActionsController(
         if (job is null)
             return Refuse($"Something is already running on {action.Target}.");
 
-        // origin is the panel: the notification IS this panel's surface, reaching a phone. The closed
-        // vocabulary has no value for "through a notification", and widening it for one transport is
-        // the move the audit model has already declined once.
-        runner.Start(job, identity.ActorString, AuditOrigin.Ui);
+        // Stamped, not written: server.update is kgsm's event to emit, so the provenance rides the
+        // engine call and the audit row comes from the echo. A second writer for an action the engine
+        // already emits is what the audit model forbids.
+        runner.Start(job, identity.ActorString, AuditOrigin.Notification);
         logger.LogInformation(
             "notification action: update {ServerId} job={JobId} (actor={Actor}, via push)",
             action.Target, job.Id, identity.ActorString);

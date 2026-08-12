@@ -31,9 +31,25 @@ panel's own gates in the panel's own order — tier, observed run state, one-in-
 
 **It writes no audit row of its own.** `server.update` is kgsm's event to emit, so this stamps actor and
 origin onto the engine call and the row comes from the echo — a second writer for an action the engine
-already emits is the one thing the audit model forbids. Worth stating plainly: that row reads
-`origin: ui`, which is true and does **not** distinguish a tap on a notification from a click in the
-panel. A snooze writes nothing anywhere, being a personal preference like every other push preference.
+already emits is the one thing the audit model forbids. A snooze writes nothing anywhere, being a
+personal preference like every other push preference.
+
+### Added — `notification` joins the origin vocabulary
+
+The surface a person answered from, when they answered from a lock screen with a notification's worth of
+context and no page in front of them. That is what `origin` is for — the same reason `discord` is in the
+set — and reading back later that an update was applied that way is a materially different fact from a
+click in the panel.
+
+It names the **notification, not the device**: these buttons render on a desktop browser as readily as on
+a phone, and the panel installed to a home screen stamps `ui` for everything done inside it. So the
+distinction is notification-versus-panel, never phone-versus-laptop.
+
+Reserved, like `system`: `IsCallerDeclarable` refuses it, because a request naming it would be claiming
+to be a redemption this API performed, which is the one claim it cannot check. ⚠ `AuditOrigin.IsKnown` is
+a **gate, not a display list** — `AuditMapping` normalizes an unrecognised origin to `null`, so a value
+stamped on an engine call but missing from that set comes back off the echo having lost its whole
+provenance, silently and at runtime.
 
 A snooze is narrower than a preference on purpose. It silences **one condition** — one rule on one
 sensor — for **one person**, and expires on its own; somebody muting a hot NVMe for the afternoon has

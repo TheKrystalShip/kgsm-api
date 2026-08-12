@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
+using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Integrations;
 using TheKrystalShip.Api.Services.Integrations.WebPush;
 using TheKrystalShip.KGSM.Auth;
@@ -167,6 +168,46 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
         Assert.Contains((who.Subject, condition), active);
         // Only theirs, and only that condition — a snooze is not a mute button on the whole event.
         Assert.DoesNotContain(("someone-else", condition), active);
+    }
+}
+
+/// <summary>
+/// The origin a redeemed button carries, and who is allowed to claim it.
+/// </summary>
+public class NotificationOriginTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>
+{
+    [Fact]
+    public void The_notification_origin_is_in_the_closed_set()
+        // Load-bearing rather than cosmetic: AuditMapping normalizes an unrecognised origin to null, so
+        // a value stamped on an engine call but missing from this set comes back off the echo having
+        // lost the whole provenance — silently, at runtime.
+        => Assert.True(AuditOrigin.IsKnown(AuditOrigin.Notification));
+
+    [Fact]
+    public void It_survives_the_engine_echo()
+        // The whole provenance passes through here: the API stamps the origin onto the engine call, the
+        // engine puts it on its event verbatim, and this is what shapes the event back into a row. A
+        // value the closed set does not contain is normalized to null right here, so the round trip is
+        // the assertion that matters — not the constant existing.
+        => Assert.Equal(AuditOrigin.Notification, AuditMapping.NormalizeOrigin("Notification"));
+
+    [Fact]
+    public void No_caller_may_declare_it()
+        // Reserved like `system`. A request naming it would be claiming to be a redemption this API
+        // performed, which is the one claim it has no way to check.
+        => Assert.False(AuditOrigin.IsCallerDeclarable(AuditOrigin.Notification));
+
+    [Fact]
+    public async Task A_command_declaring_it_is_refused()
+    {
+        HttpClient c = factory.CreateClient();
+        c.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Operator));
+
+        HttpResponseMessage res = await c.PostAsJsonAsync(
+            "/api/v1/servers/factorio-01/commands", new { verb = "update", origin = "notification" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
     }
 }
 

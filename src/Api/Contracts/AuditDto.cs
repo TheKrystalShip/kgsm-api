@@ -290,9 +290,11 @@ public static class AuditTargetKind
 }
 
 /// <summary>
-/// The closed origin set (architecture.html §3·d). <see cref="System"/> is reserved for the
-/// engine/watchdog path (stamped at the kgsm level via <c>KGSM_EVENT_ORIGIN</c>); the API never
-/// emits it. <see cref="IsCallerDeclarable"/> is the subset a request may declare on the command path.
+/// The closed origin set (architecture.html §3·d). Two values are <b>reserved</b> and no request may
+/// declare either: <see cref="System"/> for the engine/watchdog path (stamped at the kgsm level via
+/// <c>KGSM_EVENT_ORIGIN</c>; the API never emits it), and <see cref="Notification"/>, which this API
+/// stamps itself when it redeems a notification button. <see cref="IsCallerDeclarable"/> is the subset a
+/// request may name.
 /// </summary>
 public static class AuditOrigin
 {
@@ -302,13 +304,32 @@ public static class AuditOrigin
     public const string System = "system";
     public const string Api = "api";
 
-    /// <summary>True if <paramref name="origin"/> is one of the closed set (used to normalize an event's
-    /// origin; an unrecognized value is treated as null — never fabricated).</summary>
-    public static bool IsKnown(string? origin) =>
-        origin is Ui or Assistant or Discord or System or Api;
+    /// <summary>
+    /// A button on a push notification, tapped without the panel open.
+    /// <para>
+    /// It is a surface of its own rather than a flavour of <see cref="Ui"/>, which is what origin is
+    /// for — the same reason <see cref="Discord"/> is here. A person answering from a lock screen has a
+    /// notification's worth of context and no page in front of them, and reading back later that an
+    /// update was applied that way is a materially different fact from a click in the panel.
+    /// </para>
+    /// <para>
+    /// It names the notification, not the device: these buttons render on a desktop browser as readily
+    /// as on a phone, and the panel installed to a home screen stamps <see cref="Ui"/> for everything
+    /// done inside it. So the distinction here is notification-versus-panel, never phone-versus-laptop.
+    /// </para>
+    /// </summary>
+    public const string Notification = "notification";
 
-    /// <summary>True if a client may declare <paramref name="origin"/> on the command path —
-    /// everything except <see cref="System"/> (reserved for autonomous engine actions).</summary>
+    /// <summary>True if <paramref name="origin"/> is one of the closed set (used to normalize an event's
+    /// origin; an unrecognized value is treated as null — never fabricated). ⚠ A value stamped on an
+    /// engine call but missing here comes back off the echo as <see langword="null"/>: this is the gate
+    /// the whole provenance passes through, not a display list.</summary>
+    public static bool IsKnown(string? origin) =>
+        origin is Ui or Assistant or Discord or System or Api or Notification;
+
+    /// <summary>True if a client may declare <paramref name="origin"/> on the command path — everything
+    /// except the two this host stamps for itself. A caller naming <see cref="Notification"/> would be
+    /// claiming to be a redemption this API performed, which is exactly the claim it cannot check.</summary>
     public static bool IsCallerDeclarable(string origin) =>
         origin is Ui or Assistant or Discord or Api;
 }
