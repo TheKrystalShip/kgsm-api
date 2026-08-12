@@ -62,6 +62,31 @@ public sealed class PushActionEntity
     public DateTimeOffset ExpiresAt { get; set; }
 }
 
+/// <summary>
+/// How the one multi-target action carries its targets.
+/// </summary>
+/// <remarks>
+/// <b>A separator is safe here and nowhere else.</b> The moderation kinds keep the player out of
+/// <see cref="PushActionEntity.Target"/> precisely because a character name is whatever a game let somebody
+/// type; a kgsm instance name is a constrained identifier that cannot contain a comma, so joining a list of
+/// them is unambiguous. Anything that does not round-trip is dropped rather than guessed at.
+/// </remarks>
+public static class PushActionTargets
+{
+    /// <summary>What <see cref="PushActionEntity.Target"/> reads for a batch — the servers are in
+    /// <see cref="PushActionEntity.Subject"/>, and this says so rather than naming one of them.</summary>
+    public const string AllServers = "*";
+
+    private const char Separator = ',';
+
+    public static string Join(IEnumerable<string> ids) => string.Join(Separator, ids);
+
+    public static IReadOnlyList<string> Split(string? joined) =>
+        string.IsNullOrWhiteSpace(joined)
+            ? []
+            : joined.Split(Separator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+}
+
 /// <summary>The closed set of operations a notification button can redeem. Deliberately short — a verb
 /// belongs here only when a single tap, with no further context, is an unambiguous instruction.</summary>
 public static class PushActionKind
@@ -106,9 +131,16 @@ public static class PushActionKind
     /// </summary>
     public const string UserApprove = "user.approve";
 
+    /// <summary>
+    /// Apply the available update to every server a summary named. The one action that acts on more than
+    /// one thing, and it exists only for a digest — where the batch is uniform, so the instruction reads
+    /// the same as the single-server one it repeats.
+    /// </summary>
+    public const string ServerUpdateAll = "server.update_all";
+
     public static bool IsKnown(string? kind) =>
         kind is ServerUpdate or ServerStart or ServerStop or ConditionSnooze
-             or PlayerKick or PlayerBan or LeafRestart or UserApprove;
+             or PlayerKick or PlayerBan or LeafRestart or UserApprove or ServerUpdateAll;
 
     /// <summary>The moderation action a kind runs, or <see langword="null"/> when it is not one. Maps onto
     /// the same <see cref="Contracts.ModerationAction"/> vocabulary the panel's own route takes, so the two

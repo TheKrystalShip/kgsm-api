@@ -284,7 +284,13 @@ public class Startup(IConfiguration configuration)
         // event-socket consumer — it rides the existing audit flow. Singleton bus (a bounded channel) + a
         // hosted drain loop, the always-on-hosted-service shape of the audit consumer / alert engine.
         services.AddSingleton<INotificationBus, NotificationBus>();
+        services.AddSingleton<NotificationDigestStore>();
         services.AddHostedService<NotificationDeliveryWorker>();
+
+        // The digest's own loop. The delivery worker is blocked on the bus for the life of the process,
+        // which is right for it and useless here: a summary becomes due because time passed, and on a
+        // quiet host nothing will happen to wake it.
+        services.AddHostedService<NotificationDigestWorker>();
 
         // The one notifiable fact with no event behind it: a server left running with nobody on it. It is a
         // reading taken from the engine and the supervisor agreeing over a dwell, published straight onto

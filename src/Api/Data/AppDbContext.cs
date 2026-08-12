@@ -110,6 +110,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// Same creation posture as the rest of the push tables.</summary>
     public DbSet<PushQuietHoursEntity> PushQuietHours => Set<PushQuietHoursEntity>();
 
+    /// <summary>Facts held back for a provider whose rule for them says <c>digest</c>. Durable because a
+    /// summary lost to a restart was never delivered and never reported undelivered.</summary>
+    public DbSet<NotificationDigestEntity> NotificationDigests => Set<NotificationDigestEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<PushActionEntity>(e =>
@@ -120,6 +124,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 v => v.UtcTicks,
                 v => new DateTimeOffset(v, TimeSpan.Zero));
             e.Property(p => p.ExpiresAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+        });
+
+        modelBuilder.Entity<NotificationDigestEntity>(e =>
+        {
+            e.ToTable("notification_digest");
+            e.HasKey(d => d.Id);
+            e.Property(d => d.Ts).HasConversion(
                 v => v.UtcTicks,
                 v => new DateTimeOffset(v, TimeSpan.Zero));
         });

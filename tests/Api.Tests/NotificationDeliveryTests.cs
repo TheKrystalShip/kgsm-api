@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Hosting;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
@@ -393,7 +394,7 @@ public sealed class NotificationDeliveryE2ETests
     }
 
     [Fact]
-    public async Task OnceCadence_Gated_OnlineStillDelivers()
+    public async Task OnceCadence_DeliversTheFirst_AndSuppressesTheRest()
     {
         using var f = new NotificationDeliveryFactory();
         HttpClient c = AdminClient(f);
@@ -401,17 +402,80 @@ public sealed class NotificationDeliveryE2ETests
         {
             webhook = Webhook,
             enabled = true,
-            events = new[] { new { id = "crash", cadence = "once" } }, // once/digest deliver nothing in B
+            events = new[] { new { id = "crash", cadence = "once" } },
         });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
-        await audit.AppendAsync(CrashWrite("srv-b")); // gated (cadence once, deferred to C)
-        await audit.AppendAsync(StartWrite("srv-b")); // the barrier — every → delivers
+        await audit.AppendAsync(CrashWrite("srv-b"));  // the first — delivers
+        await audit.AppendAsync(CrashWrite("srv-b"));  // the same news — held for a day
+        await audit.AppendAsync(StartWrite("srv-b"));  // the barrier: every → delivers, and it is sequential
+
+        await f.Webhook.WaitForAsync(2, Timeout);
+        RecordedRequest[] sent = f.Webhook.Requests.ToArray();
+
+        // Two posts, not three: `once` is the same coalescing as `every` over a much longer window, so the
+        // first occurrence still arrives — a rule that swallowed it too would be a mute, not a cadence.
+        Assert.Equal(2, sent.Length);
+        Assert.Contains("crashed", sent[0].Body);
+        Assert.Contains("is online", sent[1].Body);
+    }
+
+    [Fact]
+    public async Task DigestCadence_HoldsItBack_RatherThanDroppingIt()
+    {
+        using var f = new NotificationDeliveryFactory();
+        HttpClient c = AdminClient(f);
+        await c.PatchAsJsonAsync("/api/v1/integrations/slack", new
+        {
+            webhook = Webhook,
+            enabled = true,
+            events = new[] { new { id = "crash", cadence = "digest" } },
+        });
+
+        AuditService audit = f.Services.GetRequiredService<AuditService>();
+        await audit.AppendAsync(CrashWrite("srv-d"));  // held
+        await audit.AppendAsync(StartWrite("srv-d"));  // the barrier — every → delivers
 
         await f.Webhook.WaitForAsync(1, Timeout);
         RecordedRequest only = Assert.Single(f.Webhook.Requests);
         Assert.Contains("is online", only.Body);
         Assert.DoesNotContain("crashed", only.Body);
+
+        // Held, not dropped: the row is waiting for its window, and a restart would not lose it.
+        var digests = f.Services.GetRequiredService<NotificationDigestStore>();
+        Assert.Empty(await digests.TakeDueAsync("slack", DateTimeOffset.UtcNow, default));
+        IReadOnlyList<Data.NotificationDigestEntity> due =
+            await digests.TakeDueAsync("slack", DateTimeOffset.UtcNow + NotificationDigestStore.Window, default);
+        Assert.Equal("crash", Assert.Single(due).CatalogId);
+    }
+
+    [Fact]
+    public async Task ADueDigest_GoesOutAsOneMessage()
+    {
+        using var f = new NotificationDeliveryFactory();
+        HttpClient c = AdminClient(f);
+        await c.PatchAsJsonAsync("/api/v1/integrations/slack", new
+        {
+            webhook = Webhook,
+            enabled = true,
+            events = new[] { new { id = "crash", cadence = "digest" } },
+        });
+
+        AuditService audit = f.Services.GetRequiredService<AuditService>();
+        await audit.AppendAsync(CrashWrite("srv-e1"));
+        await audit.AppendAsync(CrashWrite("srv-e2"));
+        await audit.AppendAsync(StartWrite("srv-e1"));           // barrier: both crashes are now held
+        await f.Webhook.WaitForAsync(1, Timeout);
+        f.Webhook.Requests.Clear();
+
+        var worker = f.Services.GetServices<IHostedService>().OfType<NotificationDigestWorker>().Single();
+        await worker.FlushAsync(DateTimeOffset.UtcNow + NotificationDigestStore.Window, default);
+
+        RecordedRequest only = Assert.Single(f.Webhook.Requests);
+        // ONE message naming both — sending two would be the cadence nobody chose.
+        Assert.Contains("srv-e1", only.Body);
+        Assert.Contains("srv-e2", only.Body);
+        Assert.Contains("2 crashes", only.Body);
     }
 
     [Fact]

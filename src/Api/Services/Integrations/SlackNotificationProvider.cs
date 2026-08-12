@@ -52,12 +52,38 @@ public sealed class SlackNotificationProvider(HttpClient http, ILogger<SlackNoti
     protected override object TestPayload() =>
         new { text = "✅ KGSM Control Panel — test notification (your Slack webhook is wired up correctly)." };
 
-    protected override object MessagePayload(NotificationEvent ev, NotificationRule rule, IntegrationRecord record)
+    /// <summary>
+    /// One message listing what was held back, headed by a line saying how much and over what span.
+    /// </summary>
+    /// <remarks>
+    /// Each line is the event's own summary, verbatim through the same escaping a single message gets —
+    /// rewriting them here would give one fact two wordings depending on the cadence somebody chose. Past
+    /// <see cref="NotificationDigestStore.MaxListed"/> the rest are counted rather than named: a Slack
+    /// message listing forty crashes is a wall nobody reads, and silently dropping them would be worse
+    /// than saying how many there were.
+    /// </remarks>
+    protected override object DigestPayload(
+        IReadOnlyList<NotificationEvent> events, NotificationRule rule, IntegrationRecord record)
     {
-        string message = FormatMessage(ev);
-        // Optionally mention the configured ops user-group when the rule asks AND a subteam id is set; the
-        // subteam id is admin-supplied config (a structural mention), so it is not escaped — the message
-        // text is (below).
+        string head = SlackEscape(NotificationDigest.Headline(events));
+        IEnumerable<string> lines = events.Take(NotificationDigestStore.MaxListed)
+            .Select(e => "• " + SlackEscape(e.Summary));
+        string tail = events.Count > NotificationDigestStore.MaxListed
+            ? $"\n…and {events.Count - NotificationDigestStore.MaxListed} more"
+            : "";
+
+        string message = $"🗒️ *{head}*\n{string.Join("\n", lines)}{tail}";
+        return Ping(message, rule, record);
+    }
+
+    protected override object MessagePayload(NotificationEvent ev, NotificationRule rule, IntegrationRecord record) =>
+        Ping(FormatMessage(ev), rule, record);
+
+    // Optionally mention the configured ops user-group when the rule asks AND a subteam id is set; the
+    // subteam id is admin-supplied config (a structural mention), so it is not escaped — the message text
+    // already is, by whichever caller built it.
+    private static object Ping(string message, NotificationRule rule, IntegrationRecord record)
+    {
         if (rule.Ping
             && record.Settings.TryGetValue(PingSubteamSetting, out string? subteam)
             && !string.IsNullOrWhiteSpace(subteam))

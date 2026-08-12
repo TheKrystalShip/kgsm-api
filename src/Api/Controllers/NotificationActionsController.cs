@@ -102,6 +102,9 @@ public sealed class NotificationActionsController(
         if (authority.Outcome == AuthorityOutcome.Disabled)
             return Refuse("That account has been switched off.");
 
+        if (action.Kind == PushActionKind.ServerUpdateAll)
+            return await UpdateAllAsync(action, identity, authority.Tier, ct);
+
         if (PushActionKind.VerbFor(action.Kind) is { } verb)
             return await LifecycleAsync(action, verb, identity, authority.Tier, ct);
 
@@ -287,6 +290,69 @@ public sealed class NotificationActionsController(
         // What has happened is that kgsm was asked. Whether the server ends up in that state is the job's
         // answer, and claiming it here would be reporting an outcome nobody has yet.
         return Ok(new PushActionResult(true, $"Asked kgsm to {verb} {action.Target}."));
+    }
+
+    /// <summary>
+    /// Update every server a summary named.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Each one runs the same gates, individually.</b> A batch is not a way past the state check or the
+    /// one-in-flight claim — it is the same verb, several times, and a server that cannot take it now says
+    /// so while the others still go.
+    /// </para>
+    /// <para>
+    /// <b>Partial is the normal outcome, so it is what gets reported.</b> Somewhere in a list of five
+    /// there is usually one mid-backup, and a message saying "updating 5" when it started 4 would be the
+    /// only record that person ever sees of the one that did not.
+    /// </para>
+    /// </remarks>
+    private async Task<IActionResult> UpdateAllAsync(
+        PushActionEntity action, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
+    {
+        if (tier < KgsmTier.Operator)
+            return Refuse("That account is not allowed to update a server.");
+
+        IReadOnlyList<string> targets = PushActionTargets.Split(action.Subject);
+        if (targets.Count == 0)
+            return Refuse("That notification named no servers.");
+
+        IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct).ConfigureAwait(false);
+        var started = new List<string>();
+        var skipped = new List<string>();
+
+        foreach (string id in targets)
+        {
+            Server? server = servers.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.Ordinal));
+            if (server is null) { skipped.Add(id); continue; }
+            if (CommandGate.Inadmissible(Contracts.CommandVerb.Update, server.Status) is not null)
+            {
+                skipped.Add(id);
+                continue;
+            }
+
+            string jobId = "job_" + Guid.NewGuid().ToString("N")[..8];
+            Job? job = jobs.TryStart(jobId, id, Contracts.CommandVerb.Update, DateTimeOffset.UtcNow);
+            if (job is null) { skipped.Add(id); continue; }
+
+            runner.Start(job, identity.ActorString, AuditOrigin.Notification);
+            started.Add(id);
+        }
+
+        logger.LogInformation(
+            "notification action: update {Started} of {Total} (actor={Actor}, via push); skipped: {Skipped}",
+            started.Count, targets.Count, identity.ActorString,
+            skipped.Count == 0 ? "(none)" : string.Join(", ", skipped));
+
+        if (started.Count == 0)
+            return Refuse($"None of the {targets.Count} could be updated right now.");
+
+        string tail = skipped.Count == 0
+            ? ""
+            : $" {string.Join(", ", skipped)} couldn't be started.";
+
+        return Ok(new PushActionResult(true,
+            $"Asked kgsm to update {started.Count} of {targets.Count}.{tail}"));
     }
 
     // The gate's reasons are written as sentence fragments for an error envelope ("server is already

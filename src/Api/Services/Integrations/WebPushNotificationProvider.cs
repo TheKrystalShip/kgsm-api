@@ -133,6 +133,84 @@ public sealed class WebPushNotificationProvider(
     }
 
     /// <summary>
+    /// One summary of everything held back, to everybody who wanted at least one piece of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The per-event gates still apply, per event.</b> A digest is one message about several facts, and
+    /// somebody who switched off crash notifications must not receive crashes because they arrived in a
+    /// batch — so each device gets the summary of <em>its own</em> subset, and a device left with nothing
+    /// gets no push at all. That is why the batch is filtered per device rather than once for everyone.
+    /// </para>
+    /// <para>
+    /// Quiet hours are deliberately not consulted here. A digest is already the delayed, batched form; the
+    /// window's promise is that it holds back interruptions, and this is the cadence somebody chose
+    /// precisely so that things stop interrupting.
+    /// </para>
+    /// </remarks>
+    public async Task<NotificationDeliveryResult> SendDigestAsync(
+        IReadOnlyList<NotificationEvent> events, NotificationRule rule, IntegrationRecord record,
+        CancellationToken ct)
+    {
+        VapidKeyPair? keys = VapidKeyStore.Read(record);
+        if (keys is null) return new NotificationDeliveryResult(false, "no VAPID key on this host");
+
+        IReadOnlyList<PushSubscriptionEntity> devices = await subscriptions.AllAsync(ct).ConfigureAwait(false);
+        if (devices.Count == 0) return new NotificationDeliveryResult(true, null);
+
+        IReadOnlyDictionary<(string, string), bool> prefs = await preferences.AllAsync(ct).ConfigureAwait(false);
+
+        IReadOnlyList<NotificationEvent> Mine(PushSubscriptionEntity d) =>
+            events.Where(e => !prefs.TryGetValue((d.UserSubject, e.CatalogId), out bool want) || want).ToList();
+
+        (int sent, string? firstError) = await FanOutAsync(
+            devices,
+            device => DigestPayloadFor(Mine(device), device, ct),
+            keys,
+            device => Mine(device).Count > 0,
+            ct).ConfigureAwait(false);
+
+        if (sent == 0 && firstError is null) return new NotificationDeliveryResult(true, null);
+        return sent > 0
+            ? new NotificationDeliveryResult(true, null)
+            : new NotificationDeliveryResult(false, firstError);
+    }
+
+    /// <summary>
+    /// The summary body for one device, and the one button a summary can honestly carry.
+    /// </summary>
+    /// <remarks>
+    /// <b>Update all is offered only where the whole batch is updates.</b> Every other action names one
+    /// thing, and a batch verb over a mixed list would be asking for a tap on an instruction the person
+    /// cannot read the scope of. When it is offered, the servers ride in the staged row rather than in the
+    /// payload — the same rule as every other button: the device holds a handle, never an operation.
+    /// </remarks>
+    private async Task<byte[]> DigestPayloadFor(
+        IReadOnlyList<NotificationEvent> mine, PushSubscriptionEntity device, CancellationToken ct)
+    {
+        string headline = NotificationDigest.Headline(mine);
+        IEnumerable<string> lines = mine.Take(NotificationDigestStore.MaxListed).Select(e => e.Summary);
+        string more = mine.Count > NotificationDigestStore.MaxListed
+            ? $" …and {mine.Count - NotificationDigestStore.MaxListed} more"
+            : "";
+
+        var payload = new WebPushPayload(
+            headline, string.Join(" · ", lines) + more,
+            // A summary spans servers, so it names none: a tap opens the panel rather than one of them.
+            ServerId: null, Event: "digest", Tag: "digest", Api: options.PublicOrigin);
+
+        IReadOnlyList<string> updatable = NotificationDigest.UpdatableServers(mine);
+        if (updatable.Count == 0 || device.MaxActions is not > 0 || string.IsNullOrEmpty(device.UserHandle))
+            return Payload(payload);
+
+        string handle = await actions.StageAsync(
+            PushActionKind.ServerUpdateAll, PushActionTargets.AllServers, device.UserHandle!, device.Username,
+            device.Endpoint, "Update all", PushActionTargets.Join(updatable), ct).ConfigureAwait(false);
+
+        return Payload(payload with { Actions = [new WebPushAction(handle, "Update all")] });
+    }
+
+    /// <summary>
     /// Push every device, then record each outcome. A dead subscription (404/410) is deleted on the
     /// spot — a browser that unsubscribed or cleared its data would otherwise be retried forever.
     /// </summary>

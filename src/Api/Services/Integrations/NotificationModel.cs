@@ -26,13 +26,27 @@ public sealed record IntegrationRecord(
 /// whether to post it, how loudly (<see cref="Cadence"/>), and whether to @-mention the ops role.</summary>
 public sealed record NotificationRule(string Id, bool Enabled, string Cadence, bool Ping);
 
-/// <summary>The cadence vocabulary (architecture.html §3·e). <see cref="Every"/> is enforced from M8·c
-/// Increment B; <see cref="Once"/>/<see cref="Digest"/> are accepted in the contract but their delivery
-/// enforcement is deferred (Increment C) — accepted-but-inert, the M8·b reserved-field pattern.</summary>
+/// <summary>How loudly a provider carries one catalog event (architecture.html §3·e).</summary>
 public static class NotificationCadence
 {
+    /// <summary>Every occurrence, subject only to the delivery worker's anti-spam window.</summary>
     public const string Every = "every";
+
+    /// <summary>
+    /// At most one per subject per <see cref="NotificationDeliveryWorker.OnceWindow"/> — the same
+    /// coalescing as <see cref="Every"/>, over a much longer window.
+    /// </summary>
+    /// <remarks>
+    /// A window rather than a literal once-ever, because once-ever has no way back: the first crash a
+    /// server had would be the only one anybody was ever told about. A day is the span over which "this
+    /// again" stops being news and starts being the same news.
+    /// </remarks>
     public const string Once = "once";
+
+    /// <summary>
+    /// Held and delivered as one summary, once the oldest thing waiting reaches
+    /// <see cref="NotificationDigestStore.Window"/>.
+    /// </summary>
     public const string Digest = "digest";
 
     public static bool IsKnown(string? cadence) => cadence is Every or Once or Digest;
@@ -219,4 +233,17 @@ public interface INotificationProvider
     /// <see cref="NotificationDeliveryResult.Ok"/> false + an error, never a faked ok.</summary>
     Task<NotificationDeliveryResult> SendAsync(
         NotificationEvent ev, NotificationRule rule, IntegrationRecord record, CancellationToken ct);
+
+    /// <summary>
+    /// Deliver several held-back facts as one summary — the <c>digest</c> cadence. <paramref name="events"/>
+    /// is never empty and is ordered oldest first.
+    /// </summary>
+    /// <remarks>
+    /// Its own method rather than a loop over <see cref="SendAsync"/>, because the whole point is that it
+    /// is <em>one</em> message: sending five would be the cadence the person did not choose. Honest like
+    /// its sibling — a real failure returns an error, never a faked ok.
+    /// </remarks>
+    Task<NotificationDeliveryResult> SendDigestAsync(
+        IReadOnlyList<NotificationEvent> events, NotificationRule rule, IntegrationRecord record,
+        CancellationToken ct);
 }

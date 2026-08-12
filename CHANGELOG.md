@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `once` and `digest` now mean something
+
+Both have been in the cadence vocabulary since M8·c, accepted on a PATCH and then delivering nothing. An
+admin could set either and receive silence, which is worse than not offering them.
+
+**`once` is at most one per subject per day** — the same coalescing `every` already does, over a much
+longer window. Not a literal once-ever: that would make the first crash a server had the only one anybody
+was ever told about, with nothing to bring it back, which is a mute rather than a cadence.
+
+**`digest` holds facts and delivers them as one message**, once the oldest thing waiting reaches six
+hours. Measured from the oldest pending item rather than a wall clock, so a summary arrives six hours
+after the first thing that would have been in it — needing no notion of what hour counts as morning and
+no timezone to be wrong about.
+
+Held facts live in `notification_digest`, a table rather than a list in memory, because a digest is a
+promise: something held back for hours and then lost to a restart was never delivered and never reported
+undelivered. A batch is **taken before it is sent** — a failed POST loses that summary rather than
+repeating it every tick until the webhook returns, since the same message arriving eight times is a worse
+failure than one that did not.
+
+The headline says what the batch is only where that is true of **every** event in it: "3 servers have an
+update" for a uniform batch, "5 things happened while you were away" for a mixed one. A headline naming
+one kind of event over a body listing four others misleads on the surface where a lot of people stop
+reading. Past eight items the rest are counted rather than named, never dropped silently.
+
+On push, a digest carries **Update all** — but only when the whole batch is `update_available`, since
+every other action names exactly one thing and a batch verb over a mixed list asks for a tap on an
+instruction whose scope cannot be read. Each server still runs the same gates individually, and partial
+is the normal outcome, so partial is what gets reported: "asked kgsm to update 4 of 5. factorio-01
+couldn't be started." The servers ride in the staged row, never in the payload.
+
+The per-event push preferences still apply **per event inside a digest** — somebody who switched crashes
+off does not receive crashes because they arrived in a batch, so each device gets the summary of its own
+subset and a device left with nothing gets no push. Quiet hours deliberately do not apply: a digest is
+already the delayed, batched form, and holding back the thing somebody chose so that things stop
+interrupting would be holding back the wrong thing.
+
+⚠ Cadence is set through `PATCH /api/v1/integrations/{provider}`. The panel has no integrations admin
+screen, so this knob is API-only — as it was before, now that it does something.
+
 ### Added — quiet hours, and a floor for what still gets through
 
 A per-account window with a severity that ignores it. Between the hours somebody names, only what they

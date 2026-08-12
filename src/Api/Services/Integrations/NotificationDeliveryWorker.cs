@@ -30,12 +30,23 @@ public sealed class NotificationDeliveryWorker(
     INotificationBus bus,
     IServiceScopeFactory scopeFactory,
     IntegrationStore store,
+    NotificationDigestStore digests,
     ILogger<NotificationDeliveryWorker> logger) : BackgroundService
 {
     /// <summary>Minimum gap between two deliveries of the same <c>(provider,server,catalog)</c> — the
     /// anti-spam coalesce window. Comfortably longer than the watchdog's crash backoff so a crash loop
     /// pings once per window, not once per cycle.</summary>
     internal static readonly TimeSpan SuppressWindow = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// The same window, for a rule set to <c>once</c>: at most one per subject per day.
+    /// </summary>
+    /// <remarks>
+    /// <b>Not once-ever.</b> A literal reading would mean the first crash a server ever had is the only
+    /// one anybody is ever told about, and nothing would bring it back — the rule would quietly become a
+    /// mute. A day is the span over which "this again" stops being news and starts being the same news.
+    /// </remarks>
+    internal static readonly TimeSpan OnceWindow = TimeSpan.FromHours(24);
 
     // key "provider:server:catalog" -> last delivery attempt. Single-thread access (the drain loop). Pruned
     // when it grows, so an uninstalled server's stale keys don't accumulate.
@@ -76,21 +87,29 @@ public sealed class NotificationDeliveryWorker(
                 ?? NotificationCatalog.DefaultRule(ev.CatalogId);
             if (!rule.Enabled) continue;
 
-            if (!string.Equals(rule.Cadence, NotificationCadence.Every, StringComparison.Ordinal))
+            // Held rather than sent. The batch goes out from FlushAsync once the oldest thing in it has
+            // waited long enough, so nothing further happens for this event here.
+            if (string.Equals(rule.Cadence, NotificationCadence.Digest, StringComparison.Ordinal))
             {
-                logger.LogInformation(
-                    "notification '{Catalog}' for {Server} via {Provider} is cadence '{Cadence}' — "
-                    + "once/digest delivery is deferred to Increment C and sends NOTHING in B (set 'every' to receive it)",
-                    ev.CatalogId, ev.ServerId, provider.ProviderId, rule.Cadence);
+                await digests.AddAsync(provider.ProviderId, ev, ct).ConfigureAwait(false);
+                logger.LogDebug("held '{Catalog}' for {Server} for the {Provider} digest",
+                    ev.CatalogId, ev.ServerId, provider.ProviderId);
                 continue;
             }
 
+            // `once` is the same coalescing over a much longer window — the vocabulary's third value is a
+            // question of how often, not of a different delivery path.
+            TimeSpan window = string.Equals(rule.Cadence, NotificationCadence.Once, StringComparison.Ordinal)
+                ? OnceWindow
+                : SuppressWindow;
+
             string key = $"{provider.ProviderId}:{ev.SubjectKey ?? ev.ServerId}:{ev.CatalogId}";
-            if (_lastSent.TryGetValue(key, out DateTimeOffset last) && now - last < SuppressWindow)
+            if (_lastSent.TryGetValue(key, out DateTimeOffset last) && now - last < window)
             {
                 logger.LogDebug(
-                    "suppressed '{Catalog}' for {Server} via {Provider} — last sent {Ago:n0}s ago (anti-spam window {Window:n0}s)",
-                    ev.CatalogId, ev.ServerId, provider.ProviderId, (now - last).TotalSeconds, SuppressWindow.TotalSeconds);
+                    "suppressed '{Catalog}' for {Server} via {Provider} — last sent {Ago:n0}s ago (cadence '{Cadence}', window {Window:n0}s)",
+                    ev.CatalogId, ev.ServerId, provider.ProviderId, (now - last).TotalSeconds,
+                    rule.Cadence, window.TotalSeconds);
                 continue;
             }
 
@@ -109,13 +128,15 @@ public sealed class NotificationDeliveryWorker(
         PruneSuppression(now);
     }
 
-    // Keep _lastSent bounded: once it grows past a threshold, drop entries older than the window (they can
-    // no longer suppress anything). Cheap and only runs when the map is non-trivial.
+    // Keep _lastSent bounded: once it grows past a threshold, drop entries older than the LONGEST window
+    // that could still suppress something. Pruning at the short one would quietly turn every `once` rule
+    // back into `every` on a busy host, which is the sort of bug that only shows up as "why am I being
+    // spammed again".
     private void PruneSuppression(DateTimeOffset now)
     {
-        if (_lastSent.Count < 64) return;
+        if (_lastSent.Count < 512) return;
         foreach (string stale in _lastSent
-                     .Where(kv => now - kv.Value > SuppressWindow)
+                     .Where(kv => now - kv.Value > OnceWindow)
                      .Select(kv => kv.Key)
                      .ToList())
             _lastSent.Remove(stale);

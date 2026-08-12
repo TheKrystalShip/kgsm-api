@@ -31,6 +31,10 @@ public abstract class WebhookNotificationProvider(HttpClient http, ILogger logge
     /// <summary>The provider-shaped payload for a real event, honoring the rule (e.g. a ping).</summary>
     protected abstract object MessagePayload(NotificationEvent ev, NotificationRule rule, IntegrationRecord record);
 
+    /// <summary>The provider-shaped payload for a summary of several events.</summary>
+    protected abstract object DigestPayload(
+        IReadOnlyList<NotificationEvent> events, NotificationRule rule, IntegrationRecord record);
+
     public async Task<NotificationTestResult> TestAsync(IntegrationRecord record, CancellationToken ct)
     {
         if (record.Secret is null)
@@ -47,6 +51,17 @@ public abstract class WebhookNotificationProvider(HttpClient http, ILogger logge
         if (record.Secret is null)
             return new NotificationDeliveryResult(false, "no webhook configured");
         (bool ok, string? error) = await PostAsync(record.Secret, MessagePayload(ev, rule, record), ct).ConfigureAwait(false);
+        return new NotificationDeliveryResult(ok, error);
+    }
+
+    public async Task<NotificationDeliveryResult> SendDigestAsync(
+        IReadOnlyList<NotificationEvent> events, NotificationRule rule, IntegrationRecord record,
+        CancellationToken ct)
+    {
+        if (record.Secret is null)
+            return new NotificationDeliveryResult(false, "no webhook configured");
+        (bool ok, string? error) = await PostAsync(record.Secret, DigestPayload(events, rule, record), ct)
+            .ConfigureAwait(false);
         return new NotificationDeliveryResult(ok, error);
     }
 
