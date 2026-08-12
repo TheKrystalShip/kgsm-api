@@ -1,3 +1,5 @@
+using System.Globalization;
+using TheKrystalShip.Api.Services.Alerts;
 using System.Text.Json;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
@@ -662,4 +664,118 @@ public static class AuditMapping
         Summary = w.Summary,
         Meta = w.Meta is null || w.Meta.Count == 0 ? null : JsonSerializer.Serialize(w.Meta),
     };
+
+    /// <summary>
+    /// Map a kgsm-monitor <c>host_threshold_breached</c> event to a <c>host.threshold.breach</c> row.
+    /// </summary>
+    /// <remarks>
+    /// The monitor records the measurement; the wording, the severity and the target are applied here, at
+    /// read time. That split is the point: the journal holds what was measured, so two surfaces can phrase
+    /// the same episode differently without either being wrong, and neither can be made wrong by the
+    /// other's vocabulary being frozen into the record.
+    /// <para>
+    /// The row's timestamp is <c>OpenedTs</c> — the moment the condition changed — not the moment the line
+    /// was written. A reader scanning the trail has to see the breach where it happened.
+    /// </para>
+    /// </remarks>
+    public static AuditWrite FromThresholdBreachedEvent(HostThresholdBreachedData d, string hostId)
+    {
+        bool hostScope = !string.Equals(d.Scope, "server", StringComparison.Ordinal);
+        string noun = ConditionDisplay.Noun(d.Metric);
+        string subject = hostScope
+            ? (string.IsNullOrEmpty(d.Ref) ? hostId : d.Ref!)
+            : (d.ServerId ?? "server");
+
+        var meta = ThresholdMeta(d);
+        meta["value"] = ConditionDisplay.Format(d.Metric, d.OpenValue);
+
+        return new AuditWrite(
+            Ts: DateTimeOffset.FromUnixTimeMilliseconds(d.OpenedTs),
+            Origin: AuditOrigin.System,
+            Actor: ParseActor(MonitorActor),
+            Action: AuditAction.HostThresholdBreach,
+            // As loud as the band it reached. A condition that touched danger and eased back to warn was
+            // still a danger-band episode, which is why the peak band decides and not the current one.
+            Severity: string.Equals(d.PeakBand, "danger", StringComparison.Ordinal)
+                ? AuditSeverity.Danger
+                : AuditSeverity.Warn,
+            Target: hostScope
+                ? new AuditTarget(AuditTargetKind.Host, hostId, hostId)
+                : new AuditTarget(AuditTargetKind.Server, d.ServerId ?? "", d.ServerId),
+            ServerId: hostScope ? null : d.ServerId,
+            HostId: hostId,
+            Summary: $"{subject} {noun} crossed {ConditionDisplay.Format(d.Metric, d.Threshold)}",
+            Meta: meta);
+    }
+
+    /// <summary>
+    /// Map a kgsm-monitor <c>host_threshold_cleared</c> event to a <c>host.threshold.clear</c> row.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>A clear is not always a recovery.</b> An episode that ended because its rule was retuned,
+    /// disabled or removed did not come back under its line — the value was never observed to come down at
+    /// all. Saying "back to normal" for those would report a measurement nobody took, so the close reason
+    /// picks the sentence.
+    /// </remarks>
+    public static AuditWrite FromThresholdClearedEvent(HostThresholdClearedData d, string hostId)
+    {
+        bool hostScope = !string.Equals(d.Scope, "server", StringComparison.Ordinal);
+        string noun = ConditionDisplay.Noun(d.Metric);
+        string subject = hostScope
+            ? (string.IsNullOrEmpty(d.Ref) ? hostId : d.Ref!)
+            : (d.ServerId ?? "server");
+
+        long heldSec = Math.Max(0, (d.ClosedTs - d.OpenedTs) / 1000);
+
+        var meta = ThresholdMeta(d);
+        meta["heldSec"] = heldSec.ToString(CultureInfo.InvariantCulture);
+        meta["value"] = ConditionDisplay.Format(d.Metric, d.CloseValue ?? d.PeakValue);
+        if (!string.IsNullOrEmpty(d.CloseReason)) meta["reason"] = d.CloseReason!;
+
+        string summary = d.CloseReason switch
+        {
+            // The rule was retuned, disabled or removed while this was firing.
+            "unwatched" => $"{subject} {noun} no longer watched after {ConditionDisplay.Duration(heldSec)} over its threshold",
+            // The monitor restarted while this was firing. The condition may well have still been true.
+            "interrupted" => $"{subject} {noun} still over its threshold when monitoring stopped, after {ConditionDisplay.Duration(heldSec)}",
+            _ => $"{subject} {noun} back to normal after {ConditionDisplay.Duration(heldSec)}",
+        };
+
+        return new AuditWrite(
+            Ts: DateTimeOffset.FromUnixTimeMilliseconds(d.ClosedTs),
+            Origin: AuditOrigin.System,
+            Actor: ParseActor(MonitorActor),
+            Action: AuditAction.HostThresholdClear,
+            // A recovery is information, never a warning.
+            Severity: AuditSeverity.Info,
+            Target: hostScope
+                ? new AuditTarget(AuditTargetKind.Host, hostId, hostId)
+                : new AuditTarget(AuditTargetKind.Server, d.ServerId ?? "", d.ServerId),
+            ServerId: hostScope ? null : d.ServerId,
+            HostId: hostId,
+            Summary: summary,
+            Meta: meta);
+    }
+
+    /// <summary>The meta both threshold rows share.</summary>
+    private static Dictionary<string, string> ThresholdMeta(HostThresholdEventDataBase d)
+    {
+        var meta = new Dictionary<string, string>
+        {
+            ["episodeId"] = d.EpisodeId,
+            ["ruleKey"] = d.RuleKey,
+            ["metric"] = d.Metric,
+            ["threshold"] = ConditionDisplay.Format(d.Metric, d.Threshold),
+            ["peak"] = ConditionDisplay.Format(d.Metric, d.PeakValue),
+        };
+
+        if (!string.IsNullOrEmpty(d.Ref)) meta["ref"] = d.Ref!;
+        return meta;
+    }
+
+    /// <summary>
+    /// The identity a threshold row carries. The monitor established the fact; this API only relays it,
+    /// and a bare <c>system</c> could not tell a measured breach from any other unattended action.
+    /// </summary>
+    private const string MonitorActor = "system:monitor";
 }

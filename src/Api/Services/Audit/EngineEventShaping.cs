@@ -102,6 +102,10 @@ public static class EngineEventShaping
             "instance_upnp_opened" => Map<InstanceUpnpOpenedData>(item, d => AuditMapping.FromUpnpOpenedEvent(d, hostId)),
             "instance_upnp_closed" => Map<InstanceUpnpClosedData>(item, d => AuditMapping.FromUpnpClosedEvent(d, hostId)),
             "instance_upnp_reasserted" => Map<InstanceUpnpReassertedData>(item, d => AuditMapping.FromUpnpReassertedEvent(d, hostId)),
+            // kgsm-monitor's own journal: the host's measurements, shaped into rows here rather than
+            // polled out of its database and transcribed.
+            "host_threshold_breached" => Map<HostThresholdBreachedData>(item, d => AuditMapping.FromThresholdBreachedEvent(d, hostId)),
+            "host_threshold_cleared" => Map<HostThresholdClearedData>(item, d => AuditMapping.FromThresholdClearedEvent(d, hostId)),
             "instance_player_joined" => Map<InstancePlayerJoinedData>(item, d => AuditMapping.FromPlayerJoinedEvent(d, hostId)),
             "instance_player_left" => Map<InstancePlayerLeftData>(item, d => AuditMapping.FromPlayerLeftEvent(d, hostId)),
             "instance_player_kicked" => Map<InstancePlayerKickedData>(item,
@@ -151,7 +155,9 @@ public static class EngineEventShaping
     // Data — see EventDataBase's remarks) before handing off to the real From*Event mapper. Null/failed
     // deserialize falls back to a blank T (never throws) so a malformed or absent Data payload still
     // yields an honest row via the mapper's own null-handling, rather than vanishing.
-    private static AuditWrite? Map<T>(EventHistoryEntry item, Func<T, AuditWrite> build) where T : EventDataBase, new()
+    // Constrained to the common root rather than the instance-scoped base: a host-scoped payload carries
+    // the same envelope metadata and none of the instance identity, so the shared part is all this needs.
+    private static AuditWrite? Map<T>(EventHistoryEntry item, Func<T, AuditWrite> build) where T : KgsmEventDataBase, new()
     {
         T typed;
         if (item.Data is { ValueKind: JsonValueKind.Object } data)
@@ -167,8 +173,14 @@ public static class EngineEventShaping
         typed.Timestamp = item.Ts;
         typed.Actor = item.Actor;
         typed.Origin = item.Origin;
-        if (string.IsNullOrEmpty(typed.InstanceName) && !string.IsNullOrEmpty(item.Instance))
-            typed.InstanceName = item.Instance; // defensive — Data already carries it in practice
+        // Instance-scoped payloads only: a host-scoped one has no instance to fall back to, and the
+        // payload already carries the name in practice — this is the defensive path, not the normal one.
+        if (typed is EventDataBase instanceScoped
+            && string.IsNullOrEmpty(instanceScoped.InstanceName)
+            && !string.IsNullOrEmpty(item.Instance))
+        {
+            instanceScoped.InstanceName = item.Instance;
+        }
 
         return build(typed);
     }

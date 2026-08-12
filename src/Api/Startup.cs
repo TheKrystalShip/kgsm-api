@@ -479,10 +479,13 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<AlertEngine>();
         services.AddHostedService(sp => sp.GetRequiredService<AlertEngine>());
 
-        // The durable half of the same conditions: an audit row per threshold breach and recovery,
-        // transcribed from kgsm-monitor's own episode record rather than from the alert engine's in-memory
-        // set — which forgets on restart, and would lose any episode that spanned one.
-        services.AddHostedService<ThresholdAuditRecorder>();
+        // The durable half of the same conditions needs nothing registered here. kgsm-monitor writes a
+        // host_threshold_breached / _cleared event to its own journal the moment an episode opens or
+        // closes, and this API reads that journal like every other producer's — so a breach reaches the
+        // audit trail because the component that measured it recorded it, not because this one polled a
+        // database and copied rows into its own store. The row is still shaped here at read time
+        // (AuditMapping.FromThresholdBreachedEvent), because the wording and severity are a reader's
+        // business and the record holds only what was measured.
 
         // Cluster message bus — Phase 1 foundation (docs/cluster-message-bus-plan.md, PLAN-peers.md §3).
         // The service-token mint/validate seam. Registered unconditionally — ClusterTokenService itself
