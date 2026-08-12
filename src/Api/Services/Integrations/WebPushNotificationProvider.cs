@@ -328,6 +328,7 @@ public sealed class WebPushNotificationProvider(
 
             // These three name no server, so the summary carries the whole subject and the title is the
             // headline — the same shape a host-scope threshold takes.
+            case "restart_soon": return $"{server} restarts shortly";
             case "leaf_down": return "A service went down";
             case "leaf_up": return "A service came back";
             case "awaiting_approval": return "Someone is waiting to be let in";

@@ -132,6 +132,8 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
 
         // Unused by the scrollback controller — satisfy the interface.
         public IAsyncEnumerable<string> FollowConsoleAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<WatchdogConsoleRun>> GetConsoleRunsAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<string>> GetConsoleRunTailAsync(string instanceName, int run, int lines, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<bool> IsReadyAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<WatchdogReadyState?> GetReadyAsync(CancellationToken cancellationToken = default) => Task.FromResult<WatchdogReadyState?>(null);
         public Task<WatchdogActionResult> StartAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotSupportedException();

@@ -109,6 +109,14 @@ public sealed class ApiSettings
         Risk = LeafRisk.Wiring, NoDefault = true)]
     public string? SchedulerSocketPath { get; set; }
 
+    /// <summary>kgsm-scheduler control socket. Blank means a scheduled restart cannot be postponed from
+    /// here — the panel offers nothing rather than offering something that fails.</summary>
+    /// <panel>The scheduler's control socket, which postponing a scheduled restart goes through. Empty
+    /// means restarts can be seen but not deferred.</panel>
+    [LeafField("schedulerControlSocket", "Scheduler control socket", Group = "leaves", Type = LeafType.Path,
+        Risk = LeafRisk.Wiring, NoDefault = true)]
+    public string? SchedulerControlSocketPath { get; set; }
+
     /// <summary>kgsm-bot status socket. Blank reports the bot's status surface absent.</summary>
     /// <panel>The Discord bot's status socket, which the Services page reads its gateway and channel
     /// state from. Empty means the bot page shows systemd liveness only.</panel>

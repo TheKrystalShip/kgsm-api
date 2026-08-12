@@ -291,6 +291,14 @@ public sealed class ConsoleBridgeTests
         public Task<IReadOnlyList<string>> GetConsoleTailAsync(string instanceName, int lines, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
 
+        // The console-run pair, stubbed: this fake exists for presence/bridge behaviour and answers the
+        // honest "no runs" every implementation gives for an instance with no console.
+        public Task<IReadOnlyList<WatchdogConsoleRun>> GetConsoleRunsAsync(string instanceName, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<WatchdogConsoleRun>>(Array.Empty<WatchdogConsoleRun>());
+
+        public Task<IReadOnlyList<string>> GetConsoleRunTailAsync(string instanceName, int run, int lines, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+
         // Unused by the console bridge — satisfy the interface.
         public Task<bool> IsReadyAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<WatchdogReadyState?> GetReadyAsync(CancellationToken cancellationToken = default) => Task.FromResult<WatchdogReadyState?>(null);

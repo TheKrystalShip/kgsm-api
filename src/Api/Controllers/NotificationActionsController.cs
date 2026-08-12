@@ -115,6 +115,7 @@ public sealed class NotificationActionsController(
         {
             PushActionKind.ConditionSnooze => await SnoozeAsync(action, ct),
             PushActionKind.LeafRestart => await RestartLeafAsync(action, identity, authority.Tier, ct),
+            PushActionKind.SchedulePostpone => await PostponeAsync(action, identity, authority.Tier, ct),
             PushActionKind.UserApprove => await ApproveAsync(action, identity, authority.Tier, ct),
             _ => Refuse("This build does not know how to do that."),
         };
@@ -161,6 +162,54 @@ public sealed class NotificationActionsController(
         return ok
             ? Ok(new PushActionResult(true, $"Asked systemd to restart {leaf.DisplayName}."))
             : Unavailable($"systemd would not restart {leaf.DisplayName}.");
+    }
+
+    /// <summary>
+    /// Push a server's next scheduled restart back an hour.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Operator, like every other verb that changes what a server does.</b> Deferring a restart is not
+    /// a settings change — the schedule is untouched and the fire after this one lands where it always
+    /// would have — but it does decide whether a server goes down tonight, which is the operator's call.
+    /// </para>
+    /// <para>
+    /// <b>The scheduler enforces nothing, so this does.</b> Its control socket carries no identity: the
+    /// gate here is the only one there is, which is why it runs before the socket is dialled rather than
+    /// being left to a daemon that has no way to apply it.
+    /// </para>
+    /// <para>
+    /// <b>No audit row.</b> A postponement changes no configuration and leaves no trace on the host — the
+    /// scheduler holds the moved target in memory, and it is gone if the daemon restarts. A row claiming
+    /// a durable change would be recording something that is not there.
+    /// </para>
+    /// </remarks>
+    private async Task<IActionResult> PostponeAsync(
+        PushActionEntity action, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
+    {
+        if (tier < KgsmTier.Operator)
+            return Refuse("That account is not allowed to change when a server restarts.");
+
+        if (HttpContext.RequestServices.GetService(typeof(SchedulerClient)) is not SchedulerClient scheduler
+            || !scheduler.CanControl)
+            return Unavailable("This host is not wired to the scheduler.");
+
+        SchedulerControlResponse result = await scheduler
+            .PostponeAsync(action.Target, PushActionCatalog.PostponeBy, ct).ConfigureAwait(false);
+
+        logger.LogInformation("notification action: postpone {Server} — {Message} (actor={Actor}, via push)",
+            action.Target, result.Message, identity.ActorString);
+
+        if (!result.Ok)
+            return Refuse(Capitalize(result.Message) + ".");
+
+        // The new time, in the words the person will read it in. The scheduler answers with it precisely
+        // so a caller never has to ask again to find out what it just did.
+        string when = result.NextFireUtc is { } next
+            ? $" It will restart at {next.ToLocalTime():HH:mm} instead."
+            : "";
+
+        return Ok(new PushActionResult(true, $"{action.Target}'s restart is pushed back an hour.{when}"));
     }
 
     /// <summary>

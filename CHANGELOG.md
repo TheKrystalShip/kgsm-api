@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a scheduled restart can be pushed back from the notification about it
+
+`restart_soon` warns, fifteen minutes ahead, that a **running** server is about to take its scheduled
+restart, and carries **Postpone 1h**. A restart due on a stopped server changes nothing anybody is in
+the middle of, so it is not warned about.
+
+The warning half was always sourceable — the scheduler publishes `nextFireUtc`. The button was not:
+deferring a fire was a capability that did not exist, and it does now (`kgsm-scheduler` 2.5.0, a
+control socket beside its status one). This API dials it through `SchedulerClient.PostponeAsync`.
+
+**The gate here is the only gate there is.** The scheduler's control socket carries no identity and its
+shipped command manifest says so, so the operator check runs before the socket is dialled rather than
+being left to a daemon with no way to apply it. A host that has not wired
+`Api__SchedulerControlSocketPath` sends the warning with **no button**, rather than one that would fail.
+
+**No audit row.** A postponement changes no configuration and leaves nothing on the host — the
+scheduler holds the moved target in memory and it is gone if the daemon restarts. A row claiming a
+durable change would be recording something that is not there.
+
+The watcher re-reads the scheduler every tick rather than remembering what it warned about, which is
+what makes a postponement work: the deferred fire is outside the window on the next pass, so the same
+warning is not re-sent — and it re-arms honestly if the new time comes round with the person still
+playing. The subject key carries the fire instant, so a warning about a postponed-to time is its own
+fact rather than a repeat the coalesce window would swallow.
+
+⚠ **This host needs one line added to `/etc/kgsm-api/kgsm-api.env`** —
+`Api__SchedulerControlSocketPath=/run/kgsm-scheduler/control.sock` — before the button appears. That
+file is root-owned; until then the warning arrives with nothing to press.
+
 ### Changed — `once` and `digest` now mean something
 
 Both have been in the cadence vocabulary since M8·c, accepted on a PATCH and then delivering nothing. An

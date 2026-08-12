@@ -85,6 +85,7 @@ public static class NotificationCatalog
         new("server_empty", "Server sitting empty", "A running server has had nobody connected to it for a while."),
         new("leaf_down", "Service went down", "A KGSM service on this host stopped answering its health check and stayed that way."),
         new("leaf_up", "Service came back", "A KGSM service that was down is answering again."),
+        new("restart_soon", "Scheduled restart due", "A running server is minutes away from its scheduled restart."),
         new("awaiting_approval", "Account awaiting approval", "Somebody signed in for the first time and cannot do anything until an admin approves them (user.provision)."),
     ];
 
@@ -199,6 +200,10 @@ public static class DerivedNotificationAction
 
     /// <summary>A leaf that had been reported down is answering again.</summary>
     public const string LeafUp = "leaf.up";
+
+    /// <summary>A running server is inside the warning window before its scheduled restart
+    /// (<c>ScheduledRestartWatcher</c>).</summary>
+    public const string RestartSoon = "restart.soon";
 }
 
 /// <summary>The outcome of one provider <c>SendAsync</c> (M8·c Increment B). Honest like

@@ -201,6 +201,15 @@
       "risk": "wiring"
     },
     {
+      "key": "schedulerControlSocket",
+      "env": "Api__SchedulerControlSocketPath",
+      "label": "Scheduler control socket",
+      "description": "The scheduler's control socket, which postponing a scheduled restart goes through. Empty means restarts can be seen but not deferred.",
+      "group": "leaves",
+      "type": "path",
+      "risk": "wiring"
+    },
+    {
       "key": "botSocket",
       "env": "Api__BotSocketPath",
       "label": "Discord bot socket",

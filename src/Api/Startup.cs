@@ -302,6 +302,11 @@ public class Startup(IConfiguration configuration)
         // situation a notification exists for.
         services.AddHostedService<LeafHealthWatcher>();
 
+        // And the third: a scheduled restart about to fire on a server somebody is playing on. Its whole
+        // value is the lead time, so it reads the scheduler on a short interval rather than reacting to
+        // anything — nothing happens fifteen minutes before a restart.
+        services.AddHostedService<ScheduledRestartWatcher>();
+
         // M2 — realtime. The hub is the per-host connection registry + fan-out; the three pumps poll
         // their sources (neither the monitor nor kgsm-lib pushes) and publish only while subscribed, so
         // an idle stream costs nothing. The /stream SSE endpoint lives in StreamController.

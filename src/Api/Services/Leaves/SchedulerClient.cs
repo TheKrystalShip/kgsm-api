@@ -29,11 +29,13 @@ public sealed class SchedulerClient
     };
 
     private readonly string _socketPath;
+    private readonly string _controlSocketPath;
     private readonly ILogger<SchedulerClient> _logger;
 
     public SchedulerClient(ApiOptions options, ILogger<SchedulerClient> logger)
     {
         _socketPath = options.SchedulerSocketPath;
+        _controlSocketPath = options.SchedulerControlSocketPath;
         _logger = logger;
     }
 
@@ -74,7 +76,72 @@ public sealed class SchedulerClient
     /// Returns <c>false</c> on any failure — never throws.</summary>
     public async Task<bool> CheckHealthAsync(CancellationToken ct = default) =>
         await GetStatusAsync(ct).ConfigureAwait(false) is not null;
+
+    /// <summary>Whether this host is wired to send the scheduler an instruction at all.</summary>
+    public bool CanControl => !string.IsNullOrWhiteSpace(_controlSocketPath);
+
+    /// <summary>
+    /// Ask the scheduler to push an instance's next restart back.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A different socket from the status one, and deliberately so on the daemon's side: that one's
+    /// contract is that a client only ever reads. This writes one NDJSON line and reads one back.
+    /// </para>
+    /// <para>
+    /// <b>Every failure is reported, never swallowed into a success.</b> The caller is about to tell a
+    /// person what happened to their evening, so "we could not reach the scheduler" has to be
+    /// distinguishable from "it said no" and from "it is deferred".
+    /// </para>
+    /// </remarks>
+    public async Task<SchedulerControlResponse> PostponeAsync(
+        string instance, int minutes, CancellationToken ct = default)
+    {
+        if (!CanControl)
+            return new SchedulerControlResponse(false, "this host is not wired to the scheduler's control socket");
+
+        using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timed.CancelAfter(ReadTimeout);
+        try
+        {
+            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            await socket.ConnectAsync(new UnixDomainSocketEndPoint(_controlSocketPath), timed.Token)
+                .ConfigureAwait(false);
+
+            await using var stream = new NetworkStream(socket, ownsSocket: false);
+            byte[] request = Encoding.UTF8.GetBytes(
+                JsonSerializer.Serialize(
+                    new SchedulerControlRequest("postpone", instance, minutes), Json) + "\n");
+            await stream.WriteAsync(request, timed.Token).ConfigureAwait(false);
+            await stream.FlushAsync(timed.Token).ConfigureAwait(false);
+
+            using var reader = new StreamReader(stream, Encoding.UTF8);
+            string? line = await reader.ReadLineAsync(timed.Token).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(line))
+                return new SchedulerControlResponse(false, "the scheduler answered nothing");
+
+            return JsonSerializer.Deserialize<SchedulerControlResponse>(line, Json)
+                ?? new SchedulerControlResponse(false, "the scheduler's answer could not be read");
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("scheduler control write timed out after {Timeout} at {Path}",
+                ReadTimeout, _controlSocketPath);
+            return new SchedulerControlResponse(false, "the scheduler did not answer in time");
+        }
+        catch (Exception ex) when (ex is SocketException or IOException or JsonException)
+        {
+            _logger.LogDebug(ex, "scheduler control socket unreachable at {Path}", _controlSocketPath);
+            return new SchedulerControlResponse(false, "the scheduler could not be reached");
+        }
+    }
 }
+
+/// <summary>One instruction to the scheduler, as its control socket takes it.</summary>
+public sealed record SchedulerControlRequest(string Command, string Instance, int Minutes);
+
+/// <summary>What the scheduler said. <see cref="NextFireUtc"/> is the schedule as it now stands.</summary>
+public sealed record SchedulerControlResponse(bool Ok, string Message, DateTimeOffset? NextFireUtc = null);
 
 /// <summary>The scheduler's one-line status snapshot: the per-instance schedule state it supervises.</summary>
 public sealed record SchedulerStatusResponse(IReadOnlyList<SchedulerInstanceStatus> Instances);

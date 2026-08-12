@@ -31,6 +31,10 @@ public static class PushActionCatalog
     /// enough that forgetting to lift it is not the same as switching the event off.</summary>
     public static readonly TimeSpan SnoozeFor = TimeSpan.FromHours(4);
 
+    /// <summary>How far one tap defers a scheduled restart. An hour is what the button says, and it is
+    /// enough to finish what you are in the middle of without turning "not now" into a reschedule.</summary>
+    public const int PostponeBy = 60;
+
     /// <param name="moderation">What the event's game declares it can do to a player, or
     /// <see langword="null"/> when that could not be established. <b>The blueprint's placeholder is the
     /// contract</b> — a game that declares no ban template cannot ban, so offering the button would be
@@ -64,6 +68,9 @@ public static class PushActionCatalog
         {
             if (ev.CatalogId == "leaf_down" && Leaves.LeafCatalog.IsRestartable(subject))
                 return [new PushActionOffer(PushActionKind.LeafRestart, subject, "Restart")];
+
+            if (ev.CatalogId == "restart_soon")
+                return [new PushActionOffer(PushActionKind.SchedulePostpone, subject, "Postpone 1h")];
 
             if (ev.CatalogId == "awaiting_approval")
                 return [new PushActionOffer(PushActionKind.UserApprove, subject, "Approve")];

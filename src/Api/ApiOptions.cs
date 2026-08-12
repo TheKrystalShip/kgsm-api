@@ -120,6 +120,12 @@ public sealed class ApiOptions
     /// </summary>
     public required string SchedulerSocketPath { get; init; }
 
+    /// <summary>kgsm-scheduler control socket — the path a postponement is sent to. Blank means the
+    /// capability is simply not offered here; the schedule is still read from the status socket.</summary>
+    /// Defaulted rather than <c>required</c>, unlike its siblings: blank already means "not offered
+    /// here", so a construction site that says nothing about it is stating the honest thing.
+    public string SchedulerControlSocketPath { get; init; } = "";
+
     /// <summary>kgsm-bot's status socket; blank when this host serves no bot status surface.</summary>
     public required string BotSocketPath { get; init; }
 
@@ -396,6 +402,7 @@ public sealed class ApiOptions
         $"{ApiSettings.Section}__{nameof(ApiSettings.MonitorSocketPath)}" => MonitorSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.WatchdogSocketPath)}" => WatchdogSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerSocketPath)}" => SchedulerSocketPath,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerControlSocketPath)}" => SchedulerControlSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.BotSocketPath)}" => BotSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantBaseUrl)}" => AssistantBaseUrl,
         $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantPublicUrl)}" => AssistantPublicUrl,
@@ -823,6 +830,7 @@ public sealed class ApiOptions
             // Opt-in (blank = absent): the scheduler is a separate optional leaf. Set it to
             // /run/kgsm-scheduler/status.sock on a host that runs kgsm-scheduler.
             SchedulerSocketPath = Defaulted(s.SchedulerSocketPath, ""),
+            SchedulerControlSocketPath = Defaulted(s.SchedulerControlSocketPath, ""),
             BotSocketPath = Defaulted(s.BotSocketPath, ""),
             KgsmPath = Defaulted(s.KgsmPath, "/usr/bin/kgsm"),
             KgsmJournalDir = Defaulted(s.KgsmJournalDir, "/var/lib/kgsm/events"),

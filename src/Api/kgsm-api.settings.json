@@ -43,6 +43,8 @@
       "FirewallSocketPath": "",
       // kgsm-scheduler status socket. Blank reports the scheduler absent.
       "SchedulerSocketPath": "",
+      // kgsm-scheduler control socket. Blank means a scheduled restart can be seen but not deferred.
+      "SchedulerControlSocketPath": "",
       // kgsm-bot status socket. Blank leaves the bot page with systemd liveness only.
       "BotSocketPath": "",
 

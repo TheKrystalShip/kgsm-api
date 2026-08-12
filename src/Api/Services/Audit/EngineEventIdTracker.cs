@@ -12,7 +12,7 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// found again in history would see two ids for one fact.
 /// </summary>
 /// <remarks>
-/// The id is <see cref="AuditId.ForPosition"/> over the journal position the transport reports, which
+/// The id is <see cref="AuditId.ForPosition(string, long)"/> over the journal position the transport reports, which
 /// is what the history read derives it from too — so the two agree by construction rather than by two
 /// computations happening to match. An envelope arriving with no position (a transport that cannot
 /// supply one) has no addressable id and falls back below.
