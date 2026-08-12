@@ -362,6 +362,33 @@ public class PushActionCatalogTests
     public void A_join_that_names_nobody_offers_nothing() =>
         Assert.Empty(PushActionCatalog.For(Event("player_join", "romestead"), Can(kick: true, ban: true)));
 
+    [Fact]
+    public void A_service_that_went_down_offers_to_restart_it()
+    {
+        PushActionOffer only = Assert.Single(
+            PushActionCatalog.For(Event("leaf_down", null, player: "monitor")));
+        Assert.Equal(PushActionKind.LeafRestart, only.Kind);
+        Assert.Equal("monitor", only.Target);
+    }
+
+    [Fact]
+    public void This_API_is_not_offered_a_button_to_restart_itself() =>
+        // Restarting it would kill the request doing the restarting, so the reply would never arrive.
+        Assert.Empty(PushActionCatalog.For(Event("leaf_down", null, player: "api")));
+
+    [Fact]
+    public void A_recovered_service_offers_nothing() =>
+        Assert.Empty(PushActionCatalog.For(Event("leaf_up", null, player: "monitor")));
+
+    [Fact]
+    public void Somebody_waiting_to_be_let_in_offers_to_let_them_in()
+    {
+        PushActionOffer only = Assert.Single(
+            PushActionCatalog.For(Event("awaiting_approval", null, player: "usr_abc")));
+        Assert.Equal(PushActionKind.UserApprove, only.Kind);
+        Assert.Equal("usr_abc", only.Target);
+    }
+
     [Theory]
     [InlineData("online")]
     [InlineData("backup")]
@@ -377,6 +404,20 @@ public class PushActionCatalogTests
     [InlineData(PushActionKind.PlayerBan, ModerationAction.Ban)]
     public void Each_moderation_kind_names_the_action_it_runs(string kind, string action) =>
         Assert.Equal(action, PushActionKind.ModerationFor(kind));
+
+    [Theory]
+    [InlineData(PushActionKind.ServerUpdate)]
+    [InlineData(PushActionKind.ServerStart)]
+    [InlineData(PushActionKind.ServerStop)]
+    [InlineData(PushActionKind.ConditionSnooze)]
+    [InlineData(PushActionKind.PlayerKick)]
+    [InlineData(PushActionKind.PlayerBan)]
+    [InlineData(PushActionKind.LeafRestart)]
+    [InlineData(PushActionKind.UserApprove)]
+    public void Every_kind_the_catalog_can_stage_is_one_the_store_will_hand_back(string kind) =>
+        // The store refuses to redeem a row whose kind this build does not know, so a kind added to the
+        // catalog and not to IsKnown would stage handles that silently do nothing.
+        Assert.True(PushActionKind.IsKnown(kind));
 
     [Fact]
     public void A_lifecycle_kind_is_not_a_moderation_action() =>

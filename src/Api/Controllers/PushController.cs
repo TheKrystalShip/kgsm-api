@@ -30,6 +30,7 @@ namespace TheKrystalShip.Api.Controllers;
 public sealed class PushController(
     PushSubscriptionStore subscriptions,
     PushPreferenceStore preferences,
+    PushQuietHoursStore quiet,
     VapidKeyStore vapid,
     IntegrationStore integrations,
     ILogger<PushController> logger) : ControllerBase
@@ -162,7 +163,96 @@ public sealed class PushController(
             Enabled: !mine.TryGetValue(c.Id, out bool want) || want,
             AvailableOnHost: !hostRules.TryGetValue(c.Id, out NotificationRule? r) || r.Enabled)).ToList();
 
-        return Ok(new PushPreferencesResponse(record.Enabled, events));
+        return Ok(new PushPreferencesResponse(record.Enabled, events, await QuietViewAsync(subject, ct)));
+    }
+
+    /// <summary>
+    /// Replace the caller's quiet window — when not to wake them, and what is worth waking them for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Push only, and per account rather than per device.</b> A person with a phone and a laptop is
+    /// asleep for both; Slack and the webhook are addressed to a channel rather than to anybody, so there
+    /// is nobody whose night they would be silenced on.
+    /// </para>
+    /// <para>
+    /// The zone is stored as the browser reported it, because the host's clock is not the person's — a
+    /// fleet is often administered from a different country than it runs in. A zone this host cannot
+    /// resolve is stored and reported back as unresolvable rather than rejected: the browser is right about
+    /// where somebody is, and the honest answer is that this host's tzdata cannot follow it.
+    /// </para>
+    /// </remarks>
+    [HttpPut("quiet-hours")]
+    public async Task<IActionResult> PutQuietHours([FromBody] PushQuietHoursRequest? body, CancellationToken ct)
+    {
+        if (Subject() is not { } subject) return Error(StatusCodes.Status401Unauthorized, "unauthorized", "no valid session");
+        if (body is null) return Error(StatusCodes.Status400BadRequest, "bad_request", "a body is required");
+
+        if (!TryMinute(body.Start, out int start))
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "start must be a time of day, HH:mm");
+        if (!TryMinute(body.End, out int end))
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "end must be a time of day, HH:mm");
+
+        string floor = body.MinSeverity?.Trim().ToLowerInvariant() ?? PushQuietFloor.Danger;
+        if (!PushQuietFloor.IsKnown(floor))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                $"minSeverity must be one of '{PushQuietFloor.Everything}', '{PushQuietFloor.Warn}', "
+                + $"'{PushQuietFloor.Danger}', '{PushQuietFloor.Nothing}'");
+
+        string zone = body.TimeZone?.Trim() ?? "";
+        if (zone.Length == 0)
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "timeZone is required");
+
+        // A window with no width silences nothing and would read on the panel as though it did.
+        if (body.Enabled == true && start == end)
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "start and end are the same, so the window is empty");
+
+        await quiet.SetAsync(new PushQuietHoursEntity
+        {
+            UserSubject = subject,
+            Enabled = body.Enabled ?? false,
+            StartMinute = start,
+            EndMinute = end,
+            TimeZoneId = zone,
+            MinSeverity = floor,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        }, ct);
+
+        return Ok(await QuietViewAsync(subject, ct));
+    }
+
+    /// <summary>
+    /// The stored window, or the shape a client renders when nobody has set one: switched off, a plausible
+    /// night, and <c>danger</c> — the defaults somebody would pick, so the card opens filled in rather than
+    /// blank. Nothing is applied until <see cref="PushQuietHoursView.Enabled"/> is true.
+    /// </summary>
+    private async Task<PushQuietHoursView> QuietViewAsync(string subject, CancellationToken ct)
+    {
+        PushQuietHoursEntity? row = await quiet.ForUserAsync(subject, ct);
+        if (row is null)
+            return new PushQuietHoursView(false, "23:00", "08:00", "", PushQuietFloor.Danger, Resolvable: true);
+
+        return new PushQuietHoursView(
+            row.Enabled, Clock(row.StartMinute), Clock(row.EndMinute), row.TimeZoneId, row.MinSeverity,
+            Resolvable: Resolvable(row.TimeZoneId));
+    }
+
+    private static bool Resolvable(string zoneId)
+    {
+        if (string.IsNullOrEmpty(zoneId)) return false;
+        try { TimeZoneInfo.FindSystemTimeZoneById(zoneId); return true; }
+        catch (Exception e) when (e is TimeZoneNotFoundException or InvalidTimeZoneException) { return false; }
+    }
+
+    private static string Clock(int minute) => $"{minute / 60:00}:{minute % 60:00}";
+
+    private static bool TryMinute(string? hhmm, out int minute)
+    {
+        minute = 0;
+        if (!TimeOnly.TryParseExact(hhmm?.Trim(), "HH:mm", out TimeOnly time)) return false;
+        minute = time.Hour * 60 + time.Minute;
+        return true;
     }
 
     /// <summary>Change some of the caller's own choices. Sparse — absent ids are untouched.</summary>

@@ -42,7 +42,7 @@ public static class PushActionCatalog
         // usually not the person sitting in front of the panel. Kick before ban — the reversible one first,
         // and on a two-button ceiling the order is what survives.
         if (ev.CatalogId == "player_join"
-            && ev.PlayerIdentity is { Length: > 0 } who
+            && ev.ActionSubject is { Length: > 0 } who
             && ev.ServerId is { Length: > 0 } server
             && moderation is not null)
         {
@@ -57,6 +57,17 @@ public static class PushActionCatalog
         // about temperature.
         if (ev.CatalogId == "threshold_breach" && ev.SubjectKey is { Length: > 0 } condition)
             return [new PushActionOffer(PushActionKind.ConditionSnooze, condition, "Snooze 4h")];
+
+        // The two events that name something other than a server. Both act on the id the event carries,
+        // and both are refused at the tap if the account has since lost the tier for them.
+        if (ev.ActionSubject is { Length: > 0 } subject)
+        {
+            if (ev.CatalogId == "leaf_down" && Leaves.LeafCatalog.IsRestartable(subject))
+                return [new PushActionOffer(PushActionKind.LeafRestart, subject, "Restart")];
+
+            if (ev.CatalogId == "awaiting_approval")
+                return [new PushActionOffer(PushActionKind.UserApprove, subject, "Approve")];
+        }
 
         if (string.IsNullOrEmpty(ev.ServerId)) return [];
 

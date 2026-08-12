@@ -26,6 +26,7 @@ public sealed class WebPushNotificationProvider(
     PushSubscriptionStore subscriptions,
     PushPreferenceStore preferences,
     PushSnoozeStore snoozes,
+    PushQuietHoursStore quietHours,
     PushActionStore actions,
     WebPushSender sender,
     Aggregation.InstanceCache instances,
@@ -102,10 +103,23 @@ public sealed class WebPushNotificationProvider(
             ? await snoozes.ActiveAsync(ct).ConfigureAwait(false)
             : new HashSet<(string, string)>();
 
+        // And the FOURTH: somebody who is asleep. One read for the whole fan-out, keyed by account, and
+        // evaluated per device below because the answer depends only on which account owns it.
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        IReadOnlyList<PushQuietHoursEntity> windows = await quietHours.ActiveAsync(ct).ConfigureAwait(false);
+        var quiet = new Dictionary<string, PushQuietHoursEntity>(StringComparer.Ordinal);
+        foreach (PushQuietHoursEntity w in windows)
+            if (quietHours.IsQuiet(w, now)) quiet[w.UserSubject] = w;
+
         bool Wanted(PushSubscriptionEntity d) =>
             // No stored row means yes — see PushPreferenceEntity: the table holds deviations only.
             (!prefs.TryGetValue((d.UserSubject, ev.CatalogId), out bool want) || want)
-            && !(ev.SubjectKey is { Length: > 0 } c && muted.Contains((d.UserSubject, c)));
+            && !(ev.SubjectKey is { Length: > 0 } c && muted.Contains((d.UserSubject, c)))
+            // Inside a quiet window, only what the person said was worth waking them for. The floor is
+            // read off the severity the audit row already carries, so this invents no new judgement about
+            // how bad anything is.
+            && (!quiet.TryGetValue(d.UserSubject, out PushQuietHoursEntity? window)
+                || PushQuietFloor.Passes(ev.Severity, window.MinSeverity));
 
         (int sent, string? firstError) = await FanOutAsync(
             devices, device => PayloadFor(ev, device, ct), keys, Wanted, ct).ConfigureAwait(false);
@@ -233,6 +247,12 @@ public sealed class WebPushNotificationProvider(
             case "crash_loop": return $"{server} gave up";
             case "player_join": return $"Someone joined {server}";
             case "server_empty": return $"{server} is empty";
+
+            // These three name no server, so the summary carries the whole subject and the title is the
+            // headline — the same shape a host-scope threshold takes.
+            case "leaf_down": return "A service went down";
+            case "leaf_up": return "A service came back";
+            case "awaiting_approval": return "Someone is waiting to be let in";
         }
 
         return ev.Action switch

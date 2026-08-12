@@ -69,6 +69,9 @@ public static class NotificationCatalog
         new("threshold_clear", "Threshold recovered", "A metric that was over its threshold came back down (host.threshold.clear)."),
         new("player_join", "Player joined", "Somebody connected to a server this host can observe presence on (player.join)."),
         new("server_empty", "Server sitting empty", "A running server has had nobody connected to it for a while."),
+        new("leaf_down", "Service went down", "A KGSM service on this host stopped answering its health check and stayed that way."),
+        new("leaf_up", "Service came back", "A KGSM service that was down is answering again."),
+        new("awaiting_approval", "Account awaiting approval", "Somebody signed in for the first time and cannot do anything until an admin approves them (user.provision)."),
     ];
 
     /// <summary>
@@ -116,6 +119,7 @@ public static class NotificationCatalog
         // notification a person most needs — "it is down and staying down" — is the one they would not get.
         AuditAction.ServerCrash => severity == AuditSeverity.Danger ? "crash_loop" : "crash",
         AuditAction.PlayerJoin => "player_join",
+        AuditAction.UserProvision => "awaiting_approval",
         AuditAction.ServerUpdate => "update",
         AuditAction.ServerUpdateAvailable => "update_available",
         AuditAction.ServerInstall => "installed",
@@ -142,10 +146,12 @@ public sealed record NotificationTestResult(bool Ok, string? Posted, string? Cha
 /// <see cref="ServerId"/> is not always the subject: every host-scope threshold carries a null server, so a
 /// window keyed on the server would let a disk breach silently swallow a temperature breach that happened
 /// a few seconds later. Null falls back to <see cref="ServerId"/>.</param>
-/// <param name="PlayerIdentity">The roster's own key for the person an event is about, on the events that
-/// are about a person. It is what a moderation button is staged against, and it is carried rather than
-/// re-derived because the roster's identity rule (id → name → addr → sessionKey) lives in exactly one place
-/// and a second opinion about who somebody is would eventually moderate the wrong one.</param>
+/// <param name="ActionSubject">What a button on this event would act <em>on</em>, inside the event's own
+/// scope — the roster's key for a player on a join, the account id on a provision, the leaf id on a health
+/// flip. Distinct from <paramref name="SubjectKey"/>, which is only ever a coalescing key: this one is an
+/// operand, and it is carried rather than re-derived because the rule that produces it (the roster's
+/// identity precedence, say) lives in exactly one place, and a second opinion about who somebody is would
+/// eventually act on the wrong one.</param>
 public sealed record NotificationEvent(
     string CatalogId,
     string Action,
@@ -155,7 +161,7 @@ public sealed record NotificationEvent(
     DateTimeOffset Ts,
     string AuditId,
     string? SubjectKey = null,
-    string? PlayerIdentity = null);
+    string? ActionSubject = null);
 
 /// <summary>
 /// The <see cref="NotificationEvent.Action"/> values for facts <b>this API observes itself</b>, which are
@@ -172,6 +178,13 @@ public static class DerivedNotificationAction
     /// <summary>A running server with observable presence and nobody on it for the dwell
     /// (<c>IdleServerWatcher</c>).</summary>
     public const string ServerEmpty = "server.empty";
+
+    /// <summary>A leaf's health probe has said <c>down</c> for longer than a restart takes
+    /// (<c>LeafHealthWatcher</c>).</summary>
+    public const string LeafDown = "leaf.down";
+
+    /// <summary>A leaf that had been reported down is answering again.</summary>
+    public const string LeafUp = "leaf.up";
 }
 
 /// <summary>The outcome of one provider <c>SendAsync</c> (M8·c Increment B). Honest like

@@ -93,8 +93,22 @@ public static class PushActionKind
     /// <summary>Disconnect <c>Subject</c> from <c>Target</c> and keep them out.</summary>
     public const string PlayerBan = "player.ban";
 
+    /// <summary>
+    /// Restart the leaf named by <c>Target</c>. Admin, like every other way of restarting a service from
+    /// the panel — it interrupts something every other surface on this host depends on.
+    /// </summary>
+    public const string LeafRestart = "leaf.restart";
+
+    /// <summary>
+    /// Let the account named by <c>Target</c> in, as a viewer. Viewer rather than a choice of tier: a
+    /// button carries no room to pick one, and the floor is the only grant that is safe to make without
+    /// looking at who is asking. Anything above it is a decision for the Users tab.
+    /// </summary>
+    public const string UserApprove = "user.approve";
+
     public static bool IsKnown(string? kind) =>
-        kind is ServerUpdate or ServerStart or ServerStop or ConditionSnooze or PlayerKick or PlayerBan;
+        kind is ServerUpdate or ServerStart or ServerStop or ConditionSnooze
+             or PlayerKick or PlayerBan or LeafRestart or UserApprove;
 
     /// <summary>The moderation action a kind runs, or <see langword="null"/> when it is not one. Maps onto
     /// the same <see cref="Contracts.ModerationAction"/> vocabulary the panel's own route takes, so the two

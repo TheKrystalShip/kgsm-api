@@ -3,7 +3,9 @@ using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Commands;
+using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Integrations.WebPush;
 using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Auth;
@@ -55,8 +57,13 @@ public sealed class NotificationActionsController(
     PlayerHistoryService history,
     JobRegistry jobs,
     CommandRunner runner,
+    IUnitController units,
+    AuditService audit,
+    ApiOptions options,
     ILogger<NotificationActionsController> logger) : ControllerBase
 {
+    private string hostId => options.HostId;
+
     /// <summary>
     /// Redeem <paramref name="handle"/> for the device that presents its own endpoint.
     /// </summary>
@@ -104,8 +111,138 @@ public sealed class NotificationActionsController(
         return action.Kind switch
         {
             PushActionKind.ConditionSnooze => await SnoozeAsync(action, ct),
+            PushActionKind.LeafRestart => await RestartLeafAsync(action, identity, authority.Tier, ct),
+            PushActionKind.UserApprove => await ApproveAsync(action, identity, authority.Tier, ct),
             _ => Refuse("This build does not know how to do that."),
         };
+    }
+
+    /// <summary>
+    /// Restart one of this host's own services.
+    /// </summary>
+    /// <remarks>
+    /// <b>Admin, like every other way of restarting a leaf from the panel.</b> It interrupts something the
+    /// rest of the host depends on, and the fact that the request arrived from a lock screen changes
+    /// nothing about that. The privilege underneath is the polkit rule scoped to exactly these units, so a
+    /// leaf outside <see cref="LeafCatalog.IsRestartable"/> is refused here rather than shelling a command
+    /// that would be denied.
+    /// </remarks>
+    private async Task<IActionResult> RestartLeafAsync(
+        PushActionEntity action, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
+    {
+        if (tier < KgsmTier.Admin)
+            return Refuse("That account is not allowed to restart a service.");
+
+        if (!LeafCatalog.IsRestartable(action.Target) || LeafCatalog.Find(action.Target) is not { } leaf)
+            return Refuse($"{action.Target} is not a service this host can restart.");
+
+        bool ok = await units.RestartAsync(leaf.Unit, ct).ConfigureAwait(false);
+
+        await audit.AppendAsync(new AuditWrite(
+            Ts: DateTimeOffset.UtcNow,
+            Origin: AuditOrigin.Notification,
+            Actor: new AuditActor(ActorKind.User, identity.Username, identity.Provider),
+            Action: AuditAction.ServiceRestart,
+            Severity: ok ? AuditSeverity.Warn : AuditSeverity.Danger,
+            Target: new AuditTarget(AuditTargetKind.Host, leaf.Id, leaf.DisplayName),
+            ServerId: null,
+            HostId: hostId,
+            Summary: ok
+                ? $"restarted {leaf.DisplayName}"
+                : $"tried to restart {leaf.DisplayName} and systemd refused",
+            Meta: new Dictionary<string, string> { ["unit"] = leaf.Unit, ["ok"] = ok ? "true" : "false" }),
+            ct).ConfigureAwait(false);
+
+        // A row either way: a refused restart is a thing an operator needs to be able to find later, and it
+        // is the case where nobody was watching a screen to see it fail.
+        return ok
+            ? Ok(new PushActionResult(true, $"Asked systemd to restart {leaf.DisplayName}."))
+            : Unavailable($"systemd would not restart {leaf.DisplayName}.");
+    }
+
+    /// <summary>
+    /// Let a waiting account in, at the floor.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Viewer, and only viewer.</b> A button has no room to choose a tier, and the floor is the one
+    /// grant that is safe to make from a notification's worth of context. Anything above it stays a
+    /// decision somebody makes in the Users tab while looking at who is asking.
+    /// </para>
+    /// <para>
+    /// <b>This one writes its own audit row</b>, unlike the lifecycle buttons: kgsm runs nothing for an
+    /// account change and emits no event, so there is no echo to carry the provenance and a direct write
+    /// is the only record there will be. Same posture as the Users tab's own writes.
+    /// </para>
+    /// <para>
+    /// An account that is no longer pending — approved from a laptop in the meantime, or since disabled —
+    /// is reported as it is rather than overwritten. Two admins answering the same notification is the
+    /// expected case, not an edge one.
+    /// </para>
+    /// </remarks>
+    private async Task<IActionResult> ApproveAsync(
+        PushActionEntity action, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
+    {
+        if (tier < KgsmTier.Admin)
+            return Refuse("That account is not allowed to approve accounts.");
+
+        KgsmUser? account;
+        try
+        {
+            account = await users.Store.FindByIdAsync(action.Target, ct).ConfigureAwait(false);
+        }
+        catch (Exception e) when (e is not OperationCanceledException)
+        {
+            logger.LogError(e, "notification action: could not read account {UserId}", action.Target);
+            return Unavailable("The account store on this host could not be read.");
+        }
+
+        if (account is null)
+            return Refuse("That account no longer exists on this host.");
+
+        if (account.Status == UserStatus.Active)
+            return Ok(new PushActionResult(true, $"{account.DisplayName} has already been approved."));
+
+        if (account.Status == UserStatus.Disabled)
+            return Refuse($"{account.DisplayName} has been switched off, so approving is not the answer.");
+
+        KgsmUser approved = account with
+        {
+            Tier = KgsmTier.Viewer,
+            TierSource = TierSource.Granted,
+            Status = UserStatus.Active,
+            Updated = DateTimeOffset.UtcNow,
+        };
+
+        if (!await users.Store.UpdateAsync(approved, ct).ConfigureAwait(false))
+            return Refuse("That account no longer exists on this host.");
+
+        // Authority is resolved per request from a short-lived cache; drop this account's entries so the
+        // person who was just let in is not still refused for the length of a TTL.
+        await users.ForgetAsync(approved.UserId, ct).ConfigureAwait(false);
+
+        await audit.AppendAsync(new AuditWrite(
+            Ts: DateTimeOffset.UtcNow,
+            Origin: AuditOrigin.Notification,
+            Actor: new AuditActor(ActorKind.User, identity.Username, identity.Provider),
+            Action: AuditAction.UserApprove,
+            Severity: AuditSeverity.Warn,
+            Target: new AuditTarget("user", approved.UserId, approved.Username),
+            ServerId: null,
+            HostId: hostId,
+            Summary: $"approved the account '{approved.Username}'",
+            Meta: new Dictionary<string, string>
+            {
+                ["from"] = UserStatuses.ToWire(account.Status),
+                ["to"] = UserStatuses.ToWire(approved.Status),
+                ["tier"] = KgsmTiers.ToWire(approved.Tier),
+            }),
+            ct).ConfigureAwait(false);
+
+        logger.LogInformation("notification action: approved {User} as viewer (actor={Actor}, via push)",
+            approved.Username, identity.ActorString);
+
+        return Ok(new PushActionResult(true, $"{approved.DisplayName} can now sign in as a viewer."));
     }
 
     /// <summary>

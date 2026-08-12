@@ -273,6 +273,7 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<PushSubscriptionStore>();
         services.AddSingleton<PushPreferenceStore>();
         services.AddSingleton<PushSnoozeStore>();
+        services.AddSingleton<PushQuietHoursStore>();
         services.AddSingleton<PushActionStore>();
         services.AddSingleton<VapidKeyStore>();
         services.AddTransient<INotificationProvider, WebPushNotificationProvider>();
@@ -289,6 +290,11 @@ public class Startup(IConfiguration configuration)
         // reading taken from the engine and the supervisor agreeing over a dwell, published straight onto
         // the bus — nothing is written to the audit log, which records actions rather than observations.
         services.AddHostedService<IdleServerWatcher>();
+
+        // And the other always-on watcher: a leaf that stops answering its health check. The Services board
+        // shows the same flips, but its pump goes idle when nobody is watching the panel — which is the
+        // situation a notification exists for.
+        services.AddHostedService<LeafHealthWatcher>();
 
         // M2 — realtime. The hub is the per-host connection registry + fan-out; the three pumps poll
         // their sources (neither the monitor nor kgsm-lib pushes) and publish only while subscribed, so

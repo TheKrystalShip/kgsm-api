@@ -73,4 +73,32 @@ public static class LeafCatalog
         new("bot", "kgsm-bot.service", "Discord bot",
             "Discord control surface onto KGSM", false, LeafHealthSource.None),
     ];
+
+    /// <summary>
+    /// The leaves this API can restart — every one it knows about except itself.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The privilege is a polkit rule scoped to exactly these units, installed by
+    /// <c>deploy/setup-leaf-config.sh</c> and kept in lockstep with the leaf→unit map there. Derived from
+    /// <see cref="Default"/> rather than listed again, so a leaf joining the catalog cannot end up in one
+    /// list and not the other.
+    /// </para>
+    /// <para>
+    /// <b>Itself is excluded, and not as an oversight:</b> restarting this service kills the request doing
+    /// the restarting, so the reply would never arrive and the caller could not tell it from a failure.
+    /// Redeploying is how this one is restarted.
+    /// </para>
+    /// </remarks>
+    public static bool IsRestartable(string? leafId) =>
+        leafId is not null
+        && !string.Equals(leafId, SelfId, StringComparison.Ordinal)
+        && Default.Any(l => string.Equals(l.Id, leafId, StringComparison.Ordinal));
+
+    /// <summary>This API's own leaf id.</summary>
+    public const string SelfId = "api";
+
+    /// <summary>One leaf by id, or null when nothing by that name is on this host.</summary>
+    public static LeafDescriptor? Find(string? leafId) =>
+        leafId is null ? null : Default.FirstOrDefault(l => string.Equals(l.Id, leafId, StringComparison.Ordinal));
 }

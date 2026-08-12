@@ -106,6 +106,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// only. Same creation posture as the two above.</summary>
     public DbSet<PushSnoozeEntity> PushSnoozes => Set<PushSnoozeEntity>();
 
+    /// <summary>Per-account quiet windows — when somebody does not want waking, and what still wakes them.
+    /// Same creation posture as the rest of the push tables.</summary>
+    public DbSet<PushQuietHoursEntity> PushQuietHours => Set<PushQuietHoursEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<PushActionEntity>(e =>
@@ -116,6 +120,15 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 v => v.UtcTicks,
                 v => new DateTimeOffset(v, TimeSpan.Zero));
             e.Property(p => p.ExpiresAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+        });
+
+        modelBuilder.Entity<PushQuietHoursEntity>(e =>
+        {
+            e.ToTable("push_quiet_hours");
+            e.HasKey(q => q.UserSubject);
+            e.Property(q => q.UpdatedAt).HasConversion(
                 v => v.UtcTicks,
                 v => new DateTimeOffset(v, TimeSpan.Zero));
         });

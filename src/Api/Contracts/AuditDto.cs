@@ -231,6 +231,13 @@ public static class AuditAction
     public const string ServiceDisconnect = "service.disconnect";
     public const string ServiceConfig = "service.config";
 
+    // service.restart — a leaf's unit was restarted on its own, rather than as the tail of a config apply
+    // (which is service.config, and says so). Its own action because the two answer different questions:
+    // a config row explains what changed, this one records that somebody interrupted a running service and
+    // nothing about the host's configuration is different afterwards. Written whether systemd accepted it
+    // or refused — a refused restart is exactly the case nobody was watching a screen for.
+    public const string ServiceRestart = "service.restart";
+
     // host.threshold.* — a measured value crossed a line this host watches, and later came back. Recorded
     // from the episodes kgsm-monitor keeps: the monitor establishes the fact against every sample it takes,
     // and this API transcribes its durable record rather than deciding anything, which is why the rows carry

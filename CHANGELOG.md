@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — quiet hours, and a floor for what still gets through
+
+A per-account window with a severity that ignores it. Between the hours somebody names, only what they
+said was worth waking them for arrives; everything else is **not delivered** rather than delivered late.
+It is the fourth gate in the push fan-out, after the host's rule, the person's per-event choice and a
+condition snooze.
+
+**The times are read where the person is.** The browser reports its IANA zone on every save, because a
+fleet is often administered from a different country than it runs in and a window silently applied in
+the host's own time would silence the wrong nine hours. A zone this host's tzdata cannot resolve
+**delivers**: the gate exists to hold notifications back, so its failure has to be the direction that
+does not — being wrong that way costs a buzz at a bad hour, and the other way costs an outage nobody was
+told about. The panel says so rather than showing a setting that does nothing.
+
+A window that wraps midnight is the normal one and is treated as first-class; the closing time is
+exclusive, so an alarm set for the hour the window ends is not itself silenced. `nothing` is spelled as
+its own word rather than as an impossible severity, so it can never be misread as "no floor" — the two
+are opposites. `success` ranks with `info`, and a severity this build does not recognise ranks as low as
+it can: the value of a floor is that it holds things back, and an unfamiliar spelling is not grounds for
+an exception.
+
+Push only. Slack and the webhook are addressed to a channel rather than to anybody, so there is nobody
+whose night they would be silenced on.
+
+### Added — two more events worth waking somebody for
+
+**`leaf_down` / `leaf_up` — a service on this host stopped answering**, carrying **Restart**. The
+Services board already shows these flips, but its pump is subscriber-gated: it goes idle when nobody is
+looking at the panel, which is the situation a notification exists for. The always-on capability probe
+is the source instead.
+
+The dwell is what separates a fault from a deploy — delivering a leaf restarts it, and a channel that
+pages on every deploy gets switched off, after which it reports nothing at all. `unknown` is never read
+as down, so this API's own redeploy does not announce four outages on the way back up. The recovery only
+reaches somebody who was told about the outage in the first place.
+
+**Two leaves are deliberately unwatchable and are not quietly reported healthy:** the firewall is
+socket-activated and idle-exits, so inactive is its resting state, and the Discord bot serves no health
+endpoint this API polls. Neither has a signal, so neither is reported. The restartable set is *derived*
+from the leaf catalog rather than listed again, so a leaf joining the catalog becomes restartable with
+no second edit — minus this API itself, which cannot restart the service serving the request.
+
+**`awaiting_approval` — somebody signed in for the first time**, carrying **Approve**. Sourced from the
+`user.provision` row that already exists, gated on its status: a host whose policy activates an account
+on sight writes the same action, and asking an admin to approve what is already approved is worse than
+saying nothing. The button grants **viewer and only viewer** — a button has no room to choose a tier,
+and the floor is the one grant that is safe to make from a notification's worth of context.
+
+Unlike the lifecycle buttons, both of these **write their own audit row**: kgsm runs nothing for an
+account change or a unit restart and emits no event, so there is no echo to carry the provenance and a
+direct write is the only record there will be. A restart is recorded whether systemd accepted it or
+refused — a refused restart is exactly the case nobody was watching a screen for. `service.restart`
+joins the audit vocabulary as its own action rather than reusing `service.config`, because the two
+answer different questions: a config row explains what changed, this one records that a running service
+was interrupted and nothing about the host's configuration is different afterwards.
+
 ### Added — three events worth waking somebody for
 
 **`crash_loop` — the watchdog gave up.** The engine has always raised two different facts here: it is

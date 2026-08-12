@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.KGSM.Auth.Users;
 
 namespace TheKrystalShip.Api.Services.Integrations;
 
@@ -80,7 +81,7 @@ public sealed class NotificationBus : INotificationBus
         var ev = new NotificationEvent(
             catalogId, record.Action, record.ServerId, record.Severity, record.Summary, record.Ts, record.Id,
             SubjectKey: SubjectKeyOf(record),
-            PlayerIdentity: PlayerIdentityOf(record));
+            ActionSubject: ActionSubjectOf(record));
 
         // Bounded + DropOldest → TryWrite always accepts (it evicts the oldest on overflow), so this never
         // blocks the audit write. The itemDropped callback above logs any eviction.
@@ -111,6 +112,14 @@ public sealed class NotificationBus : INotificationBus
     /// </summary>
     private static bool IsWorthAnnouncing(AuditRecord record)
     {
+        // A provisioning that did not leave somebody waiting is not an approval request. Which one it was
+        // is on the row: a host whose policy activates an account on sight writes the same action with a
+        // different status, and announcing that would ask an admin to approve what is already approved.
+        if (record.Action == AuditAction.UserProvision)
+            return record.Meta is not null
+                && record.Meta.TryGetValue("status", out string? status)
+                && status == UserStatuses.ToWire(UserStatus.Pending);
+
         if (record.Action is not (AuditAction.HostThresholdBreach or AuditAction.HostThresholdClear)) return true;
 
         if (record.Action == AuditAction.HostThresholdClear
@@ -135,7 +144,12 @@ public sealed class NotificationBus : INotificationBus
         // server alone the second would be coalesced away — and the whole point of hearing about a join is
         // that it names who arrived, so the one that got dropped could be the one worth answering.
         if (record.Action == AuditAction.PlayerJoin)
-            return PlayerIdentityOf(record) is { Length: > 0 } who ? $"player/{who}/{record.ServerId}" : null;
+            return ActionSubjectOf(record) is { Length: > 0 } who ? $"player/{who}/{record.ServerId}" : null;
+
+        // Same reasoning for accounts: two people signing up a minute apart are two people to approve, and
+        // they both carry a null server.
+        if (record.Action == AuditAction.UserProvision)
+            return ActionSubjectOf(record) is { Length: > 0 } account ? $"user/{account}" : null;
 
         if (record.Action is not (AuditAction.HostThresholdBreach or AuditAction.HostThresholdClear)) return null;
         if (record.Meta is null) return null;
@@ -146,13 +160,18 @@ public sealed class NotificationBus : INotificationBus
     }
 
     /// <summary>
-    /// The roster key for the person a presence row names, resolved from the same meta the roster itself was
-    /// built from and by the same rule, so a button staged here addresses the record the moderation path
-    /// will look up. Null when the row carries no identity at all — a notification can still be sent, it
-    /// just cannot offer a button naming somebody it cannot name.
+    /// What a button on this row would act on, read off the row's own meta so a button staged here addresses
+    /// the same record the acting path will look up. Null when the row names nothing actionable — the
+    /// notification is still sent, it just cannot offer a button naming something it cannot name.
     /// </summary>
-    private static string? PlayerIdentityOf(AuditRecord record)
+    private static string? ActionSubjectOf(AuditRecord record)
     {
+        // The account, for a provisioning: the id the account store is keyed on, never the username, which
+        // is a label somebody can change out from under a staged handle.
+        if (record.Action == AuditAction.UserProvision)
+            return record.Meta is not null && record.Meta.TryGetValue("userId", out string? userId)
+                && !string.IsNullOrWhiteSpace(userId) ? userId : null;
+
         if (record.Action is not (AuditAction.PlayerJoin or AuditAction.PlayerLeave)) return null;
         if (record.Meta is null) return null;
         record.Meta.TryGetValue("playerId", out string? id);

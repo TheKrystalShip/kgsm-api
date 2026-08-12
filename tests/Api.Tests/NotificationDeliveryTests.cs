@@ -185,7 +185,7 @@ public sealed class NotificationBusTests
         // the whole value of a join notification is that it names who arrived, so the one dropped could
         // be the one worth answering.
         Assert.Equal(2, got.Select(ev => ev.SubjectKey).Distinct(StringComparer.Ordinal).Count());
-        Assert.Equal(["Ana", "Bo"], got.Select(ev => ev.PlayerIdentity));
+        Assert.Equal(["Ana", "Bo"], got.Select(ev => ev.ActionSubject));
     }
 
     [Fact]
@@ -199,7 +199,54 @@ public sealed class NotificationBusTests
         bus.Publish(JoinRow("romestead", null, null, "10.0.0.3:5000"));
 
         List<NotificationEvent> got = await DrainAsync(bus, 3);
-        Assert.Equal(["7656119", "Bo", "10.0.0.3:5000"], got.Select(ev => ev.PlayerIdentity));
+        Assert.Equal(["7656119", "Bo", "10.0.0.3:5000"], got.Select(ev => ev.ActionSubject));
+    }
+
+    private static AuditRecord ProvisionRow(string userId, string status) =>
+        new(Id: "evt_" + Guid.NewGuid().ToString("N")[..10], Ts: DateTimeOffset.UtcNow, Origin: AuditOrigin.Ui,
+            Actor: new AuditActor(ActorKind.User, "newcomer", ActorProvider.Discord),
+            Action: AuditAction.UserProvision, Severity: AuditSeverity.Warn,
+            Target: new AuditTarget("user", userId, "newcomer"),
+            ServerId: null, HostId: "test-host", Summary: "newcomer signed in for the first time",
+            Meta: new Dictionary<string, string> { ["userId"] = userId, ["status"] = status });
+
+    [Fact]
+    public async Task A_provisioning_that_left_somebody_waiting_asks_for_an_approval()
+    {
+        NotificationBus bus = NewBus();
+        bus.Publish(ProvisionRow("usr_abc", "pending"));
+
+        NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
+        Assert.Equal("awaiting_approval", only.CatalogId);
+        // The account id, never the username: a label somebody can change out from under a staged handle.
+        Assert.Equal("usr_abc", only.ActionSubject);
+    }
+
+    [Fact]
+    public async Task A_provisioning_that_did_not_is_not_an_approval_request()
+    {
+        NotificationBus bus = NewBus();
+        // A host whose policy activates on sight writes the same action with a different status, and
+        // asking an admin to approve what is already approved is worse than saying nothing.
+        bus.Publish(ProvisionRow("usr_auto", "active"));
+        // The barrier: the channel is FIFO, so receiving this proves the first was dropped, not delayed.
+        bus.Publish(ProvisionRow("usr_waiting", "pending"));
+
+        NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
+        Assert.Equal("usr_waiting", only.ActionSubject);
+    }
+
+    [Fact]
+    public async Task Two_people_signing_up_are_two_people_to_approve()
+    {
+        NotificationBus bus = NewBus();
+        bus.Publish(ProvisionRow("usr_a", "pending"));
+        bus.Publish(ProvisionRow("usr_b", "pending"));
+
+        List<NotificationEvent> got = await DrainAsync(bus, 2);
+        // Both carry a null server, so a window keyed on that would coalesce the second away.
+        Assert.All(got, ev => Assert.Null(ev.ServerId));
+        Assert.Equal(2, got.Select(ev => ev.SubjectKey).Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]
@@ -211,7 +258,7 @@ public sealed class NotificationBusTests
         NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
         // Still announced — somebody did join — but with nobody to name, so no button can be staged
         // against a person this row cannot identify.
-        Assert.Null(only.PlayerIdentity);
+        Assert.Null(only.ActionSubject);
         Assert.Null(only.SubjectKey);
     }
 

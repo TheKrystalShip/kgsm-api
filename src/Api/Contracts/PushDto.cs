@@ -102,7 +102,27 @@ public sealed record PushPreferenceView(
 
 /// <summary>GET /push/preferences — the whole catalog with this caller's choices applied.</summary>
 /// <param name="Enabled">Whether the push channel is on for the host at all.</param>
-public sealed record PushPreferencesResponse(bool Enabled, IReadOnlyList<PushPreferenceView> Events);
+/// <param name="QuietHours">This caller's quiet window. Always present, defaulted rather than null, so a
+/// client renders the same card whether or not somebody has ever opened it.</param>
+public sealed record PushPreferencesResponse(
+    bool Enabled, IReadOnlyList<PushPreferenceView> Events, PushQuietHoursView QuietHours);
+
+/// <summary>
+/// A quiet window, on the wire.
+/// </summary>
+/// <param name="Start">Local time the window opens, <c>HH:mm</c>.</param>
+/// <param name="End">Local time it closes, <c>HH:mm</c>. Earlier than <paramref name="Start"/> means it
+/// wraps midnight, which is what a night usually does.</param>
+/// <param name="TimeZone">The IANA zone the two times are read in, as the browser reported it.</param>
+/// <param name="MinSeverity">A <c>PushQuietFloor</c> value — what still gets through.</param>
+/// <param name="Resolvable">Whether this host can resolve <paramref name="TimeZone"/> at all. False means
+/// the window is not being applied, and the panel says so rather than showing a setting that does nothing.</param>
+public sealed record PushQuietHoursView(
+    bool Enabled, string Start, string End, string TimeZone, string MinSeverity, bool Resolvable);
+
+/// <summary>PUT /push/quiet-hours — the whole window, replaced.</summary>
+public sealed record PushQuietHoursRequest(
+    bool? Enabled, string? Start, string? End, string? TimeZone, string? MinSeverity);
 
 /// <summary>PATCH /push/preferences — a sparse update; only the ids present change.</summary>
 public sealed record PushPreferencePatch(IReadOnlyList<PushPreferenceChange>? Events);
