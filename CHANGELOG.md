@@ -28,8 +28,29 @@ A recovery row says how it ended. A condition whose rule was retuned or disabled
 one that was still firing when the monitor stopped, are not recoveries — the value was never observed to
 come down — so those rows say that rather than "back to normal".
 
-Notifications are unaffected — `NotificationModel` keys off a closed action map, so these do not reach
-Discord, Slack or push unless an event key is added there. That is a separate decision.
+### Added — a threshold breach reaches a phone
+
+Two catalog events, `threshold_breach` and `threshold_clear`, so the rows above ride the notification
+pipeline out to Slack and Web Push. They are separate switches because plenty of people want the alarm
+and not the all-clear, and because a recovery must not coalesce against the breach that preceded it.
+
+**The coalesce window now keys on the subject, not the server.** A `NotificationEvent` may name what it is
+about (`subjectKey`), and a threshold event names the watched condition — the rule plus the sensor or
+filesystem. Every host-scope row carries a null server, so a window keyed on the server would let a disk
+warning silently swallow a temperature one that crossed a few seconds later. Everything else names no
+subject and keys on the server exactly as before. The push payload carries the same value as the
+notification `tag`, so two conditions no longer overwrite each other on a lock screen, and the catalog
+event id, so a tap lands on the alerts page rather than the dashboard.
+
+Two things are deliberately not announced. **An episode that ended without recovering** — its rule was
+retuned, or the monitor restarted while it was firing — is not an all-clear, and saying so would report a
+measurement nobody took; a condition still true after a restart opens a fresh episode and announces itself
+as a breach within seconds. And **a row older than ten minutes** is history being transcribed rather than
+news: the recorder looks back a day on a cold start, so a host whose audit DB was wiped would otherwise
+wake every phone on the fleet with yesterday's weather. Both stay in the audit log, which is the record.
+
+kgsm-bot does not announce these, so unlike the lifecycle events there is nothing here that can arrive
+twice.
 
 ### Added — the alert thresholds are editable, without a restart
 

@@ -66,7 +66,7 @@ public sealed class WebPushNotificationProvider(
         if (devices.Count == 0)
             return new NotificationTestResult(false, null, null, "no devices are subscribed to push on this host");
 
-        byte[] payload = Payload("KGSM Control Panel", "Test notification — push is wired up correctly.", null);
+        byte[] payload = Payload("KGSM Control Panel", "Test notification — push is wired up correctly.", null, null, null);
         // A test deliberately ignores per-user event choices: it answers "does this channel work at
         // all", which is not a catalog event and not something a person opted out of.
         (int sent, string? firstError) = await FanOutAsync(devices, payload, keys, wanted: null, ct).ConfigureAwait(false);
@@ -95,7 +95,7 @@ public sealed class WebPushNotificationProvider(
             // No stored row means yes — see PushPreferenceEntity: the table holds deviations only.
             !prefs.TryGetValue((d.UserSubject, ev.CatalogId), out bool want) || want;
 
-        byte[] payload = Payload(Title(ev), ev.Summary, ev.ServerId);
+        byte[] payload = Payload(Title(ev), ev.Summary, ev.ServerId, ev.CatalogId, ev.SubjectKey);
         (int sent, string? firstError) = await FanOutAsync(devices, payload, keys, Wanted, ct).ConfigureAwait(false);
 
         // Nobody wanting this event is a correct outcome, not a failure — reporting it as one would
@@ -158,14 +158,23 @@ public sealed class WebPushNotificationProvider(
 
     /// <summary>The notification body the service worker renders. Deliberately small: a push service
     /// caps the payload, and everything here is already on the panel a tap away.</summary>
-    private static byte[] Payload(string title, string body, string? serverId) =>
-        JsonSerializer.SerializeToUtf8Bytes(new WebPushPayload(title, body, serverId), Json);
+    private static byte[] Payload(string title, string body, string? serverId, string? catalogId, string? tag) =>
+        JsonSerializer.SerializeToUtf8Bytes(new WebPushPayload(title, body, serverId, catalogId, tag), Json);
 
     private static string Title(NotificationEvent ev)
     {
         string server = string.IsNullOrEmpty(ev.ServerId) ? "A server" : ev.ServerId;
         return ev.Action switch
         {
+            // A threshold event's own summary is the detail (which sensor, which number), so the title is
+            // the headline. It says "this host" rather than naming one: a phone reads this off the lock
+            // screen with no idea which panel sent it, and the body carries the subject.
+            AuditAction.HostThresholdBreach => string.IsNullOrEmpty(ev.ServerId)
+                ? "Host threshold crossed"
+                : $"{ev.ServerId} threshold crossed",
+            AuditAction.HostThresholdClear => string.IsNullOrEmpty(ev.ServerId)
+                ? "Host back to normal"
+                : $"{ev.ServerId} back to normal",
             AuditAction.ServerStart => $"{server} is online",
             AuditAction.ServerRestart => $"{server} restarted",
             AuditAction.ServerStop => $"{server} went offline",

@@ -13,12 +13,14 @@ namespace TheKrystalShip.Api.Services.Integrations;
 /// here (not fewer); the skip is logged at Information so a mis-set cadence is never a silent black hole.</para>
 /// <para><b>Anti-spam suppression.</b> A crash-looping server re-emits <c>server.crash</c> every watchdog
 /// backoff cycle; without a guard, the worker would fire a post each cycle and self-DoS the webhook
-/// (an incoming webhook is rate-limited in the tens per minute) exactly when a server is dying. So a per-<c>(provider,server,catalog)</c>
+/// (an incoming webhook is rate-limited in the tens per minute) exactly when a server is dying. So a per-<c>(provider,subject,catalog)</c>
 /// window (<see cref="SuppressWindow"/>) coalesces repeats: the first fires immediately, repeats inside the
 /// window are skipped (logged). The window counts the <b>attempt</b>, not just a success, so a failing
 /// webhook is not hammered either. <b>Honest boundary:</b> a mass reboot autostarts N servers → N
 /// <em>distinct</em> keys → N posts (not suppressed) — bounded by the host's server count, accepted; only
-/// the unbounded single-server loop is coalesced. Heavier shaping (digest/global rate-limit) is Increment C.</para>
+/// the unbounded single-server loop is coalesced. Heavier shaping (digest/global rate-limit) is Increment C.
+/// The subject is <see cref="NotificationEvent.SubjectKey"/> where the event names one — a threshold event
+/// is about a watched condition rather than a server, and several of those share one host.</para>
 /// <para><b>Threading.</b> <see cref="_lastSent"/> is touched ONLY by the single drain loop (the channel
 /// has one reader) — no lock. Each event is dispatched in its own DI scope so the transient typed
 /// <see cref="INotificationProvider"/> clients (disposable HttpClients) are disposed and the
@@ -83,7 +85,7 @@ public sealed class NotificationDeliveryWorker(
                 continue;
             }
 
-            string key = $"{provider.ProviderId}:{ev.ServerId}:{ev.CatalogId}";
+            string key = $"{provider.ProviderId}:{ev.SubjectKey ?? ev.ServerId}:{ev.CatalogId}";
             if (_lastSent.TryGetValue(key, out DateTimeOffset last) && now - last < SuppressWindow)
             {
                 logger.LogDebug(

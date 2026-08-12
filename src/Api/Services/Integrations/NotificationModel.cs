@@ -44,9 +44,14 @@ public sealed record CatalogEvent(string Id, string Title, string Description);
 
 /// <summary>
 /// The server-defined notification catalog (architecture.html §3·e). <b>Honest:</b> only events the API
-/// can actually source/deliver are listed — <c>resource</c> (no CPU/RAM/disk threshold-alert source is
-/// built) and <c>join</c> (no player tracking) are deliberately omitted, never faked. They join the
-/// catalog when an honest source lands.
+/// can actually source/deliver are listed — <c>join</c> (no player tracking) is deliberately omitted,
+/// never faked. It joins the catalog when an honest source lands.
+/// <para>
+/// <b>A breach and its recovery are two events, not one.</b> They are separate immutable facts in the
+/// audit log and they are separately worth hearing about: plenty of people want the alarm and not the
+/// all-clear. Splitting them is also what keeps the delivery worker's coalesce window from letting a
+/// recovery suppress itself against the breach that preceded it inside the same window.
+/// </para>
 /// </summary>
 public static class NotificationCatalog
 {
@@ -59,6 +64,8 @@ public static class NotificationCatalog
         new("update_available", "Update available", "A new game version is available to install (server.update_available)."),
         new("installed", "Game installed", "A new server was installed (server.install)."),
         new("backup", "Backup created", "A server backup completed (backup.create)."),
+        new("threshold_breach", "Threshold crossed", "A metric the monitor watches went over its threshold and stayed there (host.threshold.breach)."),
+        new("threshold_clear", "Threshold recovered", "A metric that was over its threshold came back down (host.threshold.clear)."),
     ];
 
     public static bool IsKnown(string id) =>
@@ -87,6 +94,8 @@ public static class NotificationCatalog
         AuditAction.ServerUpdateAvailable => "update_available",
         AuditAction.ServerInstall => "installed",
         AuditAction.BackupCreate => "backup",
+        AuditAction.HostThresholdBreach => "threshold_breach",
+        AuditAction.HostThresholdClear => "threshold_clear",
         _ => null,
     };
 }
@@ -102,6 +111,11 @@ public sealed record NotificationTestResult(bool Ok, string? Posted, string? Cha
 /// from the audit contract). <see cref="Action"/> is the source <see cref="AuditAction"/> so a provider
 /// can phrase a nuance (a restart vs a fresh start) while the rule lookup still keys on the catalog id.
 /// </summary>
+/// <param name="SubjectKey">What this event is <em>about</em>, for coalescing repeats — the server for a
+/// lifecycle event, the individual watched condition for a threshold one. It exists because
+/// <see cref="ServerId"/> is not always the subject: every host-scope threshold carries a null server, so a
+/// window keyed on the server would let a disk breach silently swallow a temperature breach that happened
+/// a few seconds later. Null falls back to <see cref="ServerId"/>.</param>
 public sealed record NotificationEvent(
     string CatalogId,
     string Action,
@@ -109,7 +123,8 @@ public sealed record NotificationEvent(
     string Severity,
     string Summary,
     DateTimeOffset Ts,
-    string AuditId);
+    string AuditId,
+    string? SubjectKey = null);
 
 /// <summary>The outcome of one provider <c>SendAsync</c> (M8·c Increment B). Honest like
 /// <see cref="NotificationTestResult"/> — a real failure reports <see cref="Error"/>, never a faked ok.</summary>

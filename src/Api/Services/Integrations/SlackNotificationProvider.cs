@@ -79,6 +79,10 @@ public sealed class SlackNotificationProvider(HttpClient http, ILogger<SlackNoti
             AuditAction.ServerUpdate => $"⬆️ *{server}* was updated",
             AuditAction.ServerInstall => $"📦 *{server}* was installed",
             AuditAction.BackupCreate => $"💾 *{server}* backup created",
+            // The summary already names the sensor, the metric and the number, and it is the same sentence
+            // the audit trail carries — rephrasing it here would give one fact two wordings.
+            AuditAction.HostThresholdBreach => $"🌡️ {SlackEscape(ev.Summary)}",
+            AuditAction.HostThresholdClear => $"✅ {SlackEscape(ev.Summary)}",
             _ => $"ℹ️ {SlackEscape(ev.Summary)}",
         };
     }

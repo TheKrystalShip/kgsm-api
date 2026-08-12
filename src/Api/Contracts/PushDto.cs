@@ -19,10 +19,18 @@ public sealed record WebPushIntegrationView(
 /// Kept small on purpose: push services cap the payload, and everything here is one tap from the panel
 /// anyway. <paramref name="ServerId"/> is what lets a tap open the server it concerns.
 /// </summary>
+/// <param name="Event">The catalog event id, so the worker can route a tap at something other than a
+/// server — the panel owns its own routes, and a URL built here would be this API guessing at them.</param>
+/// <param name="Tag">The device-side coalescing key: a second notification carrying it replaces the first
+/// on the lock screen instead of stacking under it. It names the <em>subject</em> — one host watches
+/// several conditions at once, so keying this on the host would let a disk warning overwrite a temperature
+/// one. Absent falls back to the worker's own per-server key.</param>
 public sealed record WebPushPayload(
     string Title,
     string Body,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ServerId);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ServerId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Event = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Tag = null);
 
 /// <summary>GET /push/key — what a browser needs before it can call <c>pushManager.subscribe</c>.</summary>
 /// <param name="PublicKey">base64url VAPID public key, passed as <c>applicationServerKey</c>.</param>

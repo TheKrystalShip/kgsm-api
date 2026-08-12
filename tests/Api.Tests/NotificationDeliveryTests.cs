@@ -39,6 +39,8 @@ public sealed class NotificationMappingTests
     [InlineData(AuditAction.ServerUpdateAvailable, "update_available")]
     [InlineData(AuditAction.ServerInstall, "installed")]
     [InlineData(AuditAction.BackupCreate, "backup")]
+    [InlineData(AuditAction.HostThresholdBreach, "threshold_breach")]
+    [InlineData(AuditAction.HostThresholdClear, "threshold_clear")] // separate ids: the all-clear is its own choice
     public void CatalogIdForAction_MapsNotifiableActions(string action, string expected) =>
         Assert.Equal(expected, NotificationCatalog.CatalogIdForAction(action));
 
@@ -60,9 +62,120 @@ public sealed class NotificationMappingTests
             AuditAction.ServerStart, AuditAction.ServerRestart, AuditAction.ServerStop,
             AuditAction.ServerCrash, AuditAction.ServerUpdate, AuditAction.ServerUpdateAvailable,
             AuditAction.ServerInstall, AuditAction.BackupCreate,
+            AuditAction.HostThresholdBreach, AuditAction.HostThresholdClear,
         ];
         foreach (string action in notifiable)
             Assert.True(NotificationCatalog.IsKnown(NotificationCatalog.CatalogIdForAction(action)!));
+    }
+}
+
+/// <summary>
+/// The bus's own two decisions, in isolation from the worker: what it refuses to enqueue at all, and what
+/// subject it says an event is about. Both matter most for threshold rows, which are transcribed from the
+/// monitor's durable episodes rather than produced live, and which carry no server to key on.
+/// </summary>
+public sealed class NotificationBusTests
+{
+    private static AuditRecord ThresholdRow(
+        string action, string ruleKey, string? sensor, DateTimeOffset ts, string? reason = null)
+    {
+        var meta = new Dictionary<string, string> { ["episodeId"] = "ep_" + Guid.NewGuid().ToString("N")[..8], ["ruleKey"] = ruleKey };
+        if (sensor is not null) meta["ref"] = sensor;
+        if (reason is not null) meta["reason"] = reason;
+        return new AuditRecord(
+            Id: "evt_" + Guid.NewGuid().ToString("N")[..10], Ts: ts, Origin: AuditOrigin.System,
+            Actor: new AuditActor(ActorKind.System, "monitor", ActorProvider.System),
+            Action: action, Severity: AuditSeverity.Warn,
+            Target: new AuditTarget(AuditTargetKind.Host, "test-host", "test-host"),
+            ServerId: null, HostId: "test-host", Summary: "something crossed something", Meta: meta);
+    }
+
+    private static NotificationBus NewBus() => new(NullLogger<NotificationBus>.Instance);
+
+    private static async Task<List<NotificationEvent>> DrainAsync(NotificationBus bus, int expected)
+    {
+        var got = new List<NotificationEvent>();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await foreach (NotificationEvent ev in bus.ReadAllAsync(cts.Token))
+        {
+            got.Add(ev);
+            if (got.Count == expected) break;
+        }
+        return got;
+    }
+
+    [Fact]
+    public async Task Breach_IsAboutTheCondition_NotTheHost()
+    {
+        NotificationBus bus = NewBus();
+        bus.Publish(ThresholdRow(AuditAction.HostThresholdBreach, "host-temp", "k10temp/Tctl", DateTimeOffset.UtcNow));
+        bus.Publish(ThresholdRow(AuditAction.HostThresholdBreach, "host-disk", "/", DateTimeOffset.UtcNow));
+
+        List<NotificationEvent> got = await DrainAsync(bus, 2);
+
+        // Both carry a null server; if the subject were the server they would coalesce into one and the
+        // second condition would never be heard about.
+        Assert.All(got, ev => Assert.Null(ev.ServerId));
+        Assert.Equal(2, got.Select(ev => ev.SubjectKey).Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public async Task LifecycleEvent_NamesNoSubject_AndFallsBackToTheServer()
+    {
+        NotificationBus bus = NewBus();
+        bus.Publish(new AuditRecord(
+            Id: "evt_x", Ts: DateTimeOffset.UtcNow, Origin: AuditOrigin.System,
+            Actor: new AuditActor(ActorKind.System, "watchdog", ActorProvider.System),
+            Action: AuditAction.ServerCrash, Severity: AuditSeverity.Warn,
+            Target: new AuditTarget(AuditTargetKind.Server, "srv", "srv"),
+            ServerId: "srv", HostId: "test-host", Summary: "srv crashed", Meta: null));
+
+        NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
+        Assert.Null(only.SubjectKey);
+    }
+
+    [Theory]
+    [InlineData("unwatched")]   // the rule was retuned or switched off — nobody measured a recovery
+    [InlineData("interrupted")] // the monitor restarted while it was firing — same
+    public async Task Clear_ThatDidNotRecover_IsNotAnnounced(string reason)
+    {
+        NotificationBus bus = NewBus();
+        bus.Publish(ThresholdRow(AuditAction.HostThresholdClear, "host-temp", "k10temp/Tctl", DateTimeOffset.UtcNow, reason));
+        // The barrier: a real recovery published after it. The channel is FIFO, so receiving this one
+        // proves the first was dropped rather than merely slow.
+        bus.Publish(ThresholdRow(AuditAction.HostThresholdClear, "host-disk", "/", DateTimeOffset.UtcNow));
+
+        NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
+        Assert.Contains("host-disk", only.SubjectKey);
+    }
+
+    [Fact]
+    public async Task Episode_OlderThanTheNoticeWindow_IsNotAnnounced()
+    {
+        NotificationBus bus = NewBus();
+        // What a cold start transcribing yesterday's episodes looks like.
+        bus.Publish(ThresholdRow(AuditAction.HostThresholdBreach, "host-temp", "k10temp/Tctl",
+            DateTimeOffset.UtcNow.AddHours(-6)));
+        bus.Publish(ThresholdRow(AuditAction.HostThresholdBreach, "host-disk", "/", DateTimeOffset.UtcNow));
+
+        NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
+        Assert.Contains("host-disk", only.SubjectKey);
+    }
+
+    [Fact]
+    public async Task StaleLifecycleEvent_IsStillAnnounced()
+    {
+        NotificationBus bus = NewBus();
+        // The age gate is about transcribed history. An engine echo is published as it happens, and a
+        // timestamp that drifted must never be a reason to swallow a crash.
+        bus.Publish(new AuditRecord(
+            Id: "evt_y", Ts: DateTimeOffset.UtcNow.AddHours(-6), Origin: AuditOrigin.System,
+            Actor: new AuditActor(ActorKind.System, "watchdog", ActorProvider.System),
+            Action: AuditAction.ServerCrash, Severity: AuditSeverity.Warn,
+            Target: new AuditTarget(AuditTargetKind.Server, "srv", "srv"),
+            ServerId: "srv", HostId: "test-host", Summary: "srv crashed", Meta: null));
+
+        Assert.Single(await DrainAsync(bus, 1));
     }
 }
 
@@ -190,6 +303,40 @@ public sealed class NotificationDeliveryE2ETests
         List<string> bodies = f.Webhook.Requests.Select(r => r.Body).ToList();
         Assert.Single(bodies, b => b.Contains("crashed", StringComparison.Ordinal));  // one crash, not two
         Assert.Single(bodies, b => b.Contains("is online", StringComparison.Ordinal));
+    }
+
+    private static AuditWrite BreachWrite(string ruleKey, string sensor, string summary) => new(
+        Ts: DateTimeOffset.UtcNow, Origin: AuditOrigin.System,
+        Actor: new AuditActor(ActorKind.System, "monitor", ActorProvider.System),
+        Action: AuditAction.HostThresholdBreach, Severity: AuditSeverity.Warn,
+        Target: new AuditTarget(AuditTargetKind.Host, "test-host", "test-host"),
+        ServerId: null, HostId: "test-host", Summary: summary,
+        Meta: new Dictionary<string, string>
+        {
+            ["episodeId"] = "ep_" + Guid.NewGuid().ToString("N")[..8],
+            ["ruleKey"] = ruleKey,
+            ["ref"] = sensor,
+        });
+
+    [Fact]
+    public async Task TwoConditionsOnOneHost_BothDeliver_AndARepeatDoesNot()
+    {
+        using var f = new NotificationDeliveryFactory();
+        HttpClient c = AdminClient(f);
+        await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, enabled = true });
+
+        AuditService audit = f.Services.GetRequiredService<AuditService>();
+        // Every host-scope threshold row carries a null server. Keyed on the server they would all be one
+        // subject, and the disk would be silently swallowed by the sensor that breached first.
+        await audit.AppendAsync(BreachWrite("host-temp", "k10temp", "k10temp temperature crossed 70C"));
+        await audit.AppendAsync(BreachWrite("host-temp", "k10temp", "k10temp temperature crossed 70C")); // suppressed
+        await audit.AppendAsync(BreachWrite("host-disk", "root", "root disk usage crossed 90%"));
+
+        await f.Webhook.WaitForAsync(2, Timeout);
+        Assert.Equal(2, f.Webhook.Requests.Count);
+        List<string> bodies = f.Webhook.Requests.Select(r => r.Body).ToList();
+        Assert.Single(bodies, b => b.Contains("temperature", StringComparison.Ordinal));
+        Assert.Single(bodies, b => b.Contains("disk usage", StringComparison.Ordinal));
     }
 }
 
