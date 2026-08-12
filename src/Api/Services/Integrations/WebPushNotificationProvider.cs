@@ -28,6 +28,7 @@ public sealed class WebPushNotificationProvider(
     PushSnoozeStore snoozes,
     PushActionStore actions,
     WebPushSender sender,
+    Aggregation.InstanceCache instances,
     ApiOptions options,
     ILogger<WebPushNotificationProvider> logger) : INotificationProvider
 {
@@ -186,7 +187,7 @@ public sealed class WebPushNotificationProvider(
         var payload = new WebPushPayload(
             Title(ev), ev.Summary, ev.ServerId, ev.CatalogId, ev.SubjectKey, options.PublicOrigin);
 
-        IReadOnlyList<PushActionOffer> offers = PushActionCatalog.For(ev);
+        IReadOnlyList<PushActionOffer> offers = PushActionCatalog.For(ev, ModerationFor(ev));
         if (offers.Count == 0 || device.MaxActions is not > 0 || string.IsNullOrEmpty(device.UserHandle))
             return Payload(payload);
 
@@ -194,7 +195,8 @@ public sealed class WebPushNotificationProvider(
         foreach (PushActionOffer offer in offers.Take(device.MaxActions.Value))
         {
             string handle = await actions.StageAsync(
-                offer.Kind, offer.Target, device.UserHandle!, device.Username, device.Endpoint, offer.Label, ct)
+                offer.Kind, offer.Target, device.UserHandle!, device.Username, device.Endpoint, offer.Label,
+                offer.Subject, ct)
                 .ConfigureAwait(false);
             buttons.Add(new WebPushAction(handle, offer.Label));
         }
@@ -202,9 +204,37 @@ public sealed class WebPushNotificationProvider(
         return Payload(payload with { Actions = buttons });
     }
 
+    /// <summary>
+    /// What the event's game declares it can do to a player, read off the instance the cache already holds.
+    /// </summary>
+    /// <remarks>
+    /// Null for every event that is not about a person, and null when the engine is not readable or does not
+    /// know this instance — which the catalog treats as "no moderation", the same as a game that declares
+    /// none. That is the deliberate direction to fail in: a button offered on a guess ends with somebody
+    /// removed from a game on the strength of an assumption.
+    /// </remarks>
+    private ModerationCapability? ModerationFor(NotificationEvent ev)
+    {
+        if (ev.CatalogId != "player_join" || string.IsNullOrEmpty(ev.ServerId)) return null;
+        return instances.Roster.TryGetValue(ev.ServerId!, out KGSM.Core.Models.Instance? instance)
+            ? Players.ModerationTargetResolver.Describe(instance)
+            : null;
+    }
+
     private static string Title(NotificationEvent ev)
     {
         string server = string.IsNullOrEmpty(ev.ServerId) ? "A server" : ev.ServerId;
+
+        // The events the catalog id separates but the action does not. A crash and a give-up are one audit
+        // action told apart by severity, and the title is where that distinction has to land — "crashed"
+        // under a notification that means "it is not coming back" would be the wrong headline.
+        switch (ev.CatalogId)
+        {
+            case "crash_loop": return $"{server} gave up";
+            case "player_join": return $"Someone joined {server}";
+            case "server_empty": return $"{server} is empty";
+        }
+
         return ev.Action switch
         {
             // A threshold event's own summary is the detail (which sensor, which number), so the title is

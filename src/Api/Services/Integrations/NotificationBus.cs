@@ -23,6 +23,19 @@ public interface INotificationBus
     /// (logged), because notifications are best-effort and must never back-pressure persistence.</summary>
     void Publish(AuditRecord record);
 
+    /// <summary>
+    /// Enqueue a fact <b>this API observed itself</b> — one with no audit row behind it, so there is no
+    /// append to tap. Same queue, same worker, same rules and coalescing; only the source differs.
+    /// </summary>
+    /// <remarks>
+    /// The only caller is the empty-server watcher, and the seam exists rather than the watcher writing a
+    /// synthetic audit row to get itself noticed: the audit log records actions, and inventing one there to
+    /// reach a notification would put a reading in a record of deeds. <see cref="NotificationEvent.Action"/>
+    /// on anything published here is a <see cref="DerivedNotificationAction"/> value, never an
+    /// <see cref="AuditAction"/>.
+    /// </remarks>
+    void PublishDerived(NotificationEvent ev);
+
     /// <summary>The worker's drain. Completes when the channel completes (app stop).</summary>
     IAsyncEnumerable<NotificationEvent> ReadAllAsync(CancellationToken ct);
 }
@@ -60,18 +73,21 @@ public sealed class NotificationBus : INotificationBus
 
     public void Publish(AuditRecord record)
     {
-        string? catalogId = NotificationCatalog.CatalogIdForAction(record.Action);
+        string? catalogId = NotificationCatalog.CatalogIdForAction(record.Action, record.Severity);
         if (catalogId is null) return; // not a notifiable action — dropped before the queue (no work, no read)
         if (!IsWorthAnnouncing(record)) return;
 
         var ev = new NotificationEvent(
             catalogId, record.Action, record.ServerId, record.Severity, record.Summary, record.Ts, record.Id,
-            SubjectKey: SubjectKeyOf(record));
+            SubjectKey: SubjectKeyOf(record),
+            PlayerIdentity: PlayerIdentityOf(record));
 
         // Bounded + DropOldest → TryWrite always accepts (it evicts the oldest on overflow), so this never
         // blocks the audit write. The itemDropped callback above logs any eviction.
         _channel.Writer.TryWrite(ev);
     }
+
+    public void PublishDerived(NotificationEvent ev) => _channel.Writer.TryWrite(ev);
 
     public IAsyncEnumerable<NotificationEvent> ReadAllAsync(CancellationToken ct) =>
         _channel.Reader.ReadAllAsync(ct);
@@ -115,11 +131,35 @@ public sealed class NotificationBus : INotificationBus
     /// </summary>
     private static string? SubjectKeyOf(AuditRecord record)
     {
+        // A join is about a person, and two people arriving a few seconds apart are two facts. Keyed on the
+        // server alone the second would be coalesced away — and the whole point of hearing about a join is
+        // that it names who arrived, so the one that got dropped could be the one worth answering.
+        if (record.Action == AuditAction.PlayerJoin)
+            return PlayerIdentityOf(record) is { Length: > 0 } who ? $"player/{who}/{record.ServerId}" : null;
+
         if (record.Action is not (AuditAction.HostThresholdBreach or AuditAction.HostThresholdClear)) return null;
         if (record.Meta is null) return null;
         record.Meta.TryGetValue("ruleKey", out string? rule);
         record.Meta.TryGetValue("ref", out string? reference);
         if (string.IsNullOrEmpty(rule) && string.IsNullOrEmpty(reference)) return null;
         return $"{rule}/{reference}/{record.ServerId}";
+    }
+
+    /// <summary>
+    /// The roster key for the person a presence row names, resolved from the same meta the roster itself was
+    /// built from and by the same rule, so a button staged here addresses the record the moderation path
+    /// will look up. Null when the row carries no identity at all — a notification can still be sent, it
+    /// just cannot offer a button naming somebody it cannot name.
+    /// </summary>
+    private static string? PlayerIdentityOf(AuditRecord record)
+    {
+        if (record.Action is not (AuditAction.PlayerJoin or AuditAction.PlayerLeave)) return null;
+        if (record.Meta is null) return null;
+        record.Meta.TryGetValue("playerId", out string? id);
+        record.Meta.TryGetValue("playerName", out string? name);
+        record.Meta.TryGetValue("playerAddr", out string? addr);
+        record.Meta.TryGetValue("sessionKey", out string? sessionKey);
+        string identity = Players.PlayerIdentityResolver.Resolve(id, name, addr, sessionKey);
+        return identity == "unknown" ? null : identity;
     }
 }

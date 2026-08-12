@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — three events worth waking somebody for
+
+**`crash_loop` — the watchdog gave up.** The engine has always raised two different facts here: it is
+restarting this, and it has stopped restarting this. Both are `server.crash`, told apart by the severity
+the mapper writes, and both were routed to one catalog event — where the anti-spam window ate the second
+one. A give-up arrives at the end of a run of crashes for the same server, inside the sixty seconds those
+crashes were being coalesced into, so the single crash notification a person most needs was the one they
+did not get. It is now its own event, its own window, and its own button: **Start**, because the
+supervisor has stopped trying and the server is already down — a crash cause that has since gone away (a
+full disk, a port somebody else was holding) makes the next attempt succeed, and if it does not, the
+supervisor gives up again and says so.
+
+**`player_join` — somebody connected**, carrying **Kick** and **Ban**. The most genuinely phone-shaped
+thing this channel can do: somebody is ruining a game right now and the person who can stop it is not at
+a desk. The buttons are staged against the roster's own key for that person, and offered only for what
+the game's blueprint actually declares — the placeholder **is** the contract, so a game with no ban
+template is not offered one, and a game whose moderation cannot be established is treated exactly like a
+game that has none. Being wrong here removes a real person from a game. Everything is re-resolved at the
+tap, because minutes pass between a lock screen and an answer: the player may have left, the account may
+have been demoted, and each of those is reported in the words the person reads.
+
+**`server_empty` — a server left running for nobody**, carrying **Stop**. The one notifiable fact on this
+host with no event behind it: nothing *happens* when a server becomes idle, so there is nothing to echo.
+It is a reading instead — the engine says running, the supervisor says no sessions, and both have to keep
+saying it for thirty minutes. **Unobservable presence is never empty**: a game this host cannot watch
+players on reports no sessions for the same reason a deserted one does, and conflating those would
+announce an abandonment nobody measured. It latches until somebody joins or the server stops, so a server
+left down for a fortnight is one notification rather than one a minute. Nothing is written to the audit
+log for it — the trail records actions, and this is an observation.
+
+**`player_join` and `server_empty` arrive switched off.** Their rate is set by how popular a server is
+rather than by what the host does, and a busy evening is hundreds of joins — so adding them does not
+silently change what an already-configured host sends. An admin turns them on deliberately, per
+integration, and each person can still switch them off again.
+
 ### Added — a notification can be acted on
 
 One button, on each of the four events where a single tap is an unambiguous instruction:

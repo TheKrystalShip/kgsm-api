@@ -285,6 +285,11 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<INotificationBus, NotificationBus>();
         services.AddHostedService<NotificationDeliveryWorker>();
 
+        // The one notifiable fact with no event behind it: a server left running with nobody on it. It is a
+        // reading taken from the engine and the supervisor agreeing over a dwell, published straight onto
+        // the bus — nothing is written to the audit log, which records actions rather than observations.
+        services.AddHostedService<IdleServerWatcher>();
+
         // M2 — realtime. The hub is the per-host connection registry + fan-out; the three pumps poll
         // their sources (neither the monitor nor kgsm-lib pushes) and publish only while subscribed, so
         // an idle stream costs nothing. The /stream SSE endpoint lives in StreamController.

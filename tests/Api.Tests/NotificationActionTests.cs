@@ -152,6 +152,40 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
         Assert.Contains($"not allowed to {verb}", await res.Content.ReadAsStringAsync());
     }
 
+    [Theory]
+    [InlineData(PushActionKind.PlayerKick, "kick")]
+    [InlineData(PushActionKind.PlayerBan, "ban")]
+    public async Task Every_moderation_button_runs_the_tier_gate_too(string kind, string action)
+    {
+        // Removing a person from a game is a mutation like any other, and reaching it from a lock screen
+        // must not be a way around the tier that guards the panel's own route.
+        KgsmIdentity who = Account("act-mod-" + action, KgsmTier.Viewer);
+        string handle = await Staged.StageAsync(
+            kind, "factorio-01", who.Handle, who.Username, Endpoint, "Go", subject: "Ana");
+
+        HttpResponseMessage res = await factory.CreateClient()
+            .PostAsync($"/api/v1/notifications/actions/{handle}", From(Endpoint));
+
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+        Assert.Contains($"not allowed to {action} a player", await res.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task A_moderation_handle_that_names_nobody_does_nothing()
+    {
+        // Belt-and-braces against a row staged without a subject: the target is a server, and a kick with
+        // no player named must never be allowed to resolve to "whoever the resolver finds first".
+        KgsmIdentity who = Account("act-mod-nosubject", KgsmTier.Operator);
+        string handle = await Staged.StageAsync(
+            PushActionKind.PlayerKick, "factorio-01", who.Handle, who.Username, Endpoint, "Kick");
+
+        HttpResponseMessage res = await factory.CreateClient()
+            .PostAsync($"/api/v1/notifications/actions/{handle}", From(Endpoint));
+
+        Assert.Equal(HttpStatusCode.Forbidden, res.StatusCode);
+        Assert.Contains("did not name a player", await res.Content.ReadAsStringAsync());
+    }
+
     [Fact]
     public async Task Snoozing_silences_that_condition_for_that_person()
     {
@@ -232,8 +266,12 @@ public class NotificationOriginTests(AuthTestFactory factory) : IClassFixture<Au
 /// <summary>Which events offer a button, and which deliberately do not.</summary>
 public class PushActionCatalogTests
 {
-    private static NotificationEvent Event(string catalogId, string? serverId, string? subject = null) =>
-        new(catalogId, "irrelevant", serverId, AuditSeverity.Warn, "summary", DateTimeOffset.UtcNow, "evt_1", subject);
+    private static NotificationEvent Event(
+        string catalogId, string? serverId, string? subject = null, string? player = null) =>
+        new(catalogId, "irrelevant", serverId, AuditSeverity.Warn, "summary", DateTimeOffset.UtcNow, "evt_1",
+            subject, player);
+
+    private static ModerationCapability Can(bool kick, bool ban) => new(kick, ban, false, "name");
 
     [Fact]
     public void An_available_update_offers_to_apply_it()
@@ -269,6 +307,61 @@ public class PushActionCatalogTests
         Assert.Equal(PushActionKind.ServerStop, only.Kind);
     }
 
+    [Fact]
+    public void A_give_up_offers_START_because_the_watchdog_has_stopped_trying()
+    {
+        // The mirror of the crash above: there, the supervisor is restarting it and Stop is the only
+        // thing that changes anything. Here it has given up, so the server is already down and Stop
+        // would ask for what already is.
+        PushActionOffer only = Assert.Single(PushActionCatalog.For(Event("crash_loop", "factorio-01")));
+        Assert.Equal(PushActionKind.ServerStart, only.Kind);
+    }
+
+    [Fact]
+    public void An_empty_server_offers_to_stop_it()
+    {
+        PushActionOffer only = Assert.Single(PushActionCatalog.For(Event("server_empty", "factorio-01")));
+        Assert.Equal(PushActionKind.ServerStop, only.Kind);
+    }
+
+    [Fact]
+    public void A_join_offers_kick_before_ban_and_names_the_player()
+    {
+        IReadOnlyList<PushActionOffer> offers =
+            PushActionCatalog.For(Event("player_join", "romestead", player: "Ana"), Can(kick: true, ban: true));
+
+        // Kick first: two is the button ceiling on the platform these are read on, so the order here is
+        // the order that survives, and the reversible action is the one to keep.
+        Assert.Collection(offers,
+            o => Assert.Equal(PushActionKind.PlayerKick, o.Kind),
+            o => Assert.Equal(PushActionKind.PlayerBan, o.Kind));
+        Assert.All(offers, o =>
+        {
+            Assert.Equal("romestead", o.Target);
+            Assert.Equal("Ana", o.Subject);
+        });
+    }
+
+    [Fact]
+    public void A_game_that_declares_no_ban_is_not_offered_one()
+    {
+        // The blueprint's placeholder IS the contract. Offering a button the engine will refuse promises
+        // something this host cannot do.
+        PushActionOffer only = Assert.Single(
+            PushActionCatalog.For(Event("player_join", "romestead", player: "Ana"), Can(kick: true, ban: false)));
+        Assert.Equal(PushActionKind.PlayerKick, only.Kind);
+    }
+
+    [Fact]
+    public void A_join_offers_nothing_when_moderation_could_not_be_established() =>
+        // Not knowing what a game supports is treated exactly like knowing it supports nothing: being
+        // wrong here removes a real person from a game.
+        Assert.Empty(PushActionCatalog.For(Event("player_join", "romestead", player: "Ana"), moderation: null));
+
+    [Fact]
+    public void A_join_that_names_nobody_offers_nothing() =>
+        Assert.Empty(PushActionCatalog.For(Event("player_join", "romestead"), Can(kick: true, ban: true)));
+
     [Theory]
     [InlineData("online")]
     [InlineData("backup")]
@@ -278,6 +371,16 @@ public class PushActionCatalogTests
     [InlineData("threshold_clear")]
     public void The_rest_offer_nothing(string catalogId) =>
         Assert.Empty(PushActionCatalog.For(Event(catalogId, "srv", "some/condition/")));
+
+    [Theory]
+    [InlineData(PushActionKind.PlayerKick, ModerationAction.Kick)]
+    [InlineData(PushActionKind.PlayerBan, ModerationAction.Ban)]
+    public void Each_moderation_kind_names_the_action_it_runs(string kind, string action) =>
+        Assert.Equal(action, PushActionKind.ModerationFor(kind));
+
+    [Fact]
+    public void A_lifecycle_kind_is_not_a_moderation_action() =>
+        Assert.Null(PushActionKind.ModerationFor(PushActionKind.ServerStop));
 
     [Theory]
     [InlineData(PushActionKind.ServerUpdate, CommandVerb.Update)]

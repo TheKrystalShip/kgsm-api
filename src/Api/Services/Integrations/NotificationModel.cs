@@ -59,20 +59,37 @@ public static class NotificationCatalog
     [
         new("online", "Server online", "A server came up and is running (server.start / server.restart)."),
         new("offline", "Server offline", "A server stopped (server.stop)."),
-        new("crash", "Server crash", "The watchdog detected a server exited unexpectedly (server.crash)."),
+        new("crash", "Server crash", "The watchdog detected a server exited unexpectedly and is restarting it (server.crash)."),
+        new("crash_loop", "Server gave up", "The watchdog exhausted its restart retries and left a server down (server.crash, at danger)."),
         new("update", "Game updated", "A new game build was applied (server.update)."),
         new("update_available", "Update available", "A new game version is available to install (server.update_available)."),
         new("installed", "Game installed", "A new server was installed (server.install)."),
         new("backup", "Backup created", "A server backup completed (backup.create)."),
         new("threshold_breach", "Threshold crossed", "A metric the monitor watches went over its threshold and stayed there (host.threshold.breach)."),
         new("threshold_clear", "Threshold recovered", "A metric that was over its threshold came back down (host.threshold.clear)."),
+        new("player_join", "Player joined", "Somebody connected to a server this host can observe presence on (player.join)."),
+        new("server_empty", "Server sitting empty", "A running server has had nobody connected to it for a while."),
     ];
+
+    /// <summary>
+    /// The two events whose rate is set by <em>other people</em> rather than by the fleet doing something,
+    /// and which therefore arrive opt-in.
+    /// </summary>
+    /// <remarks>
+    /// Every other event is bounded by what the host does: a server starts, crashes, gets backed up. These
+    /// two are bounded by how popular a server is, and a busy evening is hundreds of joins. Defaulting them
+    /// on would mean adding them silently changed what an already-configured host sends — so an admin turns
+    /// them on deliberately, and each person can still switch them off again.
+    /// </remarks>
+    private static readonly HashSet<string> OptIn = new(StringComparer.Ordinal) { "player_join", "server_empty" };
 
     public static bool IsKnown(string id) =>
         Events.Any(e => string.Equals(e.Id, id, StringComparison.Ordinal));
 
-    /// <summary>The default rule for a catalog event the user hasn't configured: enabled, every, no ping.</summary>
-    public static NotificationRule DefaultRule(string id) => new(id, Enabled: true, NotificationCadence.Every, Ping: false);
+    /// <summary>The default rule for a catalog event the user hasn't configured: <c>every</c>, no ping, and
+    /// enabled unless the event is one of the <see cref="OptIn"/> pair.</summary>
+    public static NotificationRule DefaultRule(string id) =>
+        new(id, Enabled: !OptIn.Contains(id), NotificationCadence.Every, Ping: false);
 
     /// <summary>
     /// Map an <see cref="AuditAction"/> (the always-on audit row, M8·c Increment B) to the catalog event
@@ -84,12 +101,21 @@ public static class NotificationCatalog
     /// watchdog's autonomous crash-restart (<c>instance_restarted</c> → <c>server.restart</c>) delivers the
     /// "back online" signal that pairs with its crash, not a silent gap.
     /// </summary>
-    public static string? CatalogIdForAction(string action) => action switch
+    /// <param name="severity">The row's severity, which is the only thing separating the two crash facts.
+    /// The watchdog raises <c>instance_crashed</c> while it is still restarting and <c>instance_failed</c>
+    /// once it has given up, and both are the doc's single <c>server.crash</c> action — the give-up is
+    /// carried by the <see cref="AuditSeverity.Danger"/> the mapper writes. Omitting it reads a crash as the
+    /// restarting kind, which is the safe way round: the escalation is the one that must not be invented.</param>
+    public static string? CatalogIdForAction(string action, string? severity = null) => action switch
     {
         AuditAction.ServerStart => "online",
         AuditAction.ServerRestart => "online",
         AuditAction.ServerStop => "offline",
-        AuditAction.ServerCrash => "crash",
+        // Split, because the coalesce window would otherwise hide it: a give-up arrives at the end of a run
+        // of crashes for the same server, inside the window they were suppressed by, so the one crash
+        // notification a person most needs — "it is down and staying down" — is the one they would not get.
+        AuditAction.ServerCrash => severity == AuditSeverity.Danger ? "crash_loop" : "crash",
+        AuditAction.PlayerJoin => "player_join",
         AuditAction.ServerUpdate => "update",
         AuditAction.ServerUpdateAvailable => "update_available",
         AuditAction.ServerInstall => "installed",
@@ -116,6 +142,10 @@ public sealed record NotificationTestResult(bool Ok, string? Posted, string? Cha
 /// <see cref="ServerId"/> is not always the subject: every host-scope threshold carries a null server, so a
 /// window keyed on the server would let a disk breach silently swallow a temperature breach that happened
 /// a few seconds later. Null falls back to <see cref="ServerId"/>.</param>
+/// <param name="PlayerIdentity">The roster's own key for the person an event is about, on the events that
+/// are about a person. It is what a moderation button is staged against, and it is carried rather than
+/// re-derived because the roster's identity rule (id → name → addr → sessionKey) lives in exactly one place
+/// and a second opinion about who somebody is would eventually moderate the wrong one.</param>
 public sealed record NotificationEvent(
     string CatalogId,
     string Action,
@@ -124,7 +154,25 @@ public sealed record NotificationEvent(
     string Summary,
     DateTimeOffset Ts,
     string AuditId,
-    string? SubjectKey = null);
+    string? SubjectKey = null,
+    string? PlayerIdentity = null);
+
+/// <summary>
+/// The <see cref="NotificationEvent.Action"/> values for facts <b>this API observes itself</b>, which are
+/// therefore not <see cref="AuditAction"/> values.
+/// </summary>
+/// <remarks>
+/// <b>Nothing here is ever written to the audit log.</b> The audit trail records what the engine and this
+/// API <em>did</em>; a server sitting empty is neither — it is a reading taken by watching two authorities
+/// agree (the engine says running, the supervisor says nobody is connected). Writing it as an audit row
+/// would put an observation in a record of actions. Providers switch on these like any other action.
+/// </remarks>
+public static class DerivedNotificationAction
+{
+    /// <summary>A running server with observable presence and nobody on it for the dwell
+    /// (<c>IdleServerWatcher</c>).</summary>
+    public const string ServerEmpty = "server.empty";
+}
 
 /// <summary>The outcome of one provider <c>SendAsync</c> (M8·c Increment B). Honest like
 /// <see cref="NotificationTestResult"/> — a real failure reports <see cref="Error"/>, never a faked ok.</summary>

@@ -30,6 +30,17 @@ public sealed class PushActionEntity
     /// <summary>What it acts on: a server id, or the watched condition's subject for a snooze.</summary>
     public string Target { get; set; } = "";
 
+    /// <summary>
+    /// Who inside <see cref="Target"/> it acts on, for the kinds that need one — the roster key of the
+    /// player a kick or a ban names. Null for everything else.
+    /// </summary>
+    /// <remarks>
+    /// Its own column rather than a separator inside <see cref="Target"/>: a player identity can be a
+    /// character name the game chose, and a name containing whatever byte was picked as the separator would
+    /// split into the wrong two halves — which on this path means moderating a different person.
+    /// </remarks>
+    public string? Subject { get; set; }
+
     /// <summary>The provider-qualified handle of the account it was staged for (<c>provider:subject</c>) —
     /// what the tier is re-resolved from. A subject alone is unique only within its provider.</summary>
     public string UserHandle { get; set; } = "";
@@ -73,8 +84,27 @@ public static class PushActionKind
     /// Their own phone, so it needs nothing above viewer.</summary>
     public const string ConditionSnooze = "condition.snooze";
 
+    /// <summary>
+    /// Disconnect <c>Subject</c> from <c>Target</c>. The reason this whole feature is worth having on a
+    /// phone: somebody is ruining a game right now and the person who can stop it is not at a desk.
+    /// </summary>
+    public const string PlayerKick = "player.kick";
+
+    /// <summary>Disconnect <c>Subject</c> from <c>Target</c> and keep them out.</summary>
+    public const string PlayerBan = "player.ban";
+
     public static bool IsKnown(string? kind) =>
-        kind is ServerUpdate or ServerStart or ServerStop or ConditionSnooze;
+        kind is ServerUpdate or ServerStart or ServerStop or ConditionSnooze or PlayerKick or PlayerBan;
+
+    /// <summary>The moderation action a kind runs, or <see langword="null"/> when it is not one. Maps onto
+    /// the same <see cref="Contracts.ModerationAction"/> vocabulary the panel's own route takes, so the two
+    /// paths cannot mean different things by "ban".</summary>
+    public static string? ModerationFor(string kind) => kind switch
+    {
+        PlayerKick => Contracts.ModerationAction.Kick,
+        PlayerBan => Contracts.ModerationAction.Ban,
+        _ => null,
+    };
 
     /// <summary>The engine verb a server-scoped kind runs, or <see langword="null"/> when the kind is not
     /// a lifecycle command at all. One place, so the redemption path cannot drift from the panel's.</summary>

@@ -5,8 +5,12 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Integrations.WebPush;
+using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.KGSM.Core.Interfaces;
+using TheKrystalShip.KGSM.Core.Models;
+using TheKrystalShip.KGSM.Core.Models.Enums;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -48,6 +52,7 @@ public sealed class NotificationActionsController(
     PushSubscriptionStore subscriptions,
     Services.Auth.UserDirectory users,
     ServerAggregator aggregator,
+    PlayerHistoryService history,
     JobRegistry jobs,
     CommandRunner runner,
     ILogger<NotificationActionsController> logger) : ControllerBase
@@ -92,6 +97,9 @@ public sealed class NotificationActionsController(
 
         if (PushActionKind.VerbFor(action.Kind) is { } verb)
             return await LifecycleAsync(action, verb, identity, authority.Tier, ct);
+
+        if (PushActionKind.ModerationFor(action.Kind) is { } moderation)
+            return ModerateAsync(action, moderation, identity, authority.Tier);
 
         return action.Kind switch
         {
@@ -147,6 +155,81 @@ public sealed class NotificationActionsController(
     // The gate's reasons are written as sentence fragments for an error envelope ("server is already
     // stopped"); here they are the whole message a person reads on a notification.
     private static string Capitalize(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
+    /// <summary>
+    /// Remove one player from one server — the same resolution the panel's moderation route performs, and
+    /// deliberately re-performed rather than trusted from staging time.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The staged row names a roster key, never an identity to send.</b> Which field reaches the game is
+    /// the blueprint's decision, read here through <see cref="ModerationTargetResolver"/> against the roster
+    /// record that key resolves to — so a handle cannot carry an address the roster never saw, and a game
+    /// that moderates by account id is not sent a name because a name is what was to hand.
+    /// </para>
+    /// <para>
+    /// <b>Everything is re-checked at the tap, because the interval is the point.</b> A notification is
+    /// answered minutes later from a lock screen: by then the person may have left, the game may not declare
+    /// this action, and the account may have been demoted. Each of those is reported in the words the person
+    /// will read on the follow-up notification.
+    /// </para>
+    /// </remarks>
+    private IActionResult ModerateAsync(
+        PushActionEntity action, string moderation, KgsmIdentity identity, KgsmTier tier)
+    {
+        if (tier < KgsmTier.Operator)
+            return Refuse($"That account is not allowed to {moderation} a player.");
+
+        if (string.IsNullOrEmpty(action.Subject))
+            return Refuse("That notification did not name a player.");
+
+        if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService engine)
+            return Unavailable("The kgsm engine is not readable on this host right now.");
+
+        Instance? instance = engine.GetInstanceInfo(action.Target);
+        if (instance is null)
+            return Refuse($"{action.Target} is not on this host any more.");
+
+        if (!history.TryGetPlayer(action.Target, action.Subject!, out RosterPlayer player))
+            return Refuse($"{action.Subject} is not on {action.Target}'s roster.");
+
+        // A kick on somebody who already left is answered here rather than by the engine: the game would
+        // refuse it as a 502 that reads like a fault, when what happened is simply that the moment passed.
+        if (moderation == Contracts.ModerationAction.Kick && player.Status != PlayerStatus.online)
+            return Refuse($"{Name(player)} is no longer connected.");
+
+        string? template = moderation == Contracts.ModerationAction.Kick ? instance.KickCommand : instance.BanCommand;
+        ModerationTargetResolver.Failure failure =
+            ModerationTargetResolver.TryResolve(template, player, out string target, out ModerationTargetKind kind);
+
+        if (failure == ModerationTargetResolver.Failure.Unsupported)
+            return Refuse($"This game declares no {moderation} command.");
+        if (failure == ModerationTargetResolver.Failure.NoSuchIdentity)
+            return Refuse($"This game moderates by {kind.ToString().ToLowerInvariant()}, which {Name(player)} has none of.");
+
+        // Stamped, not written — kgsm emits instance_player_kicked/_banned and the audit row comes off that
+        // echo, exactly as the panel's own moderation route leaves it.
+        KgsmResult result = moderation == Contracts.ModerationAction.Kick
+            ? engine.Kick(action.Target, target, identity.ActorString, AuditOrigin.Notification)
+            : engine.Ban(action.Target, target, identity.ActorString, AuditOrigin.Notification);
+
+        if (!result.IsSuccess)
+        {
+            logger.LogWarning("notification action: {Action} {Player} on {Server} refused by the engine — {Error}",
+                moderation, action.Subject, action.Target, result.Stderr);
+            return Unavailable($"The engine refused the {moderation}.");
+        }
+
+        logger.LogInformation("notification action: {Action} {Player} on {Server} (actor={Actor}, via push)",
+            moderation, action.Subject, action.Target, identity.ActorString);
+
+        return Ok(new PushActionResult(true, $"{Name(player)} was {(moderation == Contracts.ModerationAction.Kick ? "kicked" : "banned")}."));
+    }
+
+    // The name the person read on the notification, when the roster has one — an account id or an address
+    // is what the game answers to, not what somebody recognises on a lock screen.
+    private static string Name(RosterPlayer player) =>
+        !string.IsNullOrWhiteSpace(player.PlayerName) ? player.PlayerName! : player.PlayerIdentity;
 
     /// <summary>
     /// Silence one condition on the tapping person's own devices. Needs nothing above the account

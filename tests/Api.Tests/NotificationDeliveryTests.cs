@@ -41,8 +41,31 @@ public sealed class NotificationMappingTests
     [InlineData(AuditAction.BackupCreate, "backup")]
     [InlineData(AuditAction.HostThresholdBreach, "threshold_breach")]
     [InlineData(AuditAction.HostThresholdClear, "threshold_clear")] // separate ids: the all-clear is its own choice
+    [InlineData(AuditAction.PlayerJoin, "player_join")]
     public void CatalogIdForAction_MapsNotifiableActions(string action, string expected) =>
         Assert.Equal(expected, NotificationCatalog.CatalogIdForAction(action));
+
+    [Theory]
+    [InlineData(AuditSeverity.Warn, "crash")]        // instance_crashed — the watchdog is restarting it
+    [InlineData(AuditSeverity.Danger, "crash_loop")] // instance_failed — it has given up
+    [InlineData(null, "crash")]                      // unstated reads as the restarting kind, never the escalation
+    public void The_severity_is_what_separates_a_crash_from_a_give_up(string? severity, string expected) =>
+        Assert.Equal(expected, NotificationCatalog.CatalogIdForAction(AuditAction.ServerCrash, severity));
+
+    [Theory]
+    [InlineData("player_join")]
+    [InlineData("server_empty")]
+    public void The_two_events_other_people_drive_arrive_switched_off(string catalogId) =>
+        // Their rate is set by how popular a server is, not by what the host does, so an admin turns them
+        // on deliberately — adding them must not change what an already-configured host sends.
+        Assert.False(NotificationCatalog.DefaultRule(catalogId).Enabled);
+
+    [Theory]
+    [InlineData("crash_loop")]
+    [InlineData("offline")]
+    [InlineData("threshold_breach")]
+    public void Everything_else_still_defaults_on(string catalogId) =>
+        Assert.True(NotificationCatalog.DefaultRule(catalogId).Enabled);
 
     [Theory]
     [InlineData(AuditAction.ServerUninstall)]
@@ -62,10 +85,14 @@ public sealed class NotificationMappingTests
             AuditAction.ServerStart, AuditAction.ServerRestart, AuditAction.ServerStop,
             AuditAction.ServerCrash, AuditAction.ServerUpdate, AuditAction.ServerUpdateAvailable,
             AuditAction.ServerInstall, AuditAction.BackupCreate,
-            AuditAction.HostThresholdBreach, AuditAction.HostThresholdClear,
+            AuditAction.HostThresholdBreach, AuditAction.HostThresholdClear, AuditAction.PlayerJoin,
         ];
         foreach (string action in notifiable)
             Assert.True(NotificationCatalog.IsKnown(NotificationCatalog.CatalogIdForAction(action)!));
+
+        // Including the one whose id depends on the severity, which the loop above cannot reach.
+        Assert.True(NotificationCatalog.IsKnown(
+            NotificationCatalog.CatalogIdForAction(AuditAction.ServerCrash, AuditSeverity.Danger)!));
     }
 }
 
@@ -131,6 +158,60 @@ public sealed class NotificationBusTests
             ServerId: "srv", HostId: "test-host", Summary: "srv crashed", Meta: null));
 
         NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
+        Assert.Null(only.SubjectKey);
+    }
+
+    private static AuditRecord JoinRow(string server, string? id, string? name, string? addr) =>
+        new(Id: "evt_" + Guid.NewGuid().ToString("N")[..10], Ts: DateTimeOffset.UtcNow, Origin: AuditOrigin.System,
+            Actor: new AuditActor(ActorKind.System, "watchdog", ActorProvider.System),
+            Action: AuditAction.PlayerJoin, Severity: AuditSeverity.Info,
+            Target: new AuditTarget(AuditTargetKind.Server, server, server),
+            ServerId: server, HostId: "test-host", Summary: "somebody joined",
+            Meta: new Dictionary<string, string>(
+                new[] { ("playerId", id), ("playerName", name), ("playerAddr", addr) }
+                    .Where(p => p.Item2 is not null)
+                    .Select(p => new KeyValuePair<string, string>(p.Item1, p.Item2!))));
+
+    [Fact]
+    public async Task Two_people_joining_one_server_are_two_facts()
+    {
+        NotificationBus bus = NewBus();
+        bus.Publish(JoinRow("romestead", null, "Ana", "10.0.0.1:5000"));
+        bus.Publish(JoinRow("romestead", null, "Bo", "10.0.0.2:5000"));
+
+        List<NotificationEvent> got = await DrainAsync(bus, 2);
+
+        // Keyed on the server alone the second would be coalesced away inside the anti-spam window — and
+        // the whole value of a join notification is that it names who arrived, so the one dropped could
+        // be the one worth answering.
+        Assert.Equal(2, got.Select(ev => ev.SubjectKey).Distinct(StringComparer.Ordinal).Count());
+        Assert.Equal(["Ana", "Bo"], got.Select(ev => ev.PlayerIdentity));
+    }
+
+    [Fact]
+    public async Task A_join_resolves_the_player_by_the_rosters_own_rule()
+    {
+        NotificationBus bus = NewBus();
+        // The account id wins over the name, and the name over the address — the same precedence the
+        // roster keyed its row on, because a button staged here has to address that row.
+        bus.Publish(JoinRow("romestead", "7656119", "Ana", "10.0.0.1:5000"));
+        bus.Publish(JoinRow("romestead", null, "Bo", "10.0.0.2:5000"));
+        bus.Publish(JoinRow("romestead", null, null, "10.0.0.3:5000"));
+
+        List<NotificationEvent> got = await DrainAsync(bus, 3);
+        Assert.Equal(["7656119", "Bo", "10.0.0.3:5000"], got.Select(ev => ev.PlayerIdentity));
+    }
+
+    [Fact]
+    public async Task A_join_that_names_nobody_carries_no_identity()
+    {
+        NotificationBus bus = NewBus();
+        bus.Publish(JoinRow("romestead", null, null, null));
+
+        NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
+        // Still announced — somebody did join — but with nobody to name, so no button can be staged
+        // against a person this row cannot identify.
+        Assert.Null(only.PlayerIdentity);
         Assert.Null(only.SubjectKey);
     }
 

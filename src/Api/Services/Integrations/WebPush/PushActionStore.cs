@@ -51,6 +51,7 @@ public sealed class PushActionStore(IServiceScopeFactory scopeFactory)
                     "Id" TEXT NOT NULL CONSTRAINT "PK_push_actions" PRIMARY KEY,
                     "Kind" TEXT NOT NULL,
                     "Target" TEXT NOT NULL,
+                    "Subject" TEXT NULL,
                     "UserHandle" TEXT NOT NULL,
                     "Username" TEXT NULL,
                     "Endpoint" TEXT NOT NULL,
@@ -59,15 +60,27 @@ public sealed class PushActionStore(IServiceScopeFactory scopeFactory)
                     "ExpiresAt" INTEGER NOT NULL
                 );
                 """, ct).ConfigureAwait(false);
+
+            // And the same table on a host that already has it: CREATE TABLE IF NOT EXISTS is a no-op there,
+            // so a column added later arrives this way or not at all. SQLite has no ADD COLUMN IF NOT
+            // EXISTS, so the duplicate-column error IS the "already applied" answer.
+            try
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    """ALTER TABLE push_actions ADD COLUMN "Subject" TEXT NULL;""", ct).ConfigureAwait(false);
+            }
+            catch (Microsoft.Data.Sqlite.SqliteException) { /* already there */ }
+
             _ensured = true;
         }
         finally { _ensureGate.Release(); }
     }
 
     /// <summary>Stage one operation and return the handle that redeems it.</summary>
+    /// <param name="subject">Who inside <paramref name="target"/> it acts on, for the kinds that need one.</param>
     public async Task<string> StageAsync(
         string kind, string target, string userHandle, string? username, string endpoint, string label,
-        CancellationToken ct = default)
+        string? subject = null, CancellationToken ct = default)
     {
         await EnsureSchemaAsync(ct).ConfigureAwait(false);
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -88,6 +101,7 @@ public sealed class PushActionStore(IServiceScopeFactory scopeFactory)
                 Id = id,
                 Kind = kind,
                 Target = target,
+                Subject = subject,
                 UserHandle = userHandle,
                 Username = username,
                 Endpoint = endpoint,
