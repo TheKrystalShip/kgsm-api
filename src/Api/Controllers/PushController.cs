@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.WebPush;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -280,7 +281,7 @@ public sealed class PushController(
     /// capability to push to that browser, so it never leaves the server.</summary>
     private static string Fingerprint(string endpoint)
     {
-        byte[] hash = System.Security.Cryptography.SHA256.HashData(WebPushCrypto.Utf8(endpoint));
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(endpoint));
         return Convert.ToHexString(hash.AsSpan(0, 6)).ToLowerInvariant();
     }
 

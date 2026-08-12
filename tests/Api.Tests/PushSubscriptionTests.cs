@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.WebPush;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -204,7 +205,7 @@ public class PushSubscriptionTests(AuthTestFactory factory) : IClassFixture<Auth
 
     private static string Fingerprint(string endpoint)
     {
-        byte[] hash = System.Security.Cryptography.SHA256.HashData(WebPushCrypto.Utf8(endpoint));
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(endpoint));
         return Convert.ToHexString(hash.AsSpan(0, 6)).ToLowerInvariant();
     }
 }

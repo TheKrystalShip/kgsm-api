@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the Web Push protocol moved to a shared package
+
+`WebPushCrypto`, `VapidKeyPair`/`VapidSigner` and `WebPushSender` are now
+`TheKrystalShip.KGSM.WebPush` 1.0.0, because the assistant leaf needs to send a push too and two
+implementations of RFC 8291 message encryption is one more than anybody can keep correct.
+
+**Only the protocol moved.** This API keeps its own subscriptions, preferences, quiet hours and staged
+actions: two surfaces on one host have different users and different opinions about what is worth
+sending, so a shared store would force one answer where there are two. The library takes an endpoint, a
+key pair and some bytes, and holds nothing.
+
+The sender no longer takes a logger — a rejection comes back in `PushResult` with the push service's own
+words and this side logs it, being the only side that knows whose device it was. `PushSubscriptionEntity`
+gains a `Credential()` extension, which is the whole of the coupling between the row and the protocol.
+
+The crypto tests moved with the code and grew: the package's suite **decrypts** what the sender produces,
+deriving the keys from the subscription's private half the way a browser does, rather than re-using the
+sender's own idea of the format. An encoding mistake produces bytes of the right length and the wrong
+message, and only a receiver catches that.
+
+⚠ The VAPID key pair is untouched by this: it lives in the integration row, so every device already
+registered stays registered.
+
 ### Added — a scheduled restart can be pushed back from the notification about it
 
 `restart_soon` warns, fifteen minutes ahead, that a **running** server is about to take its scheduled

@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.WebPush;
 using System.Text.Json;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
@@ -231,7 +232,7 @@ public sealed class WebPushNotificationProvider(
         {
             if (wanted is not null && !wanted(device)) continue;
             byte[] payload = await payloadFor(device).ConfigureAwait(false);
-            PushResult result = await sender.SendAsync(device, payload, keys, subject, ct).ConfigureAwait(false);
+            PushResult result = await sender.SendAsync(device.Credential(), payload, keys, subject, ct).ConfigureAwait(false);
             switch (result.Outcome)
             {
                 case PushOutcome.Accepted:

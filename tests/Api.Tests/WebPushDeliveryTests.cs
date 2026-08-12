@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.WebPush;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -43,7 +44,19 @@ public class WebPushDeliveryTests
         public static UserAgent New()
         {
             ECDiffieHellman k = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
-            return new UserAgent(k, WebPushCrypto.ExportPoint(k), RandomNumberGenerator.GetBytes(16));
+            return new UserAgent(k, ExportPoint(k), RandomNumberGenerator.GetBytes(16));
+        }
+
+        // The uncompressed point, written out here rather than borrowed from the library: this suite
+        // stands in for a browser, and a browser does not use our code to build its own key.
+        private static byte[] ExportPoint(ECDiffieHellman key)
+        {
+            ECParameters p = key.ExportParameters(false);
+            byte[] point = new byte[65];
+            point[0] = 0x04;
+            p.Q.X!.CopyTo(point, 33 - p.Q.X!.Length);
+            p.Q.Y!.CopyTo(point, 65 - p.Q.Y!.Length);
+            return point;
         }
 
         public PushSubscriptionEntity Subscription() => new()
@@ -58,7 +71,7 @@ public class WebPushDeliveryTests
     private static (WebPushSender Sender, CapturingHandler Handler) Sender(HttpStatusCode status = HttpStatusCode.Created)
     {
         var handler = new CapturingHandler(status);
-        return (new WebPushSender(new HttpClient(handler), NullLogger<WebPushSender>.Instance), handler);
+        return (new WebPushSender(new HttpClient(handler)), handler);
     }
 
     /// <summary>The user-agent half of RFC 8291 — exactly the steps a browser runs on receipt.</summary>
@@ -100,7 +113,7 @@ public class WebPushDeliveryTests
         VapidKeyPair keys = VapidKeyPair.Generate();
         byte[] payload = JsonSerializer.SerializeToUtf8Bytes(new { title = "minecraft crashed", body = "watchdog restarted it", serverId = "minecraft" });
 
-        PushResult result = await sender.SendAsync(ua.Subscription(), payload, keys, "https://panel.test", default);
+        PushResult result = await sender.SendAsync(ua.Subscription().Credential(), payload, keys, "https://panel.test", default);
 
         Assert.Equal(PushOutcome.Accepted, result.Outcome);
         byte[] plain = Decrypt(handler.Body, ua);
@@ -114,7 +127,7 @@ public class WebPushDeliveryTests
     {
         UserAgent ua = UserAgent.New();
         (WebPushSender sender, CapturingHandler handler) = Sender();
-        await sender.SendAsync(ua.Subscription(), "{}"u8.ToArray(), VapidKeyPair.Generate(), "https://panel.test", default);
+        await sender.SendAsync(ua.Subscription().Credential(), "{}"u8.ToArray(), VapidKeyPair.Generate(), "https://panel.test", default);
 
         HttpRequestMessage req = handler.Request!;
         Assert.Equal(HttpMethod.Post, req.Method);
@@ -131,7 +144,7 @@ public class WebPushDeliveryTests
         (WebPushSender sender, CapturingHandler handler) = Sender();
         VapidKeyPair keys = VapidKeyPair.Generate();
 
-        await sender.SendAsync(ua.Subscription(), "{}"u8.ToArray(), keys, "https://panel.test", default);
+        await sender.SendAsync(ua.Subscription().Credential(), "{}"u8.ToArray(), keys, "https://panel.test", default);
 
         string auth = handler.Request!.Headers.GetValues("Authorization").Single();
         Assert.StartsWith("vapid ", auth);
@@ -169,7 +182,7 @@ public class WebPushDeliveryTests
     {
         UserAgent ua = UserAgent.New();
         (WebPushSender sender, _) = Sender(status);
-        PushResult r = await sender.SendAsync(ua.Subscription(), "{}"u8.ToArray(), VapidKeyPair.Generate(), "https://panel.test", default);
+        PushResult r = await sender.SendAsync(ua.Subscription().Credential(), "{}"u8.ToArray(), VapidKeyPair.Generate(), "https://panel.test", default);
         Assert.Equal(PushOutcome.Expired, r.Outcome);
     }
 
@@ -181,7 +194,7 @@ public class WebPushDeliveryTests
     {
         UserAgent ua = UserAgent.New();
         (WebPushSender sender, _) = Sender(status);
-        PushResult r = await sender.SendAsync(ua.Subscription(), "{}"u8.ToArray(), VapidKeyPair.Generate(), "https://panel.test", default);
+        PushResult r = await sender.SendAsync(ua.Subscription().Credential(), "{}"u8.ToArray(), VapidKeyPair.Generate(), "https://panel.test", default);
         // Deleting on a 429 would evict a live device over a busy minute.
         Assert.Equal(PushOutcome.Failed, r.Outcome);
     }
@@ -194,7 +207,7 @@ public class WebPushDeliveryTests
         {
             Endpoint = Endpoint, UserSubject = "u", P256dh = "AAAA", Auth = WebPushCrypto.ToBase64Url(new byte[16]),
         };
-        PushResult r = await sender.SendAsync(broken, "{}"u8.ToArray(), VapidKeyPair.Generate(), "https://panel.test", default);
+        PushResult r = await sender.SendAsync(broken.Credential(), "{}"u8.ToArray(), VapidKeyPair.Generate(), "https://panel.test", default);
         Assert.Equal(PushOutcome.Expired, r.Outcome);
         Assert.Null(handler.Request); // never even attempted
     }

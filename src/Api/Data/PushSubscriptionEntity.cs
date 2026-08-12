@@ -61,3 +61,16 @@ public sealed class PushSubscriptionEntity
     /// outright). Lets a persistently broken endpoint be retired without punishing one bad night.</summary>
     public int FailureCount { get; set; }
 }
+
+/// <summary>The bridge from this API's device row to the protocol library's view of it.</summary>
+/// <remarks>
+/// The library takes the three fields the protocol needs and nothing else. Whose device this is, when
+/// it was registered, what it may be told and how many buttons it draws are all questions this API
+/// answers from its own table — which is exactly why the library holds no state and cannot answer them
+/// wrongly.
+/// </remarks>
+public static class PushSubscriptionCredential
+{
+    public static TheKrystalShip.KGSM.WebPush.PushSubscription Credential(this PushSubscriptionEntity row) =>
+        new(row.Endpoint, row.P256dh, row.Auth);
+}
