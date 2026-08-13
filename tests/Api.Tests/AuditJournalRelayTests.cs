@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Core.Models;
@@ -193,6 +194,49 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         // Ready closes it, exactly as it closes a plain start's window.
         await Feed("instance_ready", instance, until: () => !cache.IsStarting(instance));
         Assert.True(cache.Statuses[instance].Value!.Status);
+    }
+
+    /// <summary>
+    /// An engine-driven update that kgsm reports as failed settles the observed job as FAILED. It used
+    /// to settle as succeeded — the bracket's finish is emitted on every outcome and this API has no
+    /// exit code of its own for a run it did not issue, so a refused update reported itself to every
+    /// surface as a completed one. The engine now states the outcome and this is where it is believed.
+    /// </summary>
+    [Fact]
+    public async Task AnUpdateTheEngineReportsAsFailedSettlesTheJobAsFailed()
+    {
+        JobRegistry jobs = _factory.Services.GetRequiredService<JobRegistry>();
+
+        string instance = $"updfail-{Guid.NewGuid():N}";
+        await Feed("instance_update_started", instance, until: () => jobs.InFlightFor(instance) is not null);
+
+        Job running = jobs.InFlightFor(instance)!;
+        Assert.Equal(CommandVerb.Update, running.Verb);
+
+        await Feed("instance_update_failed", instance,
+            until: () => jobs.Get(running.Id)?.State == JobState.Failed);
+
+        Job settled = jobs.Get(running.Id)!;
+        Assert.Equal(JobState.Failed, settled.State);
+        Assert.NotNull(settled.Error);
+        Assert.Null(jobs.InFlightFor(instance));   // the slot is released either way
+    }
+
+    /// <summary>
+    /// An engine-driven uninstall claims the in-flight slot for the whole of its run. Every other long
+    /// verb's bracket did; this one was not registered, so a removal driven from anywhere but this API
+    /// showed nothing at all on a surface while a server was being destroyed.
+    /// </summary>
+    [Fact]
+    public async Task AnEngineDrivenUninstallIsVisibleWhileItRuns()
+    {
+        JobRegistry jobs = _factory.Services.GetRequiredService<JobRegistry>();
+
+        string instance = $"uninst-{Guid.NewGuid():N}";
+        await Feed("instance_uninstall_started", instance, until: () => jobs.InFlightFor(instance) is not null);
+        Assert.Equal(CommandVerb.Uninstall, jobs.InFlightFor(instance)!.Verb);
+
+        await Feed("instance_uninstall_finished", instance, until: () => jobs.InFlightFor(instance) is null);
     }
 
     /// <summary>The instance is known and observed down.</summary>

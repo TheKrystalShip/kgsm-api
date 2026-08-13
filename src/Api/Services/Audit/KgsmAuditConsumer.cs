@@ -129,6 +129,26 @@ public sealed class KgsmAuditConsumer(
     };
 
     /// <summary>
+    /// Engine failures that are facts but belong to no single operation, so this API gives them no
+    /// domain action of its own — they are published live in the SAME generic shape the history read
+    /// gives them, off the same hook and the same shaping call.
+    /// </summary>
+    /// <remarks>
+    /// A download or a deploy is a step of an install <em>or</em> of an update, and nothing in the
+    /// payload says which — so labelling one <c>server.install</c> would name a parent operation this
+    /// API is guessing at. Which run it belonged to is answered by the run's own outcome fact beside it
+    /// (<c>instance_update_failed</c>, or the absence of <c>instance_installed</c>).
+    /// <para>
+    /// What they were missing was not a label but a reader: nothing published them, so a failure — the
+    /// event an operator most needs pushed — reached a surface only when somebody happened to refresh.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> UnattributedFailureTypes = new(StringComparer.Ordinal)
+    {
+        "instance_download_failed", "instance_deploy_failed",
+    };
+
+    /// <summary>
     /// Shape and announce one of this API's own journal events, so a row reaches an open browser as
     /// soon as it is recorded rather than on the reader's next refresh.
     /// </summary>
@@ -147,7 +167,8 @@ public sealed class KgsmAuditConsumer(
     /// </remarks>
     private Task PublishOwnEventAsync(EventWrapper wrapper, EventPosition position)
     {
-        if (wrapper is null || !OwnEventTypes.Contains(wrapper.EventType))
+        if (wrapper is null
+            || !(OwnEventTypes.Contains(wrapper.EventType) || UnattributedFailureTypes.Contains(wrapper.EventType)))
             return Task.CompletedTask;
 
         try
@@ -329,6 +350,21 @@ public sealed class KgsmAuditConsumer(
             SettleObserved(d.InstanceName);
             return Task.CompletedTask;
         });
+        // instance_update_failed — the run ended and the version did not move, for a reason. It arrives
+        // BEFORE the bracket's finish, so it is what settles the job, and it settles it as FAILED: the
+        // other way an update leaves the version alone is finding nothing to do, and without this fact
+        // the two were the same two lines. An engine-driven update that kgsm refused reported itself to
+        // every surface as a succeeded job.
+        //
+        // Unlike the brackets it is NOT audit-silent: a run that did not do what was asked is a fact
+        // worth an append-only row, carried on server.update at Danger — the same shape server.crash
+        // uses to tell its two facts apart by severity rather than by inventing an action.
+        events.RegisterHandler<InstanceUpdateFailedData>(d =>
+        {
+            SettleObserved(d.InstanceName, "kgsm reported the update as failed");
+            domainPump.Nudge();
+            return WriteServer(d, AuditAction.ServerUpdate, AuditSeverity.Danger, "could not update");
+        });
 
         // instance_stop_started / instance_stop_finished — the same bracket for a shutdown (kgsm
         // 3.7.3-rc1). A stop is not instant either: the supervisor asks the game to stop and waits for it
@@ -389,12 +425,62 @@ public sealed class KgsmAuditConsumer(
             return Task.CompletedTask;
         });
 
+        // instance_uninstall_started / _finished — the bracket around a removal. An uninstall stops the
+        // game, tears down its integrations and deletes its files, which is not instant for a large one,
+        // and until this was registered an engine-driven uninstall claimed no job slot: the panel showed
+        // nothing at all while a server was being destroyed, and only an uninstall this API issued was
+        // visible. Audit-silent like every other bracket — server.uninstall is the fact.
+        events.RegisterHandler<InstanceUninstallStartedData>(d =>
+        {
+            ObserveStarted(d.InstanceName, CommandVerb.Uninstall);
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<InstanceUninstallFinishedData>(d =>
+        {
+            SettleObserved(d.InstanceName);
+            return Task.CompletedTask;
+        });
+        // instance_uninstall_failed — the removal did not happen. Settles the run as failed and writes a
+        // row, on the same reasoning as the update's: the instance is still there, and a surface told the
+        // run merely "ended" would leave an operator believing the server is gone.
+        events.RegisterHandler<InstanceUninstallFailedData>(d =>
+        {
+            SettleObserved(d.InstanceName, "kgsm reported the uninstall as failed");
+            instanceCache.TryRefresh();
+            return WriteServer(d, AuditAction.ServerUninstall, AuditSeverity.Danger, "could not uninstall");
+        });
+
         // server.install — carries the blueprint it was installed from.
         events.RegisterHandler<InstanceInstalledData>(d =>
         {
             instanceCache.TryRefresh();
             return WriteServer(d, AuditAction.ServerInstall, AuditSeverity.Success, "installed",
                 Meta(("blueprint", d.Blueprint)));
+        });
+
+        // The two backup verbs' brackets. Archiving a large world is minutes of work and the scheduler
+        // runs it unattended, so an engine-driven backup or restore claims the one in-flight slot exactly
+        // as an update does — otherwise the only backup any surface could show as running was one this
+        // API issued itself. Audit-silent: backup.create / backup.restore are the facts.
+        events.RegisterHandler<InstanceBackupStartedData>(d =>
+        {
+            ObserveStarted(d.InstanceName, CommandVerb.BackupCreate);
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<InstanceBackupFinishedData>(d =>
+        {
+            SettleObserved(d.InstanceName);
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<InstanceRestoreStartedData>(d =>
+        {
+            ObserveStarted(d.InstanceName, CommandVerb.BackupRestore);
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<InstanceRestoreFinishedData>(d =>
+        {
+            SettleObserved(d.InstanceName);
+            return Task.CompletedTask;
         });
 
         // backup.* — source + version of the snapshot. Both also re-scan that ONE instance's backups, so
@@ -653,7 +739,14 @@ public sealed class KgsmAuditConsumer(
     // event that is evidence the run is over (the version moved; the instance started/stopped/restarted) —
     // an observed slot must never outlive the run it describes, because it also gates every subsequent
     // command for that server. A job this API issued is never touched here: CommandRunner settles its own.
-    private void SettleObserved(string instanceName)
+    //
+    // <paramref name="error"/> is the engine's own failure fact for the run. Without one, Succeeded means
+    // "the run ended", not "it worked" — kgsm emits its finish event on every outcome and this API did not
+    // run the command, so it has no exit code to claim otherwise. That was honest only while nothing knew
+    // better: an update the engine refused settled as a succeeded job on every surface, indistinguishable
+    // from one that found nothing to do. Now the engine says which, and a run it reports as failed settles
+    // as failed.
+    private void SettleObserved(string instanceName, string? error = null)
     {
         if (string.IsNullOrWhiteSpace(instanceName))
             return;
@@ -662,13 +755,11 @@ public sealed class KgsmAuditConsumer(
         if (job is null || !jobRegistry.IsObserved(job.Id))
             return;
 
-        // Succeeded means "the run ended", not "the version moved" — kgsm emits its finish event on every
-        // outcome and this API did not run the command, so it has no exit code to claim otherwise. The
-        // version event is what records whether anything actually changed.
         PublishJob(jobRegistry.Update(job with
         {
-            State = JobState.Succeeded,
+            State = error is null ? JobState.Succeeded : JobState.Failed,
             SettledAt = DateTimeOffset.UtcNow,
+            Error = error,
         }));
     }
 

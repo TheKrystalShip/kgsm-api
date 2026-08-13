@@ -75,6 +75,13 @@ public static class EngineEventShaping
             "instance_version_updated" => Map<InstanceVersionUpdatedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerUpdate, AuditSeverity.Info, "updated", hostId,
                     Meta(("oldVersion", d.OldVersion), ("newVersion", d.NewVersion)))),
+            // The update run that ended without the version moving, for a reason. Same action as the
+            // successful one with the severity carrying the outcome — the server.crash shape, rather
+            // than an invented action for every way a thing can fail.
+            "instance_update_failed" => Map<InstanceUpdateFailedData>(item,
+                d => AuditMapping.FromServerEvent(d, AuditAction.ServerUpdate, AuditSeverity.Danger, "could not update", hostId)),
+            "instance_uninstall_failed" => Map<InstanceUninstallFailedData>(item,
+                d => AuditMapping.FromServerEvent(d, AuditAction.ServerUninstall, AuditSeverity.Danger, "could not uninstall", hostId)),
             "instance_update_available" => Map<InstanceUpdateAvailableData>(item,
                 d => AuditMapping.FromUpdateAvailableEvent(d, hostId)),
             "instance_installed" => Map<InstanceInstalledData>(item,

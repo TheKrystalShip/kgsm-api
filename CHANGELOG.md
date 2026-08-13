@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — an engine-driven run that failed is reported as failed
+
+`SettleObserved` marked every observed job `Succeeded` on its bracket's finish, because kgsm emits
+that on every outcome and this API has no exit code for a run it did not issue. The engine now states
+the outcome (`instance_update_failed`, kgsm 3.16.0-rc1 / kgsm-lib 4.25.0), so a refused or broken
+update settles as **Failed** with the reason, instead of reporting itself to every surface as a
+completed update. `instance_uninstall_failed` does the same for a removal that did not happen. Both
+also write an audit row at `Danger` on their operation's own action — the `server.crash` shape, where
+severity tells two facts apart rather than an action being invented for every way a thing can fail.
+
+### Added — the brackets this API was not watching, and the failures nothing pushed
+
+`instance_uninstall_started`/`_finished` and the new backup/restore brackets claim and release the one
+in-flight job slot like `update`/`stop`/`restart` already did — so a removal or an archive driven from
+the CLI, the assistant or the scheduler is visible while it runs, not only when this API issued it.
+
+`instance_download_failed` and `instance_deploy_failed` are now published live, in the same generic
+shape the history read already gave them. They get no domain action: a download is a step of an
+install *or* of an update and nothing in the payload says which, so naming a parent operation would be
+a guess. What they were missing was a reader, not a label — a failure is the event an operator most
+needs pushed, and these reached a surface only when somebody happened to refresh.
+
 ### Changed — a restart's run-state comes from the engine, all the way through
 
 The engine now reports the middle of a restart (`instance_restart_stopped`, kgsm 3.15.0-rc1 /
