@@ -260,7 +260,14 @@ public sealed class KgsmAuditConsumer(
         });
         events.RegisterHandler<InstanceRestartedData>(d =>
         {
-            instanceCache.UpdateStatus(d.InstanceName, true);
+            // A restart ENDS where a start does — with a process that has just been spawned and has not
+            // finished booting — so it opens the same starting window (MarkStarting, not a plain
+            // "running" flip). Without it a restart is the one lifecycle path that skips `starting`
+            // entirely: the instance reads `running` from the moment its process exists, which is the
+            // whole of the boot early (40s for a Project Zomboid world, minutes for a big one), and the
+            // operator who just pressed Restart is told the server is up while nobody can connect to it.
+            // The window closes on the watchdog's instance_ready, exactly as it does for a start.
+            instanceCache.MarkStarting(d.InstanceName);
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
             SettleObserved(d.InstanceName);

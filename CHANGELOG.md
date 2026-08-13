@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a restarted server is `starting` until it is ready, not `running`
+
+`instance_restarted` settled the instance as running, so a restart was the one lifecycle path that
+skipped the `starting` window entirely: from the moment the watchdog re-spawned the process the panel
+said the server was up, through a boot that measures 40s for a Project Zomboid world and minutes for a
+big one. The handler now opens the same starting latch a plain start opens (`InstanceCache.MarkStarting`),
+and the watchdog's `instance_ready` closes it — so a restart reads `Restarting…` for the engine command
+(the shutdown and the re-spawn), then `Starting` for the boot, then online when people can actually join.
+
+This is the last word the API gets about a restart: kgsm runs both halves through its own logic and
+emits nothing in between, so an event that settles the instance as up settles it for the whole boot.
+
 ### Fixed — the firewall test double compiles again
 
 `NetworkAggregatorTests.FakeFirewall` did not implement `IFirewallService`'s `actor`/`origin`

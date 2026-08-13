@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
+using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Auth;
 
@@ -157,6 +158,42 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
 
         Assert.NotNull(frame);
         Assert.Equal(AuditAction.ServerReady, frame!.Value.GetProperty("data").GetProperty("action").GetString());
+    }
+
+    /// <summary>
+    /// A restarted instance is <c>starting</c>, not <c>running</c>, until the watchdog says it is ready.
+    /// A restart is the one lifecycle path whose only word about the new run is the event at the END of
+    /// it, so if that event settles the instance as up, the whole boot — the part an operator is waiting
+    /// through — reads as a server people can join. The window closes on <c>instance_ready</c>, exactly
+    /// as a plain start's does.
+    /// </summary>
+    [Fact]
+    public async Task ARestartedInstanceIsStartingUntilItIsReady()
+    {
+        InstanceCache cache = _factory.Services.GetRequiredService<InstanceCache>();
+
+        // Re-append until the tail picks it up — the reader polls and acks nothing (same shape as the
+        // relay tests above), so the loop is what keeps this off a tuned sleep.
+        string instance = $"restart-{Guid.NewGuid():N}";
+        DateTime deadline = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < deadline && !cache.IsStarting(instance))
+        {
+            _factory.AppendEvent("instance_restarted", instance, actor: "discord:haru", origin: AuditOrigin.Ui);
+            await Task.Delay(250);
+        }
+
+        Assert.True(cache.IsStarting(instance));
+        Assert.True(cache.Statuses[instance].Value!.Status);   // observed up throughout — only "booting" is news
+
+        deadline = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < deadline && cache.IsStarting(instance))
+        {
+            _factory.AppendEvent("instance_ready", instance, actor: "system:watchdog", origin: AuditOrigin.System);
+            await Task.Delay(250);
+        }
+
+        Assert.False(cache.IsStarting(instance));
+        Assert.True(cache.Statuses[instance].Value!.Status);
     }
 
     /// <summary>
