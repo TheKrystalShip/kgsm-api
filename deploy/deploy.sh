@@ -17,7 +17,7 @@
 # Deploy is verified by an actual HTTP 200 from /health — not just "the unit launched". The
 # health URL is resolved from the configured bind (see deploy-common.sh), not hardcoded.
 #
-# Knobs: RID, HEALTH_URL, HEALTH_TRIES, SKIP_SPA=1 (API-only), KGSM_WEB_DIR, LOCAL_NUGET.
+# Knobs: RID, HEALTH_URL, HEALTH_TRIES, SKIP_SPA=1 (API-only), KGSM_WEB_DIR.
 #
 set -euo pipefail
 
@@ -26,11 +26,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/deploy-common.sh"
 PROJECT_CSPROJ="$REPO_DIR/src/Api/Api.csproj"
 RID="${RID:-linux-x64}"
 
-# The umbrella tks/ checkout — the sibling repos (kgsm-lib, kgsm-monitor) live here. This repo
-# consumes them as PACKAGES from a local folder feed (src/Api/nuget.config → $LOCAL_NUGET), so a
-# fresh clone needs those packages packed before restore can succeed (bootstrapped below).
+# The umbrella tks/ checkout. Only the SPA bundle still reads from it — every TheKrystalShip.*
+# package comes from the GitHub Packages feed, so this repo's .NET build needs no sibling present.
 WORKSPACE="$(cd "$REPO_DIR/.." && pwd)"
-LOCAL_NUGET="${LOCAL_NUGET:-/home/heisen/local-nuget}"
 
 STOPPED=0
 on_err() {
@@ -62,22 +60,9 @@ if ! dotnet --list-runtimes 2>/dev/null | grep -q 'Microsoft.AspNetCore.App 10\.
 fi
 
 # ── 1. Build (as the invoking user — no privilege, fail fast before any disruption) ──
-# Bootstrap the local NuGet feed. This repo consumes the sibling kgsm-lib + monitor-contracts as
-# PACKAGES, not project refs, so on a fresh umbrella checkout those packages aren't packed yet.
-# Pack them from the siblings if absent — pack-if-MISSING only, so an already-published version is
-# never repacked (avoids the same-version stale-dll NuGet-cache trap).
-pkg_ver() { grep -oP "Include=\"$1\"\s+Version=\"\K[^\"]+" "$PROJECT_CSPROJ"; }
-ensure_pkg() {  # csproj  package-id  version
-    local csproj="$1" id="$2" ver="$3"
-    [[ -n "$ver" ]] || { err "could not read $id version from $PROJECT_CSPROJ"; exit 1; }
-    [[ -f "$LOCAL_NUGET/${id}.${ver}.nupkg" ]] && return 0
-    [[ -f "$csproj" ]] || { err "need $id $ver, but $LOCAL_NUGET lacks it and the sibling source is missing:"; err "  $csproj"; err "clone the full tks workspace (umbrella checkout) so kgsm-lib + kgsm-monitor are present."; exit 1; }
-    log "packing $id $ver → $LOCAL_NUGET (from $(basename "$(dirname "$csproj")"))"
-    dotnet pack "$csproj" -c Release -o "$LOCAL_NUGET"
-}
-mkdir -p "$LOCAL_NUGET"
-ensure_pkg "$WORKSPACE/kgsm-lib/kgsm-lib/kgsm-lib.csproj"                            TheKrystalShip.KGSM.Lib               "$(pkg_ver TheKrystalShip.KGSM.Lib)"
-ensure_pkg "$WORKSPACE/kgsm-monitor/src/Monitor.Contracts/Monitor.Contracts.csproj" TheKrystalShip.KGSM.Monitor.Contracts "$(pkg_ver TheKrystalShip.KGSM.Monitor.Contracts)"
+# Every TheKrystalShip.* package restores from the org's GitHub Packages feed (nuget.config), so
+# this repo builds with no sibling checkout present. The feed needs a token: a workstation keeps one
+# in ~/.nuget/NuGet/NuGet.Config, CI uses the automatic GITHUB_TOKEN.
 
 log "publishing framework-dependent single-file (${RID}) → ${PUBLISH_DIR}"
 rm -rf "$PUBLISH_DIR"
