@@ -53,6 +53,7 @@ jobs:
             --store-password-in-clear-text \
             --configfile nuget.config
 
+
       - name: Test
         run: dotnet test kgsm-api.slnx -c Release --nologo
 
