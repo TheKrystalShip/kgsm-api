@@ -153,7 +153,18 @@ public sealed record Server(
     //
     // It is NOT a status. Status stays the run-state vocabulary above; a surface that wants to render
     // "updating" joins the two itself, exactly as it joins status with metrics.
-    Job? ActiveJob = null);
+    Job? ActiveJob = null,
+    // This instance's on-disk footprint in bytes (the monitor's slow working-dir walk), or null when it
+    // has not been measured. It sits OUTSIDE Metrics deliberately: everything in that block is a runtime
+    // reading that exists only while the server runs, whereas the space an installed instance occupies is
+    // a property of its files — the monitor publishes it for its whole watch-list (Snapshot.ServerDisks),
+    // so a stopped instance carries an honest figure here while its Metrics block is null. That is what
+    // lets a card show disk for every server and cpu/mem/net only for the running ones.
+    //
+    // Rides the list, the detail AND the `servers` stream so a card needs no detail fetch. DomainPump
+    // does NOT diff it (see CoreChanged) — it is a metric, and the roster metric frame is what keeps it
+    // live; carrying it here is the hydrate, not the feed.
+    long? DiskBytes = null);
 
 /// <summary>
 /// A server's operator-authored note — free text an Operator writes for players and teammates
@@ -208,6 +219,36 @@ public sealed record ServerMetricsDto(
     long? DiskBytes,
     long? RxBps,
     long? TxBps);
+
+/// <summary>
+/// One instance's line in a roster metric frame (<c>metrics.roster</c> on
+/// <see cref="Realtime.StreamProtocol.ServersMetricsTopic"/>) — the live counterpart of the
+/// <see cref="Server.Metrics"/> + <see cref="Server.DiskBytes"/> pair a REST read hydrates from, in the
+/// same two parts and with the same meaning, so a client merges a frame onto a row field-for-field.
+/// </summary>
+/// <param name="Id">The instance id — the merge key, the same one <see cref="Server.Id"/> carries.</param>
+/// <param name="Metrics">This instance's resource sample, or <c>null</c> when the monitor produced no row
+/// for it — which is the ordinary case for a stopped server (no cgroup, no process tree). Null is
+/// "nothing was measured", NOT "measured zero", and it is never a statement about run-state: status comes
+/// from the run-state authority on the <c>servers</c> topic, and a surface joins the two.</param>
+/// <param name="DiskBytes">On-disk footprint in bytes, or <c>null</c> when unmeasured. Present
+/// independently of <paramref name="Metrics"/> — the whole reason this frame has two parts — because the
+/// monitor walks its entire watch-list, so a stopped instance still reports what it occupies.</param>
+public sealed record ServerMetricsRow(
+    string Id,
+    ServerMetricsDto? Metrics,
+    long? DiskBytes);
+
+/// <summary>
+/// Every server's readout at one instant — the payload of a <c>metrics.roster</c> frame.
+/// </summary>
+/// <remarks>
+/// The array is the roster the monitor knows about, so an id the caller holds and this frame omits means
+/// the monitor has nothing at all for it (neither a sample nor a footprint) — not that it is idle. A
+/// consumer merges by id and leaves what it isn't told about alone.
+/// </remarks>
+/// <param name="Servers">One row per instance, in no guaranteed order.</param>
+public sealed record ServerMetricsRoster(IReadOnlyList<ServerMetricsRow> Servers);
 
 /// <summary>
 /// The honest run-state vocabulary (M1·b, extended with <see cref="Starting"/>). Derived from

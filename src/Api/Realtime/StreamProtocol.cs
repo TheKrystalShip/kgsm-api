@@ -21,6 +21,15 @@ public static class StreamProtocol
     /// <summary>One server's per-instance metric ticks: <c>servers/{id}/metrics</c>.</summary>
     public static string ServerMetricsTopic(string id) => $"servers/{id}/metrics";
 
+    /// <summary>Every server's resource readout in ONE frame: <c>servers/metrics</c> — what a roster of
+    /// cards reads, as against <see cref="ServerMetricsTopic"/>, which is one chart's feed.
+    /// <para>The distinction is not cosmetic. A card grid wants a number per server; subscribing to N
+    /// per-server topics is N subscriptions for a screen that shows one figure each, and a client whose
+    /// transport opens a connection per resource-scoped topic cannot do it at all. So this topic carries
+    /// the whole roster — including instances that are stopped, which have no metrics row and a disk
+    /// footprint all the same — on a slower, card-shaped cadence (see <see cref="MetricsPump"/>).</para></summary>
+    public const string ServersMetricsTopic = "servers/metrics";
+
     /// <summary>One server's live console (stdout) tail: <c>servers/{id}/console</c> (#8). A
     /// <strong>follow-only</strong> topic — the client hydrates scrollback via the REST
     /// <c>GET /servers/{id}/console?tail=N</c> and applies the live lines pushed here from the next line on
@@ -78,6 +87,16 @@ public static class StreamProtocol
     public const string ServerRemoved = "server.removed";
     /// <summary>A per-server metric sample (<c>ServerMetricsDto</c>).</summary>
     public const string MetricsTick = "metrics.tick";
+    /// <summary>Every server's readout at one instant on <see cref="ServersMetricsTopic"/>:
+    /// <c>data</c> is a <see cref="Contracts.ServerMetricsRoster"/>. Supersede-by-latest like the other
+    /// metric frames — the client applies the newest and merges each row by id.</summary>
+    public const string MetricsRoster = "metrics.roster";
+
+    /// <summary>The per-connection coalesce key for the roster metric frame: one key for the whole
+    /// topic, so a slow client gets the newest readout rather than a queue of superseded ones. There is
+    /// no per-server key here on purpose — the frame IS the roster, and half of an old one merged
+    /// under half of a new one is a picture of no instant at all.</summary>
+    public const string ServersMetricsEntityKey = "servers-metrics";
     /// <summary>A host capacity sample (<c>HostMetricsDto</c>).</summary>
     public const string HostMetrics = "host.metrics";
     /// <summary>The host's capability block after a status flip (<c>HostCapabilities</c>).</summary>

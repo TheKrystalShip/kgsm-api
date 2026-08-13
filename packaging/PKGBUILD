@@ -1,0 +1,82 @@
+# Maintainer: Cristian Moraru <info@thekrystalship.com>
+#
+# Build from this directory:  cd packaging && makepkg
+#
+# The Control Panel aggregator. Deliberately not AOT (controllers + EF Core are not AOT-compatible),
+# so it is framework-dependent and declares the ASP.NET runtime. A CI publish with --self-contained
+# removes that dependency; drop 'aspnet-runtime' from depends when it does.
+#
+# The SPA is NOT here. kgsm-web is its own package installing to /usr/share/kgsm-web, so the panel
+# upgrades without rebuilding this and a node can run the API headless.
+
+pkgname=kgsm-api
+pkgver=0.97.0
+pkgrel=1
+pkgdesc="KGSM Control Panel API — the per-host aggregator for the panel and other surfaces"
+arch=('x86_64')
+url="https://github.com/TheKrystalShip/kgsm-api"
+license=('GPL-3.0-or-later')
+groups=('kgsm-node')
+# No separate debug package: these are shipped to a private fleet, not a distro archive.
+options=('!debug')
+depends=('kgsm' 'systemd' 'glibc' 'aspnet-runtime' 'polkit')
+optdepends=(
+    'kgsm-web: the Control Panel SPA this serves at / (without it the API runs headless)'
+    'kgsm-monitor: host and per-server metrics'
+    'kgsm-llm: the assistant the chat surface relays to'
+    'kgsm-scheduler: scheduled restarts and backups on the settings page'
+    'kgsm-firewall: port exposure reporting'
+    'nginx: public TLS ingress in front of the API'
+)
+backup=('etc/kgsm-api/kgsm-api.env')
+install="${pkgname}.install"
+
+_stage() { printf '%s' "${KGSM_STAGE:-${startdir}/../artifacts/publish}"; }
+
+pkgver() {
+    "${startdir}/../deploy/version.sh" --pkgver
+}
+
+build() {
+    local stage; stage="$(_stage)"
+    [[ -e "${stage}/kgsm-api" ]] || {
+        printf '\n  no publish output at %s\n' "$stage" >&2
+        printf '  build it first:  dotnet publish src/Api/Api.csproj -c Release -r linux-x64 -o artifacts/publish\n' >&2
+        printf '  or point KGSM_STAGE at an existing one.\n\n' >&2
+        return 1
+    }
+}
+
+package() {
+    local repo="${startdir}/.." stage; stage="$(_stage)"
+    local prefix="${pkgdir}/opt/${pkgname}"
+
+    install -dm755 "$prefix"
+    # The SPA belongs to kgsm-web; excluding it here is what stops two packages owning one file.
+    rsync -a --exclude='wwwroot/' "${stage}/" "${prefix}/"
+    rm -f "${prefix}"/*.pdb "${prefix}"/*.dbg
+
+    install -Dm644 "${repo}/deploy/kgsm-api.service" \
+        "${pkgdir}/usr/lib/systemd/system/kgsm-api.service"
+
+    install -Dm644 "${repo}/deploy/sysusers.d/kgsm-api.conf" \
+        "${pkgdir}/usr/lib/sysusers.d/kgsm-api.conf"
+
+    install -Dm640 "${repo}/deploy/kgsm-api.env.example" \
+        "${pkgdir}/etc/${pkgname}/${pkgname}.env"
+
+    install -Dm644 "${repo}/deploy/kgsm-api.leaf.json" \
+        "${pkgdir}/var/lib/kgsm/leaves/api.json"
+
+    # The RUNTIME polkit grant — what lets the running service restart a leaf after a config change.
+    # Unlike the 48-*-deploy grants, which exist only so a human can deploy without a password and
+    # have no place on a node, this one is part of the product. Rendered here with the packaged
+    # service account, since nothing runs setup-leaf-config.sh on a node.
+    sed 's|@SVC_USER@|kgsm|g' \
+        "${repo}/deploy/leaf-config/49-kgsm-api-leaf-restart.rules.in" \
+        > "${srcdir}/49-kgsm-api-leaf-restart.rules"
+    install -Dm644 "${srcdir}/49-kgsm-api-leaf-restart.rules" \
+        "${pkgdir}/usr/share/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules"
+
+    install -Dm644 "${repo}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

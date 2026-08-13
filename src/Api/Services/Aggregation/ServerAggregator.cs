@@ -111,7 +111,8 @@ public sealed class ServerAggregator
 
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshotTask.Result);
         Server server = BuildServer(id, instance, _cache.Statuses, _backups.Readings,
-            metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor);
+            metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
+            IndexDiskBytes(snapshotTask.Result));
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -163,25 +164,40 @@ public sealed class ServerAggregator
         Snap.Snapshot? snapshot)
     {
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshot);
+        Dictionary<string, long> diskById = IndexDiskBytes(snapshot);
 
         var servers = new List<Server>(roster.Count);
         foreach ((string id, Instance instance) in roster)
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
-                _options.HostId, _cache.IsStarting, _jobs.InFlightFor));
+                _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
         return servers;
     }
 
-    // Index per-instance metrics by id (the monitor guarantees unique ids per tick).
-    private static Dictionary<string, Snap.ServerMetrics> IndexMetrics(Snap.Snapshot? snapshot)
+    // Index per-instance metrics by id (the monitor guarantees unique ids per tick). internal so the
+    // stream pumps index a snapshot by the same rule the REST reads use.
+    internal static Dictionary<string, Snap.ServerMetrics> IndexMetrics(Snap.Snapshot? snapshot)
     {
         Dictionary<string, Snap.ServerMetrics> metricsById = new(StringComparer.Ordinal);
         if (snapshot is not null)
             foreach (Snap.ServerMetrics sm in snapshot.Servers)
                 metricsById[sm.Id] = sm;
         return metricsById;
+    }
+
+    // Index the run-state-independent footprints by id. A separate array from the metrics rows because
+    // it covers the monitor's whole watch-list — a stopped instance appears here and nowhere else. An
+    // instance the walk couldn't read is absent (honest "not measured"), and an older monitor that
+    // publishes no such array leaves every lookup empty rather than reporting zeros.
+    internal static Dictionary<string, long> IndexDiskBytes(Snap.Snapshot? snapshot)
+    {
+        Dictionary<string, long> diskById = new(StringComparer.Ordinal);
+        if (snapshot?.ServerDisks is { } disks)
+            foreach (Snap.ServerDiskUsage d in disks)
+                diskById[d.Id] = d.DiskBytes;
+        return diskById;
     }
 
     // Build one Server (the shared list/detail element — detail adds the network block on top). status,
@@ -202,7 +218,8 @@ public sealed class ServerAggregator
         IReadOnlyDictionary<string, Snap.ServerMetrics> metricsById,
         string hostId,
         Func<string, bool> isStarting,
-        Func<string, Job?> activeJob)
+        Func<string, Job?> activeJob,
+        IReadOnlyDictionary<string, long>? diskBytesById = null)
     {
         string status = ServerStatus.Unknown;
         string? version = null;
@@ -243,6 +260,13 @@ public sealed class ServerAggregator
             ? MetricsMapping.ToServerMetrics(m)
             : null;
 
+        // The footprint is independent of run-state for the same reason backups are: a stopped instance
+        // still occupies its disk. It comes from the snapshot's own watch-list-wide array, never from the
+        // metrics row, so it is present exactly when the monitor measured it.
+        long? diskBytes = diskBytesById is not null && diskBytesById.TryGetValue(id, out long bytes)
+            ? bytes
+            : null;
+
         // Backup standing is independent of run-state and of the metrics row — an instance that is stopped,
         // or that the monitor has no sample for, still has whatever backups it has. A missing entry is the
         // honest "not scanned yet" (both fields null), never a claim that there are none.
@@ -270,7 +294,8 @@ public sealed class ServerAggregator
             Note: NoteOf(instance),
             LastBackup: backups.Latest,
             BackupCount: backups.Count,
-            ActiveJob: activeJob(id));
+            ActiveJob: activeJob(id),
+            DiskBytes: diskBytes);
     }
 
     // The operator-authored note, or null when the instance has no note. kgsm-lib decodes the body

@@ -353,6 +353,40 @@ public sealed class ServerAggregatorBuildServerTests
         Assert.Equal(ServerStatus.Stopped, s.Status);
     }
 
+    // The whole point of carrying the footprint outside the metrics block: a stopped instance has no
+    // sample and still occupies its disk, so a card can show what it takes up without the API implying
+    // a reading nobody took.
+    [Fact]
+    public void StoppedServerReportsItsFootprintWithNoMetricsBlock()
+    {
+        var statuses = Down("factorio-1");
+        var disks = new Dictionary<string, long>(StringComparer.Ordinal) { ["factorio-1"] = 4_294_967_296L };
+
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoBackupReadings,
+            NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob, diskBytesById: disks);
+
+        Assert.Equal(ServerStatus.Stopped, s.Status);
+        Assert.Null(s.Metrics);
+        Assert.Equal(4_294_967_296L, s.DiskBytes);
+    }
+
+    // Absent from the walk is "not measured", and it must not arrive as a 0 that reads like an empty
+    // install directory.
+    [Fact]
+    public void UnmeasuredFootprintIsNullNeverZero()
+    {
+        var statuses = Up("factorio-1");
+
+        Server withoutIndex = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses,
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob);
+        Server notInIndex = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses,
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            diskBytesById: new Dictionary<string, long>(StringComparer.Ordinal) { ["other"] = 1024 });
+
+        Assert.Null(withoutIndex.DiskBytes);
+        Assert.Null(notInIndex.DiskBytes);
+    }
+
     // --- helpers -----------------------------------------------------------------------------------
 
     private static Dictionary<string, Reading<InstanceRuntimeStatus>> Up(string id) => new()

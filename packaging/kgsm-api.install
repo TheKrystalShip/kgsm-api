@@ -1,0 +1,35 @@
+# pacman's own hooks already create the service account, the state directories and reload the unit
+# files, so this repeats none of that. Enabling a unit is the administrator's call, not a package's.
+
+post_install() {
+    cat <<'MSG'
+
+  kgsm-api is installed but not running. Before starting it:
+
+    1. Set real values in /etc/kgsm-api/kgsm-api.env  (it ships with the example's blanks)
+    2. If this host signs people in, seed /etc/kgsm/kgsm-auth.env with the shared
+       provider credentials — no package ships those, deliberately
+    3. systemctl enable --now kgsm-api.service
+
+  The first successful start creates the first administrator and prints its password once:
+
+    /opt/kgsm-api/kgsm-api user bootstrap
+
+  Install kgsm-web for the Control Panel UI. Without it the API serves its endpoints and no page,
+  which is a supported way to run a node.
+
+MSG
+}
+
+post_upgrade() {
+    cat <<'MSG'
+
+  Restart to pick up the new build:
+
+    systemctl restart kgsm-api.service
+
+  If pacman wrote a .pacnew beside /etc/kgsm-api/kgsm-api.env, merge it — new settings are declared
+  there and a key the file never declares binds to nothing.
+
+MSG
+}

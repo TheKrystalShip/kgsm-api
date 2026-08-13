@@ -114,13 +114,15 @@ public sealed class DomainPump(
                     Task<Snap.Snapshot?> snapshotTask = monitor.GetLatestAsync(stoppingToken);
                     await snapshotTask.ConfigureAwait(false);
 
-                    Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshotTask.Result);
+                    Dictionary<string, Snap.ServerMetrics> metricsById = ServerAggregator.IndexMetrics(snapshotTask.Result);
+                    Dictionary<string, long> diskById = ServerAggregator.IndexDiskBytes(snapshotTask.Result);
 
                     // Build the current server list from cache data.
                     var byId = new Dictionary<string, Server>(StringComparer.Ordinal);
                     foreach ((string id, var instance) in roster)
                         byId[id] = ServerAggregator.BuildServer(id, instance, statuses,
-                            backups.Readings, metricsById, options.HostId, cache.IsStarting, jobs.InFlightFor);
+                            backups.Readings, metricsById, options.HostId, cache.IsStarting, jobs.InFlightFor,
+                            diskById);
 
                     if (!primed)
                     {
@@ -152,16 +154,6 @@ public sealed class DomainPump(
         catch (OperationCanceledException) { /* app stopping */ }
     }
 
-    // Index per-instance metrics by id (the monitor guarantees unique ids per tick).
-    private static Dictionary<string, Snap.ServerMetrics> IndexMetrics(Snap.Snapshot? snapshot)
-    {
-        Dictionary<string, Snap.ServerMetrics> metricsById = new(StringComparer.Ordinal);
-        if (snapshot is not null)
-            foreach (Snap.ServerMetrics sm in snapshot.Servers)
-                metricsById[sm.Id] = sm;
-        return metricsById;
-    }
-
     // Ignores the metrics block on purpose — see the class remarks (status/roster, not the metric firehose).
     // The update fields (UpdateAvailable/LatestVersion/UpdateCheckedAt) ride along: a flip happens when the
     // scheduler's sweep finds a new build, which is hourly at most and usually far rarer, so carrying it
@@ -178,6 +170,9 @@ public sealed class DomainPump(
     // whole of a long operation: an update that starts or finishes flips this field, so the transition
     // reaches every open panel on the servers topic, not just the client that happened to be listening to
     // `jobs` when the command was issued. Its cadence is the operation's, not the metric firehose's.
+    // DiskBytes is absent for the same reason as the metrics block: it is a measurement, and a footprint
+    // that ticks up as a world saves would publish the whole roster on this topic. The element pushed on a
+    // real change still carries it, and the roster metric frame is what keeps it live.
     private static bool CoreChanged(Server a, Server b) =>
         a.Status != b.Status || a.Version != b.Version || a.Name != b.Name
         || a.Blueprint != b.Blueprint || a.Runtime != b.Runtime

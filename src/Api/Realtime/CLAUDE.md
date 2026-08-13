@@ -29,7 +29,15 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE (M2; migr
 
 - **The `servers` topic carries status/roster ONLY — never the 1s metric firehose.** Resource ticks
   live on `servers/{id}/metrics`. `DomainPump`'s change-detection deliberately ignores the metrics block
-  so it never double-streams. Breaking this floods the status topic (smoke check 22 guards it).
+  (and `diskBytes`, which is one) so it never double-streams. Breaking this floods the status topic
+  (smoke check 22 guards it).
+- **Two metric topics, split by what is asking.** `servers/{id}/metrics` is one chart's feed, at the
+  scrape cadence. `servers/metrics` is one frame for the WHOLE roster on a 2s card cadence
+  (`MetricsPump.RosterIntervalMs`) — what a grid of server cards reads, because a client that opens a
+  connection per resource-scoped topic cannot subscribe to N of them. Its row is the live half of the
+  REST hydrate: `{ id, metrics, diskBytes }`, the same two parts `Server` carries, so a merge is
+  field-for-field. **A row may be half-null** — a stopped instance has no sample and a real footprint,
+  which is the whole reason disk sits outside the metrics block. Never fill either half in.
 - **`network.patch` rides its OWN topic `servers/{id}/network` (M6·b) — never `server.patch`.** The same
   topic-separation discipline as metrics: keeping the firewall block off the `servers` topic is what lets
   `server.patch` stay the frozen M1·b `Server`. **No pump publishes it** — it is pushed ONLY by the

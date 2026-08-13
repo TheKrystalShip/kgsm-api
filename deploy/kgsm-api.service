@@ -26,7 +26,7 @@ WorkingDirectory=/opt/kgsm-api
 # Operational config (bind + paths). Secrets and host specifics live in the EnvironmentFile
 # below, which is read AFTER these and therefore overrides them.
 Environment=Api__Urls=http://0.0.0.0:8080
-Environment=Api__KgsmPath=/usr/local/bin/kgsm
+Environment=Api__KgsmPath=/usr/bin/kgsm
 Environment=Api__KgsmJournalDir=/var/lib/kgsm/events
 Environment=Api__MonitorSocketPath=/run/kgsm-monitor/metrics.sock
 Environment=Api__DbPath=/var/lib/kgsm-api/kgsm-api.db

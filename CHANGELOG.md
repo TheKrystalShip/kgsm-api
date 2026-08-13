@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — an Arch package, built from the tested binaries
+
+`packaging/PKGBUILD` builds this project into a pacman package. It compiles nothing: CI publishes
+first and the recipe places that output, so the packaged bytes are the tested bytes. `pkgver()`
+reads `deploy/version.sh`, so the package never restates a version.
+
+The install prefix stays `/opt/<project>` — the same path `deploy.sh` uses — which is what lets the
+committed systemd unit ship verbatim instead of being rewritten at packaging time.
+
+Config files are listed in `backup=()`, so an upgrade writes `.pacnew` beside a file you edited
+rather than over it. The unit, the sysusers fragment and the leaf descriptor are packaged files, so
+the descriptor can never lag the binary it describes. Nothing is enabled by a scriptlet: pacman's
+own hooks handle the service account, the state directories and the daemon reload, and enabling a
+unit is the administrator's decision.
+
+The Control Panel SPA is deliberately absent — `kgsm-web` is its own package now, so the panel
+upgrades without rebuilding the API and a node can run it headless. The runtime polkit grant that
+lets the service restart a leaf is packaged and rendered against the `kgsm` account, since nothing
+runs `setup-leaf-config.sh` on a node.
+
+### Added — a server's disk footprint, and one metric frame for the whole roster
+
+`Server.diskBytes` carries the instance's on-disk footprint on the list, the detail and the `servers`
+stream. It sits beside `metrics` rather than inside it because the two answer different questions: the
+metrics block is a runtime reading that exists only while the server runs, while the space an installed
+instance occupies is a property of its files. The monitor measures its whole watch-list
+(`Snapshot.serverDisks`, contracts 1.6.0), so a **stopped** server reports an honest footprint with a
+null metrics block. `DomainPump` does not diff it — it is a metric, and carrying it here is the hydrate.
+
+`servers/metrics` is a new topic carrying every instance's readout in one `metrics.roster` frame:
+`{ id, metrics, diskBytes }` per row, the same two parts, merged by id. It exists because
+`servers/{id}/metrics` is one chart's feed — a grid of cards would need N subscriptions, which a client
+that opens a connection per resource-scoped topic cannot do. It rides the existing scrape at a card
+cadence of 2s (charts keep the scrape cadence), and a row is half-null exactly when half of it was
+measured.
+
 ### Added — one machine-readable version, read rather than restated
 
 `deploy/version.sh` prints this project's version from the single file that declares it, and
