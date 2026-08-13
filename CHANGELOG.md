@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a restart's run-state comes from the engine, all the way through
+
+The engine now reports the middle of a restart (`instance_restart_stopped`, kgsm 3.15.0-rc1 /
+kgsm-watchdog 1.27.0 / kgsm-lib 4.24.0), so the down phase is measured rather than papered over: the
+instance reads `stopped` for as long as its process really is gone, instead of carrying the state
+from before the restart for the whole shutdown. The handler takes the roster and run history down
+with it, and deliberately does **not** settle the in-flight job — the restart is still running, and
+releasing the slot mid-run would drop the surface's `Restarting…` and let the next command in.
+
+It writes no audit row and sends no notification: the catalog classifies it `Phase`, so a restart
+still reads as one action rather than a stop and a start bolted together.
+
 ### Fixed — a restarted server is `starting` until it is ready, not `running`
 
 `instance_restarted` settled the instance as running, so a restart was the one lifecycle path that

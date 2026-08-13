@@ -267,6 +267,11 @@ public sealed class KgsmAuditConsumer(
             // whole of the boot early (40s for a Project Zomboid world, minutes for a big one), and the
             // operator who just pressed Restart is told the server is up while nobody can connect to it.
             // The window closes on the watchdog's instance_ready, exactly as it does for a start.
+            //
+            // This is the start half of a restart whoever performed it: kgsm's restart command, the
+            // watchdog's own scheduled one and its autonomous crash-recovery respawn all end here, and
+            // the down phase before it is instance_restart_stopped (or instance_crashed). One meaning,
+            // one handler — a new run is up and booting.
             instanceCache.MarkStarting(d.InstanceName);
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
@@ -356,6 +361,26 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceRestartStartedData>(d =>
         {
             ObserveStarted(d.InstanceName, CommandVerb.Restart);
+            return Task.CompletedTask;
+        });
+        // instance_restart_stopped — the middle of that bracket: the old run is down and the new one has
+        // not been spawned. This is the engine reporting the state rather than this API inferring it, and
+        // it is the only word anything gets for the whole shutdown — seconds to a minute, and the full
+        // drain of a game that saves its world on the way out. Without it the instance reads as running
+        // while its process does not exist, and every surface joined to run-state says so.
+        //
+        // It carries the roster and the run history down with it for the same reason a stop does: those
+        // sessions ended when the process did, and leaving them would show players connected to a server
+        // that is not there. Audit-silent like the rest of the bracket (the catalog classifies it Phase),
+        // and it deliberately does NOT settle the in-flight job — the restart it belongs to is still
+        // running, and releasing the slot here would both drop the surface's "Restarting…" and let the
+        // next command in mid-restart.
+        events.RegisterHandler<InstanceRestartStoppedData>(d =>
+        {
+            instanceCache.UpdateStatus(d.InstanceName, false);
+            roster.Reset(d.InstanceName);
+            history.Reset(d.InstanceName);
+            domainPump.Nudge();
             return Task.CompletedTask;
         });
         events.RegisterHandler<InstanceRestartFinishedData>(d =>

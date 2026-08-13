@@ -10,6 +10,7 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Core.Models;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -161,39 +162,59 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
     }
 
     /// <summary>
-    /// A restarted instance is <c>starting</c>, not <c>running</c>, until the watchdog says it is ready.
-    /// A restart is the one lifecycle path whose only word about the new run is the event at the END of
-    /// it, so if that event settles the instance as up, the whole boot — the part an operator is waiting
-    /// through — reads as a server people can join. The window closes on <c>instance_ready</c>, exactly
-    /// as a plain start's does.
+    /// A restart follows the process through every state it is actually in: down while the old run is
+    /// being drained, booting once the new one is spawned, up only when the watchdog says it is ready.
+    /// Each of the three comes from an engine event — this API infers none of them, which is the point:
+    /// the engine is the only thing that knows, and until it said so the instance read as running for
+    /// the whole shutdown and as up for the whole boot.
     /// </summary>
     [Fact]
-    public async Task ARestartedInstanceIsStartingUntilItIsReady()
+    public async Task ARestartFollowsTheProcessDownThenThroughItsBoot()
     {
         InstanceCache cache = _factory.Services.GetRequiredService<InstanceCache>();
 
         // Re-append until the tail picks it up — the reader polls and acks nothing (same shape as the
         // relay tests above), so the loop is what keeps this off a tuned sleep.
         string instance = $"restart-{Guid.NewGuid():N}";
-        DateTime deadline = DateTime.UtcNow.AddSeconds(20);
-        while (DateTime.UtcNow < deadline && !cache.IsStarting(instance))
-        {
-            _factory.AppendEvent("instance_restarted", instance, actor: "discord:haru", origin: AuditOrigin.Ui);
-            await Task.Delay(250);
-        }
 
-        Assert.True(cache.IsStarting(instance));
-        Assert.True(cache.Statuses[instance].Value!.Status);   // observed up throughout — only "booting" is news
+        // The bracket opens the run. Appended once and not waited on — it claims the in-flight job slot
+        // and says nothing about run-state, which is exactly the gap the events below close.
+        _factory.AppendEvent("instance_restart_started", instance, actor: "discord:haru", origin: AuditOrigin.Ui);
 
-        deadline = DateTime.UtcNow.AddSeconds(20);
-        while (DateTime.UtcNow < deadline && cache.IsStarting(instance))
-        {
-            _factory.AppendEvent("instance_ready", instance, actor: "system:watchdog", origin: AuditOrigin.System);
-            await Task.Delay(250);
-        }
-
+        // The stop half landed: the process does not exist, and the API says so rather than carrying the
+        // state from before the restart.
+        await Feed("instance_restart_stopped", instance, until: () => Down(cache, instance));
         Assert.False(cache.IsStarting(instance));
+
+        // The start half: spawned, booting — not yet a server anyone can join.
+        await Feed("instance_restarted", instance, until: () => cache.IsStarting(instance));
         Assert.True(cache.Statuses[instance].Value!.Status);
+
+        // Ready closes it, exactly as it closes a plain start's window.
+        await Feed("instance_ready", instance, until: () => !cache.IsStarting(instance));
+        Assert.True(cache.Statuses[instance].Value!.Status);
+    }
+
+    /// <summary>The instance is known and observed down.</summary>
+    private static bool Down(InstanceCache cache, string instance) =>
+        cache.Statuses.TryGetValue(instance, out Reading<InstanceRuntimeStatus>? r)
+        && r.Value is not null && !r.Value.Status;
+
+    /// <summary>
+    /// Append <paramref name="type"/> for <paramref name="instance"/> until <paramref name="until"/>
+    /// holds. Re-appending is deliberate: the journal reader polls and acknowledges nothing, so the
+    /// alternative is a sleep tuned to its cadence. Every event here is idempotent in the cache.
+    /// </summary>
+    private async Task Feed(string type, string instance, Func<bool> until)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < deadline && !until())
+        {
+            _factory.AppendEvent(type, instance, actor: "discord:haru", origin: AuditOrigin.Ui);
+            await Task.Delay(250);
+        }
+
+        Assert.True(until(), $"the cache never reflected {type} for {instance}");
     }
 
     /// <summary>
