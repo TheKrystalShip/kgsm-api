@@ -30,7 +30,7 @@ LEAF_CONFIG_DIR="$REPO_DIR/deploy/leaf-config"
 DROPIN_TEMPLATE="$LEAF_CONFIG_DIR/dropins/50-kgsm-api-override.conf.in"
 POLKIT_TEMPLATE="$LEAF_CONFIG_DIR/49-kgsm-api-leaf-restart.rules.in"
 
-STATE_DIR="/var/lib/kgsm-api"                       # the API unit's StateDirectory (systemd, 0750 heisen)
+STATE_DIR="/var/lib/kgsm-api"                       # the API unit's StateDirectory (systemd, 0750, owned by the service user)
 OVERRIDE_DIR="$STATE_DIR/leaf-overrides"            # the API renders <leaf>.env here, unprivileged
 DROPIN_NAME="50-kgsm-api-override.conf"             # the per-leaf drop-in filename
 POLKIT_DST="/etc/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules"

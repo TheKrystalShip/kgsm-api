@@ -10,8 +10,8 @@ Wants=kgsm-monitor.service
 Type=simple
 # Runs as the KGSM user: it spawns kgsm.sh (must be the user that owns the instances) and
 # reads the monitor's socket (created by kgsm-monitor running as the same user). uid/gid 1000.
-User=heisen
-Group=heisen
+User=kgsm
+Group=kgsm
 
 # Framework-dependent single-file publish — REQUIRES the .NET 10 + ASP.NET Core shared runtime
 # on the host (deploy/deploy.sh checks for it). Smaller artifact than self-contained; the binary,

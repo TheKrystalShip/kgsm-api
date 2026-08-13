@@ -1,0 +1,41 @@
+{
+  "project": "kgsm-api",
+  "leafId": "api",
+  "role": "aggregator",
+  "runtime": {
+    "kind": "dotnet",
+    "note": "Framework-dependent single-file today, which needs a matching .NET runtime on the host. Packaged builds publish --self-contained so a node needs nothing."
+  },
+  "commands": [
+    { "name": "kgsm",       "package": "kgsm",    "required": true, "probe": "kgsm --version",       "why": "every domain read and write goes through the engine via kgsm-lib" },
+    { "name": "systemctl",  "package": "systemd", "required": true, "probe": "systemctl --version",  "why": "reports leaf liveness on the services board and restarts a leaf after a config change" },
+    { "name": "journalctl", "package": "systemd", "required": true, "probe": "journalctl --version", "why": "the host-logs page tails each leaf's journal" },
+    { "name": "bash",       "package": "bash",    "required": true, "probe": "bash --version",       "why": "runs the engine's shell entrypoints" }
+  ],
+  "services": [
+    { "name": "kgsm-monitor.service",            "required": false, "why": "host and per-server metrics", "without": "metrics panels report unavailable; every other page works" },
+    { "name": "kgsm-assistant-service.service",  "required": false, "why": "the chat surface relays turns to it", "without": "the chat page is unavailable; no fallback engine exists behind it, deliberately" },
+    { "name": "kgsm-scheduler.service",          "required": false, "why": "scheduled restarts and backups on the settings page", "without": "those fields read unavailable" },
+    { "name": "kgsm-firewall.service",           "required": false, "why": "port exposure reporting", "without": "firewall state reads unavailable" },
+    { "name": "nginx",                           "required": false, "why": "public TLS ingress in front of the API", "without": "the API serves directly on its own port" }
+  ],
+  "system": [
+    { "feature": "polkit", "required": true, "probe": "systemctl is-active polkit", "why": "the API restarts a leaf after a config change through a scoped polkit grant", "note": "That grant is deploy/leaf-config/49-kgsm-api-leaf-restart.rules.in — a RUNTIME grant, unlike the 48-* deploy grants, so it must be installed on a node too." }
+  ],
+  "units": {
+    "system": ["kgsm-api.service"],
+    "user": []
+  },
+  "paths": {
+    "prefix": "/opt/kgsm-api",
+    "state": ["/var/lib/kgsm-api", "/var/lib/kgsm/auth"],
+    "runtime": ["/run/kgsm-api"],
+    "config": ["/etc/kgsm-api/kgsm-api.env", "/etc/kgsm/kgsm-auth.env"],
+    "descriptorDir": "/var/lib/kgsm/leaves",
+    "webRoot": "/usr/share/kgsm-web",
+    "tls": ["/etc/kgsm-api/tls/fullchain.pem", "/etc/kgsm-api/tls/privkey.pem"]
+  },
+  "secrets": [
+    { "path": "/etc/kgsm/kgsm-auth.env", "mode": "0600", "why": "shared auth provider credentials", "note": "Never shipped in any package. Seeding it is the one genuinely manual step of node bootstrap." }
+  ]
+}
