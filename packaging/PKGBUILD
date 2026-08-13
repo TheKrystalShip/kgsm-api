@@ -3,8 +3,9 @@
 # Build from this directory:  cd packaging && makepkg
 #
 # The Control Panel aggregator. Deliberately not AOT (controllers + EF Core are not AOT-compatible),
-# so it is framework-dependent and declares the ASP.NET runtime. A CI publish with --self-contained
-# removes that dependency; drop 'aspnet-runtime' from depends when it does.
+# so it is framework-dependent and declares the ASP.NET runtime. Every release builds against the
+# current .NET, which is what Arch's aspnet-runtime tracks, and the package stays small enough that
+# bundling a private runtime buys nothing.
 #
 # The SPA is NOT here. kgsm-web is its own package installing to /usr/share/kgsm-web, so the panel
 # upgrades without rebuilding this and a node can run the API headless.
