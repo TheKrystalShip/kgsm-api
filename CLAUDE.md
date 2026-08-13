@@ -224,7 +224,7 @@ exactly one correct access path:
 - **Engine** (instances, run-state, config, lifecycle commands) → **only via `kgsm-lib`**
   (`TheKrystalShip.KGSM`, the single C#↔engine chokepoint; it reaches the watchdog via
   `IWatchdogClient`). **Never shell out to `kgsm.sh` or open the watchdog socket directly.**
-  Added in M1 (local feed: `/home/heisen/local-nuget`, currently 1.6.0). Wired at **M1·b** for
+  Consumed as a versioned `PackageReference` from the org's GitHub Packages feed. Wired at **M1·b** for
   `GET /servers` (`IInstanceService.GetAll` + `GetAllStatuses(fast:true)`) and at **M3** for the write
   path (`ILifecycleService.Start/Stop/Restart`, run off-request by the `CommandRunner` in its own DI
   scope — the verb routes native→watchdog, container→Docker inside the engine). kgsm-lib is **base,
