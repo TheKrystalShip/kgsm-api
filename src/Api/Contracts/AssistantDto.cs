@@ -29,7 +29,13 @@ public sealed record AssistantTurnRequest(
     // carries one (the SPA sends what's in the Monaco card, edits included). Forwarded verbatim in the turn
     // body so the assistant can offer revise_blueprint and let the model change the draft from chat. Not
     // identity-bearing; re-validated by the assistant when a revision is saved. Null on an ordinary turn.
-    string? DraftYaml = null);
+    string? DraftYaml = null,
+    // Whether this surface wants the answer READ ALOUD as it is written. Forwarded verbatim: it is
+    // presentation, saying nothing about who is asking or what they may do, so there is nothing here
+    // for the API to fold with a tier the way it folds Actions. The assistant answers with
+    // `audio.delta` frames, one per sentence, which this relay passes through with every other frame.
+    // A host whose assistant has no speech engine emits none and the reply is text, as it always was.
+    bool? Speak = null);
 
 /// <summary>
 /// The assistant confirm-relay request body (<c>POST /api/v1/assistant/confirm</c>) — forwarded verbatim

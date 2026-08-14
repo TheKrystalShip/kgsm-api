@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the assistant relay forwards `speak`
+
+`POST /assistant/turn` takes an optional `speak`, forwarded verbatim to the leaf: presentation, like
+`think`, saying nothing about who is asking, so nothing here folds it with a tier. The leaf answers
+with `audio.delta` frames — one sentence at a time, while the text is still streaming — and this
+relay passes them through with every other frame, unchanged.
+
+⚠ The relayed body is composed field by field rather than forwarded whole, so a turn field the SPA
+sends and this controller does not name is dropped silently. Both places, or neither.
+
 ### Added — the Speech leaf is on the board
 
 `kgsm-speech` — the host's voice, one socket-activated daemon serving recognition and synthesis to
