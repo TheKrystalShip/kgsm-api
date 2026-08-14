@@ -19,6 +19,7 @@ public sealed class LeafRestartabilityTests
     [InlineData("monitor")]
     [InlineData("assistant")]
     [InlineData("firewall")]
+    [InlineData("speech")]
     [InlineData("scheduler")]
     [InlineData("bot")]
     public void Every_leaf_on_this_host_can_be_restarted(string leafId) =>

@@ -7,9 +7,10 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// </summary>
 public enum LeafHealthSource
 {
-    /// <summary>No deep-health probe — only systemd liveness is known. The firewall is socket-activated and
-    /// idle-exits (deliberately NOT polled — see <see cref="ApiOptions.FirewallSocketPath"/>); the bot is a
-    /// separate Discord surface. Neither serves a <c>/health</c> the api watches.</summary>
+    /// <summary>No deep-health probe — only systemd liveness is known. The firewall and the speech engine are
+    /// socket-activated and idle-exit (deliberately NOT polled — a probe would start them, and starting the
+    /// speech engine loads a gigabyte of models to answer "are you well?"); the bot is a separate Discord
+    /// surface. None of them serves a <c>/health</c> the api watches.</summary>
     None,
 
     /// <summary>This API itself — reachable by definition whenever it answers the request.</summary>
@@ -66,6 +67,11 @@ public static class LeafCatalog
             "LLM assistant — chat & tool-calling turns", false, LeafHealthSource.Assistant),
         new("firewall", "kgsm-firewall.service", "Firewall",
             "Host firewall authority — opens & closes server ports", true, LeafHealthSource.None),
+        // Socket-activated and idle-exiting like the firewall, and for a comparable reason: it holds
+        // ~1.6GB of speech models that only a process ending gives back, so `inactive` is its resting
+        // state rather than a fault.
+        new("speech", "kgsm-speech.service", "Speech",
+            "The host's voice — speech recognition & synthesis for every surface", true, LeafHealthSource.None),
         new("scheduler", "kgsm-scheduler.service", "Scheduler",
             "Scheduled restart & backup — computes next-fire, drives the watchdog", false, LeafHealthSource.Scheduler),
         new("api", "kgsm-api.service", "Control Panel API",

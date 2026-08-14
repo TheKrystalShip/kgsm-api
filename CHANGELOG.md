@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the Speech leaf is on the board
+
+`kgsm-speech` — the host's voice, one socket-activated daemon serving recognition and synthesis to
+every surface — joins `LeafCatalog`, so the Services board reports it, the host-log source map covers
+it, and its configuration page is served with a restart the API is granted to perform. It is
+`onDemand` for the same reason the firewall is: it idle-exits, so `inactive` is its resting state and
+not a fault. **No deep-health probe, deliberately** — probing an on-demand service starts it, and
+starting this one loads a gigabyte of models to answer "are you well?".
+
+Wiring a leaf still means re-running `deploy/setup-leaf-config.sh` (the polkit grant + the per-leaf
+drop-in), not rebuilding this API.
+
 ### Added — the console can be read past its tail, and downloaded whole
 
 `GET /servers/{id}/console` reports the byte range of the run's log it served

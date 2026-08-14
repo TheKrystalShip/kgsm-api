@@ -50,6 +50,7 @@ declare -A LEAF_UNITS=(
     [watchdog]="kgsm-watchdog.service"
     [assistant]="kgsm-assistant-service.service"
     [firewall]="kgsm-firewall.service"
+    [speech]="kgsm-speech.service"
     [scheduler]="kgsm-scheduler.service"
     [bot]="kgsm-bot.service"
 )
