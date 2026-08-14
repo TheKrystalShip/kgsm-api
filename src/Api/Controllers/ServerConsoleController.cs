@@ -38,24 +38,41 @@ public sealed class ServerConsoleController(ILogger<ServerConsoleController> log
     private const int MaxTail = 5000; // the watchdog clamps 0..5000; clamp here too so a wild ?tail= is honest
 
     /// <summary>
-    /// The trailing <paramref name="tail"/> console lines, oldest-first: <c>200 { "lines": ["...", ...] }</c>.
-    /// Defaults to 200, clamped to <c>0..5000</c>. Watchdog absent or down → <c>{ "lines": [] }</c> (degrade
-    /// gracefully, never a 500); an unknown / non-native / no-console instance also reads as <c>{ "lines": [] }</c>.
+    /// The trailing <paramref name="tail"/> console lines, oldest-first:
+    /// <c>200 { "lines": ["...", ...], "start": 0, "end": 0, "hasEarlier": false }</c>. Defaults to 200,
+    /// clamped to <c>0..5000</c>. Watchdog absent or down → an empty scrollback (degrade gracefully, never
+    /// a 500); an unknown / non-native / no-console instance also reads as an empty scrollback.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>?before=</c> is how a caller reads further back, and it takes a cursor rather than a count.</b>
+    /// Every response reports the byte range of the run's log it served; pass the <c>start</c> it gave back
+    /// as <c>before</c> and the next response holds the lines immediately preceding it, for as far back as
+    /// the run goes. A line offset cannot do this — a running game prints between the two requests, so
+    /// "the 500 before the last 200" names a different line each time and the pages overlap or skip with
+    /// nothing saying so. <c>hasEarlier</c> is false at the beginning of the run.
+    /// </para>
+    /// <para>
+    /// The clamp bounds ONE response, not how far back the caller can go. The whole file in one piece is
+    /// <c>GET .../console/download</c>, which is streamed and has no line budget at all.
+    /// </para>
+    /// </remarks>
     [HttpGet]
-    public async Task<IActionResult> Get(string id, [FromQuery] int? tail, CancellationToken ct)
+    public async Task<IActionResult> Get(string id, [FromQuery] int? tail, [FromQuery] long? before, CancellationToken ct)
     {
         int lines = Math.Clamp(tail ?? DefaultTail, 0, MaxTail);
 
         // Resolved optionally — the watchdog client is registered only when provisioned (Startup). Absent =>
         // no console source on this host => honest empty, exactly like a leaf-down degrade (never a 500).
         if (HttpContext.RequestServices.GetService(typeof(IWatchdogClient)) is not IWatchdogClient watchdog)
-            return Ok(new ConsoleScrollback(Array.Empty<string>()));
+            return Ok(ConsoleScrollback.Empty);
 
         try
         {
-            IReadOnlyList<string> tailLines = await watchdog.GetConsoleTailAsync(id, lines, ct).ConfigureAwait(false);
-            return Ok(new ConsoleScrollback(tailLines));
+            WatchdogConsoleWindow window = await watchdog
+                .GetConsoleWindowAsync(id, lines, run: CurrentRun, endOffset: before ?? -1, ct)
+                .ConfigureAwait(false);
+            return Ok(new ConsoleScrollback(window.Lines, window.Start, window.End, window.HasEarlier));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -66,9 +83,69 @@ public sealed class ServerConsoleController(ILogger<ServerConsoleController> log
             // The watchdog is provisioned but unreachable (transport throw). Degrade to an empty scrollback —
             // the live WS follow + the LogFile remain the source of truth; the SPA just opens with no history.
             logger.LogDebug(ex, "console tail for '{Instance}' failed (watchdog down?) — returning empty scrollback", id);
-            return Ok(new ConsoleScrollback(Array.Empty<string>()));
+            return Ok(ConsoleScrollback.Empty);
         }
     }
+
+    /// <summary>
+    /// The WHOLE of the current run's console log, streamed as a <c>text/plain</c> attachment — the file
+    /// somebody attaches to a bug report, rather than a window of it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// No line budget and no buffering: the bytes are copied from the daemon's response straight to this
+    /// one, so a multi-gigabyte log costs this process a buffer rather than its heap. Viewer-gated like the
+    /// scrollback read — it is the same output, in one piece.
+    /// </para>
+    /// <para>
+    /// <b>This is one run.</b> The supervisor rotates the log on every fresh spawn, so a server that
+    /// crashed and restarted has its cause in the previous run and a clean boot in this one; splicing them
+    /// into a single download would narrate two processes as one timeline.
+    /// </para>
+    /// <list type="bullet">
+    /// <item><c>200</c> — the log, with <c>Content-Disposition</c> naming it after the server.</item>
+    /// <item><c>404</c> — unknown server, or no console to serve (container / watchdog absent or down).</item>
+    /// </list>
+    /// </remarks>
+    [HttpGet("download")]
+    public async Task<IActionResult> Download(string id, CancellationToken ct)
+    {
+        if (HttpContext.RequestServices.GetService(typeof(IWatchdogClient)) is not IWatchdogClient watchdog)
+            return NotFound();
+
+        WatchdogConsoleDownload? download;
+        try
+        {
+            download = await watchdog.OpenConsoleDownloadAsync(id, run: CurrentRun, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // A 404 says "no console here", which is what an unreachable watchdog leaves us able to say —
+            // an empty file would claim the server printed nothing.
+            logger.LogDebug(ex, "console download for '{Instance}' failed (watchdog down?)", id);
+            return NotFound();
+        }
+
+        if (download is null)
+            return NotFound();
+
+        // FileStreamResult owns the stream and disposes it after the copy; the download wrapper holds the
+        // response open, so it is disposed alongside via the registered feature.
+        HttpContext.Response.RegisterForDispose(download);
+        // The daemon's stream is not seekable, so nothing downstream can work the size out for itself and
+        // the response would go out chunked — a browser saving a multi-megabyte log with no idea how much
+        // of it there is. The length is the one the daemon committed to when it opened the file.
+        if (download.Length > 0)
+            HttpContext.Response.ContentLength = download.Length;
+        return File(download.Content, "text/plain; charset=utf-8", $"{id}-console.log");
+    }
+
+    /// <summary>The run in progress — the only one this surface serves; earlier runs are the watchdog's own index.</summary>
+    private const int CurrentRun = 0;
 
     private const int MaxInput = 1000; // kgsm's __sanitize_input_command caps at 1000 — reject early + honestly
 
@@ -155,8 +232,17 @@ public sealed class ServerConsoleController(ILogger<ServerConsoleController> log
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
 
-    /// <summary>The frozen scrollback shape: <c>{ "lines": [ "...", "..." ] }</c>.</summary>
-    private sealed record ConsoleScrollback(IReadOnlyList<string> Lines);
+    /// <summary>
+    /// The scrollback shape: <c>{ "lines": [...], "start": N, "end": N, "hasEarlier": bool }</c>. The
+    /// offsets are the byte range of the run's log these lines came from; <c>start</c> is the cursor a
+    /// caller passes back as <c>?before=</c> to read what precedes them, and <c>hasEarlier</c> says
+    /// whether there is anything there — a watchdog too old to report the range answers 0/0/false, so a
+    /// caller offers no way back rather than one that would re-serve the same lines.
+    /// </summary>
+    private sealed record ConsoleScrollback(IReadOnlyList<string> Lines, long Start, long End, bool HasEarlier)
+    {
+        public static ConsoleScrollback Empty { get; } = new(Array.Empty<string>(), 0, 0, false);
+    }
 
     /// <summary>The 202 body: <c>{ "accepted": true }</c> — delivered to the console input (effect is async, on the WS).</summary>
     private sealed record ConsoleInputAccepted(bool Accepted);

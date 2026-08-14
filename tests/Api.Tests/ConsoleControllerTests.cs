@@ -115,19 +115,142 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
         return doc.RootElement.GetProperty("lines").EnumerateArray().Select(e => e.GetString()!).ToArray();
     }
 
-    // A fake IWatchdogClient whose console tail returns a canned set (or throws like a down daemon).
-    private sealed class FakeTailWatchdog(string[]? lines = null, bool throws = false) : IWatchdogClient
+    private static async Task<JsonElement> ReadBody(HttpResponseMessage resp) =>
+        JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.Clone();
+
+    // ---- reading further back: the cursor, not a line count ----
+
+    [Fact]
+    public async Task Viewer_Scrollback_ReportsTheRangeItServed()
+    {
+        var wd = new FakeTailWatchdog(["a", "b"], start: 4096);
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
+            .GetAsync("/api/v1/servers/mc/console?tail=2");
+
+        JsonElement body = await ReadBody(resp);
+        Assert.Equal(4096, body.GetProperty("start").GetInt64());
+        Assert.Equal(4196, body.GetProperty("end").GetInt64());
+        Assert.True(body.GetProperty("hasEarlier").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Viewer_AtTheStartOfTheRun_SaysThereIsNothingEarlier()
+    {
+        var wd = new FakeTailWatchdog(["first line"], start: 0);
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
+            .GetAsync("/api/v1/servers/mc/console?tail=200");
+
+        Assert.False((await ReadBody(resp)).GetProperty("hasEarlier").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Viewer_Before_ForwardsTheCursor_AndItsAbsenceMeansTheEnd()
+    {
+        var wd = new FakeTailWatchdog(["x"]);
+        HttpClient client = ClientWithWatchdog(wd, KgsmTier.Viewer);
+
+        await client.GetAsync("/api/v1/servers/mc/console?tail=50");
+        Assert.Equal(-1, wd.LastEndOffset);   // no ?before= → read from the end of the log
+
+        await client.GetAsync("/api/v1/servers/mc/console?tail=50&before=8192");
+        Assert.Equal(8192, wd.LastEndOffset);
+    }
+
+    [Fact]
+    public async Task Viewer_TailIsClampedButPagingStillReachesEverything()
+    {
+        // The clamp bounds ONE response. It is not a limit on how far back a caller can read — that is
+        // what the cursor is for — so this asserts the clamp without implying a ceiling on the history.
+        var wd = new FakeTailWatchdog([]);
+        await ClientWithWatchdog(wd, KgsmTier.Viewer).GetAsync("/api/v1/servers/mc/console?tail=999999");
+
+        Assert.Equal(5000, wd.LastLines);
+    }
+
+    // ---- the whole log ----
+
+    [Fact]
+    public async Task Viewer_Download_StreamsTheWholeLogAsAnAttachment()
+    {
+        var wd = new FakeTailWatchdog(download: "boot\nplayer joined\ncrash\n");
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
+            .GetAsync("/api/v1/servers/mc/console/download");
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Equal("text/plain", resp.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("mc-console.log", resp.Content.Headers.ContentDisposition?.FileNameStar
+            ?? resp.Content.Headers.ContentDisposition?.FileName);
+        Assert.Equal("boot\nplayer joined\ncrash\n", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Viewer_Download_NoConsole_404_NotAnEmptyFile()
+    {
+        // An empty file would say the server printed nothing. A 404 says there is no console here —
+        // a container, or a watchdog that cannot answer.
+        var wd = new FakeTailWatchdog(download: null);
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
+            .GetAsync("/api/v1/servers/mc/console/download");
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Viewer_Download_WatchdogDown_404_NotA500()
+    {
+        var wd = new FakeTailWatchdog(throws: true, download: "unreachable");
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
+            .GetAsync("/api/v1/servers/mc/console/download");
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Download_NoToken_401()
+    {
+        HttpResponseMessage resp = await Client().GetAsync("/api/v1/servers/mc/console/download");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    // A fake IWatchdogClient whose console window returns a canned set (or throws like a down daemon).
+    // `start` is the byte offset the window claims to begin at — 0 means the run starts there and there
+    // is nothing earlier, which is what the controller turns into hasEarlier.
+    private sealed class FakeTailWatchdog(string[]? lines = null, bool throws = false, long start = 0, string? download = null) : IWatchdogClient
     {
         private readonly string[] _lines = lines ?? Array.Empty<string>();
         public string? LastInstance { get; private set; }
         public int LastLines { get; private set; }
+        public long LastEndOffset { get; private set; } = long.MinValue;
+        public int LastRun { get; private set; } = -1;
 
-        public Task<IReadOnlyList<string>> GetConsoleTailAsync(string instanceName, int lines, CancellationToken cancellationToken = default)
+        public Task<WatchdogConsoleWindow> GetConsoleWindowAsync(string instanceName, int lines, int run, long endOffset, CancellationToken cancellationToken = default)
         {
             LastInstance = instanceName;
             LastLines = lines;
+            LastEndOffset = endOffset;
+            LastRun = run;
             if (throws) throw new HttpRequestException("watchdog unreachable (test)");
-            return Task.FromResult<IReadOnlyList<string>>(_lines);
+            return Task.FromResult(new WatchdogConsoleWindow(_lines, start, start + 100));
+        }
+
+        public async Task<IReadOnlyList<string>> GetConsoleTailAsync(string instanceName, int lines, CancellationToken cancellationToken = default) =>
+            (await GetConsoleWindowAsync(instanceName, lines, 0, -1, cancellationToken)).Lines;
+
+        public Task<WatchdogConsoleDownload?> OpenConsoleDownloadAsync(string instanceName, int run, CancellationToken cancellationToken = default)
+        {
+            LastInstance = instanceName;
+            LastRun = run;
+            if (throws) throw new HttpRequestException("watchdog unreachable (test)");
+            if (download is null) return Task.FromResult<WatchdogConsoleDownload?>(null);
+
+            byte[] bytes = System.Text.Encoding.UTF8.GetBytes(download);
+            return Task.FromResult<WatchdogConsoleDownload?>(
+                new WatchdogConsoleDownload(new MemoryStream(bytes), bytes.Length, new NoopDisposable()));
+        }
+
+        private sealed class NoopDisposable : IDisposable
+        {
+            public void Dispose() { }
         }
 
         // Unused by the scrollback controller — satisfy the interface.

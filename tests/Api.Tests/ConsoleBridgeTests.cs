@@ -299,6 +299,12 @@ public sealed class ConsoleBridgeTests
         public Task<IReadOnlyList<string>> GetConsoleRunTailAsync(string instanceName, int run, int lines, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
 
+        public Task<WatchdogConsoleWindow> GetConsoleWindowAsync(string instanceName, int lines, int run, long endOffset, CancellationToken cancellationToken = default) =>
+            Task.FromResult(WatchdogConsoleWindow.Empty);
+
+        public Task<WatchdogConsoleDownload?> OpenConsoleDownloadAsync(string instanceName, int run, CancellationToken cancellationToken = default) =>
+            Task.FromResult<WatchdogConsoleDownload?>(null);
+
         // Unused by the console bridge — satisfy the interface.
         public Task<bool> IsReadyAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
         public Task<WatchdogReadyState?> GetReadyAsync(CancellationToken cancellationToken = default) => Task.FromResult<WatchdogReadyState?>(null);

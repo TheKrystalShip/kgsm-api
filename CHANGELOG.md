@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the console can be read past its tail, and downloaded whole
+
+`GET /servers/{id}/console` reports the byte range of the run's log it served
+(`{ lines, start, end, hasEarlier }`) and takes `?before=<start>` to read what precedes it. That is
+the cursor a caller pages back with, and it is a byte offset rather than a line count because a
+running game prints between the two requests: "the 500 before the last 200" names a different line
+each time, so the pages overlap or skip and nothing says so. `hasEarlier` is false at the beginning
+of the run. `?tail=` is still clamped to 5000 — that bounds one response, not how far back a caller
+can read.
+
+`GET /servers/{id}/console/download` streams the whole of the current run's log as a `text/plain`
+attachment named after the server, with the length the watchdog committed to, so a browser saving a
+multi-megabyte log can show progress. No line budget and no buffering: the bytes go from the daemon's
+response to this one. Viewer-gated like the scrollback — it is the same output in one piece — and a
+404 where there is no console to serve, because an empty file would claim the server printed nothing.
+
+Needs kgsm-lib 4.26.0 (`GetConsoleWindowAsync` / `OpenConsoleDownloadAsync`) and a watchdog that
+reports the range; an older daemon answers the lines with no cursor, which reads as a window with
+nothing before it, so the panel offers no way back rather than one that would re-serve them.
+
 ### Added — an Arch package, built from the tested binaries
 
 `packaging/PKGBUILD` builds this project into a pacman package. It compiles nothing: CI publishes
