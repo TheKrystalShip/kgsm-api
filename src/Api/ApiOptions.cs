@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.Events;
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Sessions;
@@ -161,13 +162,20 @@ public sealed class ApiOptions
     /// <summary>
     /// This API's OWN append-only event journal (<c>Api__EventJournalDir</c>), where it records the
     /// actions it performs itself — sign-ins, account changes, leaf configuration, file writes.
-    /// Default: an <c>events/</c> directory beside the SQLite DB, so it inherits the unit's
-    /// <c>StateDirectory</c>.
+    /// Default: this producer's own directory under <see cref="JournalStateRoot"/>, which is the
+    /// location a discovery scan looks in.
     /// </summary>
     /// <remarks>
     /// Its own, not the engine's: no component writes to another's journal, and a reader tells the
     /// producers apart by which directory a line came from rather than by anything on the line. The
     /// audit page is the merge of every journal on the host, this one included.
+    /// <para>
+    /// ⚠ The default is composed by the writer's layout rule from the producer id, <b>not</b> derived
+    /// from where the database happens to live. Those coincide on a normal host and stop coinciding
+    /// the moment somebody relocates the database — and a journal outside the scanned root is not
+    /// reported as unreadable, it is simply not found, which is what a producer that has recorded
+    /// nothing also looks like.
+    /// </para>
     /// </remarks>
     public required string EventJournalDir { get; init; }
 
@@ -876,8 +884,10 @@ public sealed class ApiOptions
             SpeechSocketPath = Defaulted(s.SpeechSocketPath, DefaultSpeechSocketPath),
             KgsmPath = Defaulted(s.KgsmPath, "/usr/bin/kgsm"),
             KgsmJournalDir = Defaulted(s.KgsmJournalDir, "/var/lib/kgsm/events"),
-            EventJournalDir = BlankFallback(s.EventJournalDir, DefaultEventDir(s.DbPath)),
-            JournalStateRoot = Defaulted(s.JournalStateRoot, "/var/lib"),
+            EventJournalDir = BlankFallback(
+                s.EventJournalDir,
+                JournalLayout.DirectoryFor(ApiJournalProducer, Defaulted(s.JournalStateRoot, JournalLayout.DefaultStateRoot))),
+            JournalStateRoot = Defaulted(s.JournalStateRoot, JournalLayout.DefaultStateRoot),
             DbPath = BlankFallback(s.DbPath, "kgsm-api.db"),
 
             // Realtime pump cadences. The domain (instance) poll is relaxed by default (5s) — it
@@ -997,15 +1007,11 @@ public sealed class ApiOptions
         return string.IsNullOrEmpty(dir) ? "covers" : Path.Combine(dir, "covers");
     }
 
-    // This API's own journal: an events/ subdir beside the SQLite DB, on the same reasoning as the
-    // artwork cache above — it inherits whatever StateDirectory the unit points Api__DbPath into, so
-    // one setting places all of this API's state and the journal cannot end up somewhere the service
-    // user cannot write.
-    private static string DefaultEventDir(string? dbPath)
-    {
-        string? dir = string.IsNullOrWhiteSpace(dbPath) ? null : Path.GetDirectoryName(dbPath.Trim());
-        return string.IsNullOrEmpty(dir) ? "events" : Path.Combine(dir, "events");
-    }
+    /// <summary>
+    /// This API's producer id — the name a reader derives from the directory it finds this journal
+    /// in, and the single input its default location follows from.
+    /// </summary>
+    public const string ApiJournalProducer = "kgsm-api";
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 

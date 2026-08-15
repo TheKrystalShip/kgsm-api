@@ -1,5 +1,6 @@
 using System.Text.Json;
 using TheKrystalShip.KGSM.Core.Interfaces;
+using TheKrystalShip.KGSM.Services;
 
 namespace TheKrystalShip.Api.Services.Audit;
 
@@ -34,6 +35,7 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// </para>
 /// </remarks>
 public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> logger)
+    : JournalRecorder(writer, logger)
 {
     // ---- the types this producer owns ----------------------------------------------------------
 
@@ -235,38 +237,36 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
             WriteNullable(w, "Sha256", sha256);
         }, ct);
 
-    /// <summary>The one write path, so no caller can compose an envelope or swallow a failure its own way.</summary>
+    /// <summary>
+    /// This API attributes nothing to itself.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Every row here records something a <em>person</em> did — signed in, changed an account's
+    /// authority, applied a leaf's configuration. The call site knows who; this class never guesses,
+    /// and a default of <c>system:api</c> would put the server's own name on somebody's sign-in. An
+    /// actor that did not reach the call site is a real null, which reads as unknown rather than as
+    /// the machine.
+    /// </remarks>
+    protected override string? DefaultActor => null;
+
+    /// <inheritdoc cref="DefaultActor"/>
+    protected override string? DefaultOrigin => null;
+
+    /// <summary>Appends one row, saying what was lost if it cannot.</summary>
+    /// <remarks>
+    /// The base logs the generic failure; this adds what the base cannot know — a row nobody will find
+    /// later, for an action that did happen. Written alongside actions already completed: a session
+    /// exists, a tier is already changed, so turning a successful sign-in into an error because
+    /// recording it did not work would trade a missing line for a broken door.
+    /// </remarks>
     private async Task WriteAsync(
         string type, string actor, string? origin, Action<Utf8JsonWriter> payload, CancellationToken ct)
     {
-        try
+        if (!await RecordAsync(type, payload, actor, origin, ct).ConfigureAwait(false))
         {
-            bool written = await writer
-                .AppendAsync(type, payload, NullIfBlank(actor), NullIfBlank(origin), ct)
-                .ConfigureAwait(false);
-
-            if (!written)
-            {
-                // The writer has already logged why. This says what was lost, which the writer cannot
-                // know: a row nobody will find later, for an action that did happen.
-                logger.LogWarning("audit {Event} was not recorded — the action happened, the row did not", type);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "audit {Event} write failed (non-fatal)", type);
+            logger.LogWarning(
+                "audit {Event} was not recorded — the action happened, the row did not",
+                NormalizeType(type));
         }
     }
-
-    /// <summary>Writes a value, or a real JSON null when there is none — never an empty string.</summary>
-    private static void WriteNullable(Utf8JsonWriter w, string name, string? value)
-    {
-        if (string.IsNullOrEmpty(value))
-            w.WriteNull(name);
-        else
-            w.WriteString(name, value);
-    }
-
-    private static string? NullIfBlank(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value;
 }

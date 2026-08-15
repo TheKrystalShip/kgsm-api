@@ -143,14 +143,14 @@ public class Startup(IConfiguration configuration)
         // works on a host with no kgsm installed, and so must recording that it happened. The producer
         // id is this state directory's own name, which is what a reader scans for, so writer and
         // readers agree on the location without either being told.
-        services.AddSingleton<IEventJournalWriter>(sp => new EventJournalWriter(
-            new EventJournalWriterOptions
-            {
-                Producer = "kgsm-api",
-                Directory = apiOptions.EventJournalDir,
-                ProducerVersion = typeof(Startup).Assembly.GetName().Version?.ToString(),
-            },
-            sp.GetRequiredService<ILogger<EventJournalWriter>>()));
+        services.AddKgsmJournal(
+            ApiOptions.ApiJournalProducer,
+            typeof(Startup).Assembly,
+            stateRoot: apiOptions.JournalStateRoot,
+            // Named explicitly because this API's journal path is configurable: the state root places
+            // it by default, and a host that points Api__EventJournalDir somewhere else must still
+            // have the writer land where this process's own reader is told to look.
+            configure: o => o.Directory = apiOptions.EventJournalDir);
         services.AddSingleton<ApiJournal>();
 
         if (apiOptions.KgsmProvisioned)
@@ -206,7 +206,7 @@ public class Startup(IConfiguration configuration)
             // This API's own journal, named rather than left to the scan. The scan finds a producer at
             // its DEFAULT state directory, and this one's path is configurable — so a host that points
             // it elsewhere would have this API writing a record it could not then read back.
-            namedJournals: [new JournalSource("kgsm-api", apiOptions.EventJournalDir)]);
+            namedJournals: [new JournalSource(ApiOptions.ApiJournalProducer, apiOptions.EventJournalDir)]);
 
         // M6·b — ports. The firewall authority (kgsm-firewall) is OPT-IN like the assistant: its kgsm-lib
         // client is registered ONLY when its socket is configured (blank => firewall "absent"). It is

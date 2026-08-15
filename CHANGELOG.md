@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — journal identity comes from the producer id
+
+`AddKgsmJournal(ApiOptions.ApiJournalProducer, …)` replaces the hand-built writer registration and
+`ApiJournal` derives from `JournalRecorder` (kgsm-lib 4.29.0). This API keeps its eighteen event
+types and their payloads; it stops carrying its own copy of the write path, its own `NullIfBlank`
+beside three other spellings of the same function, and its own version resolution.
+
+- **`ProducerVersion` is the informational version.** These rows carried `0.99.1.0` — a four-part
+  form no release is numbered with — while this project *already* stamps a git SHA onto
+  `AssemblyInformationalVersion` for `GET /api/v1`'s `build` and the Host DTO's `identity.build`.
+  The journal was throwing that away and now uses it, so "which build wrote this row" is answered
+  the same way everywhere. ⚠ Rows already on disk keep the old spelling.
+- **`DefaultActor` and `DefaultOrigin` are explicitly null.** Every row here records something a
+  *person* did, so a default of `system:api` would put the server's own name on somebody's sign-in.
+- **`Api__EventJournalDir` defaults from the state root, not from the database path.** It was
+  `<dir of Api__DbPath>/events`; those coincide on a normal host and stop coinciding the moment the
+  database is relocated — putting the journal outside the scanned root, where it is not reported as
+  unreadable but simply not found. Unchanged at `/var/lib/kgsm-api/events` here.
+
+`namedJournals` still names this API's own journal to its reader, because the path stays
+configurable and a host that overrides it must not write a record it then cannot read back.
+
 ### Added — `GET /hosts/{id}/services/speech/status`
 
 What the host's speech engine is doing, relayed from the leaf's own status message through its
