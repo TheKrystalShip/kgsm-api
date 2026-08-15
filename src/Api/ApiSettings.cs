@@ -117,6 +117,15 @@ public sealed class ApiSettings
         Risk = LeafRisk.Wiring, NoDefault = true)]
     public string? SchedulerControlSocketPath { get; set; }
 
+    /// <summary>kgsm-speech control socket. The leaf's own default is the standard path, and the socket
+    /// file's presence — not this value — is what says the leaf is installed.</summary>
+    /// <panel>The speech engine's socket, which the Services page reads its engine state from. The socket
+    /// is bound whether or not the daemon is running, so a host without kgsm-speech simply has no file
+    /// there and the page says so.</panel>
+    [LeafField("speechSocket", "Speech socket", Group = "leaves", Type = LeafType.Path,
+        Risk = LeafRisk.Wiring)]
+    public string? SpeechSocketPath { get; set; }
+
     /// <summary>kgsm-bot status socket. Blank reports the bot's status surface absent.</summary>
     /// <panel>The Discord bot's status socket, which the Services page reads its gateway and channel
     /// state from. Empty means the bot page shows systemd liveness only.</panel>

@@ -239,6 +239,14 @@ public class Startup(IConfiguration configuration)
         if (apiOptions.BotStatusProvisioned)
             services.AddSingleton<BotClient>();
 
+        // The speech leaf, always registered and never polled. Unlike its neighbours there is nothing to
+        // opt into: systemd binds the leaf's socket whether or not the daemon is running, so the client
+        // answers "is this installed here" from the socket file itself and a host without kgsm-speech
+        // simply 404s the surface. It is deliberately absent from the LeafHealthMonitor poll — the daemon
+        // idle-exits to give back the ~1.6GB its models cost, and connecting is what starts it, so a
+        // periodic probe would keep a process alive purely to be asked whether it is alive.
+        services.AddSingleton<SpeechLeafClient>();
+
         // Always registered: it degrades to firewall:"absent"/null when not provisioned, so the
         // server/host aggregators can depend on it unconditionally.
         services.AddSingleton<NetworkAggregator>();

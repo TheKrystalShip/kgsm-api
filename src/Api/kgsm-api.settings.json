@@ -47,6 +47,9 @@
       "SchedulerControlSocketPath": "",
       // kgsm-bot status socket. Blank leaves the bot page with systemd liveness only.
       "BotSocketPath": "",
+      // kgsm-speech control socket. systemd binds it whether or not the daemon runs, so the file being
+      // there is what says the leaf is installed — this only says where to look.
+      "SpeechSocketPath": "/run/kgsm-speech/speech.sock",
 
       // ── KGSM engine ──
       // Path to the host's kgsm entrypoint. Blank is a misconfiguration, not a capability toggle.

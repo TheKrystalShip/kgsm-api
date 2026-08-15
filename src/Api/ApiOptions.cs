@@ -130,6 +130,20 @@ public sealed class ApiOptions
     public required string BotSocketPath { get; init; }
 
     /// <summary>
+    /// kgsm-speech's control socket.
+    /// </summary>
+    /// <remarks>
+    /// Carries a default instead of being <c>required</c> like its neighbours, because blank does not
+    /// mean "absent" for this leaf: systemd binds this socket whether or not the daemon is running, so
+    /// the file being there is itself the answer to "is the speech leaf installed here". A host that
+    /// says nothing about it gets the standard path and finds the leaf if it has one.
+    /// </remarks>
+    public string SpeechSocketPath { get; init; } = DefaultSpeechSocketPath;
+
+    /// <summary>Where kgsm-speech binds its socket on a standard install.</summary>
+    public const string DefaultSpeechSocketPath = "/run/kgsm-speech/speech.sock";
+
+    /// <summary>
     /// Path to the host's <c>kgsm.sh</c> entrypoint — the single C#↔engine chokepoint kgsm-lib
     /// shells (instances, run-state). Default: the AUR-packaged symlink <c>/usr/bin/kgsm</c>.
     /// Empty ⇒ the engine is not configured (a misconfiguration: <c>/servers</c> is empty + logged).
@@ -428,6 +442,7 @@ public sealed class ApiOptions
         $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerSocketPath)}" => SchedulerSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerControlSocketPath)}" => SchedulerControlSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.BotSocketPath)}" => BotSocketPath,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.SpeechSocketPath)}" => SpeechSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantBaseUrl)}" => AssistantBaseUrl,
         $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantPublicUrl)}" => AssistantPublicUrl,
         $"{ApiSettings.Section}__{nameof(ApiSettings.FirewallSocketPath)}" => FirewallSocketPath,
@@ -856,6 +871,9 @@ public sealed class ApiOptions
             SchedulerSocketPath = Defaulted(s.SchedulerSocketPath, ""),
             SchedulerControlSocketPath = Defaulted(s.SchedulerControlSocketPath, ""),
             BotSocketPath = Defaulted(s.BotSocketPath, ""),
+            // Not opt-in like its neighbours: the socket file's presence is the provisioning check, so
+            // the standard path is the right default and an unconfigured host still finds the leaf.
+            SpeechSocketPath = Defaulted(s.SpeechSocketPath, DefaultSpeechSocketPath),
             KgsmPath = Defaulted(s.KgsmPath, "/usr/bin/kgsm"),
             KgsmJournalDir = Defaulted(s.KgsmJournalDir, "/var/lib/kgsm/events"),
             EventJournalDir = BlankFallback(s.EventJournalDir, DefaultEventDir(s.DbPath)),

@@ -210,6 +210,16 @@
       "risk": "wiring"
     },
     {
+      "key": "speechSocket",
+      "env": "Api__SpeechSocketPath",
+      "label": "Speech socket",
+      "description": "The speech engine's socket, which the Services page reads its engine state from. The socket is bound whether or not the daemon is running, so a host without kgsm-speech simply has no file there and the page says so.",
+      "group": "leaves",
+      "type": "path",
+      "default": "/run/kgsm-speech/speech.sock",
+      "risk": "wiring"
+    },
+    {
       "key": "botSocket",
       "env": "Api__BotSocketPath",
       "label": "Discord bot socket",

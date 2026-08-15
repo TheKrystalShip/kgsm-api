@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.99.1</Version>
+    <Version>0.100.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -167,6 +167,10 @@
          subscriptions, preferences and staged actions, because they answer questions the library has no
          business having an opinion about. -->
     <PackageReference Include="TheKrystalShip.KGSM.WebPush" Version="1.0.0" />
+    <!-- The speech leaf's own client and wire protocol, built in kgsm-speech. The Services board reads the
+         engine's status through it rather than re-implementing the framing, so a contract change is a
+         compile break here instead of a socket that answers with nonsense. -->
+    <PackageReference Include="TheKrystalShip.KGSM.Speech" Version="1.4.0" />
   </ItemGroup>
 
   <!-- Stamp the short git SHA onto the build so the assembly InformationalVersion becomes "<Version>+<sha>"

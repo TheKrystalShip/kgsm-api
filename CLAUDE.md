@@ -264,6 +264,17 @@ exactly one correct access path:
   and is never a browser address; the two are separate settings because conflating them hands a
   browser an address it cannot reach.
 
+- **Speech** → the leaf's own published client (`TheKrystalShip.KGSM.Speech`) wrapped in
+  **`Services/Leaves/SpeechLeafClient.cs`**, serving `GET /hosts/{id}/services/speech/status`.
+  `Api__SpeechSocketPath` defaults to the standard path rather than being opt-in: systemd binds the
+  socket whether or not the daemon runs, so the file's presence *is* the provisioning check.
+  ⚠ **Read on a page view, never polled, and never on a resting unit.** The daemon idle-exits to give
+  back the ~1.6GB its models cost and **connecting to its socket is what starts it** — so there is no
+  `LeafHealthMonitor` entry for speech, and the controller reads systemd first and answers
+  `resting:true` without connecting when the unit is not active. What a resting host still reports is
+  read here rather than asked for: the model files measured on disk and the configured voice, both
+  resolved through `LeafConfigService` so no path or default is written down twice.
+
 **Leaf health & the capability model (M2).** Capability **availability** is owned by the always-on
 **`Services/Leaves/LeafHealthMonitor.cs`**, which polls each *provisioned* leaf's health every ~2s
 (monitor + assistant `GET /health`; watchdog `IsReadyAsync` via kgsm-lib — never a direct socket).

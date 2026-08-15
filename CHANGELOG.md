@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `GET /hosts/{id}/services/speech/status`
+
+What the host's speech engine is doing, relayed from the leaf's own status message through its
+published client (`TheKrystalShip.KGSM.Speech`): whether the models are loaded and how long loading
+took, which runtime each half actually opened on, the voice being spoken in beside the configured one,
+when the models unload, which processes are attached, and per-half tallies of what has been heard and
+said. `Api__SpeechSocketPath` carries the standard path as its default rather than being opt-in — the
+socket is bound by systemd whether or not the daemon runs, so the file's presence is itself the
+provisioning check and a host with no speech leaf 404s.
+
+⚠ **An inactive unit is answered without connecting.** The leaf is socket-activated and idle-exits to
+give back the ~1.6GB its models cost, and connecting to its socket is precisely what starts it — so a
+resting daemon is reported as `resting:true` with the live half of the payload absent, plus what can
+still be known without asking: the unit's state, the model files measured on disk, and the configured
+voice (read through the leaf's own config surface, not from a path written down here). A unit whose
+state could not be read counts as resting too: starting one is the outcome that cannot be undone.
+
+It is deliberately absent from the `LeafHealthMonitor` poll for the same reason, and the leaf excludes
+a status request from what pushes its idle deadline out — so watching this endpoint never keeps the
+engine resident.
+
 ### Changed — the assistant relay forwards `speak`
 
 `POST /assistant/turn` takes an optional `speak`, forwarded verbatim to the leaf: presentation, like

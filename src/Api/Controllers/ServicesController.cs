@@ -5,6 +5,7 @@ using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
+using TheKrystalShip.KGSM.Speech;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -184,6 +185,88 @@ public sealed class ServicesController(
     }
 
     /// <summary>
+    /// <c>GET /hosts/{id}/services/speech/status</c> → what the host's speech engine is doing: whether the
+    /// models are loaded, which runtime each half actually opened on, the voice it is speaking in, when it
+    /// unloads, what is attached to it, and what it has heard and said since it started.
+    /// <b>404 when this host has no speech leaf</b> (no socket bound); <b>503</b> when it has one and the
+    /// daemon would not answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⚠ <b>An inactive unit is answered without connecting.</b> The leaf is socket-activated and idle-exits
+    /// to give back the ~1.6GB its models cost, and connecting to its socket is precisely what starts it —
+    /// so a resting daemon is reported as resting rather than woken up to be asked how it is. What can still
+    /// be known without asking is: the unit's state, the model files on disk, and the configured voice.
+    /// </para>
+    /// <para>
+    /// Nothing is recomputed. The runtime each half loaded on, the tallies and the unload time are the
+    /// leaf's own measurements; the model files are this API's own <c>stat</c> of the paths the leaf's
+    /// config descriptor resolves to. Neither is derived from the other, and a lane that fell back to the
+    /// processor says so rather than repeating the setting that asked for a card.
+    /// </para>
+    /// </remarks>
+    [HttpGet("speech/status")]
+    public async Task<IActionResult> GetSpeechStatus(
+        string id,
+        [FromServices] SystemdReader systemd,
+        [FromServices] LeafConfigService config,
+        CancellationToken ct)
+    {
+        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
+            return NotFound();
+
+        if (HttpContext.RequestServices.GetService(typeof(SpeechLeafClient)) is not SpeechLeafClient speech
+            || !speech.IsProvisioned)
+            return NotFound();
+
+        // The models the leaf's configuration points at, measured here rather than asked for: readable
+        // whether or not the daemon is running, and the question somebody has when nothing will speak.
+        (IReadOnlyList<SpeechModelFile> models, string configuredVoice, int? idleMinutes) =
+            await ConfiguredAsync(config, ct).ConfigureAwait(false);
+
+        IReadOnlyDictionary<string, UnitState> units =
+            await systemd.ReadAsync([SpeechUnit], ct).ConfigureAwait(false);
+        string state = units.TryGetValue(SpeechUnit, out UnitState? unit) ? unit.State : "unknown";
+
+        // Anything but a running daemon is left alone. `unknown` counts as resting here on purpose: if we
+        // could not read the unit we do not know whether asking would start one, and starting it is the
+        // outcome that cannot be undone.
+        if (!string.Equals(state, "active", StringComparison.Ordinal))
+            return Ok(new SpeechEngine(
+                Resting: true, State: state, StartedAt: null, Loaded: false, LoadedAt: null, LoadMs: null,
+                IdleMinutes: idleMinutes, LastAskedAt: null, UnloadsAt: null, Surfaces: [],
+                Voice: new SpeechVoice(string.Empty, configuredVoice, false, null),
+                Hearing: null, Speaking: null, Models: models));
+
+        SpeechStatus? status = await speech.GetStatusAsync(ct).ConfigureAwait(false);
+        if (status is null)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the speech engine didn't answer for its own status");
+
+        return Ok(new SpeechEngine(
+            Resting: false,
+            State: state,
+            StartedAt: status.StartedAt,
+            Loaded: status.Loaded,
+            LoadedAt: status.LoadedAt,
+            LoadMs: status.LoadMilliseconds,
+            IdleMinutes: status.IdleMinutes,
+            LastAskedAt: status.LastAskedAt,
+            UnloadsAt: status.UnloadsAt,
+            Surfaces: status.Surfaces,
+            Voice: new SpeechVoice(
+                status.SpeakingVoice,
+                // The daemon reads the same configuration this API does, so its word for the configured
+                // voice is the one to carry — falling back to ours only if it reported none.
+                status.ConfiguredVoice.Length > 0 ? status.ConfiguredVoice : configuredVoice,
+                status.VoiceOverridden,
+                status.InstalledVoices),
+            Hearing: Lane(status.Hearing),
+            Speaking: Lane(status.Speaking),
+            Models: models));
+    }
+
+    /// <summary>
     /// <c>GET /hosts/{id}/services/bot/status</c> → the Discord bot's gateway state, the guild it
     /// actually resolved, its channel map and its announcement switches, relayed verbatim.
     /// <b>404 when this host configures no bot status socket</b>; <b>503</b> when it does and the bot
@@ -213,4 +296,70 @@ public sealed class ServicesController(
 
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
+
+    /// <summary>The speech leaf's unit, as the catalog names it.</summary>
+    private static string SpeechUnit => LeafCatalog.Find("speech")?.Unit ?? "kgsm-speech.service";
+
+    /// <summary>One of the leaf's halves, relayed field for field.</summary>
+    private static SpeechLaneReport Lane(SpeechLane lane) => new(
+        lane.Available, lane.Detail, lane.Model, lane.Runtime, lane.Busy, lane.Waiting,
+        lane.Done, lane.Rejected, lane.Failed, lane.AudioSeconds, lane.Characters,
+        lane.LastMilliseconds, lane.MeanMilliseconds, lane.P95Milliseconds, lane.RealtimeFactor,
+        lane.LastAt, lane.LastOutcome);
+
+    /// <summary>
+    /// What the speech leaf is configured with, and what is on disk where it points.
+    /// </summary>
+    /// <remarks>
+    /// Read through the leaf's own config surface rather than from a path written down here: the
+    /// effective value already accounts for the override this API may itself have written, and holding a
+    /// second copy of the default is how the two come to disagree. A leaf that cannot be read yields no
+    /// models rather than invented ones.
+    /// </remarks>
+    private static async Task<(IReadOnlyList<SpeechModelFile> Models, string Voice, int? IdleMinutes)>
+        ConfiguredAsync(LeafConfigService config, CancellationToken ct)
+    {
+        LeafConfig? surface = null;
+        try
+        {
+            surface = await config.GetConfigAsync("speech", ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The engine's own state is the point of this endpoint; its configuration is context. A
+            // config surface that cannot be read costs the model card, not the page.
+        }
+
+        string? Effective(string key) => surface?.Fields
+            .FirstOrDefault(f => string.Equals(f.Key, key, StringComparison.Ordinal))?.Effective;
+
+        var models = new List<SpeechModelFile>(2);
+        foreach ((string kind, string key) in new[]
+                 { ("recognition", "recognitionModel"), ("synthesis", "synthesisModel") })
+        {
+            string? path = Effective(key);
+            if (string.IsNullOrWhiteSpace(path)) continue;
+
+            long? bytes = null;
+            bool present = false;
+            try
+            {
+                var file = new FileInfo(path);
+                present = file.Exists;
+                if (present) bytes = file.Length;
+            }
+            catch (Exception)
+            {
+                // An unreadable path is a file of unknown size, not an absent one — reported as such
+                // rather than as "no model", which would send somebody to re-download 813MB.
+            }
+
+            models.Add(new SpeechModelFile(kind, Path.GetFileName(path), path, bytes, present));
+        }
+
+        return (models, Effective("voice") ?? string.Empty, ParseMinutes(Effective("idleMinutes")));
+    }
+
+    private static int? ParseMinutes(string? value) =>
+        int.TryParse(value, out int minutes) ? minutes : null;
 }
