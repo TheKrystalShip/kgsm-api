@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — audit rows for what the assistant reports about itself (0.106.0)
+
+kgsm-llm now journals its own conduct, and four of those events become audit rows:
+`assistant.action.declined` (Warn — somebody reached past their tier, which until now was recorded
+nowhere on the host at all), `assistant.action.proposed`, `assistant.claim.corrected`, and
+`assistant.blueprint.authored`.
+
+- ⚠ **A corrected claim carries no target.** It is about the assistant's own honesty, not about a
+  machine; naming a server would surface the model's fabrication on that server's timeline as though
+  something had happened to it.
+- ⚠ **An authoring run targets the blueprint and carries no `serverId`.** Its probe was a disposable
+  instance that no longer exists — it rides in `meta`, which is what ties the row to the ~25
+  install/uninstall rows the engine wrote for the same run.
+- **The two refusal reasons read differently on purpose.** A host with actions switched off refuses
+  everybody, which is a configuration state; a host with them on refuses the person. Blurring them
+  would turn a permanent setting into a stream of apparent overreach.
+- `assistant_blueprint_authoring_started` produces no row: it is classified `Phase`, like
+  `instance_installation_started`, so the existing exclusion already drops it.
+
+The capability block needed no work — `LeafDegradationTracker` reads every producer's journal already,
+so the assistant's `leaf_degraded` surfaces the moment it is written.
+
+
 ### Added — `POST /auth/register`, so an account can exist without an admin making one
 
 Anonymous, and **off unless `Api__AllowSelfRegistration` says otherwise**. It creates exactly what an

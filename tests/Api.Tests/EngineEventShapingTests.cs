@@ -246,6 +246,144 @@ public sealed class EngineEventShapingTests
         }
     }
 
+    // --- what the assistant reports about itself -------------------------------------------------
+
+    /// <summary>
+    /// A refusal for want of authority becomes a row, because it exists nowhere else.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The engine cannot hold this: nothing ran, so from its side nothing happened. Warn rather than
+    /// info — nothing broke, and somebody reached for something they could not do.
+    /// </remarks>
+    [Fact]
+    public void Shape_AssistantActionDeclined_IsAWarnRowNamingTheTool()
+    {
+        var item = new EventHistoryEntry(
+            "evt_dec", Ts, AssistantEvents.ActionDeclined, null, null, "discord:haru", "assistant", null,
+            Data(new { Tool = "server_command", DeclineReason = "authority", Tier = "viewer", Instance = "mc" }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.NotNull(shaped);
+        Assert.Equal(AuditAction.AssistantActionDeclined, shaped!.Action);
+        Assert.Equal(AuditSeverity.Warn, shaped.Severity);
+        Assert.Equal("mc", shaped.ServerId);
+        Assert.Contains("server_command", shaped.Summary);
+        Assert.Contains("tier does not carry it", shaped.Summary);
+    }
+
+    /// <summary>
+    /// ⚠ The two refusal reasons read differently, because they are different facts.
+    /// </summary>
+    /// <remarks>
+    /// A host with actions switched off refuses everybody, which is a configuration state; a host with
+    /// them on refuses the person. Reading the first as the second turns a permanent setting into a
+    /// stream of apparent overreach.
+    /// </remarks>
+    [Fact]
+    public void Shape_AssistantActionDeclined_DistinguishesAConfigStateFromOverreach()
+    {
+        var item = new EventHistoryEntry(
+            "evt_dec2", Ts, AssistantEvents.ActionDeclined, null, null, "discord:haru", "assistant", null,
+            Data(new { Tool = "server_command", DeclineReason = "actions_disabled" }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.NotNull(shaped);
+        Assert.Contains("host has actions turned off", shaped!.Summary);
+        Assert.DoesNotContain("tier", shaped.Summary);
+    }
+
+    /// <summary>A staged action awaiting a person becomes a row; nothing has run, so the engine has none.</summary>
+    [Fact]
+    public void Shape_AssistantActionProposed_IsAnInfoRow()
+    {
+        var item = new EventHistoryEntry(
+            "evt_prop", Ts, AssistantEvents.ActionProposed, null, null, "discord:haru", "assistant", null,
+            Data(new { Kind = "Backup", Instance = "mc", ExpiresInSec = 300 }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.NotNull(shaped);
+        Assert.Equal(AuditAction.AssistantActionProposed, shaped!.Action);
+        Assert.Equal(AuditSeverity.Info, shaped.Severity);
+        Assert.Contains("awaiting approval", shaped.Summary);
+        Assert.Equal("300", shaped.Meta!["expiresInSec"]);
+    }
+
+    /// <summary>
+    /// A corrected claim is about the assistant's honesty, so it targets nothing.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Naming a server here would file the model's own fabrication as something that happened to a
+    /// machine, and it would surface on that server's timeline as though it had.
+    /// </remarks>
+    [Fact]
+    public void Shape_AssistantClaimCorrected_CarriesNoTarget()
+    {
+        var item = new EventHistoryEntry(
+            "evt_claim", Ts, AssistantEvents.ClaimCorrected, null, null, "discord:haru", "assistant", null,
+            Data(new { Check = "unbacked_action", Resolution = "corrected", Net = "outer", ConversationId = "web:u:1" }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.NotNull(shaped);
+        Assert.Equal(AuditAction.AssistantClaimCorrected, shaped!.Action);
+        Assert.Null(shaped.Target);
+        Assert.Null(shaped.ServerId);
+        Assert.Equal("outer", shaped.Meta!["net"]);
+    }
+
+    /// <summary>
+    /// An authoring run's close is blueprint-targeted and names no server.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The probe was a disposable instance that no longer exists. Carrying it as a serverId would put
+    /// a row about a machine nobody has into the feed for one somebody does; it rides in meta instead,
+    /// which is what ties this row to the twenty-odd install and uninstall rows the engine wrote.
+    /// </remarks>
+    [Fact]
+    public void Shape_AssistantBlueprintAuthored_TargetsTheBlueprintAndNotTheProbe()
+    {
+        var item = new EventHistoryEntry(
+            "evt_auth", Ts, AssistantEvents.BlueprintAuthored, null, null, "discord:haru", "assistant", null,
+            Data(new
+            {
+                BlueprintName = "terraria",
+                Probe = "__bp_probe_terraria__",
+                AuthoringOutcome = "verified",
+                DurationSec = 214,
+            }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.NotNull(shaped);
+        Assert.Equal(AuditAction.AssistantBlueprintAuthored, shaped!.Action);
+        Assert.Equal(AuditSeverity.Success, shaped.Severity);
+        Assert.Equal(AuditTargetKind.Blueprint, shaped.Target!.Kind);
+        Assert.Equal("terraria", shaped.Target.Id);
+        Assert.Null(shaped.ServerId);
+        Assert.Equal("__bp_probe_terraria__", shaped.Meta!["probe"]);
+    }
+
+    /// <summary>
+    /// ⚠ The bracket's opening half produces no row.
+    /// </summary>
+    /// <remarks>
+    /// It is classified <c>Phase</c>, exactly like <c>instance_installation_started</c>: a step inside a
+    /// larger operation that has its own fact event. A feed showing both would report every authoring
+    /// run twice.
+    /// </remarks>
+    [Fact]
+    public void Shape_AssistantBlueprintAuthoringStarted_IsAPhaseAndNotARow()
+    {
+        var item = new EventHistoryEntry(
+            "evt_start", Ts, AssistantEvents.BlueprintAuthoringStarted, null, null, "discord:haru", "assistant", null,
+            Data(new { BlueprintName = "terraria", Probe = "__bp_probe_terraria__" }));
+
+        Assert.Null(EngineEventShaping.Shape(item, HostId));
+    }
+
     /// <summary>
     /// <c>instance_ready</c> is a fact, not a refinement of <c>server.start</c>: that one says the
     /// process spawned, this one says the game will accept a connection, and on a big world the gap is

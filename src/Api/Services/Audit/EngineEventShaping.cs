@@ -81,6 +81,52 @@ public static class EngineEventShaping
 
         AuditWrite? write = item.Type switch
         {
+            // -- what the assistant reports about ITSELF ---------------------------------------
+            // ⚠ Not a record of what it did: every action it performs is already an engine event,
+            // attributed to the person who asked. These are the turn that did NOT act, which leaves the
+            // engine's record empty because from its side nothing happened.
+            //
+            // assistant_blueprint_authoring_started is absent on purpose — it is classified Phase, so
+            // IsPhase already drops it, exactly like instance_installation_started. The bracket's open
+            // half is not news; its close is.
+            AssistantEvents.ActionDeclined => Map<AssistantActionDeclinedEventData>(item,
+                d => Assistant(item, AuditAction.AssistantActionDeclined, AuditSeverity.Warn,
+                    d.Instance is null
+                        ? $"refused {d.Tool} — {Declined(d.DeclineReason)}"
+                        : $"refused {d.Tool} on {d.Instance} — {Declined(d.DeclineReason)}",
+                    hostId, d.Instance,
+                    Meta(("tool", d.Tool), ("reason", d.DeclineReason), ("tier", d.Tier)))),
+
+            AssistantEvents.ActionProposed => Map<AssistantActionProposedEventData>(item,
+                d => Assistant(item, AuditAction.AssistantActionProposed, AuditSeverity.Info,
+                    d.Instance is null
+                        ? $"proposed {d.Kind}, awaiting approval"
+                        : $"proposed {d.Kind} on {d.Instance}, awaiting approval",
+                    hostId, d.Instance,
+                    Meta(("kind", d.Kind), ("tool", d.Tool),
+                         ("expiresInSec", d.ExpiresInSec?.ToString(CultureInfo.InvariantCulture))))),
+
+            // No target: this is about the assistant's own honesty, not about anything on a server.
+            AssistantEvents.ClaimCorrected => Map<AssistantClaimCorrectedEventData>(item,
+                d => Assistant(item, AuditAction.AssistantClaimCorrected, AuditSeverity.Warn,
+                    $"described work the turn did not do ({d.Check}) — {d.Resolution}",
+                    hostId, instance: null,
+                    Meta(("check", d.Check), ("resolution", d.Resolution), ("net", d.Net)))),
+
+            AssistantEvents.BlueprintAuthored => Map<AssistantBlueprintAuthoredEventData>(item,
+                d => new AuditWrite(
+                    item.Ts, AuditMapping.NormalizeOrigin(item.Origin), AuditMapping.ParseActor(item.Actor),
+                    AuditAction.AssistantBlueprintAuthored,
+                    d.AuthoringOutcome == "verified" ? AuditSeverity.Success : AuditSeverity.Warn,
+                    // Blueprint-targeted, and carrying no serverId: the probe was a disposable instance
+                    // that no longer exists, and naming it as a server would put a row about a machine
+                    // nobody has in the feed for one somebody does.
+                    new AuditTarget(AuditTargetKind.Blueprint, d.BlueprintName, d.BlueprintName),
+                    ServerId: null, hostId,
+                    $"blueprint authoring for {d.BlueprintName} ended {d.AuthoringOutcome}",
+                    Meta(("outcome", d.AuthoringOutcome), ("probe", d.Probe),
+                         ("durationSec", d.DurationSec?.ToString(CultureInfo.InvariantCulture))))),
+
             "instance_started" => Map<InstanceStartedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerStart, AuditSeverity.Info, "started", hostId)),
             // The moment players can actually connect, which server.start does not report — that one
@@ -271,6 +317,41 @@ public static class EngineEventShaping
 
     // A genuinely unclassified event type — never drop it. No fabricated detail: actor/origin/target are
     // exactly what the envelope carried (or null), and meta records only the literal raw type name.
+    /// <summary>
+    /// One row about the assistant's own conduct.
+    /// </summary>
+    /// <remarks>
+    /// Server-targeted when the refused or proposed action named an instance, and untargeted when it did
+    /// not — a refusal to read a file and a corrected claim are about the assistant, not about a machine.
+    /// ⚠ The actor and origin come off the envelope, which the leaf stamps from the same invocation the
+    /// engine's own events carry, so a refusal and the action it refused name one person by one string.
+    /// </remarks>
+    private static AuditWrite Assistant(
+        EventHistoryEntry item,
+        string action,
+        string severity,
+        string summary,
+        string hostId,
+        string? instance,
+        IReadOnlyDictionary<string, string>? meta) =>
+        new(item.Ts, AuditMapping.NormalizeOrigin(item.Origin), AuditMapping.ParseActor(item.Actor),
+            action, severity,
+            instance is null ? null : new AuditTarget(AuditTargetKind.Server, instance, instance),
+            instance, hostId, summary, meta);
+
+    /// <summary>The refusal reason, in words a person reads.</summary>
+    /// <remarks>
+    /// ⚠ The two are very different facts and the row must not blur them: one host has actions switched
+    /// off for everybody, the other has a person reaching past their tier. An unrecognised value is
+    /// restated rather than guessed at.
+    /// </remarks>
+    private static string Declined(string reason) => reason switch
+    {
+        AssistantDeclineReasons.Authority => "their tier does not carry it",
+        AssistantDeclineReasons.ActionsDisabled => "this host has actions turned off",
+        _ => reason,
+    };
+
     private static AuditRecord GenericShape(EventHistoryEntry item, string hostId)
     {
         AuditActor actor = AuditMapping.ParseActor(item.Actor);

@@ -210,6 +210,32 @@ public static class AuditAction
     public const string BlueprintWrite = "blueprint.write";
     public const string BlueprintRevert = "blueprint.revert";
 
+    // assistant.* — what the assistant leaf reports about its own conduct, and deliberately NOT a
+    // record of what it did. Every action it performs runs through kgsm with provenance attached, so
+    // the engine's own events already carry them attributed to the person who asked; a second copy here
+    // would be an answer able to disagree with the engine's. These are the opposite — the turn that did
+    // NOT act, which leaves the engine's record empty because from its side nothing occurred.
+
+    // Somebody reached for an action their tier does not carry. The one genuinely security-relevant
+    // member of the set: it exists nowhere else on the host, because a refusal goes back to the model as
+    // a tool result and stops there. Warn rather than info — nothing broke, and somebody tried something
+    // they could not do.
+    public const string AssistantActionDeclined = "assistant.action.declined";
+
+    // A mutation is staged and waiting on a person. Nothing has run, so the engine has no row until
+    // somebody confirms — and one that expires unapproved produces none at all.
+    public const string AssistantActionProposed = "assistant.action.proposed";
+
+    // The model described an action it never took, or a lookup it never made, and was re-prompted or
+    // corrected. A record of the assistant's own honesty rather than of anything done to a server, which
+    // is why it carries no target.
+    public const string AssistantClaimCorrected = "assistant.claim.corrected";
+
+    // A blueprint-authoring run concluded. Distinct from blueprint.write, which reports a FILE appearing:
+    // this reports a RUN ending, and on a failed run it is the only row either way. Its probe rides in
+    // meta, which is what ties it to the twenty-odd install/uninstall rows the engine wrote for it.
+    public const string AssistantBlueprintAuthored = "assistant.blueprint.authored";
+
     // auth.* — API-internal (no kgsm event → written directly, no double-write risk).
     public const string AuthLogin = "auth.login";
     public const string AuthLogout = "auth.logout";
