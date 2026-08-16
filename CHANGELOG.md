@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a leaf that is up and impaired now reads as `degraded`
+
+`LeafDegradationTracker` reads each leaf's own journal for what it says is broken about itself, and
+`LeafHealthMonitor` folds that into the capability block. `CapabilityStatus.Degraded` has been in the
+contract since M2 and nothing produced it.
+
+⚠ **The half a probe cannot see.** `/health` answers yes or no, so a leaf answering perfectly while
+unable to do part of its job read as `operational` — an assistant with a dead backend, a monitor
+serving a frozen frame, a scheduler that cannot reach the watchdog. And the two socket-activated
+leaves cannot be probed at all, because connecting to the socket is what starts them.
+
+**Read from each producer's journal, not from the event stream.** A lifecycle payload deliberately
+names no leaf — the producer comes from the directory a line was read out of, which a reader can check
+where a field inside the payload would be a claim it cannot. A live handler is given the payload alone
+and could only guess from the actor, so this reads where the answer actually is.
+
+Two things the model keeps honest:
+
+- **A leaf with nothing broken is absent from the map**, not present with an empty list, so a caller
+  cannot mistake "reported nothing" for "reported it is fine". No self-report leaves the probe's
+  answer alone rather than downgrading it.
+- **The message names the components**, because that is the actionable part: *"Reports llm-backend not
+  working"* sends somebody somewhere, where *"the assistant is degraded"* sends them to the logs.
+
+The engine's journal is skipped — it is not a leaf, reports no lifecycle, and is much the largest on
+the host. `TheKrystalShip.KGSM.Lib` moves 4.32.0 → 4.35.0.
+
 ### Fixed — an event no longer erases an identity field it does not carry
 
 A roster upsert wrote the event's identity fields in wholesale, so a field the event was silent about

@@ -40,6 +40,7 @@ public sealed class LeafHealthMonitor : BackgroundService
     private readonly IServiceProvider _services;
     private readonly StreamHub _hub;
     private readonly ILogger<LeafHealthMonitor> _logger;
+    private readonly LeafDegradationTracker? _degradation;
 
     private readonly string _topic;
     // Scheduler provisioning is CONFIG-based (the socket is configured ⇒ SchedulerClient is registered),
@@ -52,6 +53,16 @@ public sealed class LeafHealthMonitor : BackgroundService
     // Serializes the poll body so the always-on 2s loop and an out-of-band PollNowAsync (a connect/disconnect
     // forcing an immediate publish) never race two writers onto _current.
     private readonly SemaphoreSlim _pollGate = new(1, 1);
+
+    /// <summary>
+    /// What a leaf says is broken about itself, or nothing when this API is not tracking that.
+    /// </summary>
+    /// <remarks>
+    /// Optional so the capability model still works on a host where the tracker is not registered.
+    /// Absent means no self-report was read, which is not the same as a leaf reporting it is fine —
+    /// and it therefore leaves the probe's answer alone rather than downgrading it.
+    /// </remarks>
+    private IReadOnlyCollection<string> Degraded(string leaf) => _degradation?.For(leaf) ?? [];
     private volatile HostCapabilities _current; // written only under _pollGate; volatile for reader threads
 
     public LeafHealthMonitor(
@@ -61,8 +72,10 @@ public sealed class LeafHealthMonitor : BackgroundService
         LeafRegistry registry,
         IServiceProvider services,
         StreamHub hub,
-        ILogger<LeafHealthMonitor> logger)
+        ILogger<LeafHealthMonitor> logger,
+        LeafDegradationTracker? degradation = null)
     {
+        _degradation = degradation;
         _monitor = monitor;
         _assistant = assistant;
         _registry = registry;
@@ -138,10 +151,18 @@ public sealed class LeafHealthMonitor : BackgroundService
             DateTimeOffset now = DateTimeOffset.UtcNow;
             HostCapabilities prev = _current;
             var next = new HostCapabilities(
-                Metrics: BuildMetrics(prev.Metrics, metricsProvisioned, metricsTask.Result, snap, now),
-                Assistant: BuildAssistant(prev.Assistant, assistantProvisioned, assistantTask.Result, _assistantPublicUrl, now),
-                Watchdog: BuildLeaf(prev.Watchdog, watchdogProvisioned, watchdogTask.Result, now, "Watchdog is not ready."),
-                Scheduler: BuildLeaf(prev.Scheduler, _schedulerProvisioned, schedulerTask.Result, now, "Scheduler status check failed."));
+                Metrics: BuildMetrics(
+                    prev.Metrics, metricsProvisioned, metricsTask.Result, snap, now,
+                    Degraded(ProvisionableLeaf.Monitor)),
+                Assistant: BuildAssistant(
+                    prev.Assistant, assistantProvisioned, assistantTask.Result, _assistantPublicUrl, now,
+                    Degraded(ProvisionableLeaf.Assistant)),
+                Watchdog: BuildLeaf(
+                    prev.Watchdog, watchdogProvisioned, watchdogTask.Result, now, "Watchdog is not ready.",
+                    Degraded(ProvisionableLeaf.Watchdog)),
+                Scheduler: BuildLeaf(
+                    prev.Scheduler, _schedulerProvisioned, schedulerTask.Result, now,
+                    "Scheduler status check failed.", Degraded(ProvisionableLeaf.Scheduler)));
 
             if (next.Equals(prev))
                 return; // no flip -> no emit (and provisioned/since are stable, so the block is value-equal)
@@ -179,18 +200,55 @@ public sealed class LeafHealthMonitor : BackgroundService
         }
     }
 
-    private static Capability BuildMetrics(Capability prev, bool provisioned, bool healthy, Snap.Snapshot? snap, DateTimeOffset now)
+    /// <summary>
+    /// The status a leaf that answered its probe should carry, given what it says about itself.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>A probe answers yes or no, and a leaf can be answering perfectly while unable to do part of
+    /// its job.</b> An assistant with a dead backend, a monitor serving a frozen frame and a scheduler
+    /// that cannot reach the watchdog all pass their health check. <c>Degraded</c> is the state the
+    /// contract has always had and nothing produced.
+    /// </remarks>
+    /// <param name="healthy">Whether the leaf answered its probe.</param>
+    /// <param name="degraded">The components it reports broken, from its own journal.</param>
+    /// <returns>The capability status.</returns>
+    private static string StatusFor(bool healthy, IReadOnlyCollection<string> degraded)
+    {
+        if (!healthy)
+            return CapabilityStatus.Down;
+
+        return degraded.Count > 0 ? CapabilityStatus.Degraded : CapabilityStatus.Operational;
+    }
+
+    /// <summary>
+    /// What to say about a leaf that is up and impaired, naming the components rather than summarising.
+    /// </summary>
+    /// <remarks>
+    /// The component is the actionable part: "the assistant is degraded" sends somebody reading logs
+    /// where "the assistant's llm-backend is unreachable" does not.
+    /// </remarks>
+    private static string? MessageFor(bool healthy, IReadOnlyCollection<string> degraded, string downMessage)
+    {
+        if (!healthy)
+            return downMessage;
+
+        return degraded.Count == 0 ? null : $"Reports {string.Join(", ", degraded.Order())} not working.";
+    }
+
+    private static Capability BuildMetrics(
+        Capability prev, bool provisioned, bool healthy, Snap.Snapshot? snap, DateTimeOffset now,
+        IReadOnlyCollection<string> degraded)
     {
         if (!provisioned)
             return Capability.Absent; // not connected -> client renders 'absent'
 
-        string status = healthy ? CapabilityStatus.Operational : CapabilityStatus.Down;
+        string status = StatusFor(healthy, degraded);
         object? info = healthy && snap is not null ? new MetricsCapabilityInfo(snap.IntervalMs) : null;
         return new Capability(
             Provisioned: true,
             Status: status,
             Since: SinceFor(prev, status, now),
-            Message: healthy ? null : "Monitor health check failed.",
+            Message: MessageFor(healthy, degraded, "Monitor health check failed."),
             Info: info);
     }
 
@@ -198,31 +256,34 @@ public sealed class LeafHealthMonitor : BackgroundService
     // The origin is config, not health, so it rides along on every status — a leaf that is momentarily down
     // still has the same address, and withholding it would make a transient outage look like a missing route.
     private static Capability BuildAssistant(
-        Capability prev, bool provisioned, bool healthy, string? publicUrl, DateTimeOffset now)
+        Capability prev, bool provisioned, bool healthy, string? publicUrl, DateTimeOffset now,
+        IReadOnlyCollection<string> degraded)
     {
         if (!provisioned)
             return Capability.Absent;
 
-        string status = healthy ? CapabilityStatus.Operational : CapabilityStatus.Down;
+        string status = StatusFor(healthy, degraded);
         return new Capability(
             Provisioned: true,
             Status: status,
             Since: SinceFor(prev, status, now),
-            Message: healthy ? null : "Assistant health check failed.",
+            Message: MessageFor(healthy, degraded, "Assistant health check failed."),
             Info: publicUrl is null ? null : new AssistantCapabilityInfo(publicUrl));
     }
 
-    private static Capability BuildLeaf(Capability prev, bool provisioned, bool healthy, DateTimeOffset now, string downMessage)
+    private static Capability BuildLeaf(
+        Capability prev, bool provisioned, bool healthy, DateTimeOffset now, string downMessage,
+        IReadOnlyCollection<string> degraded)
     {
         if (!provisioned)
             return Capability.Absent;
 
-        string status = healthy ? CapabilityStatus.Operational : CapabilityStatus.Down;
+        string status = StatusFor(healthy, degraded);
         return new Capability(
             Provisioned: true,
             Status: status,
             Since: SinceFor(prev, status, now),
-            Message: healthy ? null : downMessage);
+            Message: MessageFor(healthy, degraded, downMessage));
     }
 
     // Carry the prior flip timestamp when the status is unchanged; stamp 'now' on a transition. Keeping

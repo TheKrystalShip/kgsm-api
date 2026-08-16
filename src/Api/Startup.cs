@@ -377,6 +377,15 @@ public class Startup(IConfiguration configuration)
         // leaf's /health every ~2s as the canonical liveness signal, serves the cached capability block
         // to GET /hosts (HostAggregator reads it), and publishes hosts/{id}/capabilities flips. It is one
         // instance exposed as both a singleton (the readable cache) and a hosted service (the poll loop).
+        // What each leaf says is broken about ITSELF, read from its own journal.
+        //
+        // ⚠ The half the capability probe cannot see. /health answers yes or no, so a leaf answering
+        // perfectly while unable to do part of its job reads as operational — and the two
+        // socket-activated leaves cannot be probed at all, because connecting to the socket is what
+        // starts them. Registered before the monitor that consumes it.
+        services.AddSingleton<LeafDegradationTracker>();
+        services.AddHostedService(sp => sp.GetRequiredService<LeafDegradationTracker>());
+
         services.AddSingleton<LeafHealthMonitor>();
         services.AddHostedService(sp => sp.GetRequiredService<LeafHealthMonitor>());
 
