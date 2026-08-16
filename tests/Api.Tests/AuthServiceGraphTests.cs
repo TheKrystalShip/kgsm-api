@@ -43,6 +43,19 @@ public sealed class AuthServiceGraphTests
                 {
                     ["Api:UsersDbPath"] = usersDbPath
                         ?? Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-users-{Guid.NewGuid():N}.db"),
+                    // ⚠ Never the default. This factory is deliberately fake-free, so everything it does
+                    // not override is the real host's — and booting the app now writes a leaf_ready to
+                    // whatever journal it resolves. Measured: a test run put twenty-five ready/stopping
+                    // pairs into this machine's live API journal, which reads as an API that restarted
+                    // twenty-five times when systemd shows two.
+                    ["Api:EventJournalDir"] =
+                        Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-events-{Guid.NewGuid():N}"),
+                    ["Api:JournalStateRoot"] =
+                        Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-state-{Guid.NewGuid():N}"),
+                    ["Api:KgsmJournalDir"] =
+                        Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-journal-{Guid.NewGuid():N}"),
+                    ["Api:DbPath"] =
+                        Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-{Guid.NewGuid():N}.db"),
                     ["KgsmAuth:Providers:discord:ClientId"] = wired ? "graph-client" : "",
                     ["KgsmAuth:Providers:discord:ClientSecret"] = wired ? "graph-secret" : "",
                     ["Api:DiscordRedirectUri"] =

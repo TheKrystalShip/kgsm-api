@@ -5,6 +5,7 @@ using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Events;
+using TheKrystalShip.KGSM.Lifecycle;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -203,6 +204,14 @@ public sealed class EngineEventShapingTests
 
         foreach (EventDescriptor descriptor in KgsmEventCatalog.All.Where(d => d.Weight == EventWeight.Fact))
         {
+            // ⚠ The one exception, and it is by name so adding another is a deliberate act. A leaf
+            // reporting on its own state is a fact about a service, not somebody's action, and the
+            // audit answers who did what. They have their own surface: the capability block reports
+            // them as degraded with the component named. Rendering them here would also mean every
+            // deploy writing a row per leaf into the record of what people did.
+            if (LeafLifecycle.Contains(descriptor.Type))
+                continue;
+
             var item = new EventHistoryEntry(
                 "evt_x", Ts, descriptor.Type, "mc", null, null, null, null, Data(new { InstanceName = "mc" }));
 
@@ -212,6 +221,29 @@ public sealed class EngineEventShapingTests
 
         Assert.True(dropped.Count == 0,
             "these events report a fact and produce no audit row: " + string.Join(", ", dropped));
+    }
+
+    /// <summary>The four events excluded above, and the assertion that they really are excluded.</summary>
+    private static readonly string[] LeafLifecycle =
+    [
+        LeafLifecycleEvents.Ready,
+        LeafLifecycleEvents.Degraded,
+        LeafLifecycleEvents.Recovered,
+        LeafLifecycleEvents.Stopping,
+    ];
+
+    [Fact]
+    public void Shape_ALeafReportingOnItself_IsNotAnAuditRow()
+    {
+        // The other direction of the exclusion above: skipping them in the coverage test would pass
+        // just as well if they quietly started producing rows.
+        foreach (string type in LeafLifecycle)
+        {
+            var item = new EventHistoryEntry(
+                "evt_x", Ts, type, null, null, null, null, null, Data(new { Component = "backend" }));
+
+            Assert.Null(EngineEventShaping.Shape(item, HostId));
+        }
     }
 
     /// <summary>

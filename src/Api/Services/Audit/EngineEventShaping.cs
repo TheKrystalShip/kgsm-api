@@ -5,6 +5,7 @@ using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Events;
+using TheKrystalShip.KGSM.Lifecycle;
 
 namespace TheKrystalShip.Api.Services.Audit;
 
@@ -44,6 +45,26 @@ public static class EngineEventShaping
         KgsmEventCatalog.Describe(type).Weight == EventWeight.Phase;
 
     /// <summary>
+    /// Whether <paramref name="type"/> is a leaf reporting on its own state.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Not an audit row.</b> The audit answers who did what, and nobody did these — a leaf coming
+    /// up, losing a component or going away is a fact about a service rather than somebody's action,
+    /// and its actor is the leaf itself. They already have a surface: the capability block reports them
+    /// as <c>degraded</c> with the component named. Rendering them here would also mean every deploy
+    /// writing a row per leaf into the record of what people did.
+    /// <para>
+    /// The generic fallback is deliberate everywhere else — an unclassified engine event must never be
+    /// silently dropped — so this exclusion is by name rather than by falling through it.
+    /// </para>
+    /// </remarks>
+    private static bool IsLeafLifecycle(string type) =>
+        type is LeafLifecycleEvents.Ready
+            or LeafLifecycleEvents.Degraded
+            or LeafLifecycleEvents.Recovered
+            or LeafLifecycleEvents.Stopping;
+
+    /// <summary>
     /// Shape <paramref name="item"/> to its <see cref="AuditRecord"/>, or <see langword="null"/> for a
     /// step inside a larger operation (<see cref="IsPhase"/>) — the only case this returns null; every
     /// other event type is shaped, mapped when a <see cref="AuditMapping"/> mapper exists, else via an
@@ -55,6 +76,7 @@ public static class EngineEventShaping
     {
         ArgumentNullException.ThrowIfNull(item);
         if (IsPhase(item.Type)) return null;
+        if (IsLeafLifecycle(item.Type)) return null;
         if (IsNoteAttributionChange(item)) return null;
 
         AuditWrite? write = item.Type switch

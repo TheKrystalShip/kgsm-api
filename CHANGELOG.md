@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — this API reports its own state too, and a leaf's self-report is not an audit row
+
+`leaf_ready`, `leaf_degraded`, `leaf_recovered` and `leaf_stopping` on this API's own journal. The
+aggregator is a producer like any other, and while its absence is the most obvious on the host — a
+Control Panel that will not load says so by not loading — a `database` it cannot reach refuses every
+audit read and every session check while the SPA is served perfectly from the same process.
+
+⚠ **A leaf reporting on itself is excluded from the audit rows.** The audit answers who did what and
+nobody did these: a leaf coming up, losing a component or going away is a fact about a service, and
+its actor is the leaf. They already have a surface in the capability block. Rendering them here would
+also mean every deploy writing a row per leaf into the record of what people did. The generic fallback
+stays as it was — an unclassified engine event must never be silently dropped — so the exclusion is by
+name, and the coverage test that pins "every fact becomes a row" names the four exceptions rather than
+being weakened.
+
 ### Added — a leaf that is up and impaired now reads as `degraded`
 
 `LeafDegradationTracker` reads each leaf's own journal for what it says is broken about itself, and

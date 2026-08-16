@@ -35,6 +35,7 @@ using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
 
 using TheKrystalShip.KGSM.Auth.Sessions;
+using TheKrystalShip.KGSM.Lifecycle;
 
 namespace TheKrystalShip.Api;
 
@@ -152,6 +153,15 @@ public class Startup(IConfiguration configuration)
             // have the writer land where this process's own reader is told to look.
             configure: o => o.Directory = apiOptions.EventJournalDir);
         services.AddSingleton<ApiJournal>();
+
+        // What this API says about ITSELF, as opposed to about the people using it. Separate from
+        // ApiJournal because the two answer to different identities: an audit line carries whoever
+        // acted, and a lifecycle line is this process reporting on its own state with nobody behind it.
+        services.AddSingleton(sp => new LeafLifecycle(
+            sp.GetRequiredService<IEventJournalWriter>(),
+            sp.GetRequiredService<ILogger<LeafLifecycle>>()));
+
+        services.AddHostedService<ApiLifecycleReporter>();
 
         if (apiOptions.KgsmProvisioned)
         {
