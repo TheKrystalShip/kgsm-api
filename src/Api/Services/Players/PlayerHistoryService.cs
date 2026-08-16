@@ -369,18 +369,38 @@ public sealed class PlayerHistoryService(
         }
     }
 
+    /// <summary>
+    /// A player's identity fields arrive scattered across a game's two log lines, and an event that
+    /// does not carry a field is silent about it rather than reporting it absent. Necesse's connect
+    /// line has the SteamID64 and the endpoint but no character name; its disconnect line has the
+    /// name. Writing an event's fields in wholesale therefore blanks whatever the other line had
+    /// established — a rejoin erased the name and the roster fell back to showing a bare address.
+    /// <para>
+    /// So a blank incoming value leaves the stored one alone, and a present one replaces it. Newest
+    /// non-blank wins, which keeps the endpoint current across reconnects (it genuinely changes each
+    /// time) while a name, once observed, survives every later event that happens not to mention it.
+    /// </para>
+    /// </summary>
+    private static string? Merge(string? existing, string? incoming)
+        => string.IsNullOrWhiteSpace(incoming) ? existing : incoming;
+
     /// <summary>Upsert a player on <c>player.join</c>. Sets status to <c>online</c>, updates
     /// <c>LastSeen</c>, and publishes a <c>players.join</c> WS frame. Preserves <c>FirstSeen</c>
-    /// if the player already exists in the roster.</summary>
+    /// — and any identity field this event does not carry — if the player already exists.</summary>
     public void Join(string serverId, string? sessionKey, string? id, string? name, string? addr, DateTimeOffset since)
     {
         if (string.IsNullOrEmpty(serverId)) return;
         string playerIdentity = PlayerIdentityResolver.Resolve(id, name, addr, sessionKey);
 
-        // Preserve FirstSeen from existing record if present.
+        // Preserve FirstSeen, and any identity field this event is silent about, from the existing record.
         DateTimeOffset firstSeen = since;
         if (_cache.TryGetValue(serverId, out var roster) && roster.TryGetValue(playerIdentity, out var existing))
+        {
             firstSeen = existing.FirstSeen;
+            id = Merge(existing.PlayerId, id);
+            name = Merge(existing.PlayerName, name);
+            addr = Merge(existing.PlayerAddr, addr);
+        }
 
         var player = new RosterPlayer(playerIdentity, id, name, addr, PlayerStatus.online, firstSeen, since, null);
 
@@ -404,10 +424,16 @@ public sealed class PlayerHistoryService(
         if (string.IsNullOrEmpty(serverId)) return;
         string playerIdentity = PlayerIdentityResolver.Resolve(id, name, addr, sessionKey);
 
-        // Update in-memory cache: prefer the existing record's FirstSeen.
+        // Update in-memory cache: prefer the existing record's FirstSeen, and keep any identity field
+        // this event is silent about (a leave line often carries less than the join did).
         DateTimeOffset firstSeen = at;
         if (_cache.TryGetValue(serverId, out var roster) && roster.TryGetValue(playerIdentity, out var existing))
+        {
             firstSeen = existing.FirstSeen;
+            id = Merge(existing.PlayerId, id);
+            name = Merge(existing.PlayerName, name);
+            addr = Merge(existing.PlayerAddr, addr);
+        }
 
         var player = new RosterPlayer(playerIdentity, id, name, addr, PlayerStatus.offline, firstSeen, at, null);
         roster ??= _cache.GetOrAdd(serverId, static _ => new ConcurrentDictionary<string, RosterPlayer>());
@@ -614,9 +640,11 @@ public sealed class PlayerHistoryService(
                 {
                     existing.Status = status;
                     existing.LastSeen = lastSeen;
-                    existing.PlayerId = playerId;
-                    existing.PlayerName = playerName;
-                    existing.PlayerAddr = playerAddr;
+                    // Merged against the row, not just the cache: this is the durable record, and it
+                    // must not lose a field to an event that simply did not mention it.
+                    existing.PlayerId = Merge(existing.PlayerId, playerId);
+                    existing.PlayerName = Merge(existing.PlayerName, playerName);
+                    existing.PlayerAddr = Merge(existing.PlayerAddr, playerAddr);
                     if (banReason is not null)
                         existing.BanReason = banReason;
                 }

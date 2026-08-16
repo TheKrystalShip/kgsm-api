@@ -64,6 +64,31 @@ public sealed class PlayerHistoryServiceTests
     }
 
     [Fact]
+    public void Rejoin_DoesNotErase_TheNameOnlyTheLeaveLineCarried()
+    {
+        // The exact Necesse sequence, live on hotrod: connect carries the SteamID64 and the endpoint
+        // but no character name, disconnect carries the name. A rejoin used to overwrite PlayerName
+        // with the join event's null, and the panel fell back to showing the bare IP for a player the
+        // server had already named.
+        var history = NewService();
+        var t0 = DateTimeOffset.UtcNow;
+        const string steamId = "76561198144397568";
+
+        history.Join("necesse", sessionKey: steamId, id: steamId, name: null, addr: "95.19.50.122:56491", t0);
+        history.Leave("necesse", sessionKey: steamId, id: steamId, name: "Heisen", addr: "95.19.50.122:56491", t0.AddSeconds(5));
+        history.Join("necesse", sessionKey: steamId, id: steamId, name: null, addr: "95.19.50.122:56499", t0.AddSeconds(11));
+
+        RosterPlayer p = Assert.Single(history.GetRoster("necesse"));
+        Assert.Equal("Heisen", p.PlayerName);
+        Assert.Equal(PlayerStatus.online, p.Status);
+        // The endpoint still tracks the newest connection — it genuinely changes per reconnect.
+        Assert.Equal("95.19.50.122:56499", p.PlayerAddr);
+        // One person, not one row per connection.
+        Assert.Equal(steamId, p.PlayerIdentity);
+        Assert.Equal(t0, p.FirstSeen);
+    }
+
+    [Fact]
     public void Join_SamePlayerTwice_UpsertsInPlace_NotADuplicate()
     {
         var history = NewService();

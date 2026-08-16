@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — an event no longer erases an identity field it does not carry
+
+A roster upsert wrote the event's identity fields in wholesale, so a field the event was silent about
+was blanked rather than left alone. A player's fields arrive scattered across a game's two log lines —
+Necesse's connect line carries the SteamID64 and the endpoint, its disconnect line carries the
+character name — so every rejoin erased the name and the panel fell back to displaying the bare IP
+address for a player the server had already named.
+
+A blank incoming value now leaves the stored one alone, and a present one replaces it. Newest
+non-blank wins, so the endpoint still tracks the current connection while a name, once observed,
+survives every later event that happens not to mention it. Applied to the cache, the published
+`players.*` frame, and the durable row alike.
+
+⚠ An existing row that already lost its name stays nameless until the next event that carries one —
+the merge does not backfill history it never saw.
+
+
 ### Added — this producer reports a journal no other account can reach
 
 `TheKrystalShip.KGSM.Journal` 1.5.0 checks at startup whether this producer's state directory grants
