@@ -78,6 +78,12 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 // same question twice inside any sane TTL, and a cached first answer would make the
                 // second silently wrong. The cache has its own tests, where the TTL is the subject.
                 ["Api:AuthorityCacheSeconds"] = "0",
+                // Effectively no anonymous rate limit. The limiter partitions on the caller's
+                // address, and an in-memory test server has none — so every test in the run shares
+                // one bucket, and the production ten-a-minute would start refusing whichever class
+                // happened to go last. The limiter's own behaviour is asserted by a factory that
+                // sets this deliberately low.
+                ["Api:AnonymousRateLimit"] = "100000",
             });
         });
 

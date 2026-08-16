@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Net.Http.Headers;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
@@ -84,7 +85,8 @@ public sealed class AuthController(
     /// </remarks>
     [AllowAnonymous]
     [HttpGet("/auth/providers")]
-    public IActionResult Providers() => Ok(new AuthProvidersResponse(providers.Configured));
+    public IActionResult Providers() =>
+        Ok(new AuthProvidersResponse(providers.Configured, options.AllowSelfRegistration));
 
     /// <summary>
     /// Begin the OAuth bounce — 302 to the provider's authorize URL (the API owns client id /
@@ -272,6 +274,7 @@ public sealed class AuthController(
     /// </list>
     /// </summary>
     [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicy.Anonymous)]
     [HttpPost("/auth/login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest? body, CancellationToken ct)
     {
@@ -328,6 +331,144 @@ public sealed class AuthController(
         return Ok(new LoginResult(
             minted.Access.Token, minted.Refresh.Token, KgsmTiers.ToWire(principal.Tier),
             principal.Identity.Handle, UserStatuses.ToWire(result.User!.Status),
+            minted.Access.ExpiresAt, minted.Refresh.ExpiresAt));
+    }
+
+    /// <summary>
+    /// <c>POST /auth/register</c> — create an account for yourself on this host, and get a session
+    /// for it immediately. The account is <c>pending</c> at <c>none</c>, so the session proves who
+    /// somebody is and grants nothing until an admin approves them.
+    /// <list type="bullet">
+    /// <item><c>201</c> <see cref="LoginResult"/> — the same shape <c>/auth/login</c> and the OAuth
+    /// callback hand over, so a client adopts a session identically whichever door it came
+    /// through.</item>
+    /// <item><c>400</c> <c>bad_request</c> — an unusable username, or a password under the floor.</item>
+    /// <item><c>403</c> <c>registration_closed</c> — this host does not take accounts people make
+    /// for themselves.</item>
+    /// <item><c>409</c> <c>username_taken</c>.</item>
+    /// <item><c>429</c> <c>too_many_attempts</c> + <c>Retry-After</c> — the per-caller limiter.</item>
+    /// <item><c>503</c> <c>not_accepting_accounts</c> — as many accounts are already waiting as this
+    /// host will hold. The same answer the OAuth callback gives at the cap, because it is the same
+    /// refusal.</item>
+    /// <item><c>503</c> <c>users_unavailable</c> — the account store could not be opened.</item>
+    /// </list>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the second anonymous write on the whole API surface</b>, and the directory's
+    /// <c>CLAUDE.md</c> asks that such a thing be argued for rather than added. The argument: the
+    /// capability already exists and is already reachable by any stranger — completing a login at a
+    /// configured provider provisions exactly this account, unapproved and at no tier, through
+    /// <see cref="IdentityLinkService.ResolveOrProvisionAsync"/>. What this adds is the same
+    /// outcome for somebody who has no account at any provider this host is wired to. It creates
+    /// nothing an OAuth arrival does not, it is bounded by the same <see cref="PendingPolicy"/>, and
+    /// it is off unless a host turns it on.
+    /// </para>
+    /// <para>
+    /// Every refusal below is this host's. A client may check a username's shape or a password's
+    /// length to say so before the round trip, and none of that is trusted here: the same checks run
+    /// again, and the database's own uniqueness constraint is what actually decides a name is free.
+    /// </para>
+    /// <para>
+    /// The account is created with <see cref="TierSource.Derived"/>, which is what marks it as
+    /// having arrived on its own — the provenance <c>ExpirePendingAsync</c> reads to tell an
+    /// unattended sign-up from an account an admin made by hand and meant to keep.
+    /// </para>
+    /// </remarks>
+    [AllowAnonymous]
+    [EnableRateLimiting(RateLimitPolicy.Anonymous)]
+    [HttpPost("/auth/register")]
+    public async Task<IActionResult> Register([FromBody] RegisterRequest? body, CancellationToken ct)
+    {
+        if (!options.AllowSelfRegistration)
+            return Error(StatusCodes.Status403Forbidden, "registration_closed",
+                "This host does not take accounts people create for themselves. Ask an administrator for one.");
+
+        if (!users.Available)
+            return Error(StatusCodes.Status503ServiceUnavailable, "users_unavailable",
+                users.UnavailableReason ?? "The KGSM account store is unavailable on this host.");
+
+        if (body is null || !Usernames.IsValid(body.Username))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                $"username must be {Usernames.MinLength}–{Usernames.MaxLength} characters of letters, " +
+                "digits, '.', '_' or '-', beginning with a letter or a digit.");
+
+        if (!Passwords.IsAcceptable(body.Password))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                $"a password must be at least {Passwords.MinLength} characters");
+
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string username = body.Username!.Trim();
+
+        // The cap, and the expiry that keeps the cap from becoming a lockout. Read through the same
+        // service the OAuth arrival path uses, so one policy bounds both doors rather than two
+        // counts that can disagree.
+        int pending;
+        try
+        {
+            await users.Linking.ExpirePendingAsync(options.PendingPolicy, now, ct);
+            pending = await users.Linking.CountPendingAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Registration failed: the KGSM account store could not be read.");
+            return Error(StatusCodes.Status503ServiceUnavailable, "users_unavailable",
+                "The KGSM account store could not be read.");
+        }
+
+        if (pending >= options.PendingUserCap)
+        {
+            logger.LogWarning(
+                "'{Username}' tried to register but this host is already holding {Cap} accounts awaiting approval.",
+                username, options.PendingUserCap);
+            return Error(StatusCodes.Status503ServiceUnavailable, "not_accepting_accounts",
+                "This host is not accepting new accounts right now. Ask an administrator.");
+        }
+
+        KgsmUser account = new(
+            UserIds.NewUserId(),
+            username,
+            string.IsNullOrWhiteSpace(body.DisplayName) ? username : body.DisplayName.Trim(),
+            KgsmTier.None,
+            // Nobody chose this tier — it is where every unapproved account starts. Granted is what
+            // an admin's deliberate pick records, and the difference is what expiry reads.
+            TierSource.Derived,
+            UserStatus.Pending,
+            now,
+            now);
+
+        try
+        {
+            await users.Store.CreateAsync(account, ct);
+        }
+        catch (DuplicateUsernameException)
+        {
+            return Error(StatusCodes.Status409Conflict, "username_taken",
+                $"'{username}' is already taken on this host.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Registration failed: the account could not be written.");
+            return Error(StatusCodes.Status503ServiceUnavailable, "users_unavailable",
+                "The KGSM account store could not be written.");
+        }
+
+        await users.SignIn.SetPasswordAsync(account.UserId, body.Password!, now, ct);
+
+        // The identity is the account itself — there is no provider behind this one, and naming one
+        // would put a login it never made into the audit trail.
+        KgsmIdentity identity = account.AsIdentity();
+        await RecordUserAsync(identity, account, ct);
+
+        string? userAgent = UserAgent();
+        MintedSession minted = await MintSessionAsync(identity, account.EffectiveTier, userAgent, ct);
+
+        await RecordAuthAsync(ApiJournal.LoginEvent, identity, account.EffectiveTier,
+            minted.SessionId, userAgent, ct, userId: account.UserId);
+
+        return StatusCode(StatusCodes.Status201Created, new LoginResult(
+            minted.Access.Token, minted.Refresh.Token, KgsmTiers.ToWire(account.EffectiveTier),
+            identity.Handle, UserStatuses.ToWire(account.Status),
             minted.Access.ExpiresAt, minted.Refresh.ExpiresAt));
     }
 

@@ -103,8 +103,20 @@ file is the local "what you must not break."
   account and a real session holding `none`, so a surface can say "awaiting approval" rather than
   showing somebody who just proved who they are a bare `403`. That is an unauthenticated write
   surface, so it is capped (`Api__PendingUserCap`) with an expiry (`Api__PendingUserTtlDays`) that
-  only ever removes an account which arrived this way, is still unapproved, and has no password.
-  The terminal `403` is now a fact about the account (switched off), never about a guild.
+  only ever removes an account which arrived on its own and is still unapproved — provenance, not
+  whether a password is set, since a self-registered account has one. The terminal `403` is a fact
+  about the account (switched off), never about a guild.
+- **`POST /auth/register` opens that same door to somebody with no provider account.** Off unless
+  `Api__AllowSelfRegistration` says otherwise. It creates exactly what an OAuth arrival creates —
+  `Pending` at `None`, `TierSource.Derived`, under the same `PendingPolicy` — so it adds a way in and
+  no new state. A caller names a username, an optional display name and a password, and nothing else:
+  a tier or a status on the wire is a field an attacker will try to set.
+- **The per-caller throttle and the account lockout are two mechanisms and both stay.** The store's
+  exponential lockout is keyed on the account being guessed at, which protects one person and does
+  nothing about one password sprayed across many usernames, or about registration, which has no
+  account to lock yet. `RateLimitPolicy.Anonymous` (`Api__AnonymousRateLimit`, default 10/min,
+  partitioned on the caller's forwarded address) covers `/auth/login` and `/auth/register`. It is
+  generous on purpose — behind a shared connection several real people are one caller here.
 - **Auth is ON by default.** `Api__AuthDisabled=true` swaps in `DisabledAuthHandler` (synthetic
   admin — the pre-M4 open window), loudly logged. Never enable it on an exposed host.
 
@@ -112,9 +124,13 @@ file is the local "what you must not break."
 
 - **Secure-by-default.** A `FallbackPolicy` requires an authenticated caller, so a **new endpoint is
   gated unless it opts out**. Adding an open endpoint is a deliberate, reviewed act — not an omission.
-  Three carry `[AllowAnonymous]`: `/health` + `/api/v1` (pre-login reachability), and
-  `POST /notifications/actions/{handle}`, which is the **one anonymous write** and needs its own
-  paragraph. A service worker holds no session — it can read neither the access token in
+  `/health` + `/api/v1` carry `[AllowAnonymous]` for pre-login reachability, and **two anonymous
+  writes** each need their own paragraph.
+  **`POST /auth/register`** is the smaller argument: the capability it exposes already exists and is
+  already reachable by any stranger — completing a login at a configured provider provisions exactly
+  the same unapproved account — so it adds a door to a room, not a room. It is off by default, bounded
+  by the same `PendingPolicy`, and rate-limited per caller.
+  **`POST /notifications/actions/{handle}`** is the larger one. A service worker holds no session — it can read neither the access token in
   `sessionStorage` nor the refresh token in `localStorage` — so a notification button has no bearer to
   present and the handle stands in for one. What keeps that sound is that the handle names an operation
   **staged server-side** (the assistant's model, so a request describes nothing and can poison nothing),

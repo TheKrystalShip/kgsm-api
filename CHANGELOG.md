@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `POST /auth/register`, so an account can exist without an admin making one
+
+Anonymous, and **off unless `Api__AllowSelfRegistration` says otherwise**. It creates exactly what an
+OAuth arrival creates — `pending` at `none`, `TierSource.Derived`, under the same `PendingPolicy` —
+and answers with the same `LoginResult` `/auth/login` does, so a client adopts a session identically
+whichever door it came through. A caller names a username, an optional display name and a password;
+a tier or a status on the wire is a field an attacker would try to set.
+
+This is the API's **second anonymous write**, which `Services/Auth/CLAUDE.md` asks be argued for
+rather than added. The argument is that the capability already exists and is already reachable by any
+stranger: completing a login at a configured provider provisions the same unapproved account. This
+adds a door to that room for somebody who holds no account at any provider this host is wired to.
+
+`GET /auth/providers` now carries `registration` beside `providers` — the same question ("how do I
+get in here?"), answered in one anonymous read, so a sign-up form is never drawn against a host that
+would refuse it.
+
+### Added — a per-caller limit on the two anonymous doors that touch credentials
+
+`Api__AnonymousRateLimit` (default 10/min, floor 1) over `POST /auth/login` and `POST /auth/register`,
+partitioned on the caller's forwarded address, refused as `429 too_many_attempts` with `Retry-After`
+— the same shape the account lockout already answers with, so a client that handles one handles both.
+
+The account store's lockout does not cover this and is not replaced by it: it is keyed on the account
+being guessed at, which protects one person and does nothing about one password sprayed across many
+usernames, or about registration, which has no account to lock yet. The limit is generous because
+behind a shared connection several real people are one caller here.
+
+### Fixed — `awaiting_approval` never fired
+
+`NotificationBus.IsWorthAnnouncing` read the provisioning row's landing state from `meta["status"]`;
+`AuditMapping.FromUserAccountEvent` writes it to `meta["to"]`, and nothing anywhere wrote `"status"`.
+Every `user.provision` row therefore failed the guard and was dropped, so no admin was ever told that
+somebody was waiting to be let in — on any host, since the feature shipped.
+
+The covering test passed because its fixture hand-built the meta rather than going through the mapper.
+It now derives it from `AuditMapping.FromUserAccountEvent`, so the two cannot drift apart again.
+
+### Changed — the password floor is `Passwords.MinLength`, and admin account creation obeys it
+
+The 12-character rule moves into `TheKrystalShip.KGSM.Auth.Users` (1.3.0) where the store that holds
+the hash is. `POST /auth/users` accepted a password of any length while the two dedicated password
+endpoints enforced 12 — the door with the least scrutiny admitted the weakest password on the host.
+
+⚠ **`Auth.Users` 1.3.0 also changes what the pending sweep removes**: provenance, not whether a
+password is set. A host running with self-registration open should size `Api__PendingUserTtlDays` to
+how long approving somebody may realistically take, because past it they are gone and must sign up
+again. See that repo's `CHANGELOG`.
+
 ### Added — this API reports its own state too, and a leaf's self-report is not an audit row
 
 `leaf_ready`, `leaf_degraded`, `leaf_recovered` and `leaf_stopping` on this API's own journal. The

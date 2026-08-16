@@ -673,9 +673,37 @@ public sealed class ApiOptions
     /// <remarks>
     /// What keeps <see cref="PendingUserCap"/> from becoming a lockout: without expiry, one burst of
     /// arrivals fills the cap permanently and the next real person is refused. Only ever removes an
-    /// account that arrived this way, is still unapproved, and has no password.
+    /// account that arrived on its own and is still unapproved — one an admin created carries a
+    /// granted tier and is spared however long it waits. Somebody who signs up and is not approved
+    /// within this window is gone and has to sign up again, so it wants to be as long as approving
+    /// anyone here realistically takes.
     /// </remarks>
     public int PendingUserTtlDays { get; init; } = 14;
+
+    /// <summary>
+    /// Whether anonymous callers may create their own account
+    /// (<c>Api__AllowSelfRegistration</c>, default <see langword="false"/>).
+    /// </summary>
+    /// <remarks>
+    /// Off by default because it opens an anonymous write on a host that may be reachable from the
+    /// internet. What it opens is bounded — a registered account is <c>pending</c> at no tier and
+    /// waits for an admin exactly as an OAuth arrival does, and <see cref="PendingUserCap"/> bounds
+    /// how many can be waiting — so this decides who may join the queue, never who gets in.
+    /// </remarks>
+    public bool AllowSelfRegistration { get; init; }
+
+    /// <summary>
+    /// Sign-in and sign-up attempts one caller may make per minute
+    /// (<c>Api__AnonymousRateLimit</c>, default 10, floor 1).
+    /// </summary>
+    /// <remarks>
+    /// Partitioned on the caller's address, which is what makes the default generous: behind a shared
+    /// connection several real people are one caller here, and a limit tuned for one person would
+    /// lock a household out. It is a ceiling on a burst, not the protection against guessing a
+    /// password — the account store's exponential lockout is that, and the two are separate because
+    /// they answer to different attackers.
+    /// </remarks>
+    public int AnonymousRateLimit { get; init; } = 10;
 
     /// <summary>
     /// How long after proving a credential a session may attach or detach one
@@ -986,6 +1014,8 @@ public sealed class ApiOptions
             PendingUserCap = Math.Max(1, s.PendingUserCap ?? 32),
             PendingUserTtlDays = Math.Max(1, s.PendingUserTtlDays ?? 14),
             ReauthWindowMinutes = Math.Max(1, s.ReauthWindowMinutes ?? 5),
+            AllowSelfRegistration = s.AllowSelfRegistration ?? false,
+            AnonymousRateLimit = Math.Max(1, s.AnonymousRateLimit ?? 10),
 
             // Sessions. SessionsEnabled is the default-ON twin of the written SessionsDisabled
             // (a disable-flag with inverted polarity). The cache TTL bounds the revocation lag;

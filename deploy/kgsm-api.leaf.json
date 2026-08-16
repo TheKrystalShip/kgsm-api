@@ -451,12 +451,33 @@
       "key": "pendingUserTtlDays",
       "env": "Api__PendingUserTtlDays",
       "label": "Approval request lifetime",
-      "description": "How long someone waiting for approval stays on the list before being forgotten. Only ever removes an account that arrived on its own and was never approved or given a password.",
+      "description": "How long someone waiting for approval stays on the list before being forgotten. Only ever removes an account that arrived on its own and was never approved — one an administrator created by hand waits as long as it waits. Set this to however long approving somebody may realistically take here, because past it they are gone and have to sign up again.",
       "group": "auth",
       "type": "int",
       "default": "14",
       "min": 1,
       "unit": "days",
+      "risk": "safe"
+    },
+    {
+      "key": "allowSelfRegistration",
+      "env": "Api__AllowSelfRegistration",
+      "label": "Allow people to sign themselves up",
+      "description": "Lets people create their own account on this host instead of waiting for an administrator to make one. A new account still holds nothing until it is approved, so this decides who may join the queue — not who gets in. Off unless you turn it on: a host reachable from the internet with sign-up open is a host strangers can fill the approval list on.",
+      "group": "auth",
+      "type": "bool",
+      "default": "false",
+      "risk": "safe"
+    },
+    {
+      "key": "anonymousRateLimit",
+      "env": "Api__AnonymousRateLimit",
+      "label": "Sign-in attempts per minute",
+      "description": "How many times a minute one address may try to sign in or sign up before this host stops answering it. Raise it if several people here share one internet connection, since to this host they all look like the same caller.",
+      "group": "auth",
+      "type": "int",
+      "default": "10",
+      "min": 1,
       "risk": "safe"
     },
     {

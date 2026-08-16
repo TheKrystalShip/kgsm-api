@@ -13,6 +13,21 @@ namespace TheKrystalShip.Api.Contracts;
 public sealed record LoginRequest(string? Username, string? Password);
 
 /// <summary>
+/// <c>POST /auth/register</c> — create an account for yourself on this host.
+/// </summary>
+/// <param name="DisplayName">
+/// Optional. How the person is rendered everywhere they appear; the username stands in when it is
+/// absent. Carries none of the username's charset restriction, because it is displayed and never
+/// matched.
+/// </param>
+/// <remarks>
+/// The account it creates holds nothing and waits for an admin, so this asks for the three things an
+/// account is and no more. It does not take a tier or a status: what somebody may do is not theirs
+/// to declare, and a field a caller could set is a field an attacker will try to set.
+/// </remarks>
+public sealed record RegisterRequest(string? Username, string? DisplayName, string? Password);
+
+/// <summary>
 /// A minted local session. Mirrors the OAuth callback's successful shape so the SPA adopts a session
 /// the same way whichever door it came through.
 /// </summary>
@@ -128,12 +143,17 @@ public sealed record IdentitiesResponse(
 /// <c>GET /auth/providers</c> — the providers this host can sign somebody in through, in the order a
 /// login page should offer them.
 /// </summary>
+/// <param name="Registration">
+/// Whether this host takes accounts people create for themselves. Answered here because it belongs
+/// to the same question the providers do — <em>how can I get in</em> — and because a sign-up form
+/// drawn against a host that refuses one wastes somebody's password on a <c>403</c>.
+/// </param>
 /// <remarks>
 /// Read anonymously, by a browser deciding which buttons to draw. It carries names and nothing else:
 /// what each one is called in a UI, and what its mark looks like, are the client's business, and a
 /// host that shipped labels here would be telling four surfaces how to render.
 /// </remarks>
-public sealed record AuthProvidersResponse(IReadOnlyList<string> Providers);
+public sealed record AuthProvidersResponse(IReadOnlyList<string> Providers, bool Registration);
 
 /// <summary>A provider this host can attach, and whether it is attached already.</summary>
 /// <param name="Configured">

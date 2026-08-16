@@ -97,6 +97,12 @@ public sealed class UsersController(
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 $"status must be '{UserStatuses.Active}' or '{UserStatuses.Pending}'.");
 
+        // A password is optional here — an account can be created for somebody who will only ever
+        // arrive through a provider. One that IS set answers to the same floor as every other, or
+        // the door with the least scrutiny is the one that admits the weakest password on the host.
+        if (!string.IsNullOrEmpty(body.Password) && PasswordProblem(body.Password) is { } weak)
+            return weak;
+
         DateTimeOffset now = DateTimeOffset.UtcNow;
         KgsmUser user = new(
             UserIds.NewUserId(),
@@ -374,13 +380,17 @@ public sealed class UsersController(
     /// Length only, following NIST 800-63B: composition rules ("one capital, one symbol") push people
     /// toward predictable substitutions and buy less than the length they discourage.
     /// </remarks>
+    /// <summary>
+    /// The password floor, refused as the frozen envelope. The rule itself is
+    /// <see cref="Passwords"/>, beside the store that holds the hash, so the three doors that set a
+    /// password — registration, this admin reset, and a holder changing their own — cannot drift
+    /// apart.
+    /// </summary>
     private ObjectResult? PasswordProblem(string? password) =>
-        string.IsNullOrEmpty(password) || password.Length < MinPasswordLength
-            ? Error(StatusCodes.Status400BadRequest, "bad_request",
-                $"a password must be at least {MinPasswordLength} characters")
-            : null;
-
-    private const int MinPasswordLength = 12;
+        Passwords.IsAcceptable(password)
+            ? null
+            : Error(StatusCodes.Status400BadRequest, "bad_request",
+                $"a password must be at least {Passwords.MinLength} characters");
 
     /// <summary>How many active admins this host has — the count the last-admin guard reads.</summary>
     private async Task<int> CountsActiveAdminsAsync(CancellationToken ct) =>

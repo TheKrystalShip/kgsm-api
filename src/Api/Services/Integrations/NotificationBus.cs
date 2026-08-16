@@ -115,9 +115,13 @@ public sealed class NotificationBus : INotificationBus
         // A provisioning that did not leave somebody waiting is not an approval request. Which one it was
         // is on the row: a host whose policy activates an account on sight writes the same action with a
         // different status, and announcing that would ask an admin to approve what is already approved.
+        //
+        // The key is "to" — the state the account landed in. An account-lifecycle row carries the move
+        // as a from/to pair (AuditMapping.FromUserAccountEvent), and a provision has no "from" because
+        // there was nothing to move out of.
         if (record.Action == AuditAction.UserProvision)
             return record.Meta is not null
-                && record.Meta.TryGetValue("status", out string? status)
+                && record.Meta.TryGetValue("to", out string? status)
                 && status == UserStatuses.ToWire(UserStatus.Pending);
 
         if (record.Action is not (AuditAction.HostThresholdBreach or AuditAction.HostThresholdClear)) return true;

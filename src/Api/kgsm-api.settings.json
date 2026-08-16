@@ -99,6 +99,10 @@
       "PendingUserTtlDays": 14,
       // How long after proving a credential that attaching or detaching one stays allowed. Floor 1.
       "ReauthWindowMinutes": 5,
+      // Whether anonymous callers may create their own account. Off unless turned on.
+      "AllowSelfRegistration": false,
+      // Sign-in and sign-up attempts one caller may make per minute. Floor 1.
+      "AnonymousRateLimit": 10,
 
       // ── Sessions ──
       // Turns the session registry inert, leaving revocation unenforceable.

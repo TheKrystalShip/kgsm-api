@@ -1,6 +1,9 @@
 using TheKrystalShip.KGSM.WebPush;
+using System.Globalization;
 using System.Net;
 using System.Security.Claims;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Caching.Memory;
@@ -785,6 +788,47 @@ public class Startup(IConfiguration configuration)
             o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
         });
 
+        // Per-caller throttling for the anonymous doors that touch credentials — sign in, and sign
+        // up. The account store's own lockout is exponential and keyed on the account being guessed
+        // at, which is the right shape for protecting one person and the wrong shape for two things:
+        // one password sprayed across many usernames locks nobody out, and registration has no
+        // account to lock. Both throttles stay; they answer different questions.
+        //
+        // Partitioned on the client address, which is the forwarded one — UseForwardedHeaders runs
+        // first and only trusts a proxy on this machine, so this cannot be widened by a header a
+        // stranger appended. A caller with no address at all (a unit test's in-memory transport)
+        // falls into one shared bucket rather than escaping the limiter.
+        //
+        // Ten a minute: a person who mistypes a password several times and then registers never
+        // meets it, and a script trying to enumerate does so on its first breath.
+        services.AddRateLimiter(o =>
+        {
+            o.AddPolicy(RateLimitPolicy.Anonymous, http =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = apiOptions.AnonymousRateLimit,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                    }));
+
+            // The frozen {error} envelope, with the same code the account lockout uses — a caller
+            // being throttled and a caller being locked out are one thing to whoever is typing, and
+            // a client that handles one handles both.
+            o.OnRejected = async (context, ct) =>
+            {
+                int seconds = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter)
+                    ? Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))
+                    : 60;
+                context.HttpContext.Response.Headers.RetryAfter =
+                    seconds.ToString(CultureInfo.InvariantCulture);
+                await ApiErrors.WriteAsync(
+                    context.HttpContext, StatusCodes.Status429TooManyRequests, "too_many_attempts",
+                    $"Too many attempts. Try again in {seconds}s.");
+            };
+        });
+
         // Behind a reverse proxy the request this app sees is the PROXY's: plain http, from 127.0.0.1.
         // Without translating the forwarded headers, `Request.IsHttps` is false on every request — and
         // the OAuth CSRF state cookie is written `Secure = Request.IsHttps`, so a browser login would
@@ -908,6 +952,10 @@ public class Startup(IConfiguration configuration)
 
         app.UseRouting();
         app.UseCors(CorsPolicy);
+        // After UseRouting, or the endpoint carrying [EnableRateLimiting] is not known yet and the
+        // policy silently never applies. Before authentication, so a throttled caller is refused
+        // without the store being read at all.
+        app.UseRateLimiter();
         // M4·a — auth pipeline (the M0 placeholder, now filled). Authentication populates User from the
         // bearer (or the synthetic-admin scheme when disabled); authorization enforces the [Authorize]
         // tier policies. A 401/403 here flows through UseStatusCodePages above into the {error} envelope.

@@ -264,9 +264,26 @@ public sealed class ApiSettings
 
     /// <summary>How long an unapproved, self-provisioned account survives unattended, in days. Floor 1.</summary>
     /// <panel>How long someone waiting for approval stays on the list before being forgotten. Only ever
-    /// removes an account that arrived on its own and was never approved or given a password.</panel>
+    /// removes an account that arrived on its own and was never approved — one an administrator created
+    /// by hand waits as long as it waits. Set this to however long approving somebody may realistically
+    /// take here, because past it they are gone and have to sign up again.</panel>
     [LeafField("pendingUserTtlDays", "Approval request lifetime", Group = "auth", Min = 1, Unit = "days")]
     public int? PendingUserTtlDays { get; set; }
+
+    /// <summary>Whether anonymous callers may create their own account through <c>POST /auth/register</c>.</summary>
+    /// <panel>Lets people create their own account on this host instead of waiting for an administrator
+    /// to make one. A new account still holds nothing until it is approved, so this decides who may
+    /// join the queue — not who gets in. Off unless you turn it on: a host reachable from the internet
+    /// with sign-up open is a host strangers can fill the approval list on.</panel>
+    [LeafField("allowSelfRegistration", "Allow people to sign themselves up", Group = "auth")]
+    public bool? AllowSelfRegistration { get; set; }
+
+    /// <summary>Sign-in and sign-up attempts one caller may make per minute. Floor 1.</summary>
+    /// <panel>How many times a minute one address may try to sign in or sign up before this host stops
+    /// answering it. Raise it if several people here share one internet connection, since to this host
+    /// they all look like the same caller.</panel>
+    [LeafField("anonymousRateLimit", "Sign-in attempts per minute", Group = "auth", Min = 1)]
+    public int? AnonymousRateLimit { get; set; }
 
     /// <summary>How long a proved credential keeps a session allowed to change what proves it. Floor 1.</summary>
     /// <panel>How long after entering their password someone may attach or detach a sign-in method.
