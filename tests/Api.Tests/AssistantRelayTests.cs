@@ -265,4 +265,71 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
+
+    // --- /memories — what the assistant has written down about the caller. Viewer-gated on BOTH verbs:
+    // reading and pruning your own memory is a personal read-surface action, exactly like your own
+    // conversations, so the delete deliberately does NOT climb to operator the way /confirm does. ---
+
+    [Fact]
+    public async Task Memories_NoToken_401()
+    {
+        HttpResponseMessage resp = await Client().GetAsync("/api/v1/assistant/memories");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        Assert.Contains("\"code\":\"unauthorized\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Memories_NoneTier_403()
+    {
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.None))
+            .GetAsync("/api/v1/assistant/memories");
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Memories_Viewer_AssistantAbsent_404()
+    {
+        // The capability gate: an unprovisioned assistant degrades to an honest 404, never a 500 and
+        // never an empty list — "nothing is remembered" and "there is no assistant" are different answers.
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer))
+            .GetAsync("/api/v1/assistant/memories");
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task DeleteMemory_NoToken_401()
+    {
+        HttpResponseMessage resp = await Client().DeleteAsync("/api/v1/assistant/memories/some-key");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteMemory_NoneTier_403()
+    {
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.None))
+            .DeleteAsync("/api/v1/assistant/memories/some-key");
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeleteMemory_Viewer_AssistantAbsent_404()
+    {
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer))
+            .DeleteAsync("/api/v1/assistant/memories/some-key");
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task DeleteMemory_KeyIsEscapedIntoTheRelayPath()
+    {
+        // A key travels in the path, so it is escaped rather than concatenated. A slash in one must not
+        // be able to address a different upstream route; it still reaches the same capability gate.
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer))
+            .DeleteAsync("/api/v1/assistant/memories/" + Uri.EscapeDataString("a/../confirm"));
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
 }
