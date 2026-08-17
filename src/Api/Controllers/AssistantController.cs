@@ -330,6 +330,28 @@ public sealed class AssistantController(
             _ => Task.FromResult<IActionResult>(NoContent()), ct);
 
     /// <summary>
+    /// <c>GET /api/v1/assistant/memories</c> — what the assistant has written down about the caller,
+    /// <b>viewer</b>-gated (reading what is remembered about YOU is a personal read-surface action, not
+    /// a privileged host action — same posture as the conversation listing beside it). The assistant
+    /// scopes the listing under the forwarded user id, so this can only ever list the caller's OWN
+    /// memories. Relays the <c>MemoryDto</c> array JSON verbatim.
+    /// </summary>
+    [HttpGet("memories")]
+    public Task<IActionResult> Memories(CancellationToken ct) =>
+        RelayAsync((c, ct2) => assistant.GetMemoriesAsync(c, ct2), RelayedJson, ct);
+
+    /// <summary>
+    /// <c>DELETE /api/v1/assistant/memories/{key}</c> — forgets one thing the assistant has written down
+    /// about the caller, <b>viewer</b>-gated (deleting your OWN memory is a personal action, exactly like
+    /// deleting your own conversation). The assistant scopes <paramref name="key"/> under the forwarded
+    /// user id (own-memory only) and the delete is idempotent. Returns <c>204</c>.
+    /// </summary>
+    [HttpDelete("memories/{key}")]
+    public Task<IActionResult> DeleteMemory(string key, CancellationToken ct) =>
+        RelayAsync((c, ct2) => assistant.DeleteMemoryAsync(c, key, ct2),
+            _ => Task.FromResult<IActionResult>(NoContent()), ct);
+
+    /// <summary>
     /// <c>GET /api/v1/assistant/admin/conversations/users</c> — everyone who has talked to this host's
     /// assistant, <b>admin</b>-gated. The index an administrator picks from to review how the assistant is
     /// answering and where it needs tuning.

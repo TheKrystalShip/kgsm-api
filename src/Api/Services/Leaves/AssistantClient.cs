@@ -285,6 +285,29 @@ public sealed class AssistantClient : HttpClient
         return await SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Lists what the assistant has written down about the verified end-user: <c>GET /memories</c> on
+    /// their behalf with the trusted-relay identity. The assistant scopes the listing to the caller's
+    /// own memory owner key, so this can only ever list the caller's OWN memories. The body is the
+    /// assistant's JSON verbatim (an array of <c>MemoryDto</c>). Returns <see langword="null"/> when the
+    /// assistant isn't provisioned; the caller <strong>owns disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> GetMemoriesAsync(
+        RelayPrincipal caller, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Get, "/memories", caller, ct);
+
+    /// <summary>
+    /// Forgets one thing the assistant has written down about the verified end-user:
+    /// <c>DELETE /memories/{key}</c> on their behalf with the trusted-relay identity. The assistant
+    /// scopes <paramref name="key"/> under the caller's own memory owner key, so it can only ever
+    /// address the caller's OWN memory; the upstream delete is idempotent. Returns
+    /// <see langword="null"/> when the assistant isn't provisioned; the caller <strong>owns
+    /// disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> DeleteMemoryAsync(
+        RelayPrincipal caller, string key, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Delete, $"/memories/{Uri.EscapeDataString(key)}", caller, ct);
+
     // Shared relay-on-the-user's-behalf (GET read / DELETE soft-delete / compact / review): forwards the
     // secret and the caller, reads the small body fully. Self-bounded to ReadTimeout via a linked token —
     // these are short request/response calls, not the long SSE stream or the minutes-long confirm (the

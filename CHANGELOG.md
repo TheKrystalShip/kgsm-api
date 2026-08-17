@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — assistant memory relay (0.107.0)
+
+`AssistantClient` gains `GetMemoriesAsync`/`DeleteMemoryAsync` and `AssistantController` relays
+`GET /api/v1/assistant/memories` and `DELETE /api/v1/assistant/memories/{key}`, viewer-gated with
+the same degrade gate as the conversation routes (absent → 404, down → 503, reject → 502). Reading
+and deleting your own memory is a personal read-surface action, exactly like deleting your own
+conversation.
+
 ### Added — audit rows for what the assistant reports about itself (0.106.0)
 
 kgsm-llm now journals its own conduct, and four of those events become audit rows:
