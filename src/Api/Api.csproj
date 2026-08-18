@@ -144,7 +144,7 @@
          ip:port / opaque session correlation token / disconnect reason). Consumed here by the new
          roster projection (Services/Players/PlayerRosterService.cs) + the audit meta extension
          (AuditMapping.PlayerMeta). -->
-    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="4.41.0" />
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="4.41.1" />
     <!-- The assistant's trusted-relay contract: the forwarded principal and the headers that carry
          it. Built by kgsm-llm (which validates them on the other side) and packed to the local feed,
          so this API and kgsm-bot forward identity and authority through one implementation rather
