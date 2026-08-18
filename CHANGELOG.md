@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a backup's reason and retention, and the two verbs that change one
+
+`ServerBackup` carries `reason`, `retention` and the resolved `pinned`, straight from the manifest
+(kgsm-lib 4.40.0). `reason` is null when the manifest records none — that is **unknown**, because a
+backup written before the field existed cannot be identified after the fact, and the SPA says so
+rather than showing a default. `pinned` is the one derived field: an absent retention behaves as
+prunable, resolved here so no surface decides it for itself.
+
+`POST /servers/{id}/backups/{backupId}/pin` and `…/unpin` change the policy. Operator-gated like
+every mutation, answered inside the request (the engine rewrites one manifest, not the archive), and
+deliberately not holding the server's in-flight slot — a metadata edit conflicts with no bytes, and
+holding it would refuse a pin for the whole of an unrelated backup run.
+
+Two new audit actions from the kgsm echo: `backup.pin` (info) and `backup.unpin` (warn — it is the
+half that lets the next sweep take an archive somebody deliberately protected). The `backup.prune`
+row gained a `pinned` count, so a sweep that removed nothing because everything was protected is
+distinguishable from one that found nothing to remove.
+
 ### Fixed — a first setup on a host where nothing is installed yet completes
 
 `deploy/setup.sh` enables its unit at boot and starts it only when something exists at the unit's

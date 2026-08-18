@@ -246,12 +246,76 @@ public sealed class Tier1OpsTests
         Assert.Equal(["install", "saves"],
             newest.GetProperty("sources").EnumerateArray().Select(e => e.GetString()).ToArray());
 
+        // Why it was taken and whether rotation may take it — carried through, plus the resolved
+        // flag so the SPA never has to compare the retention string itself.
+        Assert.Equal("incident", newest.GetProperty("reason").GetString());
+        Assert.Equal("pinned", newest.GetProperty("retention").GetString());
+        Assert.True(newest.GetProperty("pinned").GetBoolean());
+
         // A backup the engine lists but has no manifest for still appears, carrying its id alone.
         // Its absent detail is null — never a fabricated size or timestamp.
         JsonElement undetailed = backups[1];
         Assert.Equal("factorio-01-20260620T100000Z-bbbbbb", undetailed.GetProperty("name").GetString());
         Assert.Equal(JsonValueKind.Null, undetailed.GetProperty("sizeBytes").ValueKind);
         Assert.Equal(JsonValueKind.Null, undetailed.GetProperty("createdAt").ValueKind);
+        // Unknown, never guessed — and not pinned, because nothing said it was.
+        Assert.Equal(JsonValueKind.Null, undetailed.GetProperty("reason").ValueKind);
+        Assert.False(undetailed.GetProperty("pinned").GetBoolean());
+    }
+
+    // ===== backups: POST /servers/{id}/backups/{backupId}/pin | /unpin =============================
+
+    [Theory]
+    [InlineData("pin")]
+    [InlineData("unpin")]
+    public async Task BackupRetention_Known_204(string verb)
+    {
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Operator,
+            $"/api/v1/servers/{Server}/backups/factorio-01-20260621T100000Z-aaaaaa/{verb}", "{}");
+        Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task BackupPin_UnknownBackup_404()
+    {
+        // The engine owns the name set; an id it does not list is refused rather than written to.
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Operator,
+            $"/api/v1/servers/{Server}/backups/not-a-backup/pin", "{}");
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task BackupPin_UnknownServer_404()
+    {
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Operator,
+            "/api/v1/servers/nope/backups/whatever/pin", "{}");
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task BackupPin_Viewer_403()
+    {
+        // Changing what rotation may delete is a mutation, gated like every other one.
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Viewer,
+            $"/api/v1/servers/{Server}/backups/factorio-01-20260621T100000Z-aaaaaa/pin", "{}");
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task BackupPin_BadOrigin_400()
+    {
+        HttpResponseMessage resp = await PostJson(_engine, KgsmTier.Operator,
+            $"/api/v1/servers/{Server}/backups/factorio-01-20260621T100000Z-aaaaaa/pin",
+            "{\"origin\":\"telepathy\"}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task BackupPin_EngineUnprovisioned_503()
+    {
+        HttpResponseMessage resp = await PostJson(_noEngine, KgsmTier.Operator,
+            $"/api/v1/servers/{Server}/backups/factorio-01-20260621T100000Z-aaaaaa/pin", "{}");
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
 
     [Fact]
@@ -471,11 +535,24 @@ public sealed class Tier1OpsTests
                 SizeBytes = 2411724800,
                 FileCount = 18422,
                 Sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-                SchemaVersion = 1,
+                Reason = BackupReason.Incident,
+                Retention = BackupRetention.Pinned,
+                SchemaVersion = 2,
             },
         ];
 
-        public KgsmResult CreateBackup(string instanceName, string? actor = null, string? origin = null) => new(0);
+        public KgsmResult CreateBackup(string instanceName, string? actor = null, string? origin = null, string? reason = null, string? retention = null) => new(0);
+
+        // Pinning succeeds for a backup the engine lists and refuses anything else, exactly as the
+        // engine does — the controller's 404 must come from the engine owning the name set.
+        public KgsmResult PinBackup(string instanceName, string backupName, string? actor = null, string? origin = null)
+            => backupName == "factorio-01-20260621T100000Z-aaaaaa"
+                ? new KgsmResult(0)
+                : new KgsmResult(19, "", $"No such backup for '{instanceName}': {backupName}");
+
+        public KgsmResult UnpinBackup(string instanceName, string backupName, string? actor = null, string? origin = null)
+            => PinBackup(instanceName, backupName, actor, origin);
+        public List<InstanceConfigEntry>? GetInstanceConfig(string instanceName, bool settableOnly = false) => throw new NotImplementedException();
 
         public KgsmResult RestoreBackup(string instanceName, string backupName, string? actor = null, string? origin = null) => new(0);
 

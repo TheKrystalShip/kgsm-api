@@ -244,6 +244,82 @@ public sealed class ServerBackupsController(
     }
 
     /// <summary>
+    /// Pin one backup (<c>POST …/{backupId}/pin</c>) or hand it back to retention
+    /// (<c>POST …/{backupId}/unpin</c>). Answers inside the request — the engine rewrites one manifest,
+    /// which is a metadata edit and not the archive's bytes.
+    /// <list type="bullet">
+    /// <item><c>400</c> — a missing backup id or a bad origin.</item>
+    /// <item><c>404</c> — unknown server id, or no such backup (the engine owns the name set).</item>
+    /// <item><c>503</c> — the kgsm engine is not provisioned on this host.</item>
+    /// <item><c>204</c> — the retention was changed.</item>
+    /// </list>
+    /// </summary>
+    /// <remarks>
+    /// Deliberately does <b>not</b> claim the server's in-flight slot, unlike delete. A pin touches no
+    /// archive bytes and the engine publishes the rewritten manifest by rename, so a concurrent read sees
+    /// the old document or the new one and never a partial one. Holding the slot would refuse a metadata
+    /// edit for the whole of a backup run that has nothing to do with it.
+    /// <para>
+    /// Audited through the kgsm echo (<c>instance_backup_pinned</c> → <c>backup.pin</c>,
+    /// <c>instance_backup_unpinned</c> → <c>backup.unpin</c>) — no direct write here.
+    /// </para>
+    /// </remarks>
+    [HttpPost("{backupId}/pin")]
+    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up
+    public Task<IActionResult> Pin(string id, string backupId, [FromBody] BackupRetentionRequest? body, CancellationToken ct)
+        => SetRetentionAsync(id, backupId, body?.Origin, pin: true, ct);
+
+    [HttpPost("{backupId}/unpin")]
+    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up
+    public Task<IActionResult> Unpin(string id, string backupId, [FromBody] BackupRetentionRequest? body, CancellationToken ct)
+        => SetRetentionAsync(id, backupId, body?.Origin, pin: false, ct);
+
+    // Both directions share one path so the gate, the origin vocabulary and the failure shape cannot
+    // drift between pinning and unpinning.
+    private async Task<IActionResult> SetRetentionAsync(
+        string id, string backupId, string? origin, bool pin, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(backupId))
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "backup id is required");
+
+        if (!TryResolveOrigin(origin, out string resolvedOrigin))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "unknown origin; expected one of: ui, assistant, discord, api");
+
+        if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the kgsm engine is not provisioned on this host");
+
+        if (!await ExistsAsync(id, ct).ConfigureAwait(false))
+            return NotFound();
+
+        string? actor = AuditPrincipal.ActorString(User);
+        KgsmResult result;
+        try
+        {
+            result = pin
+                ? instances.PinBackup(id, backupId, actor, resolvedOrigin)
+                : instances.UnpinBackup(id, backupId, actor, resolvedOrigin);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to change the retention of backup {Backup} of {Server}", backupId, id);
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "could not change the backup's retention");
+        }
+
+        if (result.IsSuccess)
+            return NoContent();
+
+        // The engine refuses an id it does not list, which is the same answer as "no such backup"; its
+        // own message carries through rather than a guess at what went wrong.
+        string message = string.IsNullOrWhiteSpace(result.Stderr)
+            ? $"could not change the backup's retention (exit {result.ExitCode})"
+            : result.Stderr.Trim();
+        return Error(StatusCodes.Status404NotFound, "not_found", message);
+    }
+
+    /// <summary>
     /// Mint a short-lived ticket for downloading one backup's archive (operator — a backup carries the
     /// instance's whole install and saves, so it holds every secret the file browser is operator-gated
     /// for, in bulk). Returns the handle plus the relative URL to navigate to.

@@ -15,6 +15,13 @@ namespace TheKrystalShip.Api.Services.Aggregation;
 /// <c>sha256</c> is null for an uncompressed backup (a directory tree has no single digest) and an empty
 /// <c>sources</c> list becomes null rather than an empty array, so a surface can tell "the manifest
 /// recorded no sources" from "the manifest recorded these sources".
+/// <para>
+/// <c>reason</c> and <c>retention</c> pass through as they are, including null. A null reason is
+/// <b>unknown</b> — a backup written before the manifest recorded one cannot be identified after the fact
+/// — and a surface must render it as unknown rather than fill in the likeliest answer. <c>pinned</c> is the
+/// one derived field: an absent retention behaves as prunable, and resolving that here means no surface
+/// decides it for itself.
+/// </para>
 /// </remarks>
 internal static class ServerBackupMapping
 {
@@ -28,7 +35,10 @@ internal static class ServerBackupMapping
             m.Compressed,
             m.Consistency,
             m.Sources.Count == 0 ? null : m.Sources,
-            m.Sha256);
+            m.Sha256,
+            m.Reason,
+            m.Retention,
+            m.IsPinned);
 
     /// <summary>
     /// The record for a backup the engine lists but whose manifest could not be read — it exists and is

@@ -133,6 +133,12 @@ public static class AuditAction
     public const string BackupDelete = "backup.delete";
     public const string BackupPrune = "backup.prune";
 
+    // Retention is a policy an operator revises, and both directions are recorded. They are one action
+    // because the question is "who changed what rotation may take", and the summary carries the
+    // direction — but the unpin is the half that can cost data later, so it is the louder severity.
+    public const string BackupPin = "backup.pin";
+    public const string BackupUnpin = "backup.unpin";
+
     // The one backup action with NO kgsm event behind it — the engine serves no bytes, so this is a
     // direct write (the auth.*/file.write pattern, no double-write risk). Recorded when the archive is
     // authorised to leave the host, not when the click happened.

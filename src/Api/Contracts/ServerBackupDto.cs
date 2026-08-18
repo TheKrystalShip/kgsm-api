@@ -21,6 +21,15 @@ namespace TheKrystalShip.Api.Contracts;
 /// for its duration, the only mode the engine takes today.</param>
 /// <param name="Sources">Which of the instance's directories the backup holds (<c>install</c>, <c>saves</c>).</param>
 /// <param name="Sha256">Digest of the archive, verified before a restore; null when not applicable.</param>
+/// <param name="Reason">Why the backup was taken — <c>manual</c>, <c>scheduled</c>, <c>pre-update</c>,
+/// <c>pre-restore</c> or <c>incident</c>. A fact fixed at capture. Null when the manifest records none,
+/// which is <b>unknown</b>: a backup written before the field existed cannot be identified after the fact,
+/// so a surface says so rather than showing a default.</param>
+/// <param name="Retention"><c>prunable</c> or <c>pinned</c>. A policy, not a fact — see <see cref="Pinned"/>.
+/// Null when the manifest records none, which behaves as prunable.</param>
+/// <param name="Pinned">Whether retention will skip this backup. Resolved from
+/// <paramref name="Retention"/> so the SPA never compares the string, and never null: an absent
+/// retention is not pinned.</param>
 public sealed record ServerBackup(
     string Name,
     DateTimeOffset? CreatedAt = null,
@@ -30,7 +39,10 @@ public sealed record ServerBackup(
     bool? Compressed = null,
     string? Consistency = null,
     IReadOnlyList<string>? Sources = null,
-    string? Sha256 = null);
+    string? Sha256 = null,
+    string? Reason = null,
+    string? Retention = null,
+    bool Pinned = false);
 
 /// <summary>The <c>GET /servers/{id}/backups</c> body: this instance's snapshots (newest-first as the engine
 /// lists them) plus the owning <c>serverId</c>.</summary>
@@ -51,6 +63,13 @@ public sealed record RestoreBackupRequest(string? Backup, string? Origin = null)
 /// subsequent <c>GET /servers/{id}/backups</c> and a <c>backup.create</c> audit row lands (from the kgsm echo).
 /// </summary>
 public sealed record CreateBackupRequest(string? Origin = null);
+
+/// <summary>
+/// The request body for <c>POST /servers/{id}/backups/{backupId}/pin</c> and <c>…/unpin</c>. The only field
+/// is <see cref="Origin"/> (the driving surface; absent ⇒ <c>api</c>) — which backup, and which direction,
+/// are already in the route.
+/// </summary>
+public sealed record BackupRetentionRequest(string? Origin = null);
 
 /// <summary>
 /// The response to <c>POST /servers/{id}/backups/{backupId}/download-ticket</c>: a short-lived handle

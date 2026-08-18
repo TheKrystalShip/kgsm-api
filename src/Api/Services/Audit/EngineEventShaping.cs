@@ -168,8 +168,19 @@ public static class EngineEventShaping
                     Meta(("source", d.Source)))),
             "instance_backups_pruned" => Map<InstanceBackupsPrunedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.BackupPrune, AuditSeverity.Info, "pruned backups for", hostId,
+                    // `pinned` is what the sweep protected. Without it a sweep that removed nothing
+                    // because everything was pinned reads exactly like one that found nothing to remove.
                     Meta(("deleted", d.Deleted.ToString(CultureInfo.InvariantCulture)),
-                         ("kept", d.Kept.ToString(CultureInfo.InvariantCulture))))),
+                         ("kept", d.Kept.ToString(CultureInfo.InvariantCulture)),
+                         ("pinned", d.Pinned.ToString(CultureInfo.InvariantCulture))))),
+            "instance_backup_pinned" => Map<InstanceBackupPinnedData>(item,
+                d => AuditMapping.FromServerEvent(d, AuditAction.BackupPin, AuditSeverity.Info, "pinned a backup for", hostId,
+                    Meta(("source", d.Source)))),
+            // Warn, like a delete: unpinning is what lets the next sweep take an archive somebody
+            // deliberately protected, and it succeeding is exactly what makes it worth surfacing.
+            "instance_backup_unpinned" => Map<InstanceBackupUnpinnedData>(item,
+                d => AuditMapping.FromServerEvent(d, AuditAction.BackupUnpin, AuditSeverity.Warn, "unpinned a backup for", hostId,
+                    Meta(("source", d.Source)))),
             "instance_crashed" => Map<InstanceCrashedData>(item, d => AuditMapping.FromCrashEvent(d, hostId)),
             "instance_failed" => Map<InstanceFailedData>(item, d => AuditMapping.FromFailedEvent(d, hostId)),
             "instance_ports_opened" => Map<InstancePortsOpenedData>(item, d => AuditMapping.FromPortsOpenedEvent(d, hostId)),

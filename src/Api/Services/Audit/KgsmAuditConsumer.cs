@@ -516,8 +516,29 @@ public sealed class KgsmAuditConsumer(
         {
             RefreshBackupsOf(d.InstanceName);
             return WriteServer(d, AuditAction.BackupPrune, AuditSeverity.Info, "pruned backups for",
+                // `pinned` is what the sweep protected. Without it, a sweep that removed nothing
+                // because everything was pinned reads exactly like one that found nothing to remove.
                 Meta(("deleted", d.Deleted.ToString(CultureInfo.InvariantCulture)),
-                     ("kept", d.Kept.ToString(CultureInfo.InvariantCulture))));
+                     ("kept", d.Kept.ToString(CultureInfo.InvariantCulture)),
+                     ("pinned", d.Pinned.ToString(CultureInfo.InvariantCulture))));
+        });
+
+        // Retention is a policy an operator revises, and both directions are pushed live: the badge
+        // on an open backups list is stale the moment either lands, which is why each refreshes the
+        // cache the same way a create or a delete does.
+        events.RegisterHandler<InstanceBackupPinnedData>(d =>
+        {
+            RefreshBackupsOf(d.InstanceName);
+            return WriteServer(d, AuditAction.BackupPin, AuditSeverity.Info, "pinned a backup for",
+                Meta(("source", d.Source)));
+        });
+        // Warn, like a delete: unpinning is what lets the next sweep take an archive somebody
+        // deliberately protected, and it succeeding is exactly what makes it worth surfacing.
+        events.RegisterHandler<InstanceBackupUnpinnedData>(d =>
+        {
+            RefreshBackupsOf(d.InstanceName);
+            return WriteServer(d, AuditAction.BackupUnpin, AuditSeverity.Warn, "unpinned a backup for",
+                Meta(("source", d.Source)));
         });
 
         // server.crash — the resident supervisor's autonomous signals (kgsm-watchdog, kgsm-lib 1.9.0),
