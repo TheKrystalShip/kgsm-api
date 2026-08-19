@@ -12,8 +12,9 @@
 # It does the THREE things — the ONLY privileged setup this feature needs:
 #   1. ensure /var/lib/kgsm-api/leaf-overrides/ exists (0700, owned by the service user) — the API
 #      writes each leaf's override env file here UNPRIVILEGED (it's inside the API's own state dir).
-#   2. install a systemd drop-in per configurable leaf (monitor/watchdog/assistant/firewall/scheduler)
-#      that layers that leaf's override env file on LAST, the leaf staying unaware of the API.
+#   2. install a systemd drop-in per configurable leaf
+#      (monitor/watchdog/assistant/firewall/speech/scheduler/reactor/bot) that layers that leaf's
+#      override env file on LAST, the leaf staying unaware of the API.
 #   3. install a scoped polkit rule letting the service user `systemctl restart` ONLY those units.
 #
 # Run it as the SERVICE USER (not root); it sudo's ONLY the steps that touch /etc + systemd, exactly
@@ -52,6 +53,7 @@ declare -A LEAF_UNITS=(
     [firewall]="kgsm-firewall.service"
     [speech]="kgsm-speech.service"
     [scheduler]="kgsm-scheduler.service"
+    [reactor]="kgsm-reactor.service"
     [bot]="kgsm-bot.service"
 )
 

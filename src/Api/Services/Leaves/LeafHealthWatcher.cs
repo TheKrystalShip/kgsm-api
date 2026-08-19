@@ -153,6 +153,7 @@ public sealed class LeafHealthWatcher : BackgroundService
         LeafHealthSource.Assistant => caps.Assistant,
         LeafHealthSource.Watchdog => caps.Watchdog,
         LeafHealthSource.Scheduler => caps.Scheduler,
+        LeafHealthSource.Reactor => caps.Reactor,
         // SelfApi answers by definition whenever this code runs, and None has no probe at all.
         _ => null,
     };

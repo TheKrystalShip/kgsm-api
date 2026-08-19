@@ -28,6 +28,10 @@ public enum LeafHealthSource
     /// <summary>The scheduler's status socket (<see cref="LeafHealthMonitor"/> → <see cref="SchedulerClient"/> —
     /// can connect + parse the NDJSON snapshot).</summary>
     Scheduler,
+
+    /// <summary>The reactor's status socket (<see cref="LeafHealthMonitor"/> → <see cref="ReactorClient"/> —
+    /// its <c>/health</c> over the unix socket it serves).</summary>
+    Reactor,
 }
 
 /// <summary>
@@ -74,6 +78,11 @@ public static class LeafCatalog
             "The host's voice — speech recognition & synthesis for every surface", true, LeafHealthSource.None),
         new("scheduler", "kgsm-scheduler.service", "Scheduler",
             "Scheduled restart & backup — computes next-fire, drives the watchdog", false, LeafHealthSource.Scheduler),
+        // The event-triggered half of the same job the scheduler's clock does: one fires on time, this one
+        // fires on something happening.
+        new("reactor", "kgsm-reactor.service", "Reactor",
+            "Watches every component's event journal and judges what it sees against a table of rules",
+            false, LeafHealthSource.Reactor),
         new("api", "kgsm-api.service", "Control Panel API",
             "The aggregator API serving this panel (this service)", false, LeafHealthSource.SelfApi),
         new("bot", "kgsm-bot.service", "Discord bot",

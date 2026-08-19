@@ -82,7 +82,8 @@ unprivileged. **It also wires the runtime leaf-config feature** (the Services pa
 `deploy/setup-leaf-config.sh`: a per-leaf systemd drop-in (layering an API-owned override env file in
 `/var/lib/kgsm-api/leaf-overrides/`) plus a **scoped polkit rule** letting the service user
 `systemctl restart` **only** the leaves this host can deliver a config change to
-(monitor/watchdog/assistant/firewall/scheduler/bot — kept in lockstep with the leaf→unit map in that
+(monitor/watchdog/assistant/firewall/speech/scheduler/reactor/bot — kept in lockstep with the leaf→unit
+map in that
 script, which is a superset of the leaves the API connects at runtime). Restart is the *only* privileged op
 there; the API renders override files unprivileged. It works under `NoNewPrivileges=true` (restart is
 a polkit-authorized D-Bus call to PID 1, not an in-process escalation). Full reference + verify/undo:
@@ -147,7 +148,8 @@ Knobs: `SMOKE_PORT`, `SMOKE_SKIP_BUILD=1`, `SMOKE_DB`, `SMOKE_KGSM_PATH` (the en
 host), `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A).
 **`kgsm-api.settings.json` declares the whole configurable surface** — every key with its
 default, under one `Api` section that `ApiSettings` binds 1:1. It covers host identity, the kgsm
-engine path/journal, the monitor/watchdog/assistant/scheduler/firewall endpoints, the bind address
+engine path/journal, the monitor/watchdog/assistant/scheduler/reactor/firewall endpoints, the bind
+address
 and DB path, the CORS allowlist, and the auth keys (the Discord application, the account store, and
 how long an answer from it is reused). `ApiOptions.FromSettings` is the one place any of it is interpreted; nothing reads
 configuration by string key.

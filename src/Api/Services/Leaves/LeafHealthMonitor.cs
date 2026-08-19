@@ -36,6 +36,7 @@ public sealed class LeafHealthMonitor : BackgroundService
 
     private readonly MonitorClient _monitor;
     private readonly AssistantClient _assistant;
+    private readonly ReactorClient _reactor;
     private readonly LeafRegistry _registry;
     private readonly IServiceProvider _services;
     private readonly StreamHub _hub;
@@ -69,6 +70,7 @@ public sealed class LeafHealthMonitor : BackgroundService
         ApiOptions options,
         MonitorClient monitor,
         AssistantClient assistant,
+        ReactorClient reactor,
         LeafRegistry registry,
         IServiceProvider services,
         StreamHub hub,
@@ -78,6 +80,7 @@ public sealed class LeafHealthMonitor : BackgroundService
         _degradation = degradation;
         _monitor = monitor;
         _assistant = assistant;
+        _reactor = reactor;
         _registry = registry;
         _services = services;
         _hub = hub;
@@ -128,6 +131,7 @@ public sealed class LeafHealthMonitor : BackgroundService
             bool metricsProvisioned = _registry.IsProvisioned(ProvisionableLeaf.Monitor);
             bool assistantProvisioned = _registry.IsProvisioned(ProvisionableLeaf.Assistant);
             bool watchdogProvisioned = _registry.IsProvisioned(ProvisionableLeaf.Watchdog);
+            bool reactorProvisioned = _registry.IsProvisioned(ProvisionableLeaf.Reactor);
 
             // Probe all provisioned leaves concurrently; each call self-bounds (HttpClient timeout / linked
             // CTS) so one hung leaf can never stall the cycle. The leaf clients own their transport (the
@@ -143,7 +147,9 @@ public sealed class LeafHealthMonitor : BackgroundService
             Task<bool> assistantTask = assistantProvisioned ? _assistant.CheckHealthAsync(ct) : Task.FromResult(false);
             Task<bool> watchdogTask = watchdogProvisioned ? ProbeWatchdogAsync(ct) : Task.FromResult(false);
             Task<bool> schedulerTask = scheduler is not null ? scheduler.CheckHealthAsync(ct) : Task.FromResult(false);
-            await Task.WhenAll(metricsTask, assistantTask, watchdogTask, schedulerTask).ConfigureAwait(false);
+            Task<bool> reactorTask = reactorProvisioned ? _reactor.CheckHealthAsync(ct) : Task.FromResult(false);
+            await Task.WhenAll(metricsTask, assistantTask, watchdogTask, schedulerTask, reactorTask)
+                .ConfigureAwait(false);
 
             // info.intervalMs stays honestly sourced from the metrics snapshot (cached), only when up.
             Snap.Snapshot? snap = metricsTask.Result ? await _monitor.GetLatestAsync(ct).ConfigureAwait(false) : null;
@@ -162,7 +168,10 @@ public sealed class LeafHealthMonitor : BackgroundService
                     Degraded(ProvisionableLeaf.Watchdog)),
                 Scheduler: BuildLeaf(
                     prev.Scheduler, _schedulerProvisioned, schedulerTask.Result, now,
-                    "Scheduler status check failed.", Degraded(ProvisionableLeaf.Scheduler)));
+                    "Scheduler status check failed.", Degraded(ProvisionableLeaf.Scheduler)),
+                Reactor: BuildLeaf(
+                    prev.Reactor, reactorProvisioned, reactorTask.Result, now,
+                    "Reactor health check failed.", Degraded(ProvisionableLeaf.Reactor)));
 
             if (next.Equals(prev))
                 return; // no flip -> no emit (and provisioned/since are stable, so the block is value-equal)
@@ -303,6 +312,7 @@ public sealed class LeafHealthMonitor : BackgroundService
                     Info: _assistantPublicUrl is null ? null : new AssistantCapabilityInfo(_assistantPublicUrl))
                 : Capability.Absent,
             Watchdog: Cold(_registry.IsProvisioned(ProvisionableLeaf.Watchdog)),
-            Scheduler: Cold(_schedulerProvisioned));
+            Scheduler: Cold(_schedulerProvisioned),
+            Reactor: Cold(_registry.IsProvisioned(ProvisionableLeaf.Reactor)));
     }
 }

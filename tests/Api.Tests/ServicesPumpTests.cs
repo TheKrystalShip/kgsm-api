@@ -27,19 +27,22 @@ public sealed class ServicesPumpTests
         Metrics: new Capability(true, CapabilityStatus.Unknown),
         Assistant: new Capability(true, CapabilityStatus.Unknown),
         Watchdog: new Capability(true, CapabilityStatus.Unknown),
-        Scheduler: new Capability(true, CapabilityStatus.Unknown));
+        Scheduler: new Capability(true, CapabilityStatus.Unknown),
+        Reactor: new Capability(true, CapabilityStatus.Unknown));
 
     private static HostCapabilities AllOperational => new(
         Metrics: new Capability(true, CapabilityStatus.Operational),
         Assistant: new Capability(true, CapabilityStatus.Operational),
         Watchdog: new Capability(true, CapabilityStatus.Operational),
-        Scheduler: new Capability(true, CapabilityStatus.Operational));
+        Scheduler: new Capability(true, CapabilityStatus.Operational),
+        Reactor: new Capability(true, CapabilityStatus.Operational));
 
     private static HostCapabilities MonitorDownCaps => new(
         Metrics: new Capability(true, CapabilityStatus.Down, Message: "Health check failed."),
         Assistant: new Capability(true, CapabilityStatus.Operational),
         Watchdog: new Capability(true, CapabilityStatus.Operational),
-        Scheduler: new Capability(true, CapabilityStatus.Operational));
+        Scheduler: new Capability(true, CapabilityStatus.Operational),
+        Reactor: new Capability(true, CapabilityStatus.Operational));
 
     // --- BuildLeafService: state mapping ---
 
@@ -121,7 +124,8 @@ public sealed class ServicesPumpTests
             Metrics: new Capability(false, CapabilityStatus.Down), // not provisioned
             Assistant: new Capability(true, CapabilityStatus.Operational),
             Watchdog: new Capability(true, CapabilityStatus.Operational),
-            Scheduler: new Capability(true, CapabilityStatus.Operational));
+            Scheduler: new Capability(true, CapabilityStatus.Operational),
+            Reactor: new Capability(true, CapabilityStatus.Operational));
 
         var svc = Build(MonitorLeaf, Active, caps);
 

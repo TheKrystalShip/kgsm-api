@@ -45,6 +45,8 @@
       "SchedulerSocketPath": "",
       // kgsm-scheduler control socket. Blank means a scheduled restart can be seen but not deferred.
       "SchedulerControlSocketPath": "",
+      // kgsm-reactor status socket. Blank reports the reactor absent.
+      "ReactorSocketPath": "",
       // kgsm-bot status socket. Blank leaves the bot page with systemd liveness only.
       "BotSocketPath": "",
       // kgsm-speech control socket. systemd binds it whether or not the daemon runs, so the file being

@@ -163,7 +163,8 @@ public sealed record HostCapabilities(
     Capability Metrics,
     Capability Assistant,
     Capability Watchdog,
-    Capability Scheduler);
+    Capability Scheduler,
+    Capability Reactor);
 
 /// <summary>
 /// One capability's state. <see cref="Provisioned"/> = declared on this host;

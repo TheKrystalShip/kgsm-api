@@ -159,6 +159,7 @@ public sealed class ServicesPump(
         LeafHealthSource.Assistant => caps.Assistant.Status,
         LeafHealthSource.Watchdog => caps.Watchdog.Status,
         LeafHealthSource.Scheduler => caps.Scheduler.Status,
+        LeafHealthSource.Reactor => caps.Reactor.Status,
         _ => null,
     };
 
@@ -169,6 +170,7 @@ public sealed class ServicesPump(
         LeafHealthSource.Assistant => FromCapability(caps.Assistant),
         LeafHealthSource.Watchdog => FromCapability(caps.Watchdog),
         LeafHealthSource.Scheduler => FromCapability(caps.Scheduler),
+        LeafHealthSource.Reactor => FromCapability(caps.Reactor),
         _ => null,
     };
 

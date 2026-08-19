@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the reactor is a leaf this API knows, probes and can configure
+
+The reactor reached the Services board as a leaf this API had never heard of: `ServicesAggregator`
+discovered it from the config descriptor in `/var/lib/kgsm/leaves`, so its card carried a name, a unit
+and systemd liveness, and nothing else. It is in `LeafCatalog` now, which settles four things at once.
+
+Its health is measured. `Api__ReactorSocketPath` points at the unix socket the daemon serves
+(`/run/kgsm-reactor/status.sock` on a standard install); `ReactorClient` dials `GET /health` over it and
+`LeafHealthMonitor` polls that on the same 2s tick as every other leaf, so `capabilities.reactor` reports
+`operational｜degraded｜down` and the board's card carries a health row. Blank leaves it **absent** rather
+than perpetually down — the reactor is an optional leaf, and a host without one says so.
+
+It is provisionable, so the card's Link axis is a link rather than "not applicable": connecting and
+disconnecting it arms and disarms the probe live, the same as the monitor and the watchdog.
+
+Its logs have a source, since `ApiOptions.LogSources` derives from the same catalog.
+
+And it is a restart target: `deploy/setup-leaf-config.sh` installs its override drop-in and the polkit
+grant now names `kgsm-reactor.service`, which is what lets a settings change be applied. ⚠ **Re-run
+`deploy/setup-leaf-config.sh`** on an already-provisioned host — until it runs, the reactor's
+configuration page stays read-only with that reason.
+
 ### Added — an alert carries what to do about it
 
 A firing alert now carries `actions[]` — the operations its card offers a button for. `update:<server>`

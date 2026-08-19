@@ -80,9 +80,9 @@ public sealed class LeafHealthWatcherTests
 
     private static HostCapabilities Caps(
         Capability? metrics = null, Capability? assistant = null,
-        Capability? watchdog = null, Capability? scheduler = null) =>
+        Capability? watchdog = null, Capability? scheduler = null, Capability? reactor = null) =>
         new(Metrics: metrics ?? Up(), Assistant: assistant ?? Up(),
-            Watchdog: watchdog ?? Up(), Scheduler: scheduler ?? Up());
+            Watchdog: watchdog ?? Up(), Scheduler: scheduler ?? Up(), Reactor: reactor ?? Up());
 
     private static readonly DateTimeOffset T0 = new(2026, 8, 12, 20, 0, 0, TimeSpan.Zero);
 

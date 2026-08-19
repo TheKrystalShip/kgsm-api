@@ -127,6 +127,17 @@ public sealed class ApiOptions
     /// here", so a construction site that says nothing about it is stating the honest thing.
     public string SchedulerControlSocketPath { get; init; } = "";
 
+    /// <summary>
+    /// kgsm-reactor status socket. The reactor serves HTTP over a unix socket (default standard install:
+    /// <c>/run/kgsm-reactor/status.sock</c>) — <c>/health</c> for liveness, <c>/status</c> for what it is
+    /// doing. Empty ⇒ the reactor leaf is not provisioned (absent): its Services-board card still carries
+    /// systemd liveness, and its capability renders absent rather than a perpetually-<c>down</c> row.
+    /// <strong>Opt-in like the scheduler/firewall</strong>, since the reactor is a separate optional leaf.
+    /// Defaulted rather than <c>required</c>, like the scheduler's control socket: blank already means "not
+    /// offered here", so a construction site that says nothing about it is stating the honest thing.
+    /// </summary>
+    public string ReactorSocketPath { get; init; } = "";
+
     /// <summary>kgsm-bot's status socket; blank when this host serves no bot status surface.</summary>
     public required string BotSocketPath { get; init; }
 
@@ -283,6 +294,11 @@ public sealed class ApiOptions
 
     /// <summary>The bot publishes a status socket on this host (config-based, like the scheduler).</summary>
     public bool BotStatusProvisioned => !string.IsNullOrWhiteSpace(BotSocketPath);
+
+    /// <summary>Whether the kgsm-reactor status socket is configured (a non-empty
+    /// <see cref="ReactorSocketPath"/>). This is the seed for the reactor's runtime provisioning: when false
+    /// the leaf is absent — no probe, an absent capability, never an error.</summary>
+    public bool ReactorProvisioned => !string.IsNullOrWhiteSpace(ReactorSocketPath);
 
     /// <summary>
     /// Whether the kgsm engine is configured (a non-empty <see cref="KgsmPath"/>). Unlike a leaf
@@ -450,6 +466,7 @@ public sealed class ApiOptions
         $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerSocketPath)}" => SchedulerSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerControlSocketPath)}" => SchedulerControlSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.BotSocketPath)}" => BotSocketPath,
+        $"{ApiSettings.Section}__{nameof(ApiSettings.ReactorSocketPath)}" => ReactorSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.SpeechSocketPath)}" => SpeechSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantBaseUrl)}" => AssistantBaseUrl,
         $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantPublicUrl)}" => AssistantPublicUrl,
@@ -907,6 +924,9 @@ public sealed class ApiOptions
             SchedulerSocketPath = Defaulted(s.SchedulerSocketPath, ""),
             SchedulerControlSocketPath = Defaulted(s.SchedulerControlSocketPath, ""),
             BotSocketPath = Defaulted(s.BotSocketPath, ""),
+            // Opt-in (blank = absent), on the same terms as the scheduler. Set it to
+            // /run/kgsm-reactor/status.sock on a host that runs kgsm-reactor.
+            ReactorSocketPath = Defaulted(s.ReactorSocketPath, ""),
             // Not opt-in like its neighbours: the socket file's presence is the provisioning check, so
             // the standard path is the right default and an unconfigured host still finds the leaf.
             SpeechSocketPath = Defaulted(s.SpeechSocketPath, DefaultSpeechSocketPath),

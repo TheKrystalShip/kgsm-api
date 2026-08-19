@@ -246,6 +246,13 @@ public class Startup(IConfiguration configuration)
         if (apiOptions.SchedulerProvisioned)
             services.AddSingleton<SchedulerClient>();
 
+        // The kgsm-reactor leaf. Always registered, like the monitor and unlike the scheduler: its
+        // provisioning is the runtime registry (seeded from Api__ReactorSocketPath), so the client builds
+        // its transport from the configured-or-default socket and a "connect reactor" arms the probe
+        // without a restart. Every call gates itself on the registry, so an unconnected reactor is never
+        // dialed.
+        services.AddSingleton<ReactorClient>();
+
         // The Discord bot's status socket, opt-in on exactly the same terms as the scheduler's: a host
         // that configures no path registers no client, and the Services page falls back to systemd
         // liveness alone rather than reporting a bot that is perpetually unreachable.

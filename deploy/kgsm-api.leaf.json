@@ -210,6 +210,15 @@
       "risk": "wiring"
     },
     {
+      "key": "reactorSocket",
+      "env": "Api__ReactorSocketPath",
+      "label": "Reactor socket",
+      "description": "The reactor's status socket, which its health is read from. Empty means the Services page shows systemd liveness only.",
+      "group": "leaves",
+      "type": "path",
+      "risk": "wiring"
+    },
+    {
       "key": "speechSocket",
       "env": "Api__SpeechSocketPath",
       "label": "Speech socket",

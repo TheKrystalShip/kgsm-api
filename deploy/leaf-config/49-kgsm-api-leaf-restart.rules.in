@@ -36,6 +36,7 @@ polkit.addRule(function(action, subject) {
         "kgsm-firewall.service": true,
         "kgsm-speech.service": true,
         "kgsm-scheduler.service": true,
+        "kgsm-reactor.service": true,
         "kgsm-bot.service": true
     };
     if (units[action.lookup("unit")] !== true) {

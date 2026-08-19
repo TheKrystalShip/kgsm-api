@@ -117,6 +117,13 @@ public sealed class ApiSettings
         Risk = LeafRisk.Wiring, NoDefault = true)]
     public string? SchedulerControlSocketPath { get; set; }
 
+    /// <summary>kgsm-reactor status socket. Blank reports the reactor absent.</summary>
+    /// <panel>The reactor's status socket, which its health is read from. Empty means the Services page
+    /// shows systemd liveness only.</panel>
+    [LeafField("reactorSocket", "Reactor socket", Group = "leaves", Type = LeafType.Path,
+        Risk = LeafRisk.Wiring, NoDefault = true)]
+    public string? ReactorSocketPath { get; set; }
+
     /// <summary>kgsm-speech control socket. The leaf's own default is the standard path, and the socket
     /// file's presence — not this value — is what says the leaf is installed.</summary>
     /// <panel>The speech engine's socket, which the Services page reads its engine state from. The socket

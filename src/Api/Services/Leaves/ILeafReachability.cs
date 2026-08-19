@@ -36,6 +36,7 @@ public sealed class LeafReachability(LeafHealthMonitor health) : ILeafReachabili
             ProvisionableLeaf.Assistant => caps.Assistant,
             ProvisionableLeaf.Watchdog => caps.Watchdog,
             ProvisionableLeaf.Scheduler => caps.Scheduler,
+            ProvisionableLeaf.Reactor => caps.Reactor,
             _ => null,
         };
 
