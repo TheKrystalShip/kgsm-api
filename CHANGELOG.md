@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the memory relay carries the write, not only the read
+
+`PUT /api/v1/assistant/memories/{key}` and `GET /api/v1/assistant/memories/limits`, viewer-gated with
+the listing and the delete beside them: correcting what is remembered about **you** is a personal
+action, not authority over a host.
+
+Both are forwarded on the caller's verified identity, so the assistant scopes the key under that
+user's own memory owner and this can never reach anybody else's. Every refusal — a blank or over-long
+summary, an over-long body, the per-owner cap — is relayed **verbatim**: the leaf holds the numbers,
+and a second copy of them here is how two surfaces come to promise different things. No audit row; it
+is neither an engine action nor a host mutation.
+
+⚠ `memories/limits` is a literal segment sharing a shape with `memories/{key}`. Routing sends the GET
+to the limits action, so a memory named `limits` is still addressed by `PUT`/`DELETE` and only the
+read is claimed by the literal.
+
 ### Changed — an audit row is named after its journal line
 
 Both derivations of an engine event's audit id — the live push (`EngineEventIdTracker`) and the row

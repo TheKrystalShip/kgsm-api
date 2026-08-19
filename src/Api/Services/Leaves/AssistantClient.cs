@@ -297,6 +297,31 @@ public sealed class AssistantClient : HttpClient
         RelaySendAsync(HttpMethod.Get, "/memories", caller, ct);
 
     /// <summary>
+    /// What a memory may weigh on this host: <c>GET /memories/limits</c>. It describes the assistant,
+    /// not the caller, and is carried on the same forwarded identity as the reads beside it so an
+    /// editor gets its counters from the leaf that will enforce them. Returns <see langword="null"/>
+    /// when the assistant isn't provisioned; the caller <strong>owns disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> GetMemoryLimitsAsync(
+        RelayPrincipal caller, CancellationToken ct) =>
+        RelaySendAsync(HttpMethod.Get, "/memories/limits", caller, ct);
+
+    /// <summary>
+    /// Writes one memory by hand on the verified end-user's behalf: <c>PUT /memories/{key}</c> with
+    /// the trusted-relay identity. Create and correct are the same call upstream, because a memory is
+    /// revised by rewriting its key. The assistant scopes <paramref name="key"/> under the caller's own
+    /// memory owner key, so it can only ever address the caller's OWN memory, and it refuses a length
+    /// or the per-owner cap itself — the refusal is relayed verbatim rather than restated here, since
+    /// the leaf holds the numbers. Returns <see langword="null"/> when the assistant isn't provisioned;
+    /// the caller <strong>owns disposal</strong>.
+    /// </summary>
+    public Task<HttpResponseMessage?> WriteMemoryAsync(
+        RelayPrincipal caller, string key, string? summary, string? body, CancellationToken ct) =>
+        RelaySendAsync(
+            HttpMethod.Put, $"/memories/{Uri.EscapeDataString(key)}", caller, ct,
+            body: JsonContent.Create(new { summary, body }));
+
+    /// <summary>
     /// Forgets one thing the assistant has written down about the verified end-user:
     /// <c>DELETE /memories/{key}</c> on their behalf with the trusted-relay identity. The assistant
     /// scopes <paramref name="key"/> under the caller's own memory owner key, so it can only ever

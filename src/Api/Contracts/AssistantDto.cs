@@ -61,3 +61,19 @@ public sealed record AssistantConfirmRequest(
 public sealed record TurnFeedbackRequest(
     string? Rating,
     string? Note = null);
+
+/// <summary>
+/// The memory-write request body (<c>PUT /api/v1/assistant/memories/{key}</c>) — one thing the caller
+/// wants the assistant to remember, forwarded verbatim to the assistant's own <c>PUT /memories/{key}</c>.
+/// <see cref="Summary"/> is the line the assistant reads back at the start of every later conversation
+/// and is required; <see cref="Body"/> is the detail it reads only on demand.
+/// <para>
+/// The key rides the path and the owner is derived by the assistant from the forwarded identity, so
+/// there is nothing here a caller could set to reach somebody else's memory. Lengths and the per-owner
+/// cap are the assistant's to enforce — it holds the numbers, and restating them here is how the two
+/// come to disagree.
+/// </para>
+/// </summary>
+public sealed record MemoryWriteRequest(
+    string? Summary,
+    string? Body = null);

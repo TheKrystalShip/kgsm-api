@@ -332,4 +332,63 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
     }
+
+    // --- writing one by hand. Viewer-gated with the two beside it, for the same reason: correcting
+    // what is remembered about YOU is a personal action, not authority over a host. ---
+
+    [Fact]
+    public async Task WriteMemory_NoToken_401()
+    {
+        HttpResponseMessage resp = await Client()
+            .PutAsJsonAsync("/api/v1/assistant/memories/some-key", new { summary = "Something." });
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task WriteMemory_NoneTier_403()
+    {
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.None))
+            .PutAsJsonAsync("/api/v1/assistant/memories/some-key", new { summary = "Something." });
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task WriteMemory_Viewer_AssistantAbsent_404()
+    {
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer))
+            .PutAsJsonAsync("/api/v1/assistant/memories/some-key", new { summary = "Something." });
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task WriteMemory_KeyIsEscapedIntoTheRelayPath()
+    {
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer))
+            .PutAsJsonAsync(
+                "/api/v1/assistant/memories/" + Uri.EscapeDataString("a/../confirm"),
+                new { summary = "Something." });
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task MemoryLimits_NoToken_401()
+    {
+        HttpResponseMessage resp = await Client().GetAsync("/api/v1/assistant/memories/limits");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task MemoryLimits_Viewer_AssistantAbsent_404()
+    {
+        // ⚠ `limits` is a literal segment sharing a template shape with `{key}`. Routing must send this
+        // to the limits action rather than reading it as somebody's memory named "limits" — an absent
+        // assistant answers 404 either way, so the claim worth holding is that the GET resolves at all.
+        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer))
+            .GetAsync("/api/v1/assistant/memories/limits");
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+        Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
+    }
 }

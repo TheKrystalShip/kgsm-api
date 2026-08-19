@@ -341,6 +341,35 @@ public sealed class AssistantController(
         RelayAsync((c, ct2) => assistant.GetMemoriesAsync(c, ct2), RelayedJson, ct);
 
     /// <summary>
+    /// <c>GET /api/v1/assistant/memories/limits</c> — what a memory may weigh on this host,
+    /// <b>viewer</b>-gated like the listing beside it. It describes the assistant rather than the
+    /// caller; an editor reads its counters from here so they come from the leaf that enforces them.
+    /// </summary>
+    [HttpGet("memories/limits")]
+    public Task<IActionResult> MemoryLimits(CancellationToken ct) =>
+        RelayAsync((c, ct2) => assistant.GetMemoryLimitsAsync(c, ct2), RelayedJson, ct);
+
+    /// <summary>
+    /// <c>PUT /api/v1/assistant/memories/{key}</c> — writes one thing the assistant should remember
+    /// about the caller, <b>viewer</b>-gated (correcting what is remembered about YOU is a personal
+    /// action, exactly like dropping it). Create and correct are one call, because the assistant
+    /// revises a memory by rewriting its key.
+    /// <para>
+    /// The assistant scopes <paramref name="key"/> under the forwarded user id (own-memory only) and
+    /// owns every refusal — a blank or over-long summary, an over-long body, the per-owner cap. Those
+    /// are relayed verbatim rather than restated here: it holds the numbers, and a second copy of them
+    /// is how the two surfaces come to promise different things. No audit row — it is neither an
+    /// engine action nor a host mutation.
+    /// </para>
+    /// </summary>
+    [HttpPut("memories/{key}")]
+    public Task<IActionResult> WriteMemory(
+        string key, [FromBody] MemoryWriteRequest? body, CancellationToken ct) =>
+        RelayAsync(
+            (c, ct2) => assistant.WriteMemoryAsync(c, key, body?.Summary, body?.Body, ct2),
+            RelayedJson, ct);
+
+    /// <summary>
     /// <c>DELETE /api/v1/assistant/memories/{key}</c> — forgets one thing the assistant has written down
     /// about the caller, <b>viewer</b>-gated (deleting your OWN memory is a personal action, exactly like
     /// deleting your own conversation). The assistant scopes <paramref name="key"/> under the forwarded
