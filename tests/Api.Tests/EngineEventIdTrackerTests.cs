@@ -44,6 +44,80 @@ public sealed class EngineEventIdTrackerTests
     }
 
     /// <summary>
+    /// A line that carries its own name is identified by it, not by where it sits.
+    /// </summary>
+    /// <remarks>
+    /// A position is right only while a segment is appended to and deleted whole; delete one line and
+    /// every id after it becomes the id of a different event, with nothing to notice. The name
+    /// survives that.
+    /// </remarks>
+    [Fact]
+    public async Task OnRawEvent_UsesTheLinesOwnNameWhenItHasOne()
+    {
+        const string name = "01a016e9-d535-7b03-8a6a-b26ae718064c";
+
+        var tracker = new EngineEventIdTracker();
+        var position = new EventPosition("kgsm-watchdog", "2026-08-07.ndjson", 1234)
+        {
+            EventId = name,
+        };
+
+        await tracker.OnRawEvent(Wrapper(), position);
+
+        Assert.Equal("evt_" + name, tracker.TakePendingId(NullLogger.Instance));
+    }
+
+    /// <summary>
+    /// ⚠ The live push and the history read must derive one event's id identically.
+    /// </summary>
+    /// <remarks>
+    /// This is the failure the tracker exists to prevent, and the only one that cannot be caught by
+    /// looking at either side alone: a client reconciling a row it was pushed against the same event
+    /// found in <c>/audit</c> sees two ids and reports two facts. Asserted against
+    /// <see cref="AuditId.ForLine(string?, string, string, long)"/> itself — the single helper both
+    /// paths call — rather than against a literal, so the two cannot drift apart while this still
+    /// passes.
+    /// </remarks>
+    [Theory]
+    [InlineData("01a016e9-d535-7b03-8a6a-b26ae718064c")]
+    [InlineData(null)]
+    public async Task OnRawEvent_AgreesWithTheHistoryReadsDerivation(string? eventId)
+    {
+        var tracker = new EngineEventIdTracker();
+        var position = new EventPosition("kgsm-watchdog", "2026-08-07.ndjson", 1234)
+        {
+            EventId = eventId,
+        };
+
+        await tracker.OnRawEvent(Wrapper(), position);
+
+        Assert.Equal(
+            AuditId.ForLine(eventId, "kgsm-watchdog", "2026-08-07.ndjson", 1234),
+            tracker.TakePendingId(NullLogger.Instance));
+    }
+
+    /// <summary>
+    /// An id this ecosystem did not write is not trusted enough to name a row.
+    /// </summary>
+    /// <remarks>
+    /// It cannot be assumed unique or ordered, and an audit id built on one would put a duplicate or a
+    /// mis-sort into a page. Falling back to the position keeps the row addressable; reporting the
+    /// producer is <c>envelope.event-id-shape</c>'s job, not this one's.
+    /// </remarks>
+    [Fact]
+    public async Task OnRawEvent_FallsBackToThePositionForAMalformedName()
+    {
+        var tracker = new EngineEventIdTracker();
+
+        await tracker.OnRawEvent(Wrapper(), new EventPosition("2026-08-07.ndjson", 1234)
+        {
+            EventId = "NOT-A-UUID",
+        });
+
+        Assert.Equal("evt_2026-08-07_000000001234", tracker.TakePendingId(NullLogger.Instance));
+    }
+
+    /// <summary>
     /// Two identical events one second apart in the journal are still two events. A content-derived
     /// id cannot tell them apart — the engine's timestamps carry one-second granularity — so keying
     /// on position is what stops the second one from being dropped as a duplicate.

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — an audit row is named after its journal line
+
+Both derivations of an engine event's audit id — the live push (`EngineEventIdTracker`) and the row
+written from the journal echo (`KgsmAuditConsumer`) — now go through `AuditId.ForLine`, which prefers
+the producer's minted id (`evt_<uuidv7>`) and falls back to the position for a line that carries none.
+The history read in kgsm-lib makes the same choice through the same helper.
+
+⚠ **All three had to move together.** One event served two ways — pushed live and found in `/audit` —
+must come back with one id, or a client reconciling them reports two facts. `ForLine` takes the id as
+an argument so no caller can quietly opt out, and a theory pins the tracker's answer to the helper
+itself rather than to a literal.
+
+⚠ **Audit row ids change** for lines written since producers began minting ids. Nothing persists one —
+no entity holds it, and the alert↔audit recovery bridge is an in-memory record — so there is no stored
+migration. The `/audit` cursor stays opaque and its encoding is unchanged.
+
+A named id carries no producer prefix: a minted id is already unique across every journal on the host,
+which is the property the prefix compensated for. A malformed id falls back to the position rather
+than being trusted to name a row.
+
 ## [0.109.0] - 2026-08-18
 
 ### Added — every journal line now carries its own id

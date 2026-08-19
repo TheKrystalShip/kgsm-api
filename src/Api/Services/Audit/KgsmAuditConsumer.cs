@@ -181,8 +181,8 @@ public sealed class KgsmAuditConsumer(
                 {
                     { IsKnown: false } => "evt_" + Guid.NewGuid().ToString("N")[..16],
                     { Producer: { Length: > 0 } producer } =>
-                        AuditId.ForPosition(producer, position.Segment, position.Offset),
-                    _ => AuditId.ForPosition(position.Segment, position.Offset),
+                        AuditId.ForLine(position.EventId, producer, position.Segment, position.Offset),
+                    _ => AuditId.ForLine(position.EventId, position.Segment, position.Offset),
                 },
                 Ts: wrapper.Timestamp ?? DateTimeOffset.UtcNow,
                 Type: wrapper.EventType,
