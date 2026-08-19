@@ -491,6 +491,12 @@ public class Startup(IConfiguration configuration)
         // online entries as unknown (honest — we missed events during downtime).
         services.AddSingleton<PlayerHistoryService>();
 
+        // Whether presence is observable at all, for every surface that asks — the roster endpoint's
+        // `detection` field and the per-server online count carried on every server element. One cached
+        // reading of the supervisor's answer, so the two can never disagree and the roster build costs no
+        // socket round trip. Resolves IWatchdogClient lazily (it is absent on a host with no watchdog).
+        services.AddSingleton<PlayerObservability>();
+
         services.AddHostedService<KgsmAuditConsumer>();
 
         // Host logs — the GET /hosts/{id}/logs journald aggregator. No leaf, no capability axis (host-OS

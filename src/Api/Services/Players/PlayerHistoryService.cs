@@ -513,6 +513,22 @@ public sealed class PlayerHistoryService(
             .ToArray();
     }
 
+    /// <summary>How many of this server's players are connected right now, counted off the same cache
+    /// <see cref="GetRoster"/> projects — so a per-server card and a fleet total can never disagree.
+    /// Returns a measured 0 for a server nobody is on; the caller is what decides whether the question was
+    /// answerable at all (see <see cref="PlayerObservability"/>), because "nobody is here" and "we cannot
+    /// see" are different facts and this method only ever reports the first.</summary>
+    public int OnlineCount(string serverId)
+    {
+        if (string.IsNullOrEmpty(serverId) || !_cache.TryGetValue(serverId, out var roster))
+            return 0;
+
+        int online = 0;
+        foreach (RosterPlayer p in roster.Values)
+            if (p.Status == PlayerStatus.online) online++;
+        return online;
+    }
+
     /// <summary>
     /// Look one player up by the roster's own dedup key. This is how a moderation request resolves
     /// its target: the caller names a <paramref name="playerIdentity"/> and the identity fields come

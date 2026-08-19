@@ -387,6 +387,61 @@ public sealed class ServerAggregatorBuildServerTests
         Assert.Null(notInIndex.DiskBytes);
     }
 
+    // The count is whatever the roster answered for this id — a measured figure, carried through
+    // untouched, including a measured zero for an observable server nobody is on.
+    [Fact]
+    public void OnlinePlayersCarriesTheMeasuredCount()
+    {
+        var statuses = Up("factorio-1");
+
+        Server busy = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses,
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            diskBytesById: null, onlinePlayers: _ => 3);
+        Server empty = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses,
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            diskBytesById: null, onlinePlayers: _ => 0);
+
+        Assert.Equal(3, busy.OnlinePlayers);
+        Assert.Equal(0, empty.OnlinePlayers);
+    }
+
+    // Unobservable presence is null, and a caller that asks for no count at all gets null too. Neither
+    // may arrive as a 0 — a fleet total would silently absorb it as "nobody is on that server".
+    [Fact]
+    public void UnobservablePresenceIsNullNeverZero()
+    {
+        var statuses = Up("factorio-1");
+
+        Server unobservable = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses,
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            diskBytesById: null, onlinePlayers: _ => null);
+        Server unasked = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses,
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob);
+
+        Assert.Null(unobservable.OnlinePlayers);
+        Assert.Null(unasked.OnlinePlayers);
+    }
+
+    // A stopped server is still asked, because the roster is what says whether anyone is on it — the
+    // count must never be inferred from run-state (metric-presence is never a status, and neither is
+    // its inverse).
+    [Fact]
+    public void CountComesFromTheRosterNotFromRunState()
+    {
+        var statuses = new Dictionary<string, Reading<InstanceRuntimeStatus>>
+        {
+            ["factorio-1"] = Reading<InstanceRuntimeStatus>.Measured(
+                new InstanceRuntimeStatus { InstanceName = "factorio-1", Status = false }),
+        };
+
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses,
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            diskBytesById: null, onlinePlayers: _ => 0);
+
+        Assert.Equal(ServerStatus.Stopped, s.Status);
+        Assert.Equal(0, s.OnlinePlayers);
+    }
+
     // --- helpers -----------------------------------------------------------------------------------
 
     private static Dictionary<string, Reading<InstanceRuntimeStatus>> Up(string id) => new()

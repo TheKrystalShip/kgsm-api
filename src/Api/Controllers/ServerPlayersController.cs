@@ -25,11 +25,13 @@ namespace TheKrystalShip.Api.Controllers;
 /// <see cref="PlayerDetection.Unknown"/> when this host cannot observe the instance's players at all
 /// — presence is unknowable, not "nobody's here", so <see cref="PlayersResponse.Players"/> is forced
 /// to <c>[]</c> in that case regardless of what the history projection holds for this id.</para>
-/// <para><b>The supervisor answers that, not this controller.</b> Detection is read from
-/// <c>IWatchdogClient.GetPlayerPresenceAsync</c> — the same predicate the ingesters gate on, which
+/// <para><b>The supervisor answers that, not this controller.</b> Detection is read through
+/// <see cref="PlayerObservability"/> from <c>IWatchdogClient.GetPlayerPresenceAsync</c> — the same
+/// predicate the ingesters gate on, and the same reading the online count carried on every server
+/// element is built from, so the two can never disagree. It is the predicate that
 /// accounts for RCON polling as well as log matching and for whether a pattern actually
-/// <i>compiles</i>. Deriving it here from the instance's regex fields under-reported every
-/// RCON-polled game as unknowable while the supervisor was actively reading its roster, and it is
+/// <i>compiles</i>. Deriving it from the instance's regex fields instead under-reports every
+/// RCON-polled game as unknowable while the supervisor is actively reading its roster, and it is
 /// not a derivation a consumer can get right in any case.</para>
 /// <para><b>An unreachable supervisor is <see cref="PlayerDetection.Unknown"/>, never configured.</b>
 /// Not knowing whether presence is observable is the same refusal as knowing it is not: in both cases
@@ -38,7 +40,10 @@ namespace TheKrystalShip.Api.Controllers;
 [ApiController]
 [Route("api/v1/servers/{id}/players")]
 [Authorize(Policy = AuthPolicy.Operator)]
-public sealed class ServerPlayersController(ServerAggregator aggregator, PlayerHistoryService history) : ControllerBase
+public sealed class ServerPlayersController(
+    ServerAggregator aggregator,
+    PlayerHistoryService history,
+    PlayerObservability observability) : ControllerBase
 {
     /// <summary>
     /// The permanent roster: <c>{ detection: "configured"|"unknown", players: [...] }</c>.
@@ -214,17 +219,14 @@ public sealed class ServerPlayersController(ServerAggregator aggregator, PlayerH
     /// roster. Reporting any of them as <c>configured</c> would put a roster the API cannot vouch for
     /// in front of an operator.
     /// </remarks>
+    // Detection comes from PlayerObservability — the one cached reading of the supervisor's answer that
+    // the online count on every server element is also built from, so this endpoint's `detection` and that
+    // count cannot contradict each other. An unreachable or absent supervisor reads as unobservable there
+    // exactly as it did here.
     private async Task<bool> IsObservableAsync(string id, CancellationToken ct)
     {
-        if (HttpContext.RequestServices.GetService(typeof(IWatchdogClient)) is not IWatchdogClient watchdog)
-            return false;
-
-        IReadOnlyDictionary<string, WatchdogInstancePresence>? presence =
-            await watchdog.GetPlayerPresenceAsync(ct).ConfigureAwait(false);
-
-        return presence is not null
-            && presence.TryGetValue(id, out WatchdogInstancePresence? instance)
-            && instance.IsDetected;
+        await observability.RefreshIfStaleAsync(ct).ConfigureAwait(false);
+        return observability.IsObservable(id);
     }
 
     private ObjectResult Error(int statusCode, string code, string message) =>

@@ -620,6 +620,10 @@ public sealed class KgsmAuditConsumer(
                 d.Timestamp ?? DateTimeOffset.UtcNow);
             history.Join(d.InstanceName, d.SessionKey, d.PlayerId, d.PlayerName, d.PlayerAddr,
                 d.Timestamp ?? DateTimeOffset.UtcNow);
+            // The server element carries the online count, so a join changes it — announce on the same
+            // pass the run-state changes take, or a fleet total sits a poll interval behind the roster
+            // frame that already reached the same browser.
+            domainPump.Nudge();
             PublishLive(AuditMapping.FromPlayerJoinedEvent(d, options.HostId));
             return Task.CompletedTask;
         });
@@ -629,6 +633,7 @@ public sealed class KgsmAuditConsumer(
                 d.Timestamp ?? DateTimeOffset.UtcNow);
             history.Leave(d.InstanceName, d.SessionKey, d.PlayerId, d.PlayerName, d.PlayerAddr,
                 d.Timestamp ?? DateTimeOffset.UtcNow);
+            domainPump.Nudge();
             PublishLive(AuditMapping.FromPlayerLeftEvent(d, options.HostId));
             return Task.CompletedTask;
         });

@@ -27,10 +27,13 @@ namespace TheKrystalShip.Api.Contracts;
 ///   <item><description><c>metrics</c> preserves the monitor's native units: <c>cpuPctCore</c>
 ///     (% of <em>one</em> core, can exceed 100 — NOT the host's 0–100), <c>memBytes</c>, nullable
 ///     <c>io*</c>. The whole block is <c>null</c> when no per-server sample is available.</description></item>
-///   <item><description>Omitted as unsourceable: <c>players</c> (no player-query), <c>cpu</c> 0–100,
+///   <item><description>Omitted as unsourceable: <c>cpu</c> 0–100,
 ///     <c>ram.max</c> (no memory limit), <c>ip</c> (not resolved), <c>updatedAt</c> (no state-change
 ///     tracking until the M2 stream), and the curated <c>game</c> display name (we emit the real
 ///     <c>blueprint</c> id instead — blueprint metadata curation is deferred, never guessed).</description></item>
+///   <item><description><c>onlinePlayers</c> is a count, not a roster, and is <c>null</c> for a server
+///     whose presence this host cannot observe — never a fabricated <c>0</c>. <c>players.max</c> stays
+///     absent: no instance declares a capacity, so there is nothing honest to divide by.</description></item>
 ///   <item><description><c>startedAt</c> is <strong>wired but honestly null in practice</strong> (see its
 ///     per-field note): the referenced kgsm-lib cannot parse kgsm's non-ISO <c>start_time</c>. It is
 ///     present-as-null so the SPA binds a stable shape, and is never fabricated.</description></item>
@@ -164,7 +167,19 @@ public sealed record Server(
     // Rides the list, the detail AND the `servers` stream so a card needs no detail fetch. DomainPump
     // does NOT diff it (see CoreChanged) — it is a metric, and the roster metric frame is what keeps it
     // live; carrying it here is the hydrate, not the feed.
-    long? DiskBytes = null);
+    long? DiskBytes = null,
+    // How many people are connected to this instance right now, or null when this host cannot see who is
+    // on it (the game declares no join/leave detection, or the supervisor cannot be asked). The null is
+    // load-bearing and a surface must keep it apart from zero: 0 is the measured "nobody is here", null is
+    // "presence is not knowable for this server" — rendering the second as 0 would put an invented figure
+    // in a fleet total, which is exactly the fabrication this API exists not to commit.
+    //
+    // Counted off the SAME roster GET /servers/{id}/players serves (PlayerHistoryService's projection of
+    // the presence echoes), so a per-server card and a fleet aggregate cannot disagree. Observability is
+    // PlayerObservability's single answer. It rides the list, the detail AND the `servers` stream, and
+    // DomainPump diffs it (unlike the metrics block): a join or a leave is a person-scale event, not a
+    // per-second sample, so carrying it costs the topic nothing and it is what lets a fleet total be live.
+    int? OnlinePlayers = null);
 
 /// <summary>
 /// A server's operator-authored note — free text an Operator writes for players and teammates

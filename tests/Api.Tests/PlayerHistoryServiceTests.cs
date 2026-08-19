@@ -63,6 +63,46 @@ public sealed class PlayerHistoryServiceTests
         Assert.Equal(since, p.FirstSeen);
     }
 
+    // The fleet total on a dashboard is a sum of these, so it counts the same rows the roster endpoint
+    // serves — a card and the line above it read one number, never two.
+    [Fact]
+    public void OnlineCount_CountsOnlyTheConnected()
+    {
+        var history = NewService();
+        var now = DateTimeOffset.UtcNow;
+
+        history.Join("factorio-1", "a", "a", "Ann", null, now);
+        history.Join("factorio-1", "b", "b", "Bo", null, now);
+        history.Join("factorio-1", "c", "c", "Cy", null, now);
+        history.Leave("factorio-1", "b", "b", "Bo", null, now.AddMinutes(1));
+
+        Assert.Equal(2, history.OnlineCount("factorio-1"));
+    }
+
+    // A server the roster has never seen a player on is a measured zero here. Whether that zero is
+    // reportable at all is PlayerObservability's question, not this one's.
+    [Fact]
+    public void OnlineCount_IsZeroForAServerWithNoRoster()
+    {
+        var history = NewService();
+
+        Assert.Equal(0, history.OnlineCount("never-seen"));
+    }
+
+    // A stop marks everyone offline, and the count has to follow — a roster that outlives the process
+    // is how a stopped server ends up reporting players.
+    [Fact]
+    public void OnlineCount_DropsToZeroOnReset()
+    {
+        var history = NewService();
+        var now = DateTimeOffset.UtcNow;
+
+        history.Join("factorio-1", "a", "a", "Ann", null, now);
+        history.Reset("factorio-1");
+
+        Assert.Equal(0, history.OnlineCount("factorio-1"));
+    }
+
     [Fact]
     public void Rejoin_DoesNotErase_TheNameOnlyTheLeaveLineCarried()
     {

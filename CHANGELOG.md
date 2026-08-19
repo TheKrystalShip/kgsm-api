@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a server carries how many people are on it
+
+`onlinePlayers` on the `Server` DTO — the list, the detail and the `servers` stream — counted off the
+same roster `GET /servers/{id}/players` serves, so a per-server card and a fleet total on a dashboard
+read one number and cannot disagree. `DomainPump` diffs it and the player join/leave handlers nudge a
+pass, so a total is live without every card fetching its own roster.
+
+⚠ It is **null**, never `0`, for a server whose presence this host cannot see — a game with no
+detection, or a supervisor that cannot be asked. A surface that renders that null as zero puts an
+invented figure in a fleet total. `0` is the measured "nobody is here".
+
+`PlayerObservability` is now the single answer to whether presence is observable at all: one cached
+reading of the supervisor's `IsDetected`, shared by the count and by the roster endpoint's `detection`
+field, so the two can never contradict each other.
+
 ### Added — the memory relay carries the write, not only the read
 
 `PUT /api/v1/assistant/memories/{key}` and `GET /api/v1/assistant/memories/limits`, viewer-gated with

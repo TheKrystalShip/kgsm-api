@@ -3,6 +3,7 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
+using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 using Snap = TheKrystalShip.KGSM.Monitor.Contracts;
@@ -31,6 +32,8 @@ public sealed class ServerAggregator
     private readonly InstanceCache _cache;
     private readonly BackupCache _backups;
     private readonly Commands.JobRegistry _jobs;
+    private readonly PlayerHistoryService _players;
+    private readonly PlayerObservability _observability;
     private readonly ILogger<ServerAggregator> _logger;
 
     public ServerAggregator(
@@ -41,6 +44,8 @@ public sealed class ServerAggregator
         InstanceCache cache,
         BackupCache backups,
         Commands.JobRegistry jobs,
+        PlayerHistoryService players,
+        PlayerObservability observability,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
@@ -50,8 +55,19 @@ public sealed class ServerAggregator
         _cache = cache;
         _backups = backups;
         _jobs = jobs;
+        _players = players;
+        _observability = observability;
         _logger = logger;
     }
+
+    /// <summary>
+    /// How many people are connected to one instance, or null when this host cannot see who is on it.
+    /// The count comes off the same roster <c>GET /servers/{id}/players</c> serves, so a card and a fleet
+    /// total read one number; observability is the supervisor's answer, cached. Static shape (a
+    /// <c>Func&lt;string,int?&gt;</c>) so <see cref="Realtime.DomainPump"/> composes the identical rule.
+    /// </summary>
+    internal static Func<string, int?> OnlinePlayersOf(PlayerHistoryService players, PlayerObservability observability) =>
+        id => observability.IsObservable(id) ? players.OnlineCount(id) : null;
 
     /// <summary>
     /// Build the full server list for this host AND report whether the engine was actually read. A
@@ -66,9 +82,12 @@ public sealed class ServerAggregator
         if (!_cache.EngineRead)
             return new ServersRead(false, []);
 
-        // Monitor scrape (a socket read, not a process spawn) runs concurrently with the sync cache read.
+        // Monitor scrape (a socket read, not a process spawn) runs concurrently with the sync cache read,
+        // and so does the supervisor's presence reading — both are local sockets, and the observability
+        // one is TTL-gated, so most builds take neither.
         Task<Snap.Snapshot?> snapshotTask = _monitor.GetLatestAsync(ct);
-        await snapshotTask.ConfigureAwait(false);
+        Task observabilityTask = _observability.RefreshIfStaleAsync(ct);
+        await Task.WhenAll(snapshotTask, observabilityTask).ConfigureAwait(false);
 
         IReadOnlyList<Server> servers = Join(
             _cache.Roster, _cache.Statuses, _backups.Readings, snapshotTask.Result);
@@ -107,12 +126,13 @@ public sealed class ServerAggregator
             return null;
 
         Task<Snap.Snapshot?> snapshotTask = _monitor.GetLatestAsync(ct);
-        await snapshotTask.ConfigureAwait(false);
+        Task observabilityTask = _observability.RefreshIfStaleAsync(ct);
+        await Task.WhenAll(snapshotTask, observabilityTask).ConfigureAwait(false);
 
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshotTask.Result);
         Server server = BuildServer(id, instance, _cache.Statuses, _backups.Readings,
             metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
-            IndexDiskBytes(snapshotTask.Result));
+            IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability));
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -169,7 +189,8 @@ public sealed class ServerAggregator
         var servers = new List<Server>(roster.Count);
         foreach ((string id, Instance instance) in roster)
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
-                _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById));
+                _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById,
+                OnlinePlayersOf(_players, _observability)));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -210,6 +231,10 @@ public sealed class ServerAggregator
     // InstanceCache's remarks) folds into the DTO's status; only consulted when the boolean reading
     // itself is already "up" (a stopped/crashed instance is never reported starting, even if the latch
     // somehow hadn't cleared — belt-and-suspenders alongside UpdateStatus's own latch-clear on stop/crash).
+    // `onlinePlayers` answers "how many people are on this instance", and answers null for one whose
+    // presence this host cannot see. Passing it as a function keeps this method free of the two services
+    // behind that answer (the roster projection and the supervisor reading), exactly as `activeJob` does;
+    // omitting it leaves the count honestly unknown rather than zero.
     internal static Server BuildServer(
         string id,
         Instance instance,
@@ -219,7 +244,8 @@ public sealed class ServerAggregator
         string hostId,
         Func<string, bool> isStarting,
         Func<string, Job?> activeJob,
-        IReadOnlyDictionary<string, long>? diskBytesById = null)
+        IReadOnlyDictionary<string, long>? diskBytesById = null,
+        Func<string, int?>? onlinePlayers = null)
     {
         string status = ServerStatus.Unknown;
         string? version = null;
@@ -295,7 +321,8 @@ public sealed class ServerAggregator
             LastBackup: backups.Latest,
             BackupCount: backups.Count,
             ActiveJob: activeJob(id),
-            DiskBytes: diskBytes);
+            DiskBytes: diskBytes,
+            OnlinePlayers: onlinePlayers?.Invoke(id));
     }
 
     // The operator-authored note, or null when the instance has no note. kgsm-lib decodes the body

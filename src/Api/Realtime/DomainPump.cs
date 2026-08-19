@@ -31,6 +31,8 @@ public sealed class DomainPump(
     BackupCache backups,
     MonitorClient monitor,
     Services.Commands.JobRegistry jobs,
+    Services.Players.PlayerHistoryService players,
+    Services.Players.PlayerObservability observability,
     ApiOptions options,
     ILogger<DomainPump> logger)
     : BackgroundService
@@ -112,17 +114,19 @@ public sealed class DomainPump(
                     IReadOnlyDictionary<string, TheKrystalShip.KGSM.Core.Models.Instance> roster = cache.Roster;
                     IReadOnlyDictionary<string, TheKrystalShip.KGSM.Core.Models.Reading<TheKrystalShip.KGSM.Core.Models.InstanceRuntimeStatus>> statuses = cache.Statuses;
                     Task<Snap.Snapshot?> snapshotTask = monitor.GetLatestAsync(stoppingToken);
-                    await snapshotTask.ConfigureAwait(false);
+                    Task observabilityTask = observability.RefreshIfStaleAsync(stoppingToken);
+                    await Task.WhenAll(snapshotTask, observabilityTask).ConfigureAwait(false);
 
                     Dictionary<string, Snap.ServerMetrics> metricsById = ServerAggregator.IndexMetrics(snapshotTask.Result);
                     Dictionary<string, long> diskById = ServerAggregator.IndexDiskBytes(snapshotTask.Result);
+                    Func<string, int?> onlinePlayers = ServerAggregator.OnlinePlayersOf(players, observability);
 
                     // Build the current server list from cache data.
                     var byId = new Dictionary<string, Server>(StringComparer.Ordinal);
                     foreach ((string id, var instance) in roster)
                         byId[id] = ServerAggregator.BuildServer(id, instance, statuses,
                             backups.Readings, metricsById, options.HostId, cache.IsStarting, jobs.InFlightFor,
-                            diskById);
+                            diskById, onlinePlayers);
 
                     if (!primed)
                     {
@@ -170,6 +174,10 @@ public sealed class DomainPump(
     // whole of a long operation: an update that starts or finishes flips this field, so the transition
     // reaches every open panel on the servers topic, not just the client that happened to be listening to
     // `jobs` when the command was issued. Its cadence is the operation's, not the metric firehose's.
+    // The online player count rides here even though it is a number that moves, because what moves it is a
+    // person joining or leaving — a cadence of a handful a day on a busy server, nothing like the metric
+    // firehose. Carrying it is what lets a fleet total on a dashboard be live without every card fetching
+    // its own roster, and what keeps that total agreeing with the cards beside it.
     // DiskBytes is absent for the same reason as the metrics block: it is a measurement, and a footprint
     // that ticks up as a world saves would publish the whole roster on this topic. The element pushed on a
     // real change still carries it, and the roster metric frame is what keeps it live.
@@ -182,5 +190,6 @@ public sealed class DomainPump(
         || a.Note != b.Note
         || a.LastBackup != b.LastBackup
         || a.BackupCount != b.BackupCount
-        || a.ActiveJob != b.ActiveJob;
+        || a.ActiveJob != b.ActiveJob
+        || a.OnlinePlayers != b.OnlinePlayers;
 }
