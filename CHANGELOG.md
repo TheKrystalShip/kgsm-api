@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — an empty list was refused, and for a list empty is a value
+
+`TryCoerce` rejected every empty value with *"use reset to clear an override"*. For a scalar that is
+right — a cleared text box almost always means "put it back to the default". For a **list** it is
+wrong, and destructively so: an empty list is a real configuration ("no rule may act") and reset
+restores whatever the leaf ships, which for kgsm-reactor's `rulesObserve` is every rule switched
+**on**. Turning the last rule off would have turned them all on.
+
+An empty value is now accepted for `csv` fields and stored as an empty override. Verified end to end
+against the live reactor: every rule off leaves it running, healthy and evaluating nothing, and the
+empty `Reactor__Rules*=` lines round-trip through the systemd `EnvironmentFile` intact.
+
 ### Added — the reactor's decision review reaches the panel
 
 `GET /hosts/{id}/services/reactor/decisions?days=N` relays the reactor's `/decisions` verbatim: what
