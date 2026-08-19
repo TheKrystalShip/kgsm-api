@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — an alert carries what to do about it
+
+A firing alert now carries `actions[]` — the operations its card offers a button for. `update:<server>`
+offers `server.update`; a crash the watchdog is still retrying offers `server.stop`, and one it gave up
+on offers `server.start`. A threshold breach offers nothing: a number over a line names no cause, so
+every verb available would be a guess at which.
+
+The verb is chosen by `Services/Actions/ConditionActions.cs`, which the Web Push catalog reads too — the
+same condition described on a lock screen and on a card cannot name different verbs, and reversed, each
+crash button would ask for exactly what is already happening. Wording stays per-surface ("Update now" on
+a phone, "Update" on a card), so no label rides the DTO.
+
+⚠ An offer is a **policy, not a permission**. It says the condition is the kind of thing that verb
+answers — not that the caller may run it, or that the target accepts it now. Every gate still applies at
+the click, and `update` on a running server is still a `409`. A resolved record carries `actions: null`.
+
 ### Added — a server carries how many people are on it
 
 `onlinePlayers` on the `Server` DTO — the list, the detail and the `servers` stream — counted off the

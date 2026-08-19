@@ -1,5 +1,6 @@
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
+using TheKrystalShip.Api.Services.Actions;
 
 namespace TheKrystalShip.Api.Services.Integrations.WebPush;
 
@@ -78,26 +79,22 @@ public static class PushActionCatalog
 
         if (string.IsNullOrEmpty(ev.ServerId)) return [];
 
+        // The three conditions the alert feed also describes take their verb from ConditionActions, which
+        // carries the reasoning for each choice — the same condition read on a phone and on a card must
+        // never be answered differently. The wording stays here: a lock screen has one line of context, so
+        // it says "Update now" where a card beside a server name says "Update".
         return ev.CatalogId switch
         {
-            // The one lifecycle verb a tap can mean exactly one thing by: apply the build the engine has
-            // already established is available, to the server the row names.
-            "update_available" => [new PushActionOffer(PushActionKind.ServerUpdate, ev.ServerId!, "Update now")],
+            "update_available" => [new PushActionOffer(ConditionActions.UpdateAvailable, ev.ServerId!, "Update now")],
+
+            "crash" => [new PushActionOffer(ConditionActions.Crashed, ev.ServerId!, "Stop")],
+
+            "crash_loop" => [new PushActionOffer(ConditionActions.CrashLoop, ev.ServerId!, "Start")],
 
             // Being told a server went down and being able to answer "put it back" is the whole point of
-            // hearing about it away from a desk.
+            // hearing about it away from a desk. No alert describes this one — the feed mirrors conditions
+            // the host measures, and a server somebody stopped on purpose is not one.
             "offline" => [new PushActionOffer(PushActionKind.ServerStart, ev.ServerId!, "Start")],
-
-            // Stop, not restart. The watchdog is already restarting it — that is what makes a crash
-            // notification arrive repeatedly — so the button that changes anything is the one that
-            // changes the desired state and lets it stay down.
-            "crash" => [new PushActionOffer(PushActionKind.ServerStop, ev.ServerId!, "Stop")],
-
-            // The mirror of the one above. Here the watchdog has stopped trying, so the server is down and
-            // staying down, and Stop would be asking for what already is. Start is the one thing left worth
-            // a tap: a crash cause that has since gone away (a full disk, a port somebody else was holding)
-            // makes the next attempt succeed, and if it does not, the supervisor gives up again and says so.
-            "crash_loop" => [new PushActionOffer(PushActionKind.ServerStart, ev.ServerId!, "Start")],
 
             // An empty server costs the same as a full one. Stopping it is the whole reason to be told.
             "server_empty" => [new PushActionOffer(PushActionKind.ServerStop, ev.ServerId!, "Stop")],

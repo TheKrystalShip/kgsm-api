@@ -139,6 +139,27 @@ resolved condition to the audit action that fixed it.
   source needs no capability; a host with no engine configured leaves the cache empty, which produces no
   alerts rather than a wrong feed.
 
+## What a condition offers to do about itself
+
+A firing record carries `actions[]` — the operations a surface may draw a button from
+(`AlertActionCatalog`). Three rules hold it together:
+
+- **The verb comes from `Services/Actions/ConditionActions.cs`, which the push surface reads too.** The
+  same condition described on a lock screen and on a card must not be answered differently, and the crash
+  pair is where a divergence would hurt most: reversed, each button asks for exactly what is already
+  happening. `AlertActionCatalog` decides only which conditions this feed's producers correspond to; the
+  wording is each surface's own (a lock screen says "Update now" where a card says "Update"), which is why
+  no label is on the DTO.
+- **An offer is a policy, not a permission, and nothing is staged.** It says the condition is the kind of
+  thing that verb answers — not that the caller may run it or that the target accepts it right now. The
+  panel applies its own gates at render and `POST /servers/{id}/commands` applies them again at the click,
+  so an offer whose target is running renders as a disabled button that says why. A push button is staged
+  behind a handle because a service worker holds no session; an alert card is drawn inside an
+  authenticated panel and issues the command itself.
+- **A threshold breach offers nothing, and a resolved record offers nothing.** A number over a line names
+  no cause, so every verb available would be a guess at which; and a cleared condition has nothing left to
+  do about it. `Actions` is `null` on every resolved record.
+
 ## WS message contract (architecture.html §3·c)
 
 - `alert.raise` → the **full `Alert`** record (status `firing`). Re-pushed to flip `escalated`/`attempts`.

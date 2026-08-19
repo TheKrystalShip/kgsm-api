@@ -24,6 +24,8 @@ namespace TheKrystalShip.Api.Contracts;
 /// <param name="Attempts">Self-heal attempts so far (the watchdog's restart streak — drives escalation).</param>
 /// <param name="ResolvedAt">When the condition cleared (resolved records only).</param>
 /// <param name="Resolution">Provenance of the clear (resolved records only).</param>
+/// <param name="Actions">What this condition offers to do about itself, or <see langword="null"/> when it
+/// offers nothing (firing records only — a cleared condition needs no reply).</param>
 public sealed record Alert(
     string Id,
     string Severity,
@@ -38,7 +40,33 @@ public sealed record Alert(
     bool Escalated,
     int Attempts,
     DateTimeOffset? ResolvedAt = null,
-    AlertResolution? Resolution = null);
+    AlertResolution? Resolution = null,
+    IReadOnlyList<AlertAction>? Actions = null);
+
+/// <summary>
+/// One operation a firing condition offers to run, for a surface to draw a button from.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>The offer is a policy, not a permission.</b> It says this condition is the kind of thing that verb
+/// answers — it does not say the caller may run it, or that the target is in a state that accepts it. The
+/// panel applies its own gates at render (tier, the observed run state, one command in flight) exactly as
+/// it does for the same verb pressed anywhere else, and <c>POST /servers/{id}/commands</c> applies them
+/// again at the click. An offer whose target is running is still correct: the button renders disabled and
+/// says why, which is the honest answer to "why can't I update this".
+/// </para>
+/// <para>
+/// <b>Nothing is staged.</b> Unlike a push notification's button — which is redeemed by a service worker
+/// that holds no session, and so needs the operation held server-side behind a handle — an alert card is
+/// drawn inside an authenticated panel that issues the command itself.
+/// </para>
+/// </remarks>
+/// <param name="Kind">The operation, from the closed <see cref="TheKrystalShip.Api.Data.PushActionKind"/>
+/// vocabulary (e.g. <c>server.update</c>). Chosen by
+/// <see cref="TheKrystalShip.Api.Services.Actions.ConditionActions"/>, shared with the push surface so the
+/// two never disagree about what a condition deserves.</param>
+/// <param name="Target">What it acts on — the server id for every lifecycle kind.</param>
+public sealed record AlertAction(string Kind, string Target);
 
 /// <summary>A deep-link hint to where the operator would act on a condition (architecture.html §3·c
 /// <c>anchor</c>). Advisory — the client routes from <see cref="AlertResolution"/>/<c>serverId</c> when

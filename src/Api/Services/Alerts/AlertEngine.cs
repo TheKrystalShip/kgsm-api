@@ -304,7 +304,7 @@ public sealed class AlertEngine : BackgroundService
             _firing.Remove(id);
             _clearSince.Remove(id);
             AlertResolution resolution = BuildResolution(serverId, record.RaisedAt, states);
-            Alert resolved = record with { Status = AlertStatus.Resolved, ResolvedAt = now, Resolution = resolution };
+            Alert resolved = record with { Status = AlertStatus.Resolved, ResolvedAt = now, Resolution = resolution, Actions = null };
             _resolved.Add(resolved);
             Publish(StreamProtocol.AlertResolve, id, new AlertResolved(id, resolution));
         }
@@ -370,7 +370,7 @@ public sealed class AlertEngine : BackgroundService
             _firing.Remove(id);
             var resolution = new AlertResolution(
                 AlertResolvedBy.System, record.Source, "Recovered.", ActionId: null);
-            _resolved.Add(record with { Status = AlertStatus.Resolved, ResolvedAt = now, Resolution = resolution });
+            _resolved.Add(record with { Status = AlertStatus.Resolved, ResolvedAt = now, Resolution = resolution, Actions = null });
             Publish(StreamProtocol.AlertResolve, id, new AlertResolved(id, resolution));
         }
 
@@ -428,7 +428,9 @@ public sealed class AlertEngine : BackgroundService
             Status: AlertStatus.Firing,
             RaisedAt: raisedAt,
             Escalated: false,
-            Attempts: 0);
+            Attempts: 0,
+            Actions: AlertActionCatalog.For(
+                hostScope ? AlertSource.HostMonitor : AlertSource.Metrics, condition.ServerId, escalated: false));
     }
 
     /// <summary>
@@ -504,7 +506,7 @@ public sealed class AlertEngine : BackgroundService
                     ? "Up to date."
                     : $"Up to date — running {runtime.Version.Current}.",
                 ActionId: null);
-            _resolved.Add(firingRecord with { Status = AlertStatus.Resolved, ResolvedAt = now, Resolution = resolution });
+            _resolved.Add(firingRecord with { Status = AlertStatus.Resolved, ResolvedAt = now, Resolution = resolution, Actions = null });
             Publish(StreamProtocol.AlertResolve, id, new AlertResolved(id, resolution));
         }
 
@@ -544,7 +546,8 @@ public sealed class AlertEngine : BackgroundService
             Status: AlertStatus.Firing,
             RaisedAt: raisedAt,
             Escalated: false,
-            Attempts: 0);
+            Attempts: 0,
+            Actions: AlertActionCatalog.For(AlertSource.Engine, serverId, escalated: false));
     }
 
     private Alert BuildFiring(string serverId, Observed obs, DateTimeOffset raisedAt)
@@ -584,7 +587,8 @@ public sealed class AlertEngine : BackgroundService
             Status: AlertStatus.Firing,
             RaisedAt: raisedAt,
             Escalated: obs.Escalated,
-            Attempts: obs.Attempts);
+            Attempts: obs.Attempts,
+            Actions: AlertActionCatalog.For(AlertSource.Watchdog, serverId, obs.Escalated));
     }
 
     private AlertResolution BuildResolution(string serverId, DateTimeOffset raisedAt, IReadOnlyList<WatchdogInstanceState> states)
