@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the host's GPUs
+
+`Host.gpus` (and the metrics tick's `gpus`) carry every GPU the monitor measures: memory, utilisation,
+temperature and power per device, keyed by a UUID that survives a reboot reordering the cards. Null
+when the host has no readable card — an ordinary host, not a degraded one, so a client renders no GPU
+section rather than reporting a fault. Needs Monitor.Contracts 1.7.0.
+
+⚠ **Never sum memory across devices.** Video memory does not pool; a total would imply a model could
+use it, when a model that does not fit on one card fails to load rather than spilling onto another.
+
+⚠ **A device's used figure exceeds the sum of the processes on it** — driver and CUDA context overhead
+occupies memory while belonging to no process. Both figures are honest; do not reconcile them.
+
+### Added — the per-process breakdown, operator-gated
+
+`Host.gpuProcesses` is detail-only (like `network`) and gated. The monitor sees **every** compute
+context on the card, including processes that have nothing to do with KGSM — somebody's training run,
+a CUDA experiment. Below operator, a context belonging to no known unit loses its pid and name.
+
+⚠ **The withheld rows are aggregated, not dropped.** Their memory is kept as one unnamed row per
+device, so a viewer still sees a full card and something they cannot identify holding it. Dropping
+them would leave the per-process figures failing to sum to the device's — which is a quieter falsehood
+than the one the gate exists to prevent. What is withheld is an identity, never a quantity.
+
+### Added — GPU history and threshold alerts
+
+`GET /hosts/{id}/gpus/{uuid}/metrics/history` proxies the monitor's `gpu` entity kind. Addressed by
+UUID rather than index, because an index is an enumeration order a driver reload can renumber and a
+series that silently changed which device it described would be worse than one that went empty. A UUID
+with no rows is an honest empty series, not a 404. Per-leaf GPU rides the existing
+`/hosts/{id}/services/{leafId}/metrics/history` route unchanged.
+
+`host-gpu-mem` conditions flow through `AlertEngine` with no new wiring — the reconcile is generic over
+whatever the monitor publishes. The alert reads "GPU memory at 96%", named for the device rather than
+as plain "memory", so it is tellable at a glance from the host RAM card beside it.
+
+⚠ It carries **no suggested actions**, which is deliberate rather than missing. The catalog already
+offers nothing for a host-scope threshold, and that is the right answer here: the memory is held by a
+model backend, so every verb that acts on the leaf which reported the condition would act on the wrong
+process.
+
 ### Fixed — an empty list was refused, and for a list empty is a value
 
 `TryCoerce` rejected every empty value with *"use reset to clear an override"*. For a scalar that is

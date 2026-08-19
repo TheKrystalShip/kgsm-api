@@ -99,6 +99,7 @@ public sealed class HostAggregator(
             // and a metrics tick carry the same hwmon list). Honest-null/empty when not measurable.
             Cpu: snapshot is null ? null : MetricsMapping.ToCpuInfo(snapshot.Cpu.Info),
             Sensors: capacity?.Sensors,
+            Gpus: capacity?.Gpus,
             // The identity card: operator-declared region joined with the runtime-derived OS/runtime/build/
             // start-time (each honest-null when unsourceable). Cheap + static, so present on both list and detail.
             Identity: new HostIdentity(
@@ -119,6 +120,14 @@ public sealed class HostAggregator(
     {
         Host host = await GetHostAsync(ct).ConfigureAwait(false);
         HostNetwork? net = await network.BuildHostNetworkAsync(ct).ConfigureAwait(false);
-        return host with { Network = net };
+
+        // Unprojected: the caller's tier decides what survives, and only the controller knows it. Serving this
+        // straight to a viewer would name every process on the card — see GpuRedaction.
+        return host with
+        {
+            Network = net,
+            GpuProcesses = MetricsMapping.ToGpuProcesses(
+                (await monitor.GetLatestAsync(ct).ConfigureAwait(false))?.Gpu),
+        };
     }
 }

@@ -31,7 +31,12 @@ public sealed record HostMetricsDto(
     // M-diag depth (Monitor.Contracts 1.1.0) — the DYNAMIC sensor temperatures, mirrored from the Host view so a
     // WS tick stays byte-identical to the REST element (cached/buffers + mac/errors ride MemCapacity/InterfaceSample
     // above). Empty array when no hwmon chip reports (never invented); on the tick a snapshot always exists.
-    IReadOnlyList<SensorSample> Sensors);
+    IReadOnlyList<SensorSample> Sensors,
+    // The host's GPUs. Null when the host has no readable card — an ordinary host, not a degraded one, so a
+    // client renders no GPU section rather than reporting anything. Devices only: they describe hardware and
+    // name no process, so they ride the tick ungated, while the per-process breakdown stays on the Host detail
+    // behind an operator gate (see GpuProcessSample).
+    IReadOnlyList<GpuSample>? Gpus = null);
 
 /// <summary>
 /// The roster-removal tombstone pushed on the <c>servers</c> topic as <c>server.removed</c> (M2):

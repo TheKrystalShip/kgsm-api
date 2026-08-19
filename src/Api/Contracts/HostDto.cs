@@ -58,6 +58,10 @@ public sealed record Host(
     // Sensor temperatures (hwmon) — DYNAMIC, so mirrored on HostMetricsDto too. Empty array when no hwmon chip
     // exposes a temperature (never an invented row); null only when there is no snapshot at all.
     IReadOnlyList<SensorSample>? Sensors = null,
+    // The host's GPUs — DYNAMIC, so mirrored on HostMetricsDto too (like Sensors above), which is what lets
+    // the overview render a device on its first REST load and keep it current from the tick. Null when the
+    // host has no readable card, or when the metrics capability is not operational.
+    IReadOnlyList<GpuSample>? Gpus = null,
     // The host identity card — operator-declared region (+ the editable display label, already surfaced as
     // Label) joined with the runtime-derived OS / .NET runtime / build version / API start time. Present on
     // BOTH the list and detail (cheap, static, no leaf needed — like PanelVersion); each inner field is
@@ -67,7 +71,13 @@ public sealed record Host(
     // on the GET /hosts list (this block stays detail-only; the metrics telemetry above rides both). Null
     // when the firewall can't answer (absent/unreachable/unknown); an empty OpenPorts means the firewall
     // answered and owns no rules.
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] HostNetwork? Network = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] HostNetwork? Network = null,
+    // The per-process GPU breakdown — detail-only (like Network above) and OPERATOR-GATED: below operator a
+    // context belonging to no known unit is stripped of its pid and name and folded into one unnamed row per
+    // device, keeping its memory so the card still totals honestly. Null when the host has no GPU. The device
+    // list itself is not gated and rides the metrics tick (HostMetricsDto.Gpus).
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<GpuProcessSample>? GpuProcesses = null);
 
 /// <summary>
 /// Host memory capacity, in GiB (matching the §4·a contract unit). <see cref="Used"/>/<see cref="Total"/>
@@ -118,6 +128,86 @@ public sealed record CpuInfoSample(string? Model, int? Cores, int? Threads, doub
 /// <see cref="ValueC"/> in °C. Passed through 1:1 from the snapshot — the sensors array is empty (never an
 /// invented row) when no chip exposes a temperature.</summary>
 public sealed record SensorSample(string Chip, string? Label, double ValueC);
+
+/// <summary>
+/// One GPU on this host (monitor <c>GpuDevice</c>). Rides the metrics tick: a device describes hardware and
+/// names nobody, so it needs no gating — unlike <see cref="GpuProcessSample"/>.
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="MemUsed"/> is the <em>device's</em> figure and is larger than the sum of the processes on it:
+/// driver and CUDA context overhead occupies memory while belonging to no process. Never reconcile the two by
+/// adjusting either.
+/// <para>
+/// ⚠ Video memory does not pool. A client showing several devices renders them separately and never sums
+/// <see cref="MemTotal"/> or <see cref="MemUsed"/> across them — a total would imply a model could use it, and
+/// a model that does not fit on one card fails to load rather than spilling onto another.
+/// </para>
+/// </remarks>
+/// <param name="Uuid">Stable across reboots; the key to join a device to its history series. Not the index.</param>
+/// <param name="MemUsed">Device memory in use, GiB.</param>
+/// <param name="MemTotal">Total device memory, GiB.</param>
+/// <param name="SmPct">Device-wide compute utilisation, or null when the driver can't report it.</param>
+public sealed record GpuSample(
+    int Index,
+    string Name,
+    string Uuid,
+    double MemUsed,
+    double MemTotal,
+    double? SmPct,
+    double? TempC = null,
+    double? PowerW = null,
+    double? PowerCapW = null);
+
+/// <summary>
+/// One compute context on a GPU (monitor <c>GpuProcess</c>), carried on the <see cref="Host"/> detail only and
+/// <strong>operator-gated</strong>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why gated:</b> the monitor sees every process using the card, including ones that have nothing to do with
+/// KGSM — somebody's training run, a CUDA experiment. Naming those to every viewer is the same mistake as
+/// putting a player's connection address on an audit row. Below operator, contexts that resolve to no known
+/// unit are collapsed into a single unnamed row by <c>GpuRedaction</c>.
+/// </para>
+/// <para>
+/// ⚠ That collapse <b>keeps the memory figure</b>. Dropping the rows would leave the per-process figures
+/// failing to sum to the device's, which reports a quieter falsehood than the one it avoids.
+/// </para>
+/// </remarks>
+/// <param name="Pid">Null on a row that stands for several withheld contexts.</param>
+/// <param name="Name">The process name, or null when withheld.</param>
+/// <param name="Unit">The systemd unit that owns it, or null when it belongs to none.</param>
+/// <param name="MemUsed">Device memory held, GiB. Always real, whether or not the row is named.</param>
+/// <param name="SmPct">
+/// Compute utilisation, or null when the process did no work in the sampling window. Null is idleness, not a
+/// measured zero — a client must not render it as 0.
+/// </param>
+public sealed record GpuProcessSample(
+    int DeviceIndex,
+    int? Pid,
+    string? Name,
+    string? Unit,
+    double MemUsed,
+    double? SmPct);
+
+/// <summary>
+/// GPU attributed to one leaf (monitor <c>LeafGpu</c>) — kept apart from that leaf's own CPU and memory, which
+/// stay scoped to its process tree.
+/// </summary>
+/// <remarks>
+/// <see cref="Attribution"/> is <c>own</c> when the leaf's own processes hold the contexts and <c>backend</c>
+/// when the figures come from units it drives but does not own. A client renders <see cref="Units"/> either
+/// way, so the reader sees where the number came from.
+/// <para>
+/// ⚠ A <c>backend</c> figure can be present while the leaf itself is stopped — a socket-activated model stays
+/// resident after the service that asked for it exits. Never render this as the leaf's own footprint.
+/// </para>
+/// </remarks>
+public sealed record LeafGpuSample(
+    string Attribution,
+    IReadOnlyList<string> Units,
+    double MemUsed,
+    double? SmPct);
 
 /// <summary>
 /// This host's identity card — the descriptive "who/where/what is this host" block that sits alongside the

@@ -18,7 +18,8 @@ public static class ConditionDisplay
     /// <summary>The measured value in its own unit, e.g. <c>94%</c>, <c>1.8 GiB</c>, <c>420 pids</c>.</summary>
     public static string Format(string metric, double value) => metric switch
     {
-        "HostMemUsedPct" or "HostSwapUsedPct" or "HostDiskUsedPct" or "ServerCpuPctCore" => Pct(value),
+        "HostMemUsedPct" or "HostSwapUsedPct" or "HostDiskUsedPct" or "ServerCpuPctCore"
+            or "HostGpuMemUsedPct" => Pct(value),
         "HostLoadPerCore" => Load(value),
         "HostTempC" => Temp(value),
         "ServerMemBytes" => Bytes(value),
@@ -35,6 +36,9 @@ public static class ConditionDisplay
         "HostDiskUsedPct" => "disk",
         "HostLoadPerCore" => "load",
         "HostTempC" => "temperature",
+        // Named for the device rather than as plain "memory": a card reading "GPU memory at 96%" next to one
+        // reading "memory at 71%" has to be tellable apart at a glance, and they exhaust independently.
+        "HostGpuMemUsedPct" => "GPU memory",
         "ServerMemBytes" => "memory",
         "ServerCpuPctCore" => "CPU",
         "ServerPids" => "processes",

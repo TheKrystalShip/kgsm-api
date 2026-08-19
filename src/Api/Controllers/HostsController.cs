@@ -19,7 +19,8 @@ namespace TheKrystalShip.Api.Controllers;
 [Route("api/v1/hosts")]
 [Authorize(Policy = AuthPolicy.Viewer)] // reads — viewer and up (M4·a)
 public sealed class HostsController(
-    HostAggregator aggregator, HostSettingsStore settings, ApiOptions options) : ControllerBase
+    HostAggregator aggregator, HostSettingsStore settings, ApiOptions options,
+    IAuthorizationService authorization) : ControllerBase
 {
     // The identity strings are operator-facing labels, not free-form blobs — bound so a typo can't store
     // a megabyte. Generous but finite; over-length is a 400, never a silent truncation.
@@ -38,8 +39,19 @@ public sealed class HostsController(
             return NotFound();
 
         // Detail view: the list element + the M6·b open-ports grid (one on-demand firewall probe).
-        return await aggregator.GetHostDetailAsync(ct);
+        Host host = await aggregator.GetHostDetailAsync(ct);
+
+        // Below operator, GPU contexts belonging to no unit this host knows about lose their pid and name.
+        // The monitor sees everything using the card, and a host runs more than KGSM — naming somebody's
+        // own work to every viewer is the mistake the audit rows already avoid. The withheld memory is kept
+        // as one unnamed row per device, so the card still totals honestly: what is withheld is an identity,
+        // never a quantity. Resolved through the policy rather than off the claim so the one tier ladder
+        // decides, matching AuditController.
+        return await IsOperatorAsync() ? host : host with { GpuProcesses = GpuRedaction.ForViewer(host.GpuProcesses) };
     }
+
+    private async Task<bool> IsOperatorAsync() =>
+        (await authorization.AuthorizeAsync(User, policyName: AuthPolicy.Operator).ConfigureAwait(false)).Succeeded;
 
     /// <summary>Edit this host's identity overrides — the editable half of the card (architecture §4·a).
     /// Admin-gated (host config). Sparse: an absent field is unchanged, an explicit empty string clears the

@@ -67,6 +67,31 @@ public sealed class MetricsHistoryController(
         return await ProxyAsync("leaf", leafId, range, ct);
     }
 
+    /// <summary>
+    /// One GPU's history — memory, utilisation, temperature and power for a single device.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Addressed by the device's <b>UUID</b>, not its index: the index is an enumeration order that a driver
+    /// reload or a card swap can renumber, and a series that silently changed which device it described would
+    /// be worse than one that went empty.
+    /// </para>
+    /// <para>
+    /// A UUID this host has no rows for is an honest empty series rather than a 404 — the same choice the
+    /// per-leaf route makes. A card that was removed, or one whose rows have aged out of retention, is a real
+    /// question with the answer "nothing recorded", and that is not the same statement as "no such route".
+    /// </para>
+    /// </remarks>
+    [HttpGet("hosts/{id}/gpus/{uuid}/metrics/history")]
+    public async Task<IActionResult> GetGpuHistory(
+        string id, string uuid, [FromQuery] string? range, CancellationToken ct)
+    {
+        if (id != options.HostId)
+            return NotFound();
+
+        return await ProxyAsync("gpu", uuid, range, ct);
+    }
+
     private async Task<IActionResult> ProxyAsync(string kind, string id, string? range, CancellationToken ct)
     {
         string? json = await monitor.GetHistoryJsonAsync(kind, id, range, ct);
