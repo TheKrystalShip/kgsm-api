@@ -332,6 +332,51 @@ public sealed class ServicesController(
         return Content(json, "application/json");
     }
 
+    /// <summary>
+    /// <c>GET /hosts/{id}/services/reactor/decisions?days=N</c> → what the reactor made of what it saw,
+    /// relayed verbatim: what each rule concluded and how often, the busiest rolling hour of fired
+    /// decisions, how far apart a rule's repeats on one subject were, the rules that decided nothing,
+    /// and the decisions themselves with the journal position each was derived from.
+    /// <b>404 when this host runs no reactor</b>; <b>503</b> when it runs one that would not answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the review the reactor's plan gates propose and act mode behind — nothing moves until a
+    /// week of decisions has been read against what a person would actually have done. It existed only
+    /// as text on the host until now, which made the gate something declared rather than performed.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>The window is bounded by the leaf, not here.</b> It clamps <c>days</c> to its own ledger
+    /// retention, which is the only place that figure is known. This API passes the request through and
+    /// reads the window back off the answer.
+    /// </para>
+    /// </remarks>
+    [HttpGet("reactor/decisions")]
+    public async Task<IActionResult> GetReactorDecisions(
+        string id, [FromQuery] int days, CancellationToken ct)
+    {
+        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
+            return NotFound();
+
+        if (HttpContext.RequestServices.GetService(typeof(ReactorClient)) is not ReactorClient reactor
+            || !reactor.IsProvisioned)
+            return NotFound();
+
+        // Zero or absent leaves the window to the leaf, which defaults to the week the review gate is
+        // stated over. A negative is a caller error rather than a window: forwarded, it would read back
+        // as the leaf's minimum with nobody told the request was nonsense.
+        if (days < 0)
+            return Error(StatusCodes.Status400BadRequest, "invalid_range",
+                "days must not be negative");
+
+        string? json = await reactor.GetDecisionsJsonAsync(days, ct).ConfigureAwait(false);
+        if (json is null)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the reactor didn't answer for its decision review");
+
+        return Content(json, "application/json");
+    }
+
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
 

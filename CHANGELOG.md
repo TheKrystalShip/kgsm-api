@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the reactor's decision review reaches the panel
+
+`GET /hosts/{id}/services/reactor/decisions?days=N` relays the reactor's `/decisions` verbatim: what
+each rule concluded, the busiest rolling hour a ceiling would have had to clear, how far apart a
+rule's repeats about one subject were, the rules that decided nothing, and the decisions themselves
+with the journal position each was derived from.
+
+This is the review the reactor's plan gates propose and act mode behind — it existed only as text on
+the host, which made the gate something declared rather than performed.
+
+⚠ **The window is the leaf's to bound, not this API's.** It clamps `days` to its own ledger
+retention, which is the only place that figure is known; re-clamping here against a guess would refuse
+windows the leaf can in fact answer. An absent or zero `days` is forwarded as no parameter at all, so
+the leaf applies its own default — the week the review is stated over — rather than the one-day
+minimum a literal zero would clamp to. A negative is a 400.
+
 ### Added — the reactor's own account of itself reaches the panel
 
 `GET /hosts/{id}/services/reactor/status` relays the reactor's `/status` verbatim: the gate's tuning,

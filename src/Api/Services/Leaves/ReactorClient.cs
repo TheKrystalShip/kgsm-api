@@ -145,5 +145,53 @@ public sealed class ReactorClient : IDisposable
         }
     }
 
+    /// <summary>
+    /// The reactor's decision review (<c>GET /decisions</c>), verbatim. Null on the same terms as the
+    /// status read.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The review the plan gates propose and act mode behind — what each rule concluded, the busiest
+    /// hour a ceiling would have to clear, how far apart a rule's repeats were, and the rules that
+    /// decided nothing. The leaf computes all of it from its own ledger; this relays it.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>The window is the leaf's to bound.</b> It clamps <c>days</c> to its own retention, because
+    /// only it knows how far its ledger goes back. Re-clamping here against a figure this API guessed
+    /// would refuse windows the leaf can in fact answer.
+    /// </para>
+    /// </remarks>
+    public async Task<string?> GetDecisionsJsonAsync(int days, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
+            return null; // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            // Omitted rather than sent as zero when the caller named no window: the leaf clamps what
+            // it receives to at least one day, so forwarding a 0 would ask for a single day where the
+            // caller meant "whatever you default to" — which is the week the review gate is stated over.
+            string path = days > 0 ? $"/decisions?days={days}" : "/decisions";
+
+            using HttpResponseMessage resp = await _http.GetAsync(path, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("reactor /decisions returned {Status}", (int)resp.StatusCode);
+                return null;
+            }
+            return await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("reactor /decisions timed out after {Timeout}", AnswerWithin);
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "reactor /decisions failed");
+            return null;
+        }
+    }
+
     public void Dispose() => _http.Dispose();
 }
