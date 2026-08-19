@@ -77,6 +77,16 @@ public sealed class ReactorClient : IDisposable
     }
 
     /// <summary>
+    /// Whether this host holds a link to a reactor at all.
+    /// </summary>
+    /// <remarks>
+    /// The distinction the two read methods cannot make on their own: both answer <c>null</c>/<c>false</c>
+    /// for a leaf that is absent and for one that would not speak, and a surface has to tell those apart —
+    /// the first is a host that runs no reactor, the second is a reactor that needs looking at.
+    /// </remarks>
+    public bool IsProvisioned => _registry.IsProvisioned(ProvisionableLeaf.Reactor);
+
+    /// <summary>
     /// Liveness probe for the reactor capability: <c>GET /health</c> over its status socket. A 2xx means the
     /// daemon is up and serving. Returns <c>false</c> when disconnected at runtime, unreachable, slow or
     /// non-2xx — never throws.

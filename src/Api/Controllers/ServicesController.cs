@@ -294,6 +294,44 @@ public sealed class ServicesController(
         return Content(json, "application/json");
     }
 
+    /// <summary>
+    /// <c>GET /hosts/{id}/services/reactor/status</c> → what the reactor is doing right now, relayed
+    /// verbatim: the gate's tuning, the rules that are live and the authority each runs under, what it has
+    /// ingested and judged since it started, and the evaluations waiting out their settle windows.
+    /// <b>404 when this host runs no reactor</b>; <b>503</b> when it runs one that would not answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Verbatim like <c>monitor/stats</c> and <c>bot/status</c>: the reactor owns this contract and already
+    /// resolves the parts a reader would otherwise get wrong — a rule named in two mode lists is reported
+    /// at the safest of them, and a rule with no window of its own is reported at the host-wide one. Both
+    /// are arithmetic this API would have to duplicate to reshape the payload, and duplicating it is how
+    /// the panel and the leaf come to disagree about what a rule is permitted to do.
+    /// </para>
+    /// <para>
+    /// ⚠ The counters are since the reactor's own process started, not since the beginning. They are named
+    /// that way on the wire and the panel must keep saying so — a zero after a deploy is a restart, not a
+    /// quiet host.
+    /// </para>
+    /// </remarks>
+    [HttpGet("reactor/status")]
+    public async Task<IActionResult> GetReactorStatus(string id, CancellationToken ct)
+    {
+        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
+            return NotFound();
+
+        if (HttpContext.RequestServices.GetService(typeof(ReactorClient)) is not ReactorClient reactor
+            || !reactor.IsProvisioned)
+            return NotFound();
+
+        string? json = await reactor.GetStatusJsonAsync(ct).ConfigureAwait(false);
+        if (json is null)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the reactor didn't answer for its own status");
+
+        return Content(json, "application/json");
+    }
+
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
 

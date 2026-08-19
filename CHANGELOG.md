@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the reactor's own account of itself reaches the panel
+
+`GET /hosts/{id}/services/reactor/status` relays the reactor's `/status` verbatim: the gate's tuning,
+every live rule with the authority it runs under, what has been ingested and judged since the daemon
+started, and the evaluations waiting out their settle windows. `ReactorClient` already held the read —
+it was reachable only by the `/health` capability probe, so the panel had nothing to draw the leaf's
+Overview from and fell back to the generic configuration card.
+
+Verbatim like `monitor/stats` and `bot/status`, and for a sharper reason here: the reactor reports each
+rule's mode and suppression window **as resolved** — a rule named in two mode lists at the safest of
+them, a rule carrying no window of its own at the host-wide one. Reshaping the payload would mean
+re-deriving that arithmetic in a second place, which is how a panel comes to show an authority a rule
+does not actually have.
+
+404 when the host runs no reactor, 503 when it runs one that would not answer. `ReactorClient` grew an
+`IsProvisioned` property to tell those apart, since both read paths answer null for either.
+
 ### Added — the reactor is a leaf this API knows, probes and can configure
 
 The reactor reached the Services board as a leaf this API had never heard of: `ServicesAggregator`
