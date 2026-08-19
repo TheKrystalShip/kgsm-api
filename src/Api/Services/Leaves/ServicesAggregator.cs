@@ -40,8 +40,10 @@ public sealed class ServicesAggregator(
                 Unit: leaf.Unit,
                 State: st.State,
                 OnDemand: leaf.OnDemand,
-                // Runtime provisioning from the registry for the four provisionable leaves; null (omitted)
-                // for api/bot where it isn't applicable.
+                // The link this API holds to the leaf, from the runtime registry. Null — omitted, and drawn
+                // as "not applicable" rather than "disconnected" — for a leaf where there is no such link
+                // to arm: api/bot, which this API holds no client to, and speech, whose presence is read
+                // off its socket file rather than stored here. See ProvisionableLeaf.
                 Provisioned: ProvisionableLeaf.IsProvisionable(leaf.Id) ? registry.IsProvisioned(leaf.Id) : null,
                 SubState: st.SubState,
                 Enabled: st.Enabled,

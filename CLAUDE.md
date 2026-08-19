@@ -276,6 +276,11 @@ exactly one correct access path:
   `resting:true` without connecting when the unit is not active. What a resting host still reports is
   read here rather than asked for: the model files measured on disk and the configured voice, both
   resolved through `LeafConfigService` so no path or default is written down twice.
+  ⚠ **It also carries no Link on the Services board** (it is absent from `ProvisionableLeaf`). That axis
+  is a stored connection an admin can turn off, and speech has none to arm: this client runs on a page
+  view, feeds no data flow, and the assistant service, the bot and a browser recording a voice note all
+  reach the leaf directly. Socket activation is not the reason — the firewall is socket-activated too and
+  does carry a Link, because disconnecting it degrades the ports surface.
 
 **Leaf health & the capability model (M2).** Capability **availability** is owned by the always-on
 **`Services/Leaves/LeafHealthMonitor.cs`**, which polls each *provisioned* leaf's health every ~2s

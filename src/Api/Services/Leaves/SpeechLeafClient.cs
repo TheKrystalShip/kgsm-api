@@ -19,6 +19,14 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// lets the API 404 a host with no speech leaf rather than reporting one that is permanently down.
 /// </para>
 /// <para>
+/// <b>Which is why speech carries no Link on the Services board</b> and is absent from
+/// <see cref="ProvisionableLeaf"/>. That axis is a stored connection an admin can turn off, and there is
+/// nothing here for one to arm: this client runs on a page view, holds no poll and feeds no data flow, and
+/// the paths that actually use the engine — the assistant service, the bot, a browser recording a voice
+/// note — reach the leaf directly. A toggle would stop none of them while looking like the switch that
+/// does. A stored row could also contradict the file, and the file is the measurement.
+/// </para>
+/// <para>
 /// Honesty: an unreachable or malformed answer is <c>null</c>. The controller turns that into a 503
 /// saying the leaf would not answer — never into an empty status, which would render as a healthy
 /// engine that has simply done nothing.
