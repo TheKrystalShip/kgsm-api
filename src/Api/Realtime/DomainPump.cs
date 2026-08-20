@@ -34,6 +34,7 @@ public sealed class DomainPump(
     Services.Players.PlayerHistoryService players,
     Services.Players.PlayerObservability observability,
     Services.Availability.UpdateLagIndex updateLag,
+    Services.Availability.RunTimesIndex runTimes,
     ApiOptions options,
     ILogger<DomainPump> logger)
     : BackgroundService
@@ -122,13 +123,17 @@ public sealed class DomainPump(
                     Dictionary<string, long> diskById = ServerAggregator.IndexDiskBytes(snapshotTask.Result);
                     Func<string, int?> onlinePlayers = ServerAggregator.OnlinePlayersOf(players, observability);
                     Func<string, DateTimeOffset?> updateSince = updateLag.Lookup;
+                    // The same run clock the REST join uses. Omitting it here would blank startedAt on every
+                    // streamed patch, so a card would show an uptime until the first patch arrived and then
+                    // lose it.
+                    Func<string, Services.Availability.RunTimes> runClock = runTimes.Lookup;
 
                     // Build the current server list from cache data.
                     var byId = new Dictionary<string, Server>(StringComparer.Ordinal);
                     foreach ((string id, var instance) in roster)
                         byId[id] = ServerAggregator.BuildServer(id, instance, statuses,
                             backups.Readings, metricsById, options.HostId, cache.IsStarting, jobs.InFlightFor,
-                            diskById, onlinePlayers, updateSince);
+                            diskById, onlinePlayers, updateSince, runClock);
 
                     if (!primed)
                     {

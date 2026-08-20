@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a server DTO dates its run (`0.120.0`)
+
+`Server.StartedAt` now actually populates, and `Server.StoppedAt` joins it, so a surface can say how
+long a server has been up or how long it has been down.
+
+`StartedAt` has always been on the DTO and has always been null in practice. The cause was upstream:
+kgsm reads a run's start from a local pid file, and a native instance the watchdog spawned has none —
+the process lives in a cgroup the daemon owns. So the field was null for exactly the instances this
+host runs.
+
+The fix asks the run-state authority instead. `kgsm-watchdog` 1.34.0 reports the run clock it already
+keeps (the persisted spawn time and the durable run ledger), kgsm-lib 4.45.0 exposes it as
+`GetRunTimesAsync`, and `RunTimesIndex` caches it for the roster join. Two rules keep it honest: a
+**native** instance is dated by the watchdog while a **container** keeps the engine's reading (Docker
+supplies one and the daemon does not supervise containers), and `StoppedAt` is reported only while
+the instance is actually stopped — the ledger always holds the last run's end, and printing it beside
+a live run would date a stop that has been superseded.
+
+The daemon is asked over a dedicated `/runtimes` route rather than the supervised-instance list,
+because an instance leaves that list when it stops — which is precisely when a stop time is wanted.
+
 ### Added — fleet availability, folded from the journal
 
 `GET /servers/availability?window=7d` reports how much of the time each server was up **when something

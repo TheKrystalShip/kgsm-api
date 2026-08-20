@@ -94,17 +94,18 @@ public sealed record Server(
     // older than the index's lookback. Never fabricated from the check time, and never shown on its own:
     // a surface pairs it with UpdateAvailable, so an age can't outlive the gap it measures.
     DateTimeOffset? UpdateAvailableSince = null,
-    // When the running process started (from the instance status reading's process.start_time), or null
-    // when stopped/unknown. ⚠ Null in practice today: the referenced kgsm-lib (1.21.0) maps start_time to
-    // a System.Text.Json DateTime?, but kgsm emits it as a non-ISO local-time string which STJ cannot parse
-    // — a container's start_time (docker's RFC3339 stripped of its offset → "2026-06-16 14:23:01") always
-    // throws on deserialization, and a native's `ps lstart` ("Sun Jun 21 20:17:17 2026") throws WHEN a
-    // local pid file populates it (a watchdog-spawned native with no local pid file emits null, which parses
-    // fine). A throw is swallowed upstream into an empty roster (ServerAggregator.ReadDomain). So the only
-    // value that ever reaches this field is a parseable ISO-UTC one. Surfaced honestly (the SPA derives
-    // uptime from a start timestamp); the upstream parse gap is flagged for a kgsm-lib/kgsm fix (emit ISO,
-    // and/or a start_time converter), out of scope for this read slice. Never a guessed timezone.
+    // When the running process started, or null when stopped/unknown. Two sources, by runtime: a native
+    // instance is dated by the WATCHDOG's spawn time, because kgsm reads a start time from a local pid file
+    // and a watchdog-spawned native has none — the process lives in a cgroup the daemon owns. A container is
+    // dated by the engine's own process.start_time, which Docker supplies and kgsm emits as ISO-UTC.
+    // Never a guessed timezone: a reading without a definite UTC kind is dropped rather than assumed local.
     DateTimeOffset? StartedAt = null,
+    // When the LAST run ended, or null when nothing dates one. Read from the watchdog's durable run
+    // ledger for a native instance — the run's own last output, not the moment the supervisor noticed the
+    // cgroup had emptied. Null for a container (Docker's finish time is not carried through the engine)
+    // and for an instance with no recorded runs; a surface renders the honest unknown rather than
+    // implying the server has never run.
+    DateTimeOffset? StoppedAt = null,
     // The player-facing connect PORT — the first of this instance's required ports (kgsm lists the
     // game/connect port first in the blueprint), read straight off the cached Instance.Ports. Unlike the
     // Network block below it is present on the list, the `servers` stream AND the detail view: this is pure

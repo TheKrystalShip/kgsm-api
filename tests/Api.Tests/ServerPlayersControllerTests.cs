@@ -240,6 +240,8 @@ public sealed class ServerPlayersControllerTests
         public Task<WatchdogActionResult> RestartAsync(string instanceName, string origin = "scheduler", CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<WatchdogInstanceState?> GetStatusAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<WatchdogInstanceState>> ListAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<IReadOnlyList<WatchdogRunTimes>> GetRunTimesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<WatchdogRunTimes>>(Array.Empty<WatchdogRunTimes>());
         public IAsyncEnumerable<string> FollowConsoleAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
         // The console-run pair — stubbed. This fake is not about consoles; a caller reaching here would

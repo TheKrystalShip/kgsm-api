@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.119.0</Version>
+    <Version>0.120.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -144,7 +144,7 @@
          ip:port / opaque session correlation token / disconnect reason). Consumed here by the new
          roster projection (Services/Players/PlayerRosterService.cs) + the audit meta extension
          (AuditMapping.PlayerMeta). -->
-    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="4.43.0" />
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="4.45.0" />
     <!-- The assistant's trusted-relay contract: the forwarded principal and the headers that carry
          it. Built by kgsm-llm (which validates them on the other side) and packed to the local feed,
          so this API and kgsm-bot forward identity and authority through one implementation rather

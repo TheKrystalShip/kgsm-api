@@ -246,6 +246,8 @@ public sealed class ConsoleBridgeTests
                 await Task.Delay(10);
         }
 
+        public Task<IReadOnlyList<WatchdogRunTimes>> GetRunTimesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<WatchdogRunTimes>>(Array.Empty<WatchdogRunTimes>());
         public Task<IReadOnlyList<WatchdogInstanceState>> ListAsync(CancellationToken cancellationToken = default)
         {
             Interlocked.Increment(ref ListCallCount);

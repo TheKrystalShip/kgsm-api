@@ -269,6 +269,8 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
         public Task<IReadOnlyList<string>> GetEnabledNamesAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<string>>([]);
         public Task<WatchdogInstanceState?> GetStatusAsync(string instanceName, CancellationToken cancellationToken = default) => Task.FromResult<WatchdogInstanceState?>(null);
         public Task<IReadOnlyList<WatchdogInstanceState>> ListAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<WatchdogInstanceState>>(Array.Empty<WatchdogInstanceState>());
+        public Task<IReadOnlyList<WatchdogRunTimes>> GetRunTimesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<WatchdogRunTimes>>(Array.Empty<WatchdogRunTimes>());
         public Task<IReadOnlyDictionary<string, WatchdogInstancePresence>?> GetPlayerPresenceAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyDictionary<string, WatchdogInstancePresence>?>(null);
         public Task<WatchdogUpnpList?> GetUpnpAsync(string instanceName, CancellationToken cancellationToken = default) => Task.FromResult<WatchdogUpnpList?>(null);
         public void Dispose() { }

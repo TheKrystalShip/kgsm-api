@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.Core.Models.Enums;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.KGSM.Core.Models;
@@ -443,6 +444,106 @@ public sealed class ServerAggregatorBuildServerTests
     }
 
     // --- helpers -----------------------------------------------------------------------------------
+
+
+    // ---- the run clock: which source dates a run, and when each half is reported ----------------
+
+    private static readonly DateTimeOffset Spawned = new(2026, 8, 21, 9, 15, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Exited = new(2026, 8, 18, 14, 44, 5, TimeSpan.Zero);
+
+    private static Func<string, Services.Availability.RunTimes> Clock(
+        DateTimeOffset? spawned = null, DateTimeOffset? exited = null) =>
+        _ => new Services.Availability.RunTimes(spawned, exited);
+
+    private static readonly Instance ContainerInstance = new()
+    {
+        Name = "factorio-1",
+        BlueprintFile = "factorio.bp.yaml",
+        Runtime = InstanceRuntime.Container,
+    };
+
+    [Fact]
+    public void Native_IsDatedByTheWatchdog_NotTheEngine()
+    {
+        // The engine reports nothing for a watchdog-spawned native (no local pid file), which is the whole
+        // reason the daemon is asked.
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, Up("factorio-1"), NoBackupReadings,
+            NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            runTimes: Clock(spawned: Spawned));
+
+        Assert.Equal(Spawned, s.StartedAt);
+    }
+
+    [Fact]
+    public void Container_KeepsTheEnginesReading_AndIsNotDatedByTheWatchdog()
+    {
+        // Docker supplies a container's start time and the daemon does not supervise one, so the watchdog's
+        // clock must not overwrite the engine's reading here.
+        var engineStart = new DateTime(2026, 8, 20, 6, 0, 0, DateTimeKind.Utc);
+        var statuses = new Dictionary<string, Reading<InstanceRuntimeStatus>>
+        {
+            ["factorio-1"] = Reading<InstanceRuntimeStatus>.Measured(new InstanceRuntimeStatus
+            {
+                InstanceName = "factorio-1",
+                Status = true,
+                Process = new ProcessInfo { StartTime = engineStart },
+            }),
+        };
+
+        Server s = ServerAggregator.BuildServer("factorio-1", ContainerInstance, statuses, NoBackupReadings,
+            NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            runTimes: Clock(spawned: Spawned, exited: Exited));
+
+        Assert.Equal(new DateTimeOffset(engineStart), s.StartedAt);
+        Assert.Null(s.StoppedAt);
+    }
+
+    [Fact]
+    public void StoppedAt_IsReportedOnlyWhileStopped()
+    {
+        // The ledger always holds the last run's end. Reporting it beside a LIVE run would date a stop that
+        // has already been superseded by the run currently going.
+        Server running = ServerAggregator.BuildServer("factorio-1", TestInstance, Up("factorio-1"), NoBackupReadings,
+            NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            runTimes: Clock(spawned: Spawned, exited: Exited));
+
+        Assert.Null(running.StoppedAt);
+
+        Server stopped = ServerAggregator.BuildServer("factorio-1", TestInstance, Down("factorio-1"), NoBackupReadings,
+            NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            runTimes: Clock(exited: Exited));
+
+        Assert.Equal(Exited, stopped.StoppedAt);
+    }
+
+    [Fact]
+    public void NoRunClock_LeavesBothHalvesNull()
+    {
+        // A host with no watchdog: honestly undated, never a fabricated start.
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, Down("factorio-1"), NoBackupReadings,
+            NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob);
+
+        Assert.Null(s.StartedAt);
+        Assert.Null(s.StoppedAt);
+    }
+
+    [Fact]
+    public void AnUnknownStatus_ReportsNoStopTime()
+    {
+        // Unknown is not stopped. Dating a stop for an instance whose state could not be read would state
+        // something the host does not know.
+        var statuses = new Dictionary<string, Reading<InstanceRuntimeStatus>>
+        {
+            ["factorio-1"] = Reading<InstanceRuntimeStatus>.Unavailable("requires regeneration"),
+        };
+
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses, NoBackupReadings,
+            NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            runTimes: Clock(exited: Exited));
+
+        Assert.Equal(ServerStatus.Unknown, s.Status);
+        Assert.Null(s.StoppedAt);
+    }
 
     private static Dictionary<string, Reading<InstanceRuntimeStatus>> Up(string id) => new()
     {

@@ -276,6 +276,11 @@ public class Startup(IConfiguration configuration)
         // host with no engine simply never populates it, and every server then reports the honest null.
         services.AddSingleton<Services.Availability.UpdateLagIndex>();
         services.AddHostedService(sp => sp.GetRequiredService<Services.Availability.UpdateLagIndex>());
+        // The watchdog's run clock (when the current run began, when the last one ended). Registered
+        // unconditionally: it resolves IWatchdogClient optionally and simply reports nothing on a host
+        // with no watchdog, so the roster join needs no branch.
+        services.AddSingleton<Services.Availability.RunTimesIndex>();
+        services.AddHostedService(sp => sp.GetRequiredService<Services.Availability.RunTimesIndex>());
 
         services.AddSingleton<ServerAggregator>();
 

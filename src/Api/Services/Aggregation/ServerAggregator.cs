@@ -35,6 +35,7 @@ public sealed class ServerAggregator
     private readonly PlayerHistoryService _players;
     private readonly PlayerObservability _observability;
     private readonly Availability.UpdateLagIndex _updateLag;
+    private readonly Availability.RunTimesIndex _runTimes;
     private readonly ILogger<ServerAggregator> _logger;
 
     public ServerAggregator(
@@ -48,6 +49,7 @@ public sealed class ServerAggregator
         PlayerHistoryService players,
         PlayerObservability observability,
         Availability.UpdateLagIndex updateLag,
+        Availability.RunTimesIndex runTimes,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
@@ -60,6 +62,7 @@ public sealed class ServerAggregator
         _players = players;
         _observability = observability;
         _updateLag = updateLag;
+        _runTimes = runTimes;
         _logger = logger;
     }
 
@@ -135,7 +138,8 @@ public sealed class ServerAggregator
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshotTask.Result);
         Server server = BuildServer(id, instance, _cache.Statuses, _backups.Readings,
             metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
-            IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability), _updateLag.Lookup);
+            IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability), _updateLag.Lookup,
+            _runTimes.Lookup);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -193,7 +197,7 @@ public sealed class ServerAggregator
         foreach ((string id, Instance instance) in roster)
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
                 _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById,
-                OnlinePlayersOf(_players, _observability), _updateLag.Lookup));
+                OnlinePlayersOf(_players, _observability), _updateLag.Lookup, _runTimes.Lookup));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -249,7 +253,8 @@ public sealed class ServerAggregator
         Func<string, Job?> activeJob,
         IReadOnlyDictionary<string, long>? diskBytesById = null,
         Func<string, int?>? onlinePlayers = null,
-        Func<string, DateTimeOffset?>? updateAvailableSince = null)
+        Func<string, DateTimeOffset?>? updateAvailableSince = null,
+        Func<string, Availability.RunTimes>? runTimes = null)
     {
         string status = ServerStatus.Unknown;
         string? version = null;
@@ -257,6 +262,7 @@ public sealed class ServerAggregator
         string? latestVersion = null;
         DateTimeOffset? updateCheckedAt = null;
         DateTimeOffset? startedAt = null;
+        DateTimeOffset? stoppedAt = null;
         if (statuses.TryGetValue(id, out Reading<InstanceRuntimeStatus>? reading)
             && reading is { IsMeasured: true, Value: { } runtimeStatus })
         {
@@ -277,11 +283,28 @@ public sealed class ServerAggregator
             updateCheckedAt = runtimeStatus.Version.CheckedAt;
 
             // Process start time → an honest start timestamp (the SPA derives uptime from it). Only a
-            // UTC-kind value is defensible: kgsm emits start_time as a non-ISO local string the lib can't
-            // parse, so the only non-null that reaches here is a parseable ISO-UTC one. An Unspecified/Local
-            // kind would be an unknown offset → null, never a guessed zone. See Server.StartedAt.
+            // UTC-kind value is defensible: an Unspecified/Local kind carries an unknown offset → null,
+            // never a guessed zone. This covers CONTAINERS, whose start time Docker supplies; a native
+            // instance is dated below by the watchdog, which is the thing that spawned it.
             DateTime? start = runtimeStatus.Process.StartTime;
             startedAt = start is { Kind: DateTimeKind.Utc } utc ? new DateTimeOffset(utc) : null;
+        }
+
+        // The watchdog's run clock wins for a NATIVE instance: kgsm dates a run from a local pid file, and
+        // one the watchdog spawned has none, so the engine reading above is null for exactly the instances
+        // this host supervises. It is the run-state authority for those, so it is also what dates them.
+        // A container keeps the engine's reading (the daemon does not supervise one) and has no stop time
+        // to report. Both stay honestly null when nothing dates them.
+        if (runTimes is not null)
+        {
+            Availability.RunTimes rt = runTimes(id);
+            if (instance.Runtime != InstanceRuntime.Container)
+            {
+                startedAt = rt.SpawnedAt ?? startedAt;
+                // Only meaningful while the instance is NOT running: the ledger keeps the last run's end,
+                // and reporting it beside a live run would date a stop that has been superseded.
+                stoppedAt = status == ServerStatus.Stopped ? rt.LastExitedAt : null;
+            }
         }
 
         // Metrics only when the monitor produced a row for this id; otherwise honest null. The shared
@@ -324,6 +347,7 @@ public sealed class ServerAggregator
             // the gap it just closed.
             UpdateAvailableSince: updateAvailable == true ? updateAvailableSince?.Invoke(id) : null,
             StartedAt: startedAt,
+            StoppedAt: stoppedAt,
             ConnectPort: ConnectPortOf(instance.Ports),
             Note: NoteOf(instance),
             LastBackup: backups.Latest,
