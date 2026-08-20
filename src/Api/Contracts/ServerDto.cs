@@ -86,6 +86,14 @@ public sealed record Server(
     // a check has succeeded at least once — never a fabricated timestamp, and never stamped onto a value
     // read back off the engine's record. Lets the SPA surface "checked N min ago" so freshness is visible.
     DateTimeOffset? UpdateCheckedAt = null,
+    // When this instance was FIRST seen to be behind — the engine's oldest still-standing
+    // instance_update_available notice, read from the journal (Services/Availability/UpdateLagIndex).
+    // Distinct from UpdateCheckedAt, which says when the last check ran: this says how long the gap has
+    // been open, which is what makes an update overdue rather than merely pending. Null whenever there is
+    // nothing to date it by — no update outstanding, an engine that emits no such event, or a notice
+    // older than the index's lookback. Never fabricated from the check time, and never shown on its own:
+    // a surface pairs it with UpdateAvailable, so an age can't outlive the gap it measures.
+    DateTimeOffset? UpdateAvailableSince = null,
     // When the running process started (from the instance status reading's process.start_time), or null
     // when stopped/unknown. ⚠ Null in practice today: the referenced kgsm-lib (1.21.0) maps start_time to
     // a System.Text.Json DateTime?, but kgsm emits it as a non-ISO local-time string which STJ cannot parse

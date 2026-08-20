@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Aggregation;
+using TheKrystalShip.Api.Services.Availability;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.KGSM.Core.Interfaces;
@@ -42,6 +43,44 @@ public sealed class ServersController(
             return Error(StatusCodes.Status503ServiceUnavailable, "engine_unavailable",
                 "the game-server engine could not be read; last-known state is preserved");
         return Ok(read.Servers);
+    }
+
+    /// <summary>
+    /// <c>GET /servers/availability?window=7d</c> — how much of the time each server was up
+    /// <em>when something wanted it up</em>, folded from the engine's lifecycle events.
+    /// </summary>
+    /// <remarks>
+    /// <para>A deliberate stop is not downtime, so it lowers the denominator rather than the score; a
+    /// server nothing wanted running during the window has no figure at all
+    /// (<c>availability: null</c>) rather than a flattering 100%. The report states what the journal
+    /// could actually cover — see <see cref="AvailabilityReport.CoverageFrom"/> — so a window reaching
+    /// past retention reads as the partial answer it is.</para>
+    /// <para>A literal path segment, so it is matched ahead of <c>{id}</c>. An instance actually named
+    /// <c>availability</c> would be shadowed here and is still reachable everywhere else; kgsm has no
+    /// such instance and the alternative is a second route prefix for one read.</para>
+    /// </remarks>
+    [HttpGet("availability")]
+    public async Task<ActionResult<AvailabilityReport>> GetAvailability(
+        [FromQuery] string? window, CancellationToken ct)
+    {
+        ServersRead read = await aggregator.GetServersReadAsync(ct);
+        if (!read.EngineRead)
+            return Error(StatusCodes.Status503ServiceUnavailable, "engine_unavailable",
+                "the game-server engine could not be read; availability cannot be scoped to a roster");
+
+        // Resolved from the request scope for the same reason AuditController does it: kgsm-lib's
+        // services exist only where the engine is provisioned, and a constructor parameter would turn
+        // "no engine history" into a 500 on the very endpoint that reports there is none.
+        IEventJournalHistory? journal = HttpContext.RequestServices.GetService<IEventJournalHistory>();
+
+        string label = string.IsNullOrWhiteSpace(window) ? "7d" : window.Trim().ToLowerInvariant();
+        return await AvailabilityQueries.BuildAsync(
+            journal,
+            [.. read.Servers.Select(s => s.Id)],
+            AvailabilityQueries.ParseWindow(window),
+            label,
+            DateTimeOffset.UtcNow,
+            ct);
     }
 
     /// <summary>

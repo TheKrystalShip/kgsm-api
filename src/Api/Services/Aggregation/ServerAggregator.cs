@@ -34,6 +34,7 @@ public sealed class ServerAggregator
     private readonly Commands.JobRegistry _jobs;
     private readonly PlayerHistoryService _players;
     private readonly PlayerObservability _observability;
+    private readonly Availability.UpdateLagIndex _updateLag;
     private readonly ILogger<ServerAggregator> _logger;
 
     public ServerAggregator(
@@ -46,6 +47,7 @@ public sealed class ServerAggregator
         Commands.JobRegistry jobs,
         PlayerHistoryService players,
         PlayerObservability observability,
+        Availability.UpdateLagIndex updateLag,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
@@ -57,6 +59,7 @@ public sealed class ServerAggregator
         _jobs = jobs;
         _players = players;
         _observability = observability;
+        _updateLag = updateLag;
         _logger = logger;
     }
 
@@ -132,7 +135,7 @@ public sealed class ServerAggregator
         Dictionary<string, Snap.ServerMetrics> metricsById = IndexMetrics(snapshotTask.Result);
         Server server = BuildServer(id, instance, _cache.Statuses, _backups.Readings,
             metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
-            IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability));
+            IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability), _updateLag.Lookup);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -190,7 +193,7 @@ public sealed class ServerAggregator
         foreach ((string id, Instance instance) in roster)
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
                 _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById,
-                OnlinePlayersOf(_players, _observability)));
+                OnlinePlayersOf(_players, _observability), _updateLag.Lookup));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -245,7 +248,8 @@ public sealed class ServerAggregator
         Func<string, bool> isStarting,
         Func<string, Job?> activeJob,
         IReadOnlyDictionary<string, long>? diskBytesById = null,
-        Func<string, int?>? onlinePlayers = null)
+        Func<string, int?>? onlinePlayers = null,
+        Func<string, DateTimeOffset?>? updateAvailableSince = null)
     {
         string status = ServerStatus.Unknown;
         string? version = null;
@@ -315,6 +319,10 @@ public sealed class ServerAggregator
             UpdateAvailable: updateAvailable,
             LatestVersion: latestVersion,
             UpdateCheckedAt: updateCheckedAt,
+            // Only dated while the gap is actually open. The index is refreshed on its own cadence, so
+            // pairing it with this reading is what stops a just-updated instance from carrying the age of
+            // the gap it just closed.
+            UpdateAvailableSince: updateAvailable == true ? updateAvailableSince?.Invoke(id) : null,
             StartedAt: startedAt,
             ConnectPort: ConnectPortOf(instance.Ports),
             Note: NoteOf(instance),

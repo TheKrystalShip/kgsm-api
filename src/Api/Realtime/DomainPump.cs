@@ -33,6 +33,7 @@ public sealed class DomainPump(
     Services.Commands.JobRegistry jobs,
     Services.Players.PlayerHistoryService players,
     Services.Players.PlayerObservability observability,
+    Services.Availability.UpdateLagIndex updateLag,
     ApiOptions options,
     ILogger<DomainPump> logger)
     : BackgroundService
@@ -120,13 +121,14 @@ public sealed class DomainPump(
                     Dictionary<string, Snap.ServerMetrics> metricsById = ServerAggregator.IndexMetrics(snapshotTask.Result);
                     Dictionary<string, long> diskById = ServerAggregator.IndexDiskBytes(snapshotTask.Result);
                     Func<string, int?> onlinePlayers = ServerAggregator.OnlinePlayersOf(players, observability);
+                    Func<string, DateTimeOffset?> updateSince = updateLag.Lookup;
 
                     // Build the current server list from cache data.
                     var byId = new Dictionary<string, Server>(StringComparer.Ordinal);
                     foreach ((string id, var instance) in roster)
                         byId[id] = ServerAggregator.BuildServer(id, instance, statuses,
                             backups.Readings, metricsById, options.HostId, cache.IsStarting, jobs.InFlightFor,
-                            diskById, onlinePlayers);
+                            diskById, onlinePlayers, updateSince);
 
                     if (!primed)
                     {
@@ -187,6 +189,10 @@ public sealed class DomainPump(
         || a.UpdateAvailable != b.UpdateAvailable
         || a.LatestVersion != b.LatestVersion
         || a.UpdateCheckedAt != b.UpdateCheckedAt
+        // Rides here so the age a card shows moves with the flag it qualifies: the index resolves the
+        // notice a few minutes after the sweep that raised UpdateAvailable, and without this the patch
+        // carrying the flag would land with the age still null and stay that way until the next reload.
+        || a.UpdateAvailableSince != b.UpdateAvailableSince
         || a.Note != b.Note
         || a.LastBackup != b.LastBackup
         || a.BackupCount != b.BackupCount

@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — fleet availability, folded from the journal
+
+`GET /servers/availability?window=7d` reports how much of the time each server was up **when something
+wanted it up**, replayed from the engine's lifecycle events. No sampler, no table: the journal already
+holds what happened, so a host with every optional leaf absent still answers.
+
+The denominator is intent, not wall clock. A server an operator stopped is off, not down — it lowers
+the denominator instead of the score, and a server nothing wanted running all window reports
+`availability: null` rather than a flattering 100%. The fleet rollup sums seconds before dividing, so a
+server that ran for ten minutes cannot weigh as much as one that ran all week.
+
+⚠ **Downtime and outages are different counts.** The shutdown half of a deliberate restart is downtime
+— nobody could connect — and is not an incident. Only crashes and give-ups raise `outages`.
+
+⚠ **`coverageFrom` is the engine journal's, not the merged page's.** The reader collapses every
+producer it read into one conservative floor, and the newer leaves carry no `instance_*` events; taking
+that floor would report a fleet as unmeasured over days kgsm has full history for.
+
+### Added — how long an update has been pending
+
+`Server.updateAvailableSince` dates the gap: the engine's oldest still-standing `instance_update_available`
+notice, read from the journal on a slow loop (`Services/Availability/UpdateLagIndex`). Distinct from
+`updateCheckedAt`, which says when the last check ran — this says how long the server has been behind,
+which is what makes an update overdue rather than merely pending.
+
+⚠ **Oldest notice, not newest.** The scheduler re-emits on every sweep that still finds the instance
+behind; taking the newest would reset the age every few minutes and report a week-old gap as fresh.
+
+Null whenever nothing dates it — no update outstanding, an engine that emits no such event, or a notice
+older than the walk's lookback. It is only ever populated while `updateAvailable` is true, so an age
+cannot outlive the gap it measures.
+
 ### Added — the host's GPUs
 
 `Host.gpus` (and the metrics tick's `gpus`) carry every GPU the monitor measures: memory, utilisation,

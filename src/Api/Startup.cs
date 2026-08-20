@@ -270,6 +270,13 @@ public class Startup(IConfiguration configuration)
         // Always registered: it degrades to firewall:"absent"/null when not provisioned, so the
         // server/host aggregators can depend on it unconditionally.
         services.AddSingleton<NetworkAggregator>();
+
+        // How long each instance has been running an out-of-date build, read from the engine's journal on
+        // a slow loop. Registered ahead of the aggregator that joins it onto the roster, and always — a
+        // host with no engine simply never populates it, and every server then reports the honest null.
+        services.AddSingleton<Services.Availability.UpdateLagIndex>();
+        services.AddHostedService(sp => sp.GetRequiredService<Services.Availability.UpdateLagIndex>());
+
         services.AddSingleton<ServerAggregator>();
 
         // Instance in-memory cache: sits between consumers (ServerAggregator, DomainPump,
