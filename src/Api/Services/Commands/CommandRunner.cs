@@ -36,7 +36,7 @@ public sealed class CommandRunner(
     StreamHub hub,
     ServerAggregator aggregator,
     JobRegistry registry,
-    ILogger<CommandRunner> logger)
+    ILogger<CommandRunner> logger) : ICommandExecutor
 {
     /// <summary>
     /// Fire-and-forget the job's execution. The job is already registered (queued). <paramref name="actor"/>
@@ -45,6 +45,19 @@ public sealed class CommandRunner(
     /// </summary>
     public void Start(Job job, string? actor = null, string? origin = null) =>
         _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName: null));
+
+    /// <summary>
+    /// Run a lifecycle verb and <b>await</b> it — the same execution, settle and verify
+    /// <see cref="Start"/> performs, with the completion observable.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="BatchWorker"/> needs this: it holds a concurrency window, and a window can only be
+    /// released by something that knows when the work finished. Fire-and-forget is right for a single
+    /// command, where the caller is a request that has already answered <c>202</c> and nothing is
+    /// counting.
+    /// </remarks>
+    public Task RunAsync(Job job, string? actor = null, string? origin = null) =>
+        ExecuteAsync(job, actor, origin, blueprint: null, backupName: null);
 
     /// <summary>
     /// Fire-and-forget an <c>install</c> job (M8·b — <c>POST /servers</c>). <paramref name="blueprint"/> is

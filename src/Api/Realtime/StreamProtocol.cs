@@ -155,6 +155,23 @@ public static class StreamProtocol
     /// </summary>
     public static string JobEntityKey(string id) => $"jobs:{id}";
 
+    // --- batches (one verb across a set of servers) ---
+    /// <summary>Batch progress (host-wide): <c>batches</c>. The roll-up above <see cref="JobsTopic"/> —
+    /// a batch's members each publish their own <see cref="JobPatch"/>, and this says where the batch as
+    /// a whole stands without a client having to reassemble it from N job frames.</summary>
+    public const string BatchesTopic = "batches";
+
+    /// <summary>
+    /// A full <see cref="Contracts.BatchView"/> on every member transition, merged by id (patch-only,
+    /// like every other topic here). Viewer-gated, matching the REST reads: a batch names servers and
+    /// verbs, which is what the roster already shows anyone who can see the host.
+    /// </summary>
+    public const string BatchPatch = "batch.patch";
+
+    /// <summary>The per-connection coalesce key for a batch: a slow client gets the newest standing of a
+    /// batch, never a backlog of every member transition that produced it.</summary>
+    public static string BatchEntityKey(string id) => $"batches:{id}";
+
     // --- audit (M5 — the append-only action log) ---
     /// <summary>Newly-appended audit records (host-wide): <c>audit</c> (architecture.html §3·d).</summary>
     public const string AuditTopic = "audit";

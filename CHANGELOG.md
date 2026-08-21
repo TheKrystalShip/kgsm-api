@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — one verb across a set of servers, owned by the node (`0.122.0`)
+
+`POST /servers/commands` takes a verb and a list of this host's servers, and `GET /batches`,
+`GET /batches/{id}` and `DELETE /batches/{id}` read and cancel what it started. The batch is a
+**dispatcher, not a second command vocabulary**: every admitted member becomes an ordinary job on the
+ordinary runner, with its own engine invocation and its own audit row, so audit, the reactor, the bot
+and push all see exactly what they see when somebody clicks Stop ten times quickly.
+
+The work belongs to the node from the moment it is accepted. A ten-server update paced two at a time
+runs for half an hour, and none of that should depend on a browser staying open — so the batch and its
+members are rows in SQLite, drained by `BatchWorker`, and they outlive both the request and the
+process. `runId` is a client-minted correlation id stored verbatim: a selection can span several
+nodes, each admitting its own share, and one id is what lets a person's whole cluster-wide action be
+reassembled afterwards from what the nodes hold. No node learns about any other and nothing relays
+through `/peers` — correlation, not coordination.
+
+The response states both halves. Refusals are named on arrival, with the reason a single command's
+`409` would have carried, because the caller asked about a set and is answered about the set.
+
+**The concurrency window lives here because it exists nowhere else.** `JobRegistry` caps in-flight
+work per *server* and nothing caps it per host, so the worker holds four concurrent for
+start/stop/restart and two for update. What is paced is the work, not the invocation — four parallel
+kgsm calls measure no slower than one, while a stop drains and saves a world and an update runs
+steamcmd against one disk and one uplink. Holding it in the worker also makes it a property of the
+machine: two operators batching at once share one window.
+
+Every admitted member gets its `Job` at accept, queued, rather than when the worker reaches it — a job
+is how the system already talks about pending work, so eight servers waiting now look like eight
+servers waiting instead of eight servers with nothing happening. `Job` carries `batchId` and a stable
+`queuedPosition` (a count, never a predicted time: how long a verb takes is not something measured
+here). `JobState.Cancelled` joins the terminal states, since a job that never ran neither succeeded
+nor failed. A queued job holds its server's in-flight slot, so a competing command is refused — and
+`CommandGate.Busy` now names the verb and says whether it has started, because "already in flight"
+describes waiting work wrongly and invites the caller to wait for a run that has not begun.
+
+**A member interrupted by a restart settles `unknown`.** Its job record died with the process and the
+kgsm call was that process's child, so nobody observed the outcome; calling it failed would claim a
+result never seen, and re-running it could restart a server somebody deliberately stopped. Members
+that never started simply resume, keeping their original job ids.
+
+`ICommandExecutor` names the one method the worker needs from `CommandRunner`, so the window is
+provable without executing anything — proving it with real servers costs a host four game servers'
+worth of memory, which is the failure the window exists to prevent.
+
 ### Added — preferences that belong to a person, not a browser (`0.121.0`)
 
 A general per-account preference store: `GET /me/preferences`, `PUT /me/preferences/{key}`, and

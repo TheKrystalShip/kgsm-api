@@ -114,6 +114,17 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// summary lost to a restart was never delivered and never reported undelivered.</summary>
     public DbSet<NotificationDigestEntity> NotificationDigests => Set<NotificationDigestEntity>();
 
+    /// <summary>One verb applied to a set of this host's servers (see <see cref="BatchEntity"/>). Durable
+    /// because the work outlives both the request that asked for it and the client that watched: a batch
+    /// paced two at a time runs for as long as the servers take, and a client is free to leave. Created by
+    /// <c>EnsureCreated</c> on a fresh DB and by <see cref="Services.Commands.BatchStore"/>'s idempotent
+    /// <c>CREATE TABLE IF NOT EXISTS</c> on an existing one — never a wipe of the shared audit log.</summary>
+    public DbSet<BatchEntity> Batches => Set<BatchEntity>();
+
+    /// <summary>One server's place in a batch (see <see cref="BatchMemberEntity"/>), keyed by (batch, server).
+    /// Same creation posture as <see cref="Batches"/>.</summary>
+    public DbSet<BatchMemberEntity> BatchMembers => Set<BatchMemberEntity>();
+
     /// <summary>The general per-account preference store — one row per (account, device, key), plus the
     /// <c>""</c>-device row every device reads while sync is on. Keys are opaque here: the API stores
     /// what it is handed and knows nothing about what a widget or a palette is. Created by
@@ -128,6 +139,36 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<BatchEntity>(e =>
+        {
+            e.ToTable("batches");
+            e.HasKey(b => b.Id);
+            // Timestamps as UTC ticks — the audit/host_settings posture (SQLite has no date type, and a
+            // stored DateTimeOffset cannot be compared server-side without a converter).
+            e.Property(b => b.CreatedAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            e.Property(b => b.SettledAt).HasConversion(
+                v => v!.Value.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            // The two reads that exist: the active set (the worker's pump and GET /batches?active=true),
+            // and a run's share on this node (a client reassembling a cluster-wide run by its runId).
+            e.HasIndex(b => b.State);
+            e.HasIndex(b => b.RunId);
+        });
+
+        modelBuilder.Entity<BatchMemberEntity>(e =>
+        {
+            e.ToTable("batch_members");
+            e.HasKey(m => new { m.BatchId, m.ServerId });
+            e.Property(m => m.SettledAt).HasConversion(
+                v => v!.Value.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            // Every member read is "this batch's members", which the key's leading column already covers.
+            // The state index serves the worker's one cross-batch question: what is still pending.
+            e.HasIndex(m => m.State);
+        });
+
         modelBuilder.Entity<UserPreferenceEntity>(e =>
         {
             e.ToTable("user_preferences");

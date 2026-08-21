@@ -451,10 +451,22 @@ public class Startup(IConfiguration configuration)
         // the verify server.patch. Both singletons.
         services.AddSingleton<JobRegistry>();
 
+        // Batches — one verb across a set of this host's servers. The store is the durable half (the work
+        // outlives the request AND this process); the worker holds the host's concurrency window, which
+        // exists nowhere else: the registry caps in-flight work per SERVER and nothing caps it per host.
+        // Registered as a singleton and hosted from that same instance so the controller can signal it on
+        // accept — otherwise the first members of a batch wait for the next idle poll.
+        services.AddSingleton<BatchStore>();
+        services.AddSingleton<BatchWorker>();
+        services.AddHostedService(sp => sp.GetRequiredService<BatchWorker>());
+
         // Backup-download tickets: a singleton because the mint and the redemption are two separate
         // requests, and the second one carries no identity of its own — the ticket is what connects them.
         services.AddSingleton<Services.Backups.BackupDownloadTickets>();
         services.AddSingleton<CommandRunner>();
+        // The batch worker takes the runner through its interface so its concurrency window is provable
+        // without executing anything — the same instance, named by the one method the worker uses.
+        services.AddSingleton<ICommandExecutor>(sp => sp.GetRequiredService<CommandRunner>());
 
         // M5 — audit log (append-only, downstream of the stateless engine). AuditService is the single
         // writer (own DI scope per write, serialized); the consumer subscribes to kgsm events via

@@ -117,6 +117,12 @@ public static class CommandVerb
 /// <see cref="Error"/> carries the engine's real failure detail, set only when <see cref="State"/> is
 /// <see cref="JobState.Failed"/> — never a fabricated success.
 /// </summary>
+/// <param name="BatchId">The batch this job belongs to, when one issued it. A job is the same thing
+/// whether a person clicked once or asked for twenty at a time — this names the record that ties it
+/// to its siblings, and is null for a hand-issued command.</param>
+/// <param name="QueuedPosition">The job's stable 1-based ordinal within its batch, so ten jobs all
+/// reading <c>queued</c> still say which moves next. A <b>count, not a clock</b>: no completion time
+/// is offered, because how long a verb takes is not something this API has measured.</param>
 public sealed record Job(
     string Id,
     string ServerId,
@@ -126,7 +132,9 @@ public sealed record Job(
     DateTimeOffset? SettledAt,
     string? Error,
     string? Phase = null,
-    string? Blueprint = null);
+    string? Blueprint = null,
+    string? BatchId = null,
+    int? QueuedPosition = null);
 
 /// <summary>The <c>202 Accepted</c> body: <c>{ "job": { ... } }</c> (architecture.html §3).</summary>
 public sealed record CommandAccepted(Job Job);
@@ -135,6 +143,12 @@ public sealed record CommandAccepted(Job Job);
 /// The job execution lifecycle: <see cref="Queued"/> on accept, <see cref="Running"/> while the verb
 /// executes, then a terminal <see cref="Succeeded"/>/<see cref="Failed"/> once it settles and the API
 /// has re-checked authoritative run-state.
+/// <para>
+/// <see cref="Queued"/> is a real waiting state, not a formality. A batch creates every member's job
+/// when it is accepted and lets the worker reach them at its own pace, so a job can sit here for as
+/// long as the work ahead of it takes — which is what makes pending work visible on the server it is
+/// going to happen to.
+/// </para>
 /// </summary>
 public static class JobState
 {
@@ -142,4 +156,13 @@ public static class JobState
     public const string Running = "running";
     public const string Succeeded = "succeeded";
     public const string Failed = "failed";
+
+    /// <summary>Cancelled before it ran. A job that never started has no honest outcome among the
+    /// other two terminal states: it did not succeed, and calling it a failure would report a verb
+    /// that was never attempted.</summary>
+    public const string Cancelled = "cancelled";
+
+    /// <summary>Is this a state the job will not leave? What releases the registry's per-server
+    /// in-flight slot.</summary>
+    public static bool IsTerminal(string state) => state is Succeeded or Failed or Cancelled;
 }

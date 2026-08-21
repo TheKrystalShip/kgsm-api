@@ -93,14 +93,14 @@ public sealed class JobRegistry
     }
 
     /// <summary>
-    /// Stores a job state transition. On a terminal state (<see cref="JobState.Succeeded"/>/
-    /// <see cref="JobState.Failed"/>) it releases the server's in-flight slot — but only if it still
-    /// points at this job, so a newer job for the same server is never disturbed.
+    /// Stores a job state transition. On a terminal state (<see cref="JobState.IsTerminal"/>) it
+    /// releases the server's in-flight slot — but only if it still points at this job, so a newer job
+    /// for the same server is never disturbed.
     /// </summary>
     public Job Update(Job job)
     {
         _jobs[job.Id] = job;
-        if (job.State is JobState.Succeeded or JobState.Failed)
+        if (JobState.IsTerminal(job.State))
             _inFlight.TryRemove(new KeyValuePair<string, string>(job.ServerId, job.Id));
         return job;
     }

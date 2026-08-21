@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Data;
+using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Availability;
 using TheKrystalShip.Api.Services.Auth;
@@ -28,6 +30,9 @@ public sealed class ServersController(
     ServerAggregator aggregator,
     JobRegistry jobs,
     CommandRunner runner,
+    BatchStore batches,
+    BatchWorker worker,
+    StreamHub hub,
     ApiOptions options,
     ILogger<ServersController> logger) : ControllerBase
 {
@@ -167,6 +172,139 @@ public sealed class ServersController(
     }
 
     /// <summary>
+    /// Run one verb against a set of this host's servers — the batch path.
+    /// <para>
+    /// The batch is a <b>dispatcher, not a second command vocabulary</b>: every admitted member becomes
+    /// an ordinary <see cref="Job"/> on the ordinary runner, with its own engine invocation and its own
+    /// audit row, so nothing downstream — audit, the reactor, the bot, push — learns a new event shape.
+    /// What the batch adds is the record tying the members together, the pacing between them, and the
+    /// fact that it outlives the client: the work is owned by this node from here on, and completes
+    /// whether or not anyone is still watching.
+    /// </para>
+    /// <para>
+    /// The response states <b>both halves</b> — what was taken and what was refused, with the reason
+    /// each refusal would have carried as a single command's <c>409</c>. A caller asked about a set, so
+    /// it is answered about the set rather than discovering the refusals one member at a time.
+    /// </para>
+    /// <list type="bullet">
+    /// <item><c>400</c> — unknown/missing verb, an empty server list, or a bad origin.</item>
+    /// <item><c>202</c> — accepted: <c>{ batchId, runId, verb, admitted, refused }</c>. A batch where
+    /// every member was refused is still a <c>202</c>: the request was well-formed and the answer is
+    /// the refusal list, which is information, not an error.</item>
+    /// </list>
+    /// </summary>
+    [HttpPost("commands")]
+    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up, the single-command gate
+    public async Task<IActionResult> PostBatchCommand([FromBody] BatchRequest? body, CancellationToken ct)
+    {
+        string? verb = body?.Verb?.Trim().ToLowerInvariant();
+        if (!CommandVerb.IsKnown(verb))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "unknown or missing verb; expected one of: start, stop, restart, update");
+
+        if (!TryResolveOrigin(body?.Origin, out string origin))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "unknown origin; expected one of: ui, assistant, discord, api");
+
+        // De-duplicated, order preserved: the position a member is given is the order the caller asked
+        // in, and asking for the same server twice is one member, not two commands racing each other.
+        List<string> requested = (body?.ServerIds ?? [])
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (requested.Count == 0)
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "serverIds must name at least one server");
+
+        IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct);
+        string? actor = AuditPrincipal.ActorString(User);
+        string batchId = "batch_" + Guid.NewGuid().ToString("N")[..12];
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        var admitted = new List<string>();
+        var refused = new List<BatchRefusal>();
+        var members = new List<BatchMemberEntity>();
+        var queuedJobs = new List<Job>();
+
+        foreach (string id in requested)
+        {
+            Server? server = servers.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.Ordinal));
+            if (server is null)
+            {
+                // A server this node does not own is refused, never forwarded. Answering for another
+                // node's instance is worse than not answering.
+                Refuse(id, "no such server on this host");
+                continue;
+            }
+
+            string? noop = CommandGate.Inadmissible(verb!, server.Status);
+            if (noop is not null) { Refuse(id, noop); continue; }
+
+            // Every admitted member gets its job HERE, queued, rather than when the worker reaches it.
+            // A job is how the whole system already talks about pending work — it rides the jobs topic
+            // and the server's own activeJob — so creating them up front is what makes eight servers
+            // waiting look like eight servers waiting instead of eight servers with nothing happening.
+            string jobId = "job_" + Guid.NewGuid().ToString("N")[..8];
+            Job? job = jobs.TryStart(jobId, id, verb!, now);
+            if (job is null) { Refuse(id, CommandGate.Busy(jobs.InFlightFor(id))); continue; }
+
+            int position = admitted.Count + 1;
+            Job queued = jobs.Update(job with { BatchId = batchId, QueuedPosition = position });
+            queuedJobs.Add(queued);
+            admitted.Add(id);
+            members.Add(new BatchMemberEntity
+            {
+                BatchId = batchId,
+                ServerId = id,
+                State = BatchMemberState.Pending,
+                JobId = jobId,
+                Position = position,
+            });
+        }
+
+        // A batch with nothing to do is settled on arrival — there is no member that could still move,
+        // and marking it active would leave the worker a row it can never close.
+        var batch = new BatchEntity
+        {
+            Id = batchId,
+            RunId = string.IsNullOrWhiteSpace(body?.RunId) ? null : body!.RunId!.Trim(),
+            Verb = verb!,
+            State = admitted.Count > 0 ? BatchState.Active : BatchState.Settled,
+            Actor = actor,
+            Origin = origin,
+            CreatedAt = now,
+            SettledAt = admitted.Count > 0 ? null : now,
+        };
+        await batches.CreateAsync(batch, members, ct);
+
+        // Publish the queued jobs only after the batch is durable. A client told about a job the store
+        // does not yet hold could read the batch back and not find it.
+        foreach (Job q in queuedJobs) PublishJob(q);
+        await worker.PublishBatchAsync(batchId, ct);
+        if (admitted.Count > 0) worker.Signal();
+
+        logger.LogInformation(
+            "batch accepted: {Verb} × {Admitted} admitted, {Refused} refused (batch={BatchId}, run={RunId}, actor={Actor}, origin={Origin})",
+            verb, admitted.Count, refused.Count, batchId, batch.RunId ?? "(none)", actor ?? "(none)", origin);
+
+        return StatusCode(StatusCodes.Status202Accepted,
+            new BatchAccepted(batchId, batch.RunId, verb!, admitted, refused));
+
+        void Refuse(string id, string reason)
+        {
+            refused.Add(new BatchRefusal(id, reason));
+            members.Add(new BatchMemberEntity
+            {
+                BatchId = batchId,
+                ServerId = id,
+                State = BatchMemberState.Refused,
+                Error = reason,
+                SettledAt = now,
+            });
+        }
+    }
+
+    /// <summary>
     /// Install a new server from a blueprint (M8·b, architecture.html §3·h) — the panel's one
     /// <em>create</em> operation. The client may send the whole install form, but only <c>blueprint</c>
     /// (required), <c>name</c>, and <c>origin</c> are honored today; the rest is accepted-but-inert
@@ -292,6 +430,12 @@ public sealed class ServersController(
     // formatters (camelCase) — same shape UseStatusCodePages emits for the message-less 404 above.
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
+
+    // A batch's queued jobs are announced the same way the runner announces every other transition, so
+    // a client learns about waiting work through the channel it already follows.
+    private void PublishJob(Job job) =>
+        hub.Publish(StreamProtocol.JobsTopic, StreamProtocol.JobEntityKey(job.Id),
+            new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, job));
 
     // The absolute origin the self-hosted cover/hero serving URLs are built from — the configured public
     // base (reverse-proxy deployments) or the live request's scheme+host. Mirrors LibraryController.BaseUrl().

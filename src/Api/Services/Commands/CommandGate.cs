@@ -40,4 +40,20 @@ public static class CommandGate
             => "server must be stopped before updating",
         _ => null,
     };
+
+    /// <summary>
+    /// Why a server that already holds the registry's in-flight slot cannot take another command.
+    /// </summary>
+    /// <remarks>
+    /// The reason <b>names the verb and says whether it has started</b>. Since a batch creates every
+    /// member's job when it is accepted, the slot is now routinely held by work that is merely
+    /// waiting, and "a command is already in flight" describes that wrongly — it reads as something
+    /// under way, which invites the caller to wait for a run that has not begun. One helper so the
+    /// single-command path and the batch preflight cannot word the same refusal differently.
+    /// </remarks>
+    public static string Busy(Contracts.Job? existing) => existing is null
+        ? "a command is already in flight for this server"
+        : existing.State == JobState.Queued
+            ? $"a {existing.Verb} is queued for this server (job {existing.Id})"
+            : $"a {existing.Verb} is already running on this server (job {existing.Id})";
 }
