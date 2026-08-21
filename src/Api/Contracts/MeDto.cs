@@ -8,10 +8,10 @@ namespace TheKrystalShip.Api.Contracts;
 /// <remarks>
 /// <b>Read-only — an honest-vs-aspirational divergence (frozen, like M1·b / M8·a).</b> The
 /// architecture surface table lists <c>/me</c> as GET+PATCH ("Profile: display name, handle, density").
-/// The editable half (a custom display name, the UI density preference) needs a per-panel preference
-/// store keyed off identity — <b>deliberately not built</b> (architecture.html's statelessness note:
-/// "anything that must follow a user across devices … deliberately not built"). So <c>/me</c> surfaces
-/// only what the bearer already carries; PATCH + density wait for that store. <c>display</c>/<c>username</c>
+/// The editable half is a different resource: a density, and anything else that must follow a person
+/// across devices, is a preference, and preferences live at <c>/me/preferences</c> — keyed per device,
+/// with an account-level sync switch, and opaque about what any of them mean. So <c>/me</c> surfaces
+/// only what the bearer already carries. <c>display</c>/<c>username</c>
 /// are the Discord snapshot, never a guessed label — and the snapshot is the login-time capture, not a
 /// fresh live fetch (the §3·f no-Discord-token-retained divergence, shared with <c>/auth/session</c>).
 /// <para/>

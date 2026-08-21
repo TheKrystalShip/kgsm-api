@@ -114,8 +114,42 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// summary lost to a restart was never delivered and never reported undelivered.</summary>
     public DbSet<NotificationDigestEntity> NotificationDigests => Set<NotificationDigestEntity>();
 
+    /// <summary>The general per-account preference store — one row per (account, device, key), plus the
+    /// <c>""</c>-device row every device reads while sync is on. Keys are opaque here: the API stores
+    /// what it is handed and knows nothing about what a widget or a palette is. Created by
+    /// <c>EnsureCreated</c> on a fresh DB and by <see cref="Services.Preferences.UserPreferenceStore"/>'s
+    /// idempotent <c>CREATE TABLE IF NOT EXISTS</c> on an existing one — never a wipe of the shared
+    /// audit log.</summary>
+    public DbSet<UserPreferenceEntity> UserPreferences => Set<UserPreferenceEntity>();
+
+    /// <summary>One row per account: whether that person's preferences follow them across devices, and
+    /// which device switched it on. Same creation posture as <see cref="UserPreferences"/>.</summary>
+    public DbSet<UserSyncEntity> UserSync => Set<UserSyncEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<UserPreferenceEntity>(e =>
+        {
+            e.ToTable("user_preferences");
+            e.HasKey(p => new { p.UserId, p.DeviceId, p.Key });
+            e.Property(p => p.Updated).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            // Every read is "this account's rows for one key" (the version bump) or "this account's
+            // rows" (the effective set, the sync rewrites) — the key's leading column covers both, and
+            // the per-key index covers the merge lookup without scanning an account's whole set.
+            e.HasIndex(p => new { p.UserId, p.Key });
+        });
+
+        modelBuilder.Entity<UserSyncEntity>(e =>
+        {
+            e.ToTable("user_sync");
+            e.HasKey(s => s.UserId);
+            e.Property(s => s.Updated).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+        });
+
         modelBuilder.Entity<PushActionEntity>(e =>
         {
             e.ToTable("push_actions");

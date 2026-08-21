@@ -29,6 +29,7 @@ using TheKrystalShip.Api.Services.Integrations.WebPush;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.Api.Services.Players;
+using TheKrystalShip.Api.Services.Preferences;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Services;
 using TheKrystalShip.KGSM.Core.Models;
@@ -357,6 +358,13 @@ public class Startup(IConfiguration configuration)
         // per send into the service log.
         services.AddHttpClient<WebPushSender>(c => c.Timeout = TimeSpan.FromSeconds(10))
             .RemoveAllLoggers();
+        // The general per-account preference store — what a person has set, per device, plus the
+        // account switch that makes one device's set authoritative. A singleton for the same reason the
+        // push stores are: it owns a scope per operation and a write gate, and the version bump behind
+        // that gate is what keeps the merge counter monotonic. Keys are opaque to it, so the dashboard
+        // layout and the UI theme are tenants rather than features here.
+        services.AddSingleton<UserPreferenceStore>();
+
         services.AddSingleton<PushSubscriptionStore>();
         services.AddSingleton<PushPreferenceStore>();
         services.AddSingleton<PushSnoozeStore>();

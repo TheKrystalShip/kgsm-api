@@ -22,9 +22,12 @@ namespace TheKrystalShip.Api.Controllers;
 /// so this is the surface it reads on load.
 /// </summary>
 /// <remarks>
-/// <b>Read-only (a documented divergence — see <see cref="MeResponse"/>):</b> the editable Profile half
-/// (display name, density) needs a per-panel preference store that is deliberately not built, so PATCH is
-/// deferred. The honest delta this adds over <c>GET /auth/session</c> (which returns <c>{ user, scopes }</c>)
+/// <b>Read-only (a documented divergence — see <see cref="MeResponse"/>):</b> everything here is
+/// projected from the session bearer, so there is nothing on this resource for a PATCH to write. The
+/// editable half of the Profile page — the UI density, and anything else that must follow a person
+/// rather than a browser — is a preference, and preferences are their own resource:
+/// <see cref="MePreferencesController"/>, per device with an account-level sync switch.
+/// The honest delta this adds over <c>GET /auth/session</c> (which returns <c>{ user, scopes }</c>)
 /// is the <c>tier</c> — the one fact the SPA needs to decide what to show, and the reason <c>/me</c> exists
 /// as its own resource rather than the SPA inferring authority from a 403.
 /// <para/>

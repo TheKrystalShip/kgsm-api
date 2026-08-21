@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — preferences that belong to a person, not a browser (`0.121.0`)
+
+A general per-account preference store: `GET /me/preferences`, `PUT /me/preferences/{key}`, and
+`GET|PUT /me/preferences/sync`. The dashboard layout is its first tenant and the UI theme its second,
+and the API knows what neither of them is — a key is an opaque string and a value is the client's own
+JSON, stored and handed back verbatim, so a new preference costs no backend change.
+
+Preferences are per device, and the device names itself in `X-Krystal-Device`. A session id would be
+the obvious alternative and is the wrong one: sessions are per-host and expire, so the same laptop
+signing in again would be a new device and would lose its layout. A device-scoped call without the
+header is refused with `device_required` rather than defaulting to anything — the empty device is the
+synced record's own slot, and writing there silently would publish one machine's arrangement to all of
+them.
+
+An account-level switch decides which slot every call touches. Off, a device reads and writes its own
+rows. On, they all read and write the one synced record: enabling stamps the calling device as the
+source and overwrites the others from it, disabling seeds every known device from the synced record so
+nobody lands on an empty dashboard the moment the switch moves.
+
+Each write increments a `version` that is monotonic per (account, key), with `originDevice` as the
+tiebreak at equal versions. Nothing propagates between nodes yet, but the merge key ships now: adding
+one later means inventing a version for every row that already exists. Versions, not clocks — wall-clock
+last-write-wins hands permanent victory to whichever node's clock runs fastest, and the losing device
+watches its layout revert with no error anywhere.
+
+Gated at `[Authorize]` rather than a tier. These are a person's own settings, so somebody still waiting
+on an admin arranges their own panel, and there is no endpoint that reads or writes anybody else's.
+
+⚠ Two new tables (`user_preferences`, `user_sync`). They are created by the store's idempotent
+`CREATE TABLE IF NOT EXISTS` beside `EnsureCreated`, so a deployed database gains them without a wipe.
+
 ### Added — a server DTO dates its run (`0.120.0`)
 
 `Server.StartedAt` now actually populates, and `Server.StoppedAt` joins it, so a surface can say how
