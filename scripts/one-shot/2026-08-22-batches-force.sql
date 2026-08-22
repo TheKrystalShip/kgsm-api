@@ -1,0 +1,15 @@
+-- Bring an existing `batches` table up to the shape BatchStore creates.
+--
+-- CREATE TABLE IF NOT EXISTS creates a table or does nothing; it never reconciles one that already
+-- exists. A database that gained `batches` before `Force` was added therefore keeps the older shape,
+-- and every query naming the column fails at runtime rather than at build.
+--
+-- Run once per host that has the table, against the API's own database (Api__DbPath), with the
+-- service stopped. Additive and row-preserving: the audit log shares this file and is never wiped to
+-- reconcile a schema.
+--
+--   sqlite3 /var/lib/kgsm-api/kgsm-api.db < scripts/one-shot/2026-08-22-batches-force.sql
+--
+-- A host whose database has no `batches` table needs nothing: BatchStore creates it at the current
+-- shape on first use.
+ALTER TABLE batches ADD COLUMN "Force" INTEGER NOT NULL DEFAULT 0;

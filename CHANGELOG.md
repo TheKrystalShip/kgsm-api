@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a batch meets the memory gate (`0.123.0`)
+
+`force` on `POST /servers/commands`, refused on any verb but `start` exactly as the single-command
+path refuses it. It is **one decision for the whole batch** rather than one per member: a batch is a
+single intent applied N times, and an operator who has judged that a blueprint's figure overstates
+what these games really use has judged it for the selection they made. It is stored on the batch,
+because the worker reaches most members long after the request that asked for it, and a member that
+ran without the override its batch was granted would be refused for a reason its operator had already
+answered. `CommandRunner.RunAsync` carries it to the engine; absent ⇒ false, so the protection is
+what a caller gets by not asking.
+
+**A capacity refusal is now recorded as `refused`, not `failed`.** Nothing is wrong with the server —
+the node was full — so filing it as a failure reads as a fault in the instance and invites a retry
+certain to be refused again until something else stops. The decision is keyed on kgsm's
+`EC_INSUFFICIENT_MEMORY` (51), named in `EngineExit`, because an exit code is the part of a command's
+answer meant to be read by a program; the engine's message is prose written for a person and free to
+be reworded. `RunAsync` returns the exit code for that purpose and nothing else — the job's own
+verdict still comes from the registry.
+
+⚠ Only the CLI's own gate reports 51 today. A refusal from `kgsm-watchdog`'s reservation ledger
+arrives as a generic error, because its start endpoint answers `409` for every failure and kgsm maps
+any non-200 to `EC_ERROR`. Those refusals record as `failed` until that distinction is carried
+through; the rule here needs no change when it is.
+
 ### Added — one verb across a set of servers, owned by the node (`0.122.0`)
 
 `POST /servers/commands` takes a verb and a list of this host's servers, and `GET /batches`,

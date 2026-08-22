@@ -216,7 +216,7 @@ public sealed class BatchWorker(
         string? error = null;
         try
         {
-            await runner.RunAsync(job, m.Actor, m.Origin).ConfigureAwait(false);
+            int? exitCode = await runner.RunAsync(job, m.Actor, m.Origin, m.Force).ConfigureAwait(false);
 
             // The runner settled the job; read its own verdict rather than inferring one from the fact
             // that the call returned.
@@ -232,7 +232,13 @@ public sealed class BatchWorker(
             }
             else
             {
-                state = BatchMemberState.Failed;
+                // A capacity refusal is a refusal, not a failure. Nothing is wrong with the server — the
+                // node was full — so recording it as failed both reads as a fault in the instance and
+                // invites a retry that will refuse identically. Keyed on the exit code the engine
+                // defines rather than on its message, which is prose and free to be reworded.
+                state = exitCode == EngineExit.InsufficientMemory
+                    ? BatchMemberState.Refused
+                    : BatchMemberState.Failed;
                 error = settled.Error;
             }
         }

@@ -56,8 +56,8 @@ public sealed class CommandRunner(
     /// command, where the caller is a request that has already answered <c>202</c> and nothing is
     /// counting.
     /// </remarks>
-    public Task RunAsync(Job job, string? actor = null, string? origin = null) =>
-        ExecuteAsync(job, actor, origin, blueprint: null, backupName: null);
+    public Task<int?> RunAsync(Job job, string? actor = null, string? origin = null, bool force = false) =>
+        ExecuteAsync(job, actor, origin, blueprint: null, backupName: null, force: force);
 
     /// <summary>
     /// Fire-and-forget an <c>install</c> job (M8·b — <c>POST /servers</c>). <paramref name="blueprint"/> is
@@ -102,10 +102,16 @@ public sealed class CommandRunner(
     public void StartBackupRestore(Job job, string backupName, string? actor = null, string? origin = null) =>
         _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName));
 
-    private async Task ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null, bool? installAutostart = null, bool force = false)
+    /// <summary>
+    /// Runs the verb, settles the job and verifies. Returns the engine's exit code when it failed, so a
+    /// caller that must categorise the failure — <see cref="BatchWorker"/> telling a capacity refusal
+    /// from a fault — reads a number the engine defined rather than matching its prose.
+    /// </summary>
+    private async Task<int?> ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null, bool? installAutostart = null, bool force = false)
     {
         bool ok = false;
         string? error = null;
+        int? exitCode = null;
         try
         {
             Publish(registry.Update(job with { State = JobState.Running }));
@@ -115,7 +121,7 @@ public sealed class CommandRunner(
             // Own scope — the request scope is long gone; the kgsm-lib services are transient/process-based
             // (lifecycle/install) or conditionally-registered (firewall), so resolve them here, never capture them.
             using IServiceScope scope = scopeFactory.CreateScope();
-            (ok, error) = job.Verb switch
+            (ok, error, exitCode) = job.Verb switch
             {
                 CommandVerb.Install => RunInstall(scope, job, blueprint!, installPort, actor, origin, installAutostart),
                 CommandVerb.Uninstall => RunUninstall(scope, job, actor, origin),
@@ -176,15 +182,17 @@ public sealed class CommandRunner(
         {
             logger.LogDebug(ex, "verify after job {JobId} failed; a later poll will reconcile", job.Id);
         }
+
+        return exitCode;
     }
 
     // The lifecycle verbs (start/stop/restart). Provenance rides the engine call → the kgsm event echo →
     // the M5 audit row. This runner does NOT write an audit row here (no double-write).
-    private (bool ok, string? error) RunLifecycle(IServiceScope scope, Job job, string? actor, string? origin, bool force = false)
+    private (bool ok, string? error, int? exitCode) RunLifecycle(IServiceScope scope, Job job, string? actor, string? origin, bool force = false)
     {
         var lifecycle = scope.ServiceProvider.GetService(typeof(ILifecycleService)) as ILifecycleService;
         if (lifecycle is null)
-            return (false, "lifecycle service unavailable (engine not provisioned)");
+            return (false, "lifecycle service unavailable (engine not provisioned)", null);
 
         KgsmResult result = job.Verb switch
         {
@@ -193,7 +201,7 @@ public sealed class CommandRunner(
             CommandVerb.Restart => lifecycle.Restart(job.ServerId, actor, origin),
             _ => new KgsmResult(1, "", $"unknown verb '{job.Verb}'"),
         };
-        return result.IsSuccess ? (true, null) : (false, Detail(result));
+        return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
 
     // install (M8·b) — create a new instance from `blueprint`. The job's ServerId is the backend-assigned
@@ -202,28 +210,28 @@ public sealed class CommandRunner(
     // the instance_installed event's name match. installDir/version stay null — reserved/inert per §3·h
     // (only blueprint + name are honored today). NO audit row here: kgsm emits instance_installed →
     // KgsmAuditConsumer writes the server.install echo with the stamped provenance.
-    private (bool ok, string? error) RunInstall(
+    private (bool ok, string? error, int? exitCode) RunInstall(
         IServiceScope scope, Job job, string blueprint, int? port, string? actor, string? origin, bool? autostart = null)
     {
         var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
         if (instances is null)
-            return (false, "engine not provisioned");
+            return (false, "engine not provisioned", null);
 
         // port (the install form's Game Port) overrides the blueprint's primary port when supplied; null
         // keeps the blueprint default. autostart requests a one-shot start after install completes.
         // installDir/version stay null — kgsm uses its host-config default dir and the latest version
         // (the SPA disables version selection; install dir is host-config, shown read-only).
         KgsmResult result = instances.Install(blueprint, installDir: null, version: null, name: job.ServerId, actor: actor, origin: origin, port: port, start: autostart);
-        return result.IsSuccess ? (true, null) : (false, Detail(result));
+        return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
 
     // uninstall (M8·b) — remove the instance. Same echo-path discipline: kgsm emits instance_uninstalled →
     // KgsmAuditConsumer writes the server.uninstall row. No audit write here.
-    private (bool ok, string? error) RunUninstall(IServiceScope scope, Job job, string? actor, string? origin)
+    private (bool ok, string? error, int? exitCode) RunUninstall(IServiceScope scope, Job job, string? actor, string? origin)
     {
         var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
         if (instances is null)
-            return (false, "engine not provisioned");
+            return (false, "engine not provisioned", null);
 
         // Best-effort pre-stop (Phase 0 — delete hardening): stop a running instance before removing files so
         // we never orphan a live process. A non-zero result is expected when it's already stopped — log at
@@ -238,7 +246,7 @@ public sealed class CommandRunner(
         }
 
         KgsmResult result = instances.Uninstall(job.ServerId, actor, origin);
-        return result.IsSuccess ? (true, null) : (false, Detail(result));
+        return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
 
     // update (Tier-1 ops) — update the instance to the latest version. On IInstanceService (NOT lifecycle),
@@ -246,11 +254,11 @@ public sealed class CommandRunner(
     // the server.update audit row (KgsmAuditConsumer). NO audit row here (the echo path, like install). The
     // controller already 409s an update-on-running synchronously; a subtler engine refusal lands as a failed
     // job + the real stderr.
-    private (bool ok, string? error) RunUpdate(IServiceScope scope, Job job, string? actor, string? origin)
+    private (bool ok, string? error, int? exitCode) RunUpdate(IServiceScope scope, Job job, string? actor, string? origin)
     {
         var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
         if (instances is null)
-            return (false, "engine not provisioned");
+            return (false, "engine not provisioned", null);
 
         KgsmResult result = instances.Update(job.ServerId, actor, origin);
         // Nothing to clear here: whether an update is available is the engine's own answer, read from
@@ -258,34 +266,34 @@ public sealed class CommandRunner(
         // instance_version_updated echo re-reads the roster (KgsmAuditConsumer) for an update driven
         // from anywhere — this API, the CLI, the assistant — so one path keeps it true rather than
         // this one holding a local copy it has to remember to void.
-        return result.IsSuccess ? (true, null) : (false, Detail(result));
+        return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
 
     // backup_create (Tier-1 ops) — snapshot the instance. Echo-path discipline: kgsm emits
     // instance_backup_created → KgsmAuditConsumer writes the backup.create row with the stamped provenance.
     // No audit write here.
-    private (bool ok, string? error) RunBackupCreate(IServiceScope scope, Job job, string? actor, string? origin)
+    private (bool ok, string? error, int? exitCode) RunBackupCreate(IServiceScope scope, Job job, string? actor, string? origin)
     {
         var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
         if (instances is null)
-            return (false, "engine not provisioned");
+            return (false, "engine not provisioned", null);
 
         KgsmResult result = instances.CreateBackup(job.ServerId, actor, origin);
-        return result.IsSuccess ? (true, null) : (false, Detail(result));
+        return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
 
     // backup_restore (Tier-1 ops) — restore from a named snapshot (backupName threaded through the closure;
     // Job has no slot for it). Echo-path: kgsm emits instance_backup_restored → the backup.restore row. No
     // audit write here. An unknown backup name surfaces as kgsm's real stderr on a failed job.
-    private (bool ok, string? error) RunBackupRestore(
+    private (bool ok, string? error, int? exitCode) RunBackupRestore(
         IServiceScope scope, Job job, string backupName, string? actor, string? origin)
     {
         var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
         if (instances is null)
-            return (false, "engine not provisioned");
+            return (false, "engine not provisioned", null);
 
         KgsmResult result = instances.RestoreBackup(job.ServerId, backupName, actor, origin);
-        return result.IsSuccess ? (true, null) : (false, Detail(result));
+        return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
 
     // kgsm's real failure detail (stderr), or a bare exit code when it said nothing — never a fabricated

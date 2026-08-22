@@ -18,11 +18,23 @@ namespace TheKrystalShip.Api.Contracts;
 /// hand-issued command would.
 /// </para>
 /// </summary>
+/// <param name="Force">
+/// Override the engine's node-capacity check for every member — <c>start</c> only, refused on any
+/// other verb exactly as the single-command path refuses it. One decision for the whole batch rather
+/// than one per member: a batch is a single intent applied N times, and an operator who has judged
+/// that a blueprint's figure overstates what these games really use has judged it for the selection
+/// they made. Absent ⇒ false, so the protection is what a caller gets by not asking.
+/// <para>
+/// ⚠ It does not create memory, and a batch is where that bites hardest: forcing a selection the node
+/// cannot fit does not fail one start, it invites the OOM killer to choose among everything running.
+/// </para>
+/// </param>
 public sealed record BatchRequest(
     string? Verb,
     IReadOnlyList<string>? ServerIds,
     string? RunId = null,
-    string? Origin = null);
+    string? Origin = null,
+    bool Force = false);
 
 /// <summary>One server the batch would not accept, and the sentence explaining it — the same reason
 /// text a single command's <c>409</c> would have carried.</summary>

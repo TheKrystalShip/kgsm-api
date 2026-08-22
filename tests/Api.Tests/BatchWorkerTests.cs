@@ -20,12 +20,13 @@ namespace TheKrystalShip.Api.Tests;
 /// the window exists to prevent. A fake executor that blocks until released makes the property
 /// provable at no cost, which is why <see cref="ICommandExecutor"/> exists.
 /// </remarks>
+[Collection(BatchWorkerCollection.Name)]
 public sealed class BatchWorkerTests
 {
     [Fact]
     public async Task LifecycleVerbs_NeverExceedFourAtOnce()
     {
-        await AssertWindowHolds(CommandVerb.Stop, members: 9, expectedWindow: 4);
+        await AssertWindowHolds(CommandVerb.Stop, members: 6, expectedWindow: 4);
     }
 
     [Fact]
@@ -33,7 +34,7 @@ public sealed class BatchWorkerTests
     {
         // Update is the expensive verb — steamcmd against one disk and one uplink — so it gets a
         // narrower window than the lifecycle verbs, and that difference is the whole point.
-        await AssertWindowHolds(CommandVerb.Update, members: 6, expectedWindow: 2);
+        await AssertWindowHolds(CommandVerb.Update, members: 4, expectedWindow: 2);
     }
 
     [Fact]
@@ -147,6 +148,131 @@ public sealed class BatchWorkerTests
         }
     }
 
+    [Fact]
+    public async Task ACapacityRefusal_IsRecordedAsRefused_NotFailed()
+    {
+        Harness h = Harness.New();
+        await h.SeedBatchAsync("b1", CommandVerb.Start, 3);
+
+        var executor = new BlockingExecutor(h.Registry)
+        {
+            FailServer = "srv-2",
+            FailError = "needs 8192MB, the node has 2048MB available",
+            FailExitCode = 51, // kgsm's EC_INSUFFICIENT_MEMORY
+        };
+        BatchWorker worker = h.Worker(executor);
+
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await executor.WaitForConcurrentAsync(3);
+            executor.ReleaseAll();
+            await h.WaitForSettledAsync("b1");
+
+            BatchView? view = await h.Store.GetAsync("b1");
+
+            // Nothing is wrong with the server — the node was full. Filing it as a failure reads as a
+            // fault in the instance and invites a retry certain to be refused again.
+            Assert.Equal(BatchMemberState.Refused, view!.Members.Single(m => m.ServerId == "srv-2").State);
+            Assert.Equal(1, view.Counts.Refused);
+            Assert.Equal(0, view.Counts.Failed);
+            Assert.Equal(2, view.Counts.Succeeded);
+        }
+        finally
+        {
+            executor.ReleaseAll();
+            await worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task AnyOtherEngineFailure_IsStillAFailure()
+    {
+        Harness h = Harness.New();
+        await h.SeedBatchAsync("b1", CommandVerb.Start, 2);
+
+        var executor = new BlockingExecutor(h.Registry)
+        {
+            FailServer = "srv-1",
+            FailError = "port already in use",
+            FailExitCode = 1,
+        };
+        BatchWorker worker = h.Worker(executor);
+
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await executor.WaitForConcurrentAsync(2);
+            executor.ReleaseAll();
+            await h.WaitForSettledAsync("b1");
+
+            // Only the capacity code is a refusal. Everything else the engine reports is a real fault,
+            // and widening the rule would hide faults as "the node was busy".
+            BatchView? view = await h.Store.GetAsync("b1");
+            Assert.Equal(BatchMemberState.Failed, view!.Members.Single(m => m.ServerId == "srv-1").State);
+            Assert.Equal(0, view.Counts.Refused);
+        }
+        finally
+        {
+            executor.ReleaseAll();
+            await worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task TheBatchsForce_ReachesEveryMembersEngineCall()
+    {
+        Harness h = Harness.New();
+        await h.SeedBatchAsync("b1", CommandVerb.Start, 3, force: true);
+
+        var executor = new BlockingExecutor(h.Registry);
+        BatchWorker worker = h.Worker(executor);
+
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await executor.WaitForConcurrentAsync(3);
+            executor.ReleaseAll();
+            await h.WaitForSettledAsync("b1");
+
+            // The override is the batch's, so every member carries it — a member that ran without it
+            // would be refused for a reason its operator had already answered, minutes after they left.
+            Assert.All(executor.Dispatched, d => Assert.True(d.Force));
+            Assert.Equal(3, executor.Dispatched.Count);
+        }
+        finally
+        {
+            executor.ReleaseAll();
+            await worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
+    public async Task WithoutForce_NoMemberIsDispatchedWithIt()
+    {
+        Harness h = Harness.New();
+        await h.SeedBatchAsync("b1", CommandVerb.Start, 2);
+
+        var executor = new BlockingExecutor(h.Registry);
+        BatchWorker worker = h.Worker(executor);
+
+        await worker.StartAsync(CancellationToken.None);
+        try
+        {
+            await executor.WaitForConcurrentAsync(2);
+            executor.ReleaseAll();
+            await h.WaitForSettledAsync("b1");
+
+            // The protection is what a caller gets by not asking for the override.
+            Assert.All(executor.Dispatched, d => Assert.False(d.Force));
+        }
+        finally
+        {
+            executor.ReleaseAll();
+            await worker.StopAsync(CancellationToken.None);
+        }
+    }
+
     // ---- harness --------------------------------------------------------------------------------
 
     private sealed record Harness(BatchStore Store, JobRegistry Registry, StreamHub Hub)
@@ -169,7 +295,7 @@ public sealed class BatchWorkerTests
         public BatchWorker Worker(ICommandExecutor executor) =>
             new(Store, Registry, executor, Hub, NullLogger<BatchWorker>.Instance);
 
-        public Task SeedBatchAsync(string batchId, string verb, int members) =>
+        public Task SeedBatchAsync(string batchId, string verb, int members, bool force = false) =>
             Store.CreateAsync(
                 new BatchEntity
                 {
@@ -177,6 +303,7 @@ public sealed class BatchWorkerTests
                     Verb = verb,
                     State = BatchState.Active,
                     Origin = "ui",
+                    Force = force,
                     CreatedAt = DateTimeOffset.UtcNow,
                 },
                 Enumerable.Range(1, members).Select(i => new BatchMemberEntity
@@ -212,12 +339,20 @@ public sealed class BatchWorkerTests
         public string? FailServer { get; init; }
         public string? FailError { get; init; }
 
+        /// <summary>The exit code the engine reports for the failing server — what the worker keys its
+        /// refusal-vs-failure decision on.</summary>
+        public int? FailExitCode { get; init; }
+
+        /// <summary>Every (server, force) pair the worker dispatched, so a test can assert the batch's
+        /// override actually reached the engine call rather than stopping at the store.</summary>
+        public List<(string Server, bool Force)> Dispatched { get; } = [];
+
         public int Concurrent { get { lock (_sync) return _concurrent; } }
         public int PeakConcurrent { get; private set; }
         public int TotalRun { get; private set; }
         public List<string> Ran { get; } = [];
 
-        public async Task RunAsync(Job job, string? actor = null, string? origin = null)
+        public async Task<int?> RunAsync(Job job, string? actor = null, string? origin = null, bool force = false)
         {
             lock (_sync)
             {
@@ -225,6 +360,7 @@ public sealed class BatchWorkerTests
                 if (_concurrent > PeakConcurrent) PeakConcurrent = _concurrent;
                 TotalRun++;
                 Ran.Add(job.ServerId);
+                Dispatched.Add((job.ServerId, force));
             }
 
             await _gate.Task.ConfigureAwait(false);
@@ -240,6 +376,7 @@ public sealed class BatchWorkerTests
             });
 
             lock (_sync) { _concurrent--; }
+            return fail ? FailExitCode : null;
         }
 
         public void ReleaseAll() => _gate.TrySetResult();
@@ -255,4 +392,21 @@ public sealed class BatchWorkerTests
             Assert.Fail($"never reached {n} concurrent (peak {PeakConcurrent})");
         }
     }
+}
+
+/// <summary>
+/// Runs <see cref="BatchWorkerTests"/> alone, out of parallel with every other collection.
+/// </summary>
+/// <remarks>
+/// These are the only tests here that stand up a real <see cref="Microsoft.Extensions.Hosting.BackgroundService"/>
+/// and drive it against SQLite, and a run of one settles every member through two writes and a read.
+/// Alongside the suites that bind an <c>HttpListener</c> or shell out to bash, that burst was enough to
+/// tip a timing-sensitive one over roughly half the time — a different one each run, each passing on
+/// its own. A test that proves a concurrency bound is worth having; one that makes an unrelated test
+/// fail every other run is not, and the cheapest honest fix is to stop them overlapping.
+/// </remarks>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class BatchWorkerCollection
+{
+    public const string Name = "batch-worker";
 }

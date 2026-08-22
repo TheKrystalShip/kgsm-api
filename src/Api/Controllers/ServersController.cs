@@ -215,6 +215,14 @@ public sealed class ServersController(
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "unknown origin; expected one of: ui, assistant, discord, api");
 
+        // Refused rather than dropped on a verb with no capacity check, exactly as the single-command
+        // path refuses it: silently ignoring a safety override somebody deliberately set would leave
+        // them believing they had bypassed something.
+        bool force = body?.Force == true;
+        if (force && verb != CommandVerb.Start)
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                $"force applies to start only; '{verb}' has no capacity check to override");
+
         // De-duplicated, order preserved: the position a member is given is the order the caller asked
         // in, and asking for the same server twice is one member, not two commands racing each other.
         List<string> requested = (body?.ServerIds ?? [])
@@ -281,6 +289,7 @@ public sealed class ServersController(
             State = admitted.Count > 0 ? BatchState.Active : BatchState.Settled,
             Actor = actor,
             Origin = origin,
+            Force = force,
             CreatedAt = now,
             SettledAt = admitted.Count > 0 ? null : now,
         };
@@ -293,8 +302,8 @@ public sealed class ServersController(
         if (admitted.Count > 0) worker.Signal();
 
         logger.LogInformation(
-            "batch accepted: {Verb} × {Admitted} admitted, {Refused} refused (batch={BatchId}, run={RunId}, actor={Actor}, origin={Origin})",
-            verb, admitted.Count, refused.Count, batchId, batch.RunId ?? "(none)", actor ?? "(none)", origin);
+            "batch accepted: {Verb} × {Admitted} admitted, {Refused} refused (batch={BatchId}, run={RunId}, actor={Actor}, origin={Origin}, force={Force})",
+            verb, admitted.Count, refused.Count, batchId, batch.RunId ?? "(none)", actor ?? "(none)", origin, force);
 
         return StatusCode(StatusCodes.Status202Accepted,
             new BatchAccepted(batchId, batch.RunId, verb!, admitted, refused));

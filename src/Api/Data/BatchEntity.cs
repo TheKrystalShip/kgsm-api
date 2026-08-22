@@ -39,6 +39,16 @@ public sealed class BatchEntity
     /// <summary>The declared driving surface, stamped the same way.</summary>
     public string Origin { get; set; } = "";
 
+    /// <summary>
+    /// Whether this batch overrides the engine's node-capacity check.
+    /// </summary>
+    /// <remarks>
+    /// Stored rather than held in memory because the worker reaches most members long after the
+    /// request that asked for it, and a member that ran without the override its batch was granted
+    /// would be refused for a reason its operator had already answered.
+    /// </remarks>
+    public bool Force { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     /// <summary>When the last member reached a terminal state. Null while the batch is active.</summary>

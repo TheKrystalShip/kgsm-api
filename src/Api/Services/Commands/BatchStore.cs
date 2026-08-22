@@ -46,7 +46,8 @@ public sealed class BatchStore(IServiceScopeFactory scopeFactory)
                     "Actor" TEXT NULL,
                     "Origin" TEXT NOT NULL,
                     "CreatedAt" INTEGER NOT NULL,
-                    "SettledAt" INTEGER NULL
+                    "SettledAt" INTEGER NULL,
+                    "Force" INTEGER NOT NULL DEFAULT 0
                 );
                 """, ct).ConfigureAwait(false);
             await db.Database.ExecuteSqlRawAsync(
@@ -71,6 +72,7 @@ public sealed class BatchStore(IServiceScopeFactory scopeFactory)
             await db.Database.ExecuteSqlRawAsync(
                 """CREATE INDEX IF NOT EXISTS "IX_batch_members_State" ON batch_members ("State");""",
                 ct).ConfigureAwait(false);
+
             _ensured = true;
         }
         finally { _ensureGate.Release(); }
@@ -191,7 +193,7 @@ public sealed class BatchStore(IServiceScopeFactory scopeFactory)
             where m.State == BatchMemberState.Pending
             orderby b.CreatedAt, m.Position
             select new PendingMember(
-                m.BatchId, m.ServerId, m.JobId, m.Position, b.Verb, b.Actor, b.Origin, b.CreatedAt))
+                m.BatchId, m.ServerId, m.JobId, m.Position, b.Verb, b.Actor, b.Origin, b.Force, b.CreatedAt))
             .ToListAsync(ct).ConfigureAwait(false);
     }
 
@@ -210,7 +212,7 @@ public sealed class BatchStore(IServiceScopeFactory scopeFactory)
             where m.State == BatchMemberState.Running
             orderby b.CreatedAt, m.Position
             select new PendingMember(
-                m.BatchId, m.ServerId, m.JobId, m.Position, b.Verb, b.Actor, b.Origin, b.CreatedAt))
+                m.BatchId, m.ServerId, m.JobId, m.Position, b.Verb, b.Actor, b.Origin, b.Force, b.CreatedAt))
             .ToListAsync(ct).ConfigureAwait(false);
     }
 
@@ -315,4 +317,5 @@ public sealed record PendingMember(
     string Verb,
     string? Actor,
     string Origin,
+    bool Force,
     DateTimeOffset BatchCreatedAt);
