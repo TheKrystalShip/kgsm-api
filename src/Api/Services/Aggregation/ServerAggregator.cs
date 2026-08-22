@@ -36,6 +36,7 @@ public sealed class ServerAggregator
     private readonly PlayerObservability _observability;
     private readonly Availability.UpdateLagIndex _updateLag;
     private readonly Availability.RunTimesIndex _runTimes;
+    private readonly Library.BlueprintCache _blueprints;
     private readonly ILogger<ServerAggregator> _logger;
 
     public ServerAggregator(
@@ -50,6 +51,7 @@ public sealed class ServerAggregator
         PlayerObservability observability,
         Availability.UpdateLagIndex updateLag,
         Availability.RunTimesIndex runTimes,
+        Library.BlueprintCache blueprints,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
@@ -63,6 +65,7 @@ public sealed class ServerAggregator
         _observability = observability;
         _updateLag = updateLag;
         _runTimes = runTimes;
+        _blueprints = blueprints;
         _logger = logger;
     }
 
@@ -74,6 +77,22 @@ public sealed class ServerAggregator
     /// </summary>
     internal static Func<string, int?> OnlinePlayersOf(PlayerHistoryService players, PlayerObservability observability) =>
         id => observability.IsObservable(id) ? players.OnlineCount(id) : null;
+
+    /// <summary>
+    /// A blueprint's advisory <c>min_ram_mb</c>, or null when it declares none — the fallback half of
+    /// what a start is expected to cost.
+    /// </summary>
+    /// <remarks>
+    /// Read from the blueprint cache rather than the engine, so publishing this on every server costs a
+    /// dictionary lookup instead of a kgsm invocation per row. Static and shaped as a Func for the same
+    /// reason <see cref="OnlinePlayersOf"/> is: <see cref="Realtime.DomainPump"/> composes the identical
+    /// rule, and a stream frame that disagreed with the REST read about a server's requirement would be
+    /// two answers to one question.
+    /// </remarks>
+    internal static Func<string, int?> BlueprintMinRamOf(Library.BlueprintCache blueprints) =>
+        blueprint => blueprints.GetAll().TryGetValue(blueprint, out Blueprint? bp)
+            ? bp.Metadata?.MinRamMb
+            : null;
 
     /// <summary>
     /// Build the full server list for this host AND report whether the engine was actually read. A
@@ -139,7 +158,7 @@ public sealed class ServerAggregator
         Server server = BuildServer(id, instance, _cache.Statuses, _backups.Readings,
             metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
             IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability), _updateLag.Lookup,
-            _runTimes.Lookup);
+            _runTimes.Lookup, BlueprintMinRamOf(_blueprints));
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -197,7 +216,8 @@ public sealed class ServerAggregator
         foreach ((string id, Instance instance) in roster)
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
                 _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById,
-                OnlinePlayersOf(_players, _observability), _updateLag.Lookup, _runTimes.Lookup));
+                OnlinePlayersOf(_players, _observability), _updateLag.Lookup, _runTimes.Lookup,
+                BlueprintMinRamOf(_blueprints)));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -254,7 +274,8 @@ public sealed class ServerAggregator
         IReadOnlyDictionary<string, long>? diskBytesById = null,
         Func<string, int?>? onlinePlayers = null,
         Func<string, DateTimeOffset?>? updateAvailableSince = null,
-        Func<string, Availability.RunTimes>? runTimes = null)
+        Func<string, Availability.RunTimes>? runTimes = null,
+        Func<string, int?>? blueprintMinRamMb = null)
     {
         string status = ServerStatus.Unknown;
         string? version = null;
@@ -327,6 +348,28 @@ public sealed class ServerAggregator
             ? br
             : BackupReading.Unknown;
 
+        // What a start is expected to cost the node, read in the SAME order KGSM's memory gate reads it
+        // so the panel's warning and the engine's refusal cannot disagree about which figure applies.
+        // The cap first — the cgroup ceiling the watchdog enforces, so it bounds what the node can lose
+        // and an operator chose it; the blueprint's advisory figure only when there is no cap.
+        //
+        // Published as the REQUIREMENT, never as a verdict: whether there is room depends on what the
+        // node has free at the instant the engine looks, and this record would be stale about that the
+        // moment it serialized. Neither declared leaves both null — the gate cannot answer either, and a
+        // substituted default would put an invented requirement in front of a real start.
+        int? startMemoryMb = null;
+        string? startMemorySource = null;
+        if (instance.MemoryCapMb is { } capMb and > 0)
+        {
+            startMemoryMb = capMb;
+            startMemorySource = StartMemorySource.Cap;
+        }
+        else if (blueprintMinRamMb?.Invoke(CleanBlueprintId(instance)) is { } minRamMb and > 0)
+        {
+            startMemoryMb = minRamMb;
+            startMemorySource = StartMemorySource.Blueprint;
+        }
+
         return new Server(
             Id: id,
             Name: string.IsNullOrWhiteSpace(instance.Name) ? id : instance.Name,
@@ -354,7 +397,9 @@ public sealed class ServerAggregator
             BackupCount: backups.Count,
             ActiveJob: activeJob(id),
             DiskBytes: diskBytes,
-            OnlinePlayers: onlinePlayers?.Invoke(id));
+            OnlinePlayers: onlinePlayers?.Invoke(id),
+            StartMemoryMb: startMemoryMb,
+            StartMemorySource: startMemorySource);
     }
 
     // The operator-authored note, or null when the instance has no note. kgsm-lib decodes the body

@@ -43,8 +43,8 @@ public sealed class CommandRunner(
     /// (the bearer identity, e.g. <c>discord:haru</c>) and <paramref name="origin"/> (the declared surface)
     /// are stamped onto the engine command, so the kgsm event echo carries provenance.
     /// </summary>
-    public void Start(Job job, string? actor = null, string? origin = null) =>
-        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName: null));
+    public void Start(Job job, string? actor = null, string? origin = null, bool force = false) =>
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName: null, force: force));
 
     /// <summary>
     /// Run a lifecycle verb and <b>await</b> it — the same execution, settle and verify
@@ -102,7 +102,7 @@ public sealed class CommandRunner(
     public void StartBackupRestore(Job job, string backupName, string? actor = null, string? origin = null) =>
         _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName));
 
-    private async Task ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null, bool? installAutostart = null)
+    private async Task ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null, bool? installAutostart = null, bool force = false)
     {
         bool ok = false;
         string? error = null;
@@ -125,7 +125,7 @@ public sealed class CommandRunner(
                 CommandVerb.Update => RunUpdate(scope, job, actor, origin),
                 CommandVerb.BackupCreate => RunBackupCreate(scope, job, actor, origin),
                 CommandVerb.BackupRestore => RunBackupRestore(scope, job, backupName!, actor, origin),
-                _ => RunLifecycle(scope, job, actor, origin),
+                _ => RunLifecycle(scope, job, actor, origin, force),
             };
         }
         catch (Exception ex)
@@ -180,7 +180,7 @@ public sealed class CommandRunner(
 
     // The lifecycle verbs (start/stop/restart). Provenance rides the engine call → the kgsm event echo →
     // the M5 audit row. This runner does NOT write an audit row here (no double-write).
-    private (bool ok, string? error) RunLifecycle(IServiceScope scope, Job job, string? actor, string? origin)
+    private (bool ok, string? error) RunLifecycle(IServiceScope scope, Job job, string? actor, string? origin, bool force = false)
     {
         var lifecycle = scope.ServiceProvider.GetService(typeof(ILifecycleService)) as ILifecycleService;
         if (lifecycle is null)
@@ -188,7 +188,7 @@ public sealed class CommandRunner(
 
         KgsmResult result = job.Verb switch
         {
-            CommandVerb.Start => lifecycle.Start(job.ServerId, actor, origin),
+            CommandVerb.Start => lifecycle.Start(job.ServerId, actor, origin, force),
             CommandVerb.Stop => lifecycle.Stop(job.ServerId, actor, origin),
             CommandVerb.Restart => lifecycle.Restart(job.ServerId, actor, origin),
             _ => new KgsmResult(1, "", $"unknown verb '{job.Verb}'"),

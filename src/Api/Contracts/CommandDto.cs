@@ -14,7 +14,22 @@ namespace TheKrystalShip.Api.Contracts;
 /// rejected (<c>400</c>). It is independent of the actor (the bearer identity), never derived from it.
 /// </para>
 /// </summary>
-public sealed record CommandRequest(string? Verb, string? Origin = null);
+/// <param name="Force">
+/// Override the engine's node-capacity check — <c>start</c> only. KGSM refuses a start that would
+/// leave the node with less free memory than its configured floor, judging the instance against its
+/// own <c>memory_cap_mb</c> or, failing that, its blueprint's advisory <c>min_ram_mb</c>. That
+/// fallback is a vendor estimate and can overstate what a game really uses, so an operator who knows
+/// better can say so. Absent ⇒ false: the protection is what a caller gets by not asking.
+/// <para>
+/// Operator, not admin. The judgement it takes — "this blueprint's figure is wrong for this server" —
+/// is one anyone who runs these servers day to day is in a position to make, and the tier that may
+/// start a server is the same tier that may decide it fits.
+/// </para>
+/// ⚠ It does not create memory. Forcing a start the node genuinely cannot fit invites the OOM killer,
+/// which picks by its own heuristic and may take down a different server, or the watchdog supervising
+/// them all.
+/// </param>
+public sealed record CommandRequest(string? Verb, string? Origin = null, bool Force = false);
 
 /// <summary>
 /// The request body for <c>POST /servers</c> (architecture.html §3·h, M8·b) — the panel's one

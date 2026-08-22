@@ -35,6 +35,7 @@ public sealed class DomainPump(
     Services.Players.PlayerObservability observability,
     Services.Availability.UpdateLagIndex updateLag,
     Services.Availability.RunTimesIndex runTimes,
+    Services.Library.BlueprintCache blueprints,
     ApiOptions options,
     ILogger<DomainPump> logger)
     : BackgroundService
@@ -133,7 +134,10 @@ public sealed class DomainPump(
                     foreach ((string id, var instance) in roster)
                         byId[id] = ServerAggregator.BuildServer(id, instance, statuses,
                             backups.Readings, metricsById, options.HostId, cache.IsStarting, jobs.InFlightFor,
-                            diskById, onlinePlayers, updateSince, runClock);
+                            diskById, onlinePlayers, updateSince, runClock,
+                            // Composed from the SAME helper the REST read uses, so a stream frame and a
+                            // GET can never disagree about what a start is expected to cost.
+                            ServerAggregator.BlueprintMinRamOf(blueprints));
 
                     if (!primed)
                     {

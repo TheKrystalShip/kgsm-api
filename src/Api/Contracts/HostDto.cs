@@ -48,6 +48,13 @@ public sealed record Host(
     // base instead of a hardcoded path. Null when the engine isn't provisioned or the key is unset (honest
     // unknown, never a fabricated default).
     string? InstallDirectory = null,
+    // This host's node-capacity policy, read from the engine's own config (per host: each host runs its
+    // own kgsm, and each may be tuned differently). It is the FLOOR a surface needs to warn before a
+    // start — joined against the server's StartMemoryMb and this host's live free memory — so the
+    // panel's hint and the engine's refusal are computed from the same rule and the same numbers.
+    // Null when the engine isn't provisioned or the keys are unset; the gate then still runs on its own
+    // coded defaults, so a client that finds this null must warn about nothing rather than assume a floor.
+    MemoryGatePolicy? MemoryGate = null,
     // M-diag depth (Monitor.Contracts 1.1.0). STATIC CPU identity — model/cores/threads/maxFreqGhz — is the
     // same every frame, so it lives on this Host view ONLY (like nothing on the tick) and is NOT re-pushed per
     // metrics WS tick. Null when there is no snapshot, and each inner field null when its /proc/sys source can't
@@ -78,6 +85,26 @@ public sealed record Host(
     // list itself is not gated and rides the metrics tick (HostMetricsDto.Gpus).
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     IReadOnlyList<GpuProcessSample>? GpuProcesses = null);
+
+/// <summary>
+/// This host's node-capacity policy — KGSM's <c>[resources]</c> keys, as the engine will apply them.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The engine refuses a start that would leave the node with less than <see cref="HeadroomMb"/> free,
+/// judging an instance by its own <c>memory_cap_mb</c> or, failing that, its blueprint's advisory
+/// <c>min_ram_mb</c> (published per server as <see cref="Server.StartMemoryMb"/>).
+/// </para>
+/// <para>
+/// Published so a surface can warn <em>before</em> a start instead of only reporting the refusal
+/// afterwards. It is the rule's INPUT, not its verdict: the engine reads the node's free memory at the
+/// moment it acts, and re-decides then.
+/// </para>
+/// </remarks>
+/// <param name="Enabled">Whether the gate refuses at all. False means starts proceed regardless, and a
+/// surface has nothing to warn about.</param>
+/// <param name="HeadroomMb">Megabytes that must remain available after a start.</param>
+public sealed record MemoryGatePolicy(bool Enabled, int HeadroomMb);
 
 /// <summary>
 /// Host memory capacity, in GiB (matching the §4·a contract unit). <see cref="Used"/>/<see cref="Total"/>

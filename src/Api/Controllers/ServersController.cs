@@ -137,6 +137,15 @@ public sealed class ServersController(
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "unknown origin; expected one of: ui, assistant, discord, api");
 
+        // force overrides the engine's node-capacity check, and only start has one to override. Asking
+        // for it on another verb is refused rather than dropped: silently ignoring a safety override a
+        // caller deliberately set would leave them believing they had bypassed something. `false` is the
+        // default and passes on every verb, so a client that always sends the field is unaffected.
+        bool force = body?.Force == true;
+        if (force && verb != CommandVerb.Start)
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                $"force applies to start only; '{verb}' has no capacity check to override");
+
         // Resolve the server + its real observed status (honest 404 on an unknown id).
         IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct);
         Server? server = servers.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.Ordinal));
@@ -165,9 +174,9 @@ public sealed class ServersController(
         // Log the accepted command so the action is visible in the service log even before the engine
         // echo lands an audit row — the job outcome (success/failure) is logged by the CommandRunner.
         logger.LogInformation(
-            "command accepted: {Verb} {ServerId} job={JobId} (actor={Actor}, origin={Origin})",
-            verb, id, job.Id, actor ?? "(none)", origin);
-        runner.Start(job, actor, origin);
+            "command accepted: {Verb} {ServerId} job={JobId} (actor={Actor}, origin={Origin}, force={Force})",
+            verb, id, job.Id, actor ?? "(none)", origin, force);
+        runner.Start(job, actor, origin, force);
         return StatusCode(StatusCodes.Status202Accepted, new CommandAccepted(job));
     }
 

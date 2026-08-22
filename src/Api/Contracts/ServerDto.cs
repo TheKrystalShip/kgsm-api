@@ -188,7 +188,28 @@ public sealed record Server(
     // PlayerObservability's single answer. It rides the list, the detail AND the `servers` stream, and
     // DomainPump diffs it (unlike the metrics block): a join or a leave is a person-scale event, not a
     // per-second sample, so carrying it costs the topic nothing and it is what lets a fleet total be live.
-    int? OnlinePlayers = null);
+    int? OnlinePlayers = null,
+    // What starting this instance is expected to cost the node in memory (MB), and which figure that is.
+    //
+    // This is the input to KGSM's memory gate, published so a surface can WARN before a start rather than
+    // only reporting the refusal afterwards. It is deliberately the requirement and NOT a verdict: whether
+    // there is room depends on what the node has free at the instant the engine looks, which is a moving
+    // number this DTO would be stale about the moment it serialized. A client joins this against the
+    // owning node's live free memory to show a hint; the ENGINE decides, and its refusal is the answer.
+    //
+    // Two sources, in the order the gate itself reads them, named in StartMemorySource so a surface can
+    // say WHY the figure is what it is:
+    //   "cap"       — the instance's own memory_cap_mb, the cgroup ceiling the watchdog enforces. It
+    //                 bounds what the node can actually lose, and an operator chose it.
+    //   "blueprint" — the blueprint's advisory metadata.min_ram_mb. A vendor estimate, uncurated for many
+    //                 games, and capable of overstating what a server really uses — which is exactly why
+    //                 a surface should say so rather than presenting it as measured.
+    //
+    // Both null when neither is declared. That is the common case today and it means the gate cannot
+    // answer, so nothing is refused and nothing is warned about — never a substituted default, which
+    // would put an invented requirement in front of a real start.
+    int? StartMemoryMb = null,
+    string? StartMemorySource = null);
 
 /// <summary>
 /// A server's operator-authored note — free text an Operator writes for players and teammates
@@ -289,6 +310,22 @@ public sealed record ServerMetricsRoster(IReadOnlyList<ServerMetricsRow> Servers
 /// by itself. See <c>InstanceCache</c> for the latch design and its reconcile-hazard guard.
 /// </para>
 /// </summary>
+/// <summary>
+/// Which figure <see cref="Server.StartMemoryMb"/> is, so a surface can say why — the two differ in how
+/// much they should be trusted, and presenting an estimate as a measurement is the whole thing this API
+/// avoids.
+/// </summary>
+public static class StartMemorySource
+{
+    /// <summary>The instance's own <c>memory_cap_mb</c> — the cgroup ceiling the watchdog writes to
+    /// <c>memory.max</c>, so the instance cannot exceed it and an operator chose it deliberately.</summary>
+    public const string Cap = "cap";
+
+    /// <summary>The blueprint's advisory <c>metadata.min_ram_mb</c> — vendor-declared, uncurated for many
+    /// games, and capable of overstating what a server really uses.</summary>
+    public const string Blueprint = "blueprint";
+}
+
 public static class ServerStatus
 {
     public const string Running = "running";

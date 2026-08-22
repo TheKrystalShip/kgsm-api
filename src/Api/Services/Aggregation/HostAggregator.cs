@@ -34,6 +34,55 @@ public sealed class HostAggregator(
     private bool _installDirRead;
     private readonly object _installDirGate = new();
 
+    // The node-capacity policy is config the operator TUNES, unlike the install path above, so it is
+    // re-read on a short interval rather than pinned for the process lifetime: a changed floor should
+    // reach the panel while the person who changed it is still looking. One kgsm invocation a minute at
+    // most, and only while somebody is reading /hosts. The same TTL the watchdog uses for these keys.
+    private static readonly TimeSpan MemoryGateTtl = TimeSpan.FromMinutes(1);
+    private MemoryGatePolicy? _memoryGate;
+    private DateTimeOffset _memoryGateReadAt = DateTimeOffset.MinValue;
+    private readonly object _memoryGateLock = new();
+
+    private MemoryGatePolicy? ReadMemoryGate()
+    {
+        lock (_memoryGateLock)
+        {
+            if (DateTimeOffset.UtcNow - _memoryGateReadAt < MemoryGateTtl) return _memoryGate;
+
+            MemoryGatePolicy? policy = null;
+            try
+            {
+                using IServiceScope scope = scopeFactory.CreateScope();
+                if (scope.ServiceProvider.GetService<IConfigService>() is IConfigService config)
+                {
+                    string? rawEnabled = config.Get("enable_memory_gate");
+                    string? rawHeadroom = config.Get("memory_gate_headroom_mb");
+
+                    // Both keys absent means a host whose config predates the gate. The engine still gates
+                    // there, on its own coded defaults — but this API does not know them, and publishing a
+                    // guessed floor would have the panel warn against a number nobody configured. Null is
+                    // the honest answer: the client warns about nothing and the engine still decides.
+                    if (!string.IsNullOrWhiteSpace(rawEnabled) || !string.IsNullOrWhiteSpace(rawHeadroom))
+                    {
+                        bool enabled = !string.Equals(rawEnabled?.Trim(), "false", StringComparison.OrdinalIgnoreCase);
+                        policy = int.TryParse(rawHeadroom?.Trim(), out int mb) && mb >= 0
+                            ? new MemoryGatePolicy(enabled, mb)
+                            : null;
+                    }
+                }
+            }
+            catch
+            {
+                // An engine hiccup is an unknown policy, never a fabricated one.
+                policy = null;
+            }
+
+            _memoryGate = policy;
+            _memoryGateReadAt = DateTimeOffset.UtcNow;
+            return _memoryGate;
+        }
+    }
+
     private string? ReadInstallDirectory()
     {
         if (_installDirRead) return _installDir;
@@ -94,6 +143,7 @@ public sealed class HostAggregator(
             // The engine's configured base install directory (cached once) — per-host, so the install modal
             // shows this host's real default. Null when the engine isn't provisioned / the key is unset.
             InstallDirectory: ReadInstallDirectory(),
+            MemoryGate: ReadMemoryGate(),
             // M-diag depth: STATIC cpu identity comes straight off the snapshot (not on the metrics tick),
             // null when there is no snapshot; DYNAMIC sensors ride the shared capacity DTO (so the Host view
             // and a metrics tick carry the same hwmon list). Honest-null/empty when not measurable.
