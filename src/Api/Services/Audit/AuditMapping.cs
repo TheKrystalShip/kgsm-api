@@ -1050,6 +1050,71 @@ public static class AuditMapping
     }
 
     /// <summary>
+    /// Map a <c>command_failed</c> / <c>command_refused</c> / <c>command_cancelled</c> event.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three severities for three different facts. A failure is <see cref="AuditSeverity.Danger"/> — a
+    /// verb somebody asked for did not happen and something is wrong. A capacity refusal is
+    /// <see cref="AuditSeverity.Warn"/>: nothing is wrong with the instance, the node was full, and
+    /// filing it as a fault both blames the server and invites a retry certain to be refused again. A
+    /// cancellation is <see cref="AuditSeverity.Info"/> — it is what the operator asked for.
+    /// </para>
+    /// <para>
+    /// The engine's own error text rides in <c>meta</c> and never in the summary. The sentence says what
+    /// did not happen, which is the same sentence whatever the engine's prose was, so a reworded kgsm
+    /// message changes what a reader can dig into and not how the feed reads.
+    /// </para>
+    /// </remarks>
+    public static AuditWrite FromCommandOutcomeEvent(CommandOutcomeEventData d, string type, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string instance = Display(d.InstanceName);
+        string word = CommandWord(d.Verb);
+
+        (string action, string severity, string summary) = type switch
+        {
+            ApiJournal.CommandRefusedEvent => (
+                AuditAction.CommandRefused, AuditSeverity.Warn,
+                $"refused to {word} {instance} — not enough free memory on this node"),
+            ApiJournal.CommandCancelledEvent => (
+                AuditAction.CommandCancelled, AuditSeverity.Info,
+                $"cancelled before it ran: {word} {instance}"),
+            _ => (
+                AuditAction.CommandFailed, AuditSeverity.Danger,
+                $"could not {word} {instance}"),
+        };
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!string.IsNullOrEmpty(d.Verb)) meta["verb"] = d.Verb;
+        if (!string.IsNullOrEmpty(d.JobId)) meta["jobId"] = d.JobId!;
+        if (!string.IsNullOrEmpty(d.BatchId)) meta["batchId"] = d.BatchId!;
+        if (d.ExitCode is { } code) meta["exitCode"] = code.ToString(CultureInfo.InvariantCulture);
+        if (!string.IsNullOrEmpty(d.Error)) meta["error"] = d.Error!;
+
+        return ApiWrite(d, action, severity,
+            new AuditTarget(AuditTargetKind.Server, d.InstanceName, d.InstanceName),
+            hostId, summary, meta, serverId: string.IsNullOrEmpty(d.InstanceName) ? null : d.InstanceName);
+    }
+
+    /// <summary>
+    /// The verb as a sentence uses it.
+    /// </summary>
+    /// <remarks>
+    /// A verb the set does not name is printed as it was recorded rather than replaced — a row about a
+    /// command must be able to say which command, and a fallback that swallowed the name would leave the
+    /// only record of a failure unable to say what failed.
+    /// </remarks>
+    private static string CommandWord(string? verb) => verb switch
+    {
+        CommandVerb.BackupCreate => "back up",
+        CommandVerb.BackupRestore => "restore",
+        { Length: > 0 } named => named,
+        _ => "run a command on",
+    };
+
+    /// <summary>
     /// The row every event out of this API's own journal becomes, so none of them can disagree about
     /// where the timestamp, the actor or the origin come from.
     /// </summary>

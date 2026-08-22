@@ -126,6 +126,7 @@ public sealed class KgsmAuditConsumer(
         ApiJournal.ServiceConnectedEvent, ApiJournal.ServiceDisconnectedEvent,
         ApiJournal.ServiceConfigChangedEvent, ApiJournal.ServiceRestartedEvent,
         ApiJournal.FileWrittenEvent, ApiJournal.BackupDownloadedEvent,
+        ApiJournal.CommandFailedEvent, ApiJournal.CommandRefusedEvent, ApiJournal.CommandCancelledEvent,
     };
 
     /// <summary>

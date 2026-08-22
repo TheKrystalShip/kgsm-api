@@ -133,7 +133,7 @@ public sealed class BatchStore(IServiceScopeFactory scopeFactory)
     /// A running member is left alone and named in the result. A kgsm invocation already under way is not
     /// interruptible, and reporting a clean halt that did not happen is worse than reporting a partial one.
     /// </remarks>
-    public async Task<(IReadOnlyList<string> cancelled, IReadOnlyList<string> stillRunning, IReadOnlyList<string> jobIds)>
+    public async Task<(IReadOnlyList<CancelledMember> cancelled, IReadOnlyList<string> stillRunning)>
         CancelPendingAsync(string batchId, CancellationToken ct = default)
     {
         await EnsureSchemaAsync(ct).ConfigureAwait(false);
@@ -147,9 +147,8 @@ public sealed class BatchStore(IServiceScopeFactory scopeFactory)
                 .Where(m => m.BatchId == batchId)
                 .ToListAsync(ct).ConfigureAwait(false);
 
-            var cancelled = new List<string>();
+            var cancelled = new List<CancelledMember>();
             var stillRunning = new List<string>();
-            var jobIds = new List<string>();
             DateTimeOffset now = DateTimeOffset.UtcNow;
 
             foreach (BatchMemberEntity m in members)
@@ -158,8 +157,7 @@ public sealed class BatchStore(IServiceScopeFactory scopeFactory)
                 {
                     m.State = BatchMemberState.Cancelled;
                     m.SettledAt = now;
-                    cancelled.Add(m.ServerId);
-                    if (m.JobId is not null) jobIds.Add(m.JobId);
+                    cancelled.Add(new CancelledMember(m.ServerId, m.JobId));
                 }
                 else if (m.State == BatchMemberState.Running)
                 {
@@ -169,7 +167,7 @@ public sealed class BatchStore(IServiceScopeFactory scopeFactory)
 
             await SettleIfDoneAsync(db, batchId, ct).ConfigureAwait(false);
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
-            return (cancelled, stillRunning, jobIds);
+            return (cancelled, stillRunning);
         }
         finally { _writeGate.Release(); }
     }
@@ -306,6 +304,17 @@ public sealed class BatchStore(IServiceScopeFactory scopeFactory)
                 .ToList());
     }
 }
+
+/// <summary>
+/// A member a cancel stopped, and the queued job it was holding.
+/// </summary>
+/// <remarks>
+/// The pair travels together because both halves are needed and only the store sees them side by side:
+/// the job id releases the server's in-flight slot, and the server id is what the record of the
+/// cancellation is about. <see cref="JobId"/> is nullable because the store is the durable half — a
+/// member is a row whether or not a job for it exists in this process's memory.
+/// </remarks>
+public readonly record struct CancelledMember(string ServerId, string? JobId);
 
 /// <summary>A member the worker can act on, carrying the batch's verb and provenance so the worker needs
 /// no second read to run it.</summary>

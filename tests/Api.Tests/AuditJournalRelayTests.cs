@@ -314,6 +314,54 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         Assert.Equal("haru", viewerRow.GetProperty("actor").GetProperty("name").GetString());
     }
 
+    /// <summary>
+    /// A command outcome reaches the feed exactly ONCE.
+    /// </summary>
+    /// <remarks>
+    /// The property the write site depends on: this API tails its own journal, and that tail is what
+    /// shapes and announces the row. Announcing from the write site as well would send every one of
+    /// these twice, and a duplicate is invisible to a reader — both frames carry the same id, the same
+    /// sentence and the same timestamp, so the feed simply shows one fact as two.
+    /// </remarks>
+    [Fact]
+    public async Task ACommandOutcomeIsAnnouncedOnceAndReadsBackTheSame()
+    {
+        using HttpClient client = _factory.CreateClient();
+        using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
+            client, "/api/v1/stream?topics=audit", _factory.AccessToken(KgsmTier.Operator));
+        using SseFrameReader frames = await SseTestHelpers.Frames(resp);
+
+        // Appended ONCE, deliberately: the count is the assertion, so the usual re-append-until-seen
+        // loop would make a duplicate indistinguishable from a second append. The segment file exists
+        // before the host starts, so the tail is attached to it and a single line is enough.
+        string instance = $"cmdfail-{Guid.NewGuid():N}";
+        _factory.AppendEvent(
+            "command_failed",
+            new { InstanceName = instance, Verb = "start", JobId = "job_once", ExitCode = 1, Error = "kgsm said no" },
+            actor: "discord:haru", origin: AuditOrigin.Ui);
+
+        bool Mine(JsonElement f) =>
+            f.GetProperty("type").GetString() == "audit.append"
+            && f.GetProperty("data").TryGetProperty("serverId", out JsonElement s)
+            && s.GetString() == instance;
+
+        JsonElement? first = await frames.WaitForFrame(Mine, TimeSpan.FromSeconds(20));
+        Assert.NotNull(first);
+        Assert.Equal(AuditAction.CommandFailed, first!.Value.GetProperty("data").GetProperty("action").GetString());
+        Assert.Equal("kgsm said no",
+            first.Value.GetProperty("data").GetProperty("meta").GetProperty("error").GetString());
+
+        // Nothing announces it a second time.
+        Assert.Null(await frames.WaitForFrame(Mine, TimeSpan.FromSeconds(2)));
+
+        // And the merged read shows the same single fact under the same id — one journal position,
+        // one row, whether it arrived live or on a refresh.
+        JsonElement row = await SingleRow(KgsmTier.Operator, instance);
+        Assert.Equal(first.Value.GetProperty("data").GetProperty("id").GetString(),
+                     row.GetProperty("id").GetString());
+        Assert.Equal(AuditAction.CommandFailed, row.GetProperty("action").GetString());
+    }
+
     /// <summary>The one row for <paramref name="instance"/> on the merged page, read at a given tier.</summary>
     private async Task<JsonElement> SingleRow(KgsmTier tier, string instance)
     {

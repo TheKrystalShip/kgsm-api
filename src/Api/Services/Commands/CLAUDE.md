@@ -28,6 +28,15 @@ The first write path (M3) — `POST /api/v1/servers/{id}/commands { verb }` → 
   → no double-write). `CommandRunner.Start(job, actor, origin)` threads them; `ServersController` derives
   `actor` from the JWT (`AuditPrincipal`) and validates `origin` (`ui|assistant|discord|api`, default `api`;
   `system` rejected). Don't add an `AuditService` call here **for lifecycle verbs**.
+- **The outcome with no echo IS recorded, to the API's own journal.** A verb that fails or is refused
+  exits non-zero and emits nothing, and a batch member cancelled in the queue never reaches the engine —
+  so `CommandRunner`'s `finally` writes `command_failed`/`command_refused` through `ApiJournal`, and the
+  batch cancel path writes `command_cancelled` per member. Refused vs failed is keyed on
+  `EngineExit.InsufficientMemory` (51), the same constant `BatchWorker` uses. ⚠ **Never through
+  `AuditService`** (it announces, it has no append path) and **never published from the write site** —
+  the API tails its own journal and that tail is what announces the row. ⚠ `update` and `uninstall` are
+  excluded (`CommandRunner.EngineRecordsItsOwnFailure`): kgsm emits `instance_update_failed`/
+  `instance_uninstall_failed`, and a second row for a fact a producer already emits is undedupable.
 - **`open_ports` is the audit EXCEPTION — a DIRECT write (M6·b).** It goes through `IFirewallService`
   (`EnsureOpenAsync`), which runs no kgsm command and emits **no event**, so there is no echo to read — the
   `auth.*` case. The runner therefore writes the `network.ports.open` row **directly** via `AuditService`

@@ -62,6 +62,10 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     public const string FileWrittenEvent = "file_written";
     public const string BackupDownloadedEvent = "backup_downloaded";
 
+    public const string CommandFailedEvent = "command_failed";
+    public const string CommandRefusedEvent = "command_refused";
+    public const string CommandCancelledEvent = "command_cancelled";
+
     /// <summary>
     /// Records a session beginning or ending.
     /// </summary>
@@ -235,6 +239,45 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
             w.WriteString("BackupId", backupId);
             w.WriteNumber("SizeBytes", sizeBytes);
             WriteNullable(w, "Sha256", sha256);
+        }, ct);
+
+    /// <summary>
+    /// Records a command that ended without doing the thing — it failed, the engine refused it, or it
+    /// was cancelled before it ran.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one part of the command path that records rather than stamps.</b> A verb that works is
+    /// kgsm's own event, and the command path stamps <c>actor</c>+<c>origin</c> onto the engine call so
+    /// they ride that event — nothing is written here for it. A verb that does not work exits non-zero
+    /// and emits nothing, and a member cancelled in the queue never reaches the engine at all, so
+    /// there is no echo to ride and this is the only record either can have.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>Never called for a verb whose failure the engine reports itself.</b> kgsm emits
+    /// <c>instance_update_failed</c> and <c>instance_uninstall_failed</c>, which already become rows —
+    /// a second one for the same fact cannot be deduplicated against an echo, which is the whole
+    /// reason provenance is stamped instead of written.
+    /// </para>
+    /// </remarks>
+    public Task CommandOutcomeAsync(
+        string type, string instance, string verb, string? jobId, string? batchId,
+        string? error, int? exitCode, string? actor, string? origin,
+        CancellationToken ct = default) =>
+        WriteAsync(type, actor ?? "", origin, w =>
+        {
+            w.WriteString("InstanceName", instance);
+            w.WriteString("Verb", verb);
+            WriteNullable(w, "JobId", jobId);
+            WriteNullable(w, "BatchId", batchId);
+
+            // The engine's own words and its own number. A run that produced neither — the engine was
+            // never reached — leaves both null rather than gaining a sentence this API composed.
+            WriteNullable(w, "Error", error);
+            if (exitCode is { } code)
+                w.WriteNumber("ExitCode", code);
+            else
+                w.WriteNull("ExitCode");
         }, ct);
 
     /// <summary>

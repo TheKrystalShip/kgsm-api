@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the command outcomes nobody else records (`0.124.0`)
+
+A command that **fails**, is **refused** or is **cancelled** now writes a row to this API's own event
+journal. It is the one gap the echo path could not cover: kgsm emits an event when a verb *works*, and
+a verb that does not exits non-zero and emits nothing — so a failed start, a start the memory gate
+refused, and a batch member called off before it ran existed in a transient job registry and a browser
+tab, and in no record on the host.
+
+Three actions rather than one carrying the outcome in `meta`, because they answer three different
+questions and a reader must not have to filter a field to ask them:
+
+- `command.failed` (**danger**) — a verb somebody asked for did not happen.
+- `command.refused` (**warn**) — the node was full. Keyed on kgsm's `EC_INSUFFICIENT_MEMORY` (51), the
+  same constant `BatchWorker` tells a refusal from a fault by, never on the engine's prose. Nothing is
+  wrong with the instance, so it must not read as a fault in it.
+- `command.cancelled` (**info**) — a queued batch member was called off. One row per member, scoped to
+  its server, with `meta.batchId` tying them together: "why did this server never get its update?" is
+  asked on one server's feed, where a batch-level row carrying no `serverId` would never appear.
+
+`meta` carries the verb, the job id, the batch id, and the engine's exit code and error text verbatim.
+The summary says what did not happen and never quotes the engine, so a reworded kgsm message changes
+what a reader can dig into and not how the feed reads. `jobId` is populatable here where an echo's is
+not — no id round-trips the stateless engine, and this row is written by the process that owns the job.
+
+⚠ **The success path is untouched**, and two verbs are excluded from the failure path on the same
+grounds: kgsm emits `instance_update_failed` and `instance_uninstall_failed`, which already become
+`server.update` / `server.uninstall` rows carrying the provenance the command stamped onto the call. A
+second row for a fact a producer already emits cannot be deduplicated against an echo.
+
+`DELETE /batches/{id}` takes `?origin=` (`ui|assistant|discord|api`, default `api`, unknown ⇒ `400`) —
+the same query-string vocabulary every other body-less mutation uses, so the cancellation row cannot
+claim a surface nobody declared.
+
+
 ### Added — a batch meets the memory gate (`0.123.0`)
 
 `force` on `POST /servers/commands`, refused on any verb but `start` exactly as the single-command

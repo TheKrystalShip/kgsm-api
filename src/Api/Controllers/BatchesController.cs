@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Commands;
 
@@ -31,6 +32,7 @@ public sealed class BatchesController(
     BatchWorker worker,
     JobRegistry jobs,
     StreamHub hub,
+    ApiJournal journal,
     ILogger<BatchesController> logger) : ControllerBase
 {
     /// <summary>The most batches one listing returns. A client following live work wants the active
@@ -62,27 +64,52 @@ public sealed class BatchesController(
     /// Cancel a batch's <b>pending</b> members.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A member already running is left alone and named in the response. A kgsm invocation under way is
     /// not interruptible, and a body implying a clean halt would be describing something that did not
     /// happen — an operator who reads "cancelled" and then watches a server stop anyway has been
     /// misled about the one thing they were trying to prevent.
+    /// </para>
+    /// <para>
+    /// <b>Each cancelled member gets its own audit row.</b> Nothing ran, so the engine emits nothing and
+    /// this is the only record the fleet keeps of it — and the question it answers ("why did this server
+    /// never get its update?") is asked on one server's feed, which a single batch-level row carrying no
+    /// <c>serverId</c> would never appear on. <c>meta.batchId</c> is what ties them back together.
+    /// </para>
     /// </remarks>
     [HttpDelete("{id}")]
     [Authorize(Policy = AuthPolicy.Operator)]
-    public async Task<ActionResult<BatchCancelled>> Cancel(string id, CancellationToken ct)
+    public async Task<ActionResult<BatchCancelled>> Cancel(
+        string id, [FromQuery] string? origin, CancellationToken ct)
     {
+        // A DELETE carries no body, so the driving surface rides the query string — the same vocabulary
+        // and the same refusal every other mutation uses. The audit row must not be able to claim an
+        // origin nobody can declare, whichever verb produced it.
+        if (!TryResolveOrigin(origin, out string resolvedOrigin))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "unknown origin; expected one of: ui, assistant, discord, api");
+
         BatchView? existing = await batches.GetAsync(id, ct);
         if (existing is null) return NotFound();
 
-        (IReadOnlyList<string> cancelled, IReadOnlyList<string> stillRunning, IReadOnlyList<string> jobIds) =
+        (IReadOnlyList<CancelledMember> cancelled, IReadOnlyList<string> stillRunning) =
             await batches.CancelPendingAsync(id, ct);
 
         // Settle the queued jobs too, so the per-server in-flight slot is released and the surfaces that
         // read a server's activeJob stop showing work that will never run.
+        string? actor = AuditPrincipal.ActorString(User);
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        foreach (string jobId in jobIds)
+        foreach (CancelledMember member in cancelled)
         {
-            Job? job = jobs.Get(jobId);
+            // Recorded from the store's row rather than from the job, so a member whose job record this
+            // process no longer holds — the registry is memory, and a restart empties it — still leaves
+            // the record of having been called off.
+            await journal.CommandOutcomeAsync(
+                ApiJournal.CommandCancelledEvent, member.ServerId, existing.Verb, member.JobId, id,
+                error: null, exitCode: null, actor, resolvedOrigin, ct);
+
+            if (member.JobId is null) continue;
+            Job? job = jobs.Get(member.JobId);
             if (job is null) continue;
             Job settled = jobs.Update(job with
             {
@@ -100,6 +127,15 @@ public sealed class BatchesController(
             "batch {BatchId} cancelled: {Cancelled} pending member(s) stopped, {Running} already running",
             id, cancelled.Count, stillRunning.Count);
 
-        return new BatchCancelled(id, cancelled, stillRunning);
+        return new BatchCancelled(id, [.. cancelled.Select(m => m.ServerId)], stillRunning);
     }
+
+    private static bool TryResolveOrigin(string? raw, out string origin)
+    {
+        origin = raw?.Trim().ToLowerInvariant() is { Length: > 0 } o ? o : AuditOrigin.Api;
+        return AuditOrigin.IsCallerDeclarable(origin);
+    }
+
+    private ObjectResult Error(int statusCode, string code, string message) =>
+        StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
 }

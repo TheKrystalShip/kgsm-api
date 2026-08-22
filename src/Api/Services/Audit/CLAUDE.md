@@ -81,9 +81,22 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   the payload: a claim about identity made inside data is one this API cannot check. `origin` stays `system` — no surface drove it, and the closed origin vocabulary has no
   per-component value (the `auth.cluster_session` precedent: identity detail goes in the row, the
   vocabulary is not widened).
-- **`origin` nullable** is a recorded §6 divergence, and so is **`meta.jobId`**: no id round-trips the
-  stateless engine, and every action that reaches the audit log is an engine echo, so nothing here can
-  populate it. Keep that limit in mind for the alert↔audit `resolution.actionId` bridge.
+- **`command.*` is what this API observed and nobody else can.** kgsm emits an event when a verb
+  *works*; a verb that fails or is refused exits non-zero and emits nothing, and a batch member
+  cancelled in the queue never reaches the engine — so there is no echo to ride and no double-write
+  risk. **Three actions, not one with the outcome in `meta`**: a fault to chase, a node that is full,
+  and somebody calling off queued work are three different questions, and a refusal filed beside a
+  failure blames the instance for the fleet being out of room. `command.refused` is keyed on kgsm's
+  `EC_INSUFFICIENT_MEMORY` (51) via `EngineExit`, never on the engine's message. ⚠ **`update` and
+  `uninstall` write nothing here** — kgsm emits `instance_update_failed`/`instance_uninstall_failed`,
+  which are already mapped, and the exclusion lives in `CommandRunner.EngineRecordsItsOwnFailure`.
+  ⚠ The meta key is **`verb`, never `command`**: `AuditRedaction` strips by field NAME across every
+  event, and the engine classifies `Command` as privileged for the console-input event.
+- **`origin` nullable** is a recorded §6 divergence, and so is **`meta.jobId`** on every echo-sourced row: no
+  id round-trips the stateless engine, so a row shaped from another producer's event cannot name one.
+  The rows this API writes itself are the exception — `command.*` is written by the process that owns
+  the job, so carrying the id there reports what it holds rather than reconstructing anything. Keep the
+  echo-side limit in mind for the alert↔audit `resolution.actionId` bridge.
 
 ## Invariants when you touch this
 

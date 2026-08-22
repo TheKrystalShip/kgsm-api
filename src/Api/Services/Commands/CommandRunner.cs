@@ -23,11 +23,17 @@ namespace TheKrystalShip.Api.Services.Commands;
 /// conditionally-registered singleton (<see cref="IFirewallService"/>) — so the background task creates its
 /// <b>own</b> scope via <see cref="IServiceScopeFactory"/> and resolves them <em>there</em>. Only value data
 /// (the <see cref="Job"/>) crosses the async boundary; never a request-scoped service.</para>
-/// <para><b>Audit split (the no-double-write contract):</b> the lifecycle verbs <em>and</em>
-/// <c>install</c>/<c>uninstall</c> stamp <c>actor</c>+<c>origin</c> onto the engine call and the M5 consumer
-/// records the event echo (<c>server.start/stop/restart</c>, <c>server.install</c>, <c>server.uninstall</c>)
-/// — this runner writes NO audit row for any of them. Every verb it runs is an engine call the engine
-/// itself audits, so there is no direct-write path here to keep disjoint from the echo.</para>
+/// <para><b>Audit split (the no-double-write contract):</b> a verb that WORKS is the engine's own event.
+/// Every verb here stamps <c>actor</c>+<c>origin</c> onto the engine call and the consumer records that
+/// echo (<c>server.start/stop/restart</c>, <c>server.install</c>, <c>server.uninstall</c>) — this runner
+/// writes no row for a success, and adding one would duplicate a fact it cannot deduplicate against.</para>
+/// <para><b>The outcomes with no echo to ride:</b> a verb that fails or is refused exits non-zero and emits
+/// nothing, so it exists in no record on the host. Those the runner records itself, to this API's own
+/// journal (<see cref="ApiJournal.CommandOutcomeAsync"/>) — the <c>auth.*</c>/<c>file.write</c> case, a
+/// producer recording what it observed and nobody else did. ⚠ Two verbs are excluded because the engine
+/// reports their failure itself: <c>update</c> and <c>uninstall</c> emit <c>instance_update_failed</c> /
+/// <c>instance_uninstall_failed</c>, which already become rows (see
+/// <see cref="EngineRecordsItsOwnFailure"/>).</para>
 /// <para><b>Always settles:</b> the verb runs inside try/finally so a started job always reaches a terminal
 /// state — releasing the registry's in-flight slot even if the verb throws.</para>
 /// </remarks>
@@ -36,6 +42,7 @@ public sealed class CommandRunner(
     StreamHub hub,
     ServerAggregator aggregator,
     JobRegistry registry,
+    ApiJournal journal,
     ILogger<CommandRunner> logger) : ICommandExecutor
 {
     /// <summary>
@@ -158,8 +165,15 @@ public sealed class CommandRunner(
                 logger.LogInformation("command job {JobId} succeeded: {Verb} {ServerId}",
                     job.Id, job.Verb, job.ServerId);
             else
+            {
                 logger.LogWarning("command job {JobId} FAILED: {Verb} {ServerId}: {Error}",
                     job.Id, job.Verb, job.ServerId, error ?? "(no detail)");
+
+                // The one fact on this path that nothing else on the host records. Awaited rather than
+                // fired off, so the journal's order is the order the outcomes happened — an append is a
+                // single write to a file this process owns.
+                await RecordOutcomeAsync(job, actor, origin, error, exitCode).ConfigureAwait(false);
+            }
         }
 
         // Verify: re-read authoritative state and reflect it. Best-effort — if the read fails, the next
@@ -295,6 +309,59 @@ public sealed class CommandRunner(
         KgsmResult result = instances.RestoreBackup(job.ServerId, backupName, actor, origin);
         return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
+
+    /// <summary>
+    /// Records a command that ended without doing the thing, to this API's own journal.
+    /// </summary>
+    /// <remarks>
+    /// Best-effort in both directions: <see cref="ApiJournal"/> swallows a write it could not make, and
+    /// this swallows anything above it. The command has already ended by the time this runs, and turning
+    /// a reported outcome into an exception because writing it down failed would trade a missing line for
+    /// a broken command path.
+    /// </remarks>
+    private async Task RecordOutcomeAsync(Job job, string? actor, string? origin, string? error, int? exitCode)
+    {
+        if (EngineRecordsItsOwnFailure(job.Verb)) return;
+
+        try
+        {
+            await journal.CommandOutcomeAsync(
+                OutcomeEvent(exitCode), job.ServerId, job.Verb, job.Id, job.BatchId,
+                error, exitCode, actor, AuditMapping.NormalizeOrigin(origin)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "recording the outcome of job {JobId} failed", job.Id);
+        }
+    }
+
+    /// <summary>
+    /// Which fact a non-success is: the node was full, or something went wrong.
+    /// </summary>
+    /// <remarks>
+    /// Keyed on the exit code kgsm defines (<see cref="EngineExit.InsufficientMemory"/>), never on its
+    /// message, which is prose written for a person and free to be reworded. A capacity refusal filed as
+    /// a failure reads as a fault in the instance — nothing is wrong with it, the node was full — and
+    /// invites a retry certain to be refused identically until something else stops. The same
+    /// distinction <see cref="BatchWorker"/> makes for a batch member, off the same constant.
+    /// </remarks>
+    internal static string OutcomeEvent(int? exitCode) =>
+        exitCode == EngineExit.InsufficientMemory
+            ? ApiJournal.CommandRefusedEvent
+            : ApiJournal.CommandFailedEvent;
+
+    /// <summary>
+    /// Whether the engine already emits an event for this verb failing.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>The no-double-write line.</b> kgsm emits <c>instance_update_failed</c> and
+    /// <c>instance_uninstall_failed</c>, and both are mapped to a row carrying the provenance the command
+    /// stamped onto the call — so a row written here for the same command would be a second, undedupable
+    /// record of one fact. Every other verb fails silently as far as the journals are concerned: a start,
+    /// a stop, a restart, an install and both backup verbs exit non-zero and emit nothing.
+    /// </remarks>
+    internal static bool EngineRecordsItsOwnFailure(string verb) =>
+        verb is CommandVerb.Update or CommandVerb.Uninstall;
 
     // kgsm's real failure detail (stderr), or a bare exit code when it said nothing — never a fabricated
     // success message.

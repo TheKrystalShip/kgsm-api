@@ -300,6 +300,26 @@ public static class AuditAction
     // or refused — a refused restart is exactly the case nobody was watching a screen for.
     public const string ServiceRestart = "service.restart";
 
+    // command.* — a command this API issued that ended without doing the thing. The one part of the
+    // write path with no echo to ride: kgsm emits an event when a verb WORKS, and a verb that fails,
+    // is refused or never runs exits non-zero and says nothing, so these facts exist in no other
+    // record on the host. Written directly, the auth.*/file.write case.
+    //
+    // THREE actions rather than one carrying the outcome in meta, because they are three different
+    // questions. A failure is a fault to chase; a capacity refusal is a fleet that is full and says
+    // nothing about the instance; a cancellation is somebody deliberately calling off queued work.
+    // Collapsing them would make "what broke here" a question you have to filter an outcome field to
+    // ask, and would put a refusal in the same bucket as a fault — the exact reading the engine's own
+    // exit code exists to prevent.
+    //
+    // ⚠ The SUCCESS path stays untouched: a verb that works is kgsm's event, audited from the echo
+    // with the provenance the command stamped onto it. And the two verbs whose failure the engine
+    // reports itself — update (instance_update_failed) and uninstall (instance_uninstall_failed) —
+    // write nothing here, because a second row for a fact a producer already emits is undedupable.
+    public const string CommandFailed = "command.failed";
+    public const string CommandRefused = "command.refused";
+    public const string CommandCancelled = "command.cancelled";
+
     // host.threshold.* — a measured value crossed a line this host watches, and later came back. Recorded
     // from the episodes kgsm-monitor keeps: the monitor establishes the fact against every sample it takes,
     // and this API transcribes its durable record rather than deciding anything, which is why the rows carry

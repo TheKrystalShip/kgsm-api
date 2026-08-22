@@ -120,14 +120,17 @@ public sealed class BatchStoreTests
             [Member("b1", "srv-a", 1), Member("b1", "srv-b", 2), Member("b1", "srv-c", 3)]);
         await store.SetMemberStateAsync("b1", "srv-a", BatchMemberState.Running);
 
-        (IReadOnlyList<string> cancelled, IReadOnlyList<string> stillRunning, IReadOnlyList<string> jobIds) =
+        (IReadOnlyList<CancelledMember> cancelled, IReadOnlyList<string> stillRunning) =
             await store.CancelPendingAsync("b1");
 
         // A kgsm invocation under way is not interruptible, so the running member is reported as such
         // rather than implying a clean halt.
-        Assert.Equal(["srv-b", "srv-c"], cancelled);
+        Assert.Equal(["srv-b", "srv-c"], cancelled.Select(m => m.ServerId));
         Assert.Equal(["srv-a"], stillRunning);
-        Assert.Equal(["job_srv-b", "job_srv-c"], jobIds);
+
+        // The job each cancelled member was holding travels with it: one half releases the server's
+        // in-flight slot, the other names what the record of the cancellation is about.
+        Assert.Equal(["job_srv-b", "job_srv-c"], cancelled.Select(m => m.JobId));
 
         // The batch is still active: something is genuinely still running in it.
         BatchView? view = await store.GetAsync("b1");

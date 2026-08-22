@@ -221,6 +221,12 @@ public static class EngineEventShaping
                 Map<FileWrittenEventData>(item, d => AuditMapping.FromFileWrittenEvent(d, hostId)),
             ApiJournal.BackupDownloadedEvent =>
                 Map<BackupDownloadedEventData>(item, d => AuditMapping.FromBackupDownloadedEvent(d, hostId)),
+
+            // The command that ended without doing the thing. One payload, three types — the type is
+            // what says how it ended, so the mapper takes it rather than reading an outcome field.
+            ApiJournal.CommandFailedEvent or ApiJournal.CommandRefusedEvent
+                or ApiJournal.CommandCancelledEvent =>
+                Map<CommandOutcomeEventData>(item, d => AuditMapping.FromCommandOutcomeEvent(d, item.Type, hostId)),
             "instance_player_joined" => Map<InstancePlayerJoinedData>(item, d => AuditMapping.FromPlayerJoinedEvent(d, hostId)),
             "instance_player_left" => Map<InstancePlayerLeftData>(item, d => AuditMapping.FromPlayerLeftEvent(d, hostId)),
             "instance_player_kicked" => Map<InstancePlayerKickedData>(item,
