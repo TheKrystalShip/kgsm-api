@@ -230,7 +230,7 @@ public sealed record Server(
     // refuses every lifecycle verb on an offline library, so an operator needs to see WHY before the
     // refusal, not after it.
     string? LibraryState = null,
-    // The absolute root LibraryPath names — what the instance actually records. Carried beside the name
+    // The absolute root Library names — what the instance actually records. Carried beside the name
     // so a surface can say where the files are without joining against the host's registry, and so an
     // instance whose library is unregistered can still say which directory it is under.
     string? LibraryPath = null);

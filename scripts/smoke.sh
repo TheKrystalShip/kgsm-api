@@ -393,7 +393,7 @@ if [[ "$CODE" == 200 ]] && EXP="$HOST_ID" python3 -c "
 import json,os,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 if not (isinstance(d,list) and len(d)>=1): sys.exit(2)   # empty roster -> can't prove a real read
-keys={'id','name','blueprint','status','version','runtime','hostId','steamAppId','clientSteamAppId','isSteamAccountRequired','metrics','updateAvailable','latestVersion','updateCheckedAt','startedAt','connectPort','note','lastBackup','backupCount','activeJob'}
+keys={'activeJob','backupCount','blueprint','clientSteamAppId','connectPort','diskBytes','hostId','id','isSteamAccountRequired','lastBackup','latestVersion','library','libraryPath','libraryState','metrics','name','note','onlinePlayers','runtime','startMemoryMb','startMemorySource','startedAt','status','steamAppId','stoppedAt','updateAvailable','updateAvailableSince','updateCheckedAt','version'}
 for s in d:
     if set(s)!=keys: sys.exit(3)
     if s['status'] not in ('running','stopped','unknown'): sys.exit(4)
