@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+using TheKrystalShip.Api.Services.Auth;
 
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Users;
@@ -62,25 +62,23 @@ internal static class UserCli
     /// <c>bootstrap</c> — create the first admin, but only on a host that has no accounts at all.
     /// </summary>
     /// <remarks>
-    /// Deliberately a no-op when any account exists, so a deploy script can call it every time and it
-    /// fires exactly once. The password is generated here and printed once: a password chosen by a
-    /// script is a password that ends up in the script, and one printed to a terminal is one somebody
-    /// has to actually copy.
+    /// The same account the service creates for itself on a first start that finds the store empty
+    /// (<see cref="FirstAdmin"/>), reached from a terminal instead. Whichever gets there first wins and
+    /// the other reports there is nothing to do, because the emptiness check is the same one. The
+    /// password is printed here rather than written to a file: one on a terminal is one somebody has to
+    /// actually copy.
     /// </remarks>
     private static async Task<int> BootstrapAsync(IUserStore store, LocalSignInService signIn, string[] args)
     {
-        if ((await store.ListAsync()).Count > 0)
+        string username = Option(args, "--username") ?? FirstAdmin.DefaultUsername;
+        if (!Usernames.IsValid(username))
+            return Fail($"'{username}' is not a usable username.");
+
+        if (await FirstAdmin.CreateAsync(store, signIn, username) is not { } password)
         {
             Console.WriteLine("This host already has KGSM accounts; leaving them alone.");
             return 0;
         }
-
-        string username = Option(args, "--username") ?? "admin";
-        if (!Usernames.IsValid(username))
-            return Fail($"'{username}' is not a usable username.");
-
-        string password = GeneratePassword();
-        await CreateUserAsync(store, signIn, username, "Administrator", KgsmTier.Admin, password);
 
         Console.WriteLine();
         Console.WriteLine("  Created the first KGSM administrator.");
@@ -111,7 +109,7 @@ internal static class UserCli
 
         string? password = Option(args, "--password");
         bool generated = password is null;
-        password ??= GeneratePassword();
+        password ??= FirstAdmin.GeneratePassword();
 
         await CreateUserAsync(store, signIn, username,
             Option(args, "--display") ?? username, tier, password);
@@ -136,7 +134,7 @@ internal static class UserCli
 
         string? password = Option(args, "--password");
         bool generated = password is null;
-        password ??= GeneratePassword();
+        password ??= FirstAdmin.GeneratePassword();
 
         await signIn.SetPasswordAsync(user.UserId, password, DateTimeOffset.UtcNow);
 
@@ -180,26 +178,6 @@ internal static class UserCli
 
         await store.CreateAsync(user);
         await signIn.SetPasswordAsync(user.UserId, password, now);
-    }
-
-    /// <summary>
-    /// A password nobody has to invent: 160 bits, base32-ish over an unambiguous alphabet.
-    /// </summary>
-    /// <remarks>
-    /// The alphabet drops <c>0/O</c> and <c>1/l/I</c> because this is read off a terminal and typed
-    /// into a browser, and a password somebody mistypes twice is a password they replace with a worse
-    /// one. Even at 32 characters that leaves far more entropy than anything an attacker guesses.
-    /// </remarks>
-    private static string GeneratePassword()
-    {
-        const string alphabet = "abcdefghijkmnpqrstuvwxyz23456789";
-        char[] chars = new char[32];
-        for (int i = 0; i < chars.Length; i++)
-            chars[i] = alphabet[RandomNumberGenerator.GetInt32(alphabet.Length)];
-
-        // Grouped, because it is going to be read off a screen.
-        return $"{new string(chars, 0, 8)}-{new string(chars, 8, 8)}-" +
-               $"{new string(chars, 16, 8)}-{new string(chars, 24, 8)}";
     }
 
     /// <summary>The value of <paramref name="name"/>, as <c>--name value</c> or <c>--name=value</c>.</summary>

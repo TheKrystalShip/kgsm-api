@@ -70,7 +70,7 @@ public class LeafTestFactory : AuthTestFactory
     public void UnwireDropIn(string unit) =>
         File.Delete(Path.Combine(DropInDir, unit + ".d", LeafConfigCatalog.OverrideDropInName));
 
-    private static string NewDbPath() => Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-{Guid.NewGuid():N}.db");
+    private static string NewDbPath() => AuthTestFactory.NewDbPath("kgsm-api-leaf");
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {

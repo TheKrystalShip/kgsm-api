@@ -34,9 +34,10 @@ Environment=Api__DbPath=/var/lib/kgsm-api/kgsm-api.db
 # creds from a co-located kgsm-api.settings.Development.json instead of the env file.
 Environment=ASPNETCORE_ENVIRONMENT=Production
 
-# Secrets + host overrides: Api__SigningKey (a STABLE random key — required so
-# sessions/refresh tokens survive a restart), the Discord OAuth app/guild/bot + role->tier map,
-# Api__CorsOrigins (the SPA origin), Api__AuthFrontendUrl. See deploy/kgsm-api.env.example.
+# Secrets + host overrides: the Discord OAuth app/guild/bot + role->tier map, Api__CorsOrigins
+# (the SPA origin), Api__AuthFrontendUrl. See deploy/kgsm-api.env.example. The session signing
+# key is not among them — with none configured the service generates one and keeps it in the
+# StateDirectory below, so sessions survive a restart on a host nobody handed a secret to.
 # Who may do what on this host, shared with every other KGSM surface. Loaded FIRST so the per-leaf
 # file below can still override a value deliberately; setting one there is how a host ends up
 # granting the same person different authority on different surfaces, so prefer the shared file.

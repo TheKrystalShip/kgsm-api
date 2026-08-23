@@ -400,7 +400,7 @@
       "key": "signingKey",
       "env": "Api__SigningKey",
       "label": "Token signing key",
-      "description": "Secret every session token is signed with. Changing it signs everyone out at once, which is also how you revoke every token in a hurry.",
+      "description": "Secret every session token is signed with. Leave it blank and this host generates one for itself on first start and reuses it forever after. Changing it signs everyone out at once, which is also how you revoke every token in a hurry.",
       "group": "auth",
       "type": "secret",
       "risk": "wiring"

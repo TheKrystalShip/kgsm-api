@@ -387,7 +387,7 @@ public sealed class ClusterNodeFactory(
 {
     public string NodeId { get; } = nodeId;
     public string ClusterHostId { get; } = hostId;
-    public string DbPath { get; } = dbPath ?? Path.Combine(Path.GetTempPath(), $"kgsm-api-cluster-{nodeId}-{Guid.NewGuid():N}.db");
+    public string DbPath { get; } = dbPath ?? NewDbPath($"kgsm-api-cluster-{nodeId}");
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {

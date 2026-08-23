@@ -30,6 +30,22 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     public const string HostId = "test-host";
     public const string SigningKey = "test-signing-key-please-ignore-deterministic";
 
+    /// <summary>
+    /// A database in a state directory of its own, for one factory.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The directory matters as much as the file. <see cref="ApiOptions.StateDir"/> is the database's directory,
+    /// and the API writes host secrets there — the signing key it generates for itself, the first
+    /// administrator's password. A database sitting in a bare /tmp would hand every factory in the run
+    /// the same two files.
+    /// </remarks>
+    public static string NewDbPath(string prefix)
+    {
+        string dir = Path.Combine(Path.GetTempPath(), $"{prefix}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        return Path.Combine(dir, "kgsm-api.db");
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.ConfigureAppConfiguration((_, config) =>
@@ -52,11 +68,10 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 ["Api:KgsmPath"] = "",
                 ["Api:MonitorSocketPath"] = "/tmp/kgsm-api-tests-no-monitor.sock",
                 ["Api:WatchdogSocketPath"] = "",
-                ["Api:DbPath"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-{Guid.NewGuid():N}.db"),
-                // Its own journal per factory, for the same reason it gets its own DB. The default puts
-                // events/ beside the database, which on a real host means inside this service's state
-                // directory — but every test DB lives in one shared /tmp, so the default would hand every
-                // test class the same journal and leave each one reading the others' sign-ins.
+                ["Api:DbPath"] = NewDbPath("kgsm-api-tests"),
+                // Its own journal per factory. The default puts events/ beside the database, which
+                // would work now that each factory has a state directory to itself — it is named
+                // anyway so the isolation does not silently depend on that.
                 ["Api:EventJournalDir"] =
                     Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-events-{Guid.NewGuid():N}"),
                 // Scan a directory that has no journals in it. The default is the machine's real

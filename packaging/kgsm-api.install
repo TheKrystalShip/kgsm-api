@@ -1,8 +1,6 @@
 # The preset policy in kgsm-base decides whether the API runs on a node; applying it is symlink
 # manipulation on disk, so it works during the transaction and in a chroot alike. Starting it is the
-# node's post-transaction hook's job — and that hook will NOT start this one until the signing key
-# below is set, because a blank key means a per-process key and everyone is signed out on every
-# restart.
+# node's post-transaction hook's job, and this unit needs nothing from a person first.
 #
 # post_install only. An administrator who disabled this unit keeps it disabled across every later
 # version — re-presetting on upgrade would quietly undo that.
@@ -12,18 +10,15 @@ post_install() {
 
     cat <<'MSG'
 
-  kgsm-api is enabled and waiting on one value:
+  kgsm-api is enabled and starts on its own. Its first start creates the administrator this host
+  begins with and leaves the password here, readable by nobody else:
 
-    Api__SigningKey  in  /etc/kgsm-api/kgsm-api.env      openssl rand -base64 48
+    /var/lib/kgsm-api/initial-admin-password
 
-  Set it, then start the service. It must not change between restarts — a rotated key invalidates
-  every session and refresh token that was issued under the old one.
+  Sign in as 'admin', change the password, and the file is removed on that first sign-in.
 
-    systemctl start kgsm-api.service
-
-  The first successful start creates the first administrator and prints its password once:
-
-    /opt/kgsm-api/kgsm-api user bootstrap
+  It also generates the key its sessions are signed with, in /var/lib/kgsm-api/signing-key. Set
+  Api__SigningKey in /etc/kgsm-api/kgsm-api.env only to pin one deliberately.
 
   If people here sign in through Discord or another provider, that application goes in
   /etc/kgsm/kgsm-auth.env, which every surface on the host reads. A host whose people sign in with a

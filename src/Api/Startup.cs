@@ -657,8 +657,13 @@ public class Startup(IConfiguration configuration)
         // 401/403/tier matrix is testable in-process with a fake and no two surfaces can resolve a
         // person differently. The token service mints/validates the host-scoped JWTs; the tier handler
         // grants a hierarchical viewer/operator/admin policy from the 'tier' claim.
+        // What tokens are signed with is resolved once, here, and never re-read: a configured key wins,
+        // and a host given none generates one and keeps it, so sessions outlive a restart on a machine
+        // nobody handed a secret to.
+        services.AddSingleton<HostSigningKey>();
         services.AddSingleton<ISessionTokenService>(sp => new SessionTokenService(
-            sp.GetRequiredService<ApiOptions>().ToSessionTokenOptions(),
+            sp.GetRequiredService<ApiOptions>().ToSessionTokenOptions()
+                with { SigningKey = sp.GetRequiredService<HostSigningKey>().Value },
             sp.GetRequiredService<ILogger<SessionTokenService>>()));
         // The callback URL is this surface's own; the application is the host's. Both are projected
         // from ApiOptions rather than re-read from configuration: ApiOptions is the single place any
@@ -671,6 +676,11 @@ public class Startup(IConfiguration configuration)
         // written by a newer sibling on this host); UserDirectory captures that as a capability rather
         // than letting it decide whether the Control Panel starts.
         services.AddSingleton<UserDirectory>();
+
+        // The first start on a host with no accounts creates the administrator that start-of-life
+        // needs, and leaves its password in the state directory. Every start after that finds accounts
+        // and does nothing.
+        services.AddHostedService<HostBootstrapper>();
 
         // The two halves of a sign-in come from two different places, which is the whole reason they
         // are separate seams. A provider says WHO someone is (IIdentityProvider) and contributes

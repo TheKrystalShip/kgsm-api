@@ -228,9 +228,10 @@ public sealed class ApiSettings
     [LeafField("authDisabled", "Disable authentication", Group = "auth", Risk = LeafRisk.Destructive)]
     public bool? AuthDisabled { get; set; }
 
-    /// <summary>HMAC signing key for session JWTs. Blank generates an ephemeral per-process key.</summary>
-    /// <panel>Secret every session token is signed with. Changing it signs everyone out at once, which is
-    /// also how you revoke every token in a hurry.</panel>
+    /// <summary>HMAC signing key for session JWTs. Blank means the host generates and keeps its own.</summary>
+    /// <panel>Secret every session token is signed with. Leave it blank and this host generates one for
+    /// itself on first start and reuses it forever after. Changing it signs everyone out at once, which
+    /// is also how you revoke every token in a hurry.</panel>
     [LeafField("signingKey", "Token signing key", Group = "auth", Type = LeafType.Secret,
         Risk = LeafRisk.Wiring, NoDefault = true)]
     public string? SigningKey { get; set; }

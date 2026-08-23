@@ -12,8 +12,10 @@ file is the local "what you must not break."
 - **Bearer = HMAC-SHA256 JWT.** Access ~15 min + refresh with a **30-day sliding window**: a session's
   `Expires` is `now + 30d` at login and slides to `now + 30d` on each successful refresh — a session used
   ≥once inside the window stays alive; an idle one dies 30d after its last use. The ~15-min access TTL bounds
-  privilege. ⚠ The multi-week refresh only survives if `Api__SigningKey` is **stable** — an ephemeral
-  per-process key invalidates every token on restart (the ctor logs a warning).
+  privilege. ⚠ The multi-week refresh only survives a **stable** signing key. `Api__SigningKey` is one
+  when it is set; when it is blank, `HostSigningKey` generates 384 bits on the first start and keeps
+  them in `/var/lib/kgsm-api/signing-key` (0600), so a host given no secret is still stable. Rotating
+  either invalidates every token issued under the old one.
 - **The session registry is the revocation authority; the hot path stays cached.** A `SessionEntry` table
   (`Data/SessionEntry.cs` + `Services/Auth/SessionStore.cs`, on `AppDbContext` via `EnsureCreated`; UTC-ticks
   `ValueConverter`s so `Expires > now` is a translatable indexed `INTEGER` compare) holds one row per
@@ -119,6 +121,15 @@ file is the local "what you must not break."
   generous on purpose — behind a shared connection several real people are one caller here.
 - **Auth is ON by default.** `Api__AuthDisabled=true` swaps in `DisabledAuthHandler` (synthetic
   admin — the pre-M4 open window), loudly logged. Never enable it on an exposed host.
+- **A host completes itself; only shared secrets are a person's job.** `HostBootstrapper` runs on every
+  start and settles two things: the signing key (above), and — on a store with no accounts at all — the
+  administrator this host begins with, whose generated password is left in
+  `/var/lib/kgsm-api/initial-admin-password` (0600) and removed the first time that account signs in
+  with it. `kgsm-api user bootstrap` is the same `FirstAdmin.CreateAsync` from a terminal, printing the
+  password instead of writing it; whichever runs first wins, because both are gated on the same
+  emptiness check. ⚠ The bootstrap is scoped to an **empty** store and must stay that way — a
+  re-creating admin account is a permanent back door, and a rewritten password file is a live
+  credential sitting on disk forever.
 
 ## Invariants when you touch this
 
@@ -179,9 +190,8 @@ The real HTTP identity provider is **live-validated** on the trusted host: a rea
 verified an identity, the account it proved decided the tier, the bearer was minted, and that bearer
 passed live tier-gating end-to-end (PLAN.md §8 M4·b). The login endpoints `503` only until
 the `Api__Discord*` settings are configured. **What's still owed for the *full* M4: only the frontend gate**
-(the per-host session state machine + tier-gated controls — the SPA, still `planned`). Op note: dev ran an
-**ephemeral** signing key (`Api__SigningKey` blank → tokens die on restart) — set a stable secret
-on any real host. To run with the dev creds, the env must be `Development` (`ASPNETCORE_ENVIRONMENT=Development`)
+(the per-host session state machine + tier-gated controls — the SPA, still `planned`).
+To run with the dev creds, the env must be `Development` (`ASPNETCORE_ENVIRONMENT=Development`)
 or `kgsm-api.settings.Development.json` is ignored and the login endpoints `503` as if unconfigured.
 
 ## Session registry status — self-validated 2026-07-09; live OAuth soak owed

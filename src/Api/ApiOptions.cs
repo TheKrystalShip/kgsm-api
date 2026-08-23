@@ -44,7 +44,8 @@ public sealed class ApiOptions
 
     /// <summary>
     /// SQLite file for the API's own operational metadata. Also the anchor for
-    /// <see cref="RawgCacheDir"/>'s default, so the image cache lands in the same state directory.
+    /// <see cref="RawgCacheDir"/>'s default and for <see cref="StateDir"/>, so the image cache and the
+    /// secrets this host generates for itself land in the same state directory.
     /// </summary>
     public string DbPath { get; init; } = "kgsm-api.db";
 
@@ -613,8 +614,8 @@ public sealed class ApiOptions
     public bool AuthDisabled { get; init; }
 
     /// <summary>HMAC signing key for the host-scoped session JWTs (<c>Api__SigningKey</c>).
-    /// Empty + auth enabled ⇒ an ephemeral per-process key is generated (tokens die on restart;
-    /// logged loudly). Set a stable secret on a real host.</summary>
+    /// Blank means this host generates one for itself and keeps it in <see cref="SigningKeyPath"/>,
+    /// so sessions survive a restart with nothing configured; a value here always wins.</summary>
     public required string SigningKey { get; init; }
 
     /// <summary>
@@ -834,6 +835,31 @@ public sealed class ApiOptions
         Uri.TryCreate(DiscordRedirectUri, UriKind.Absolute, out Uri? configured)
             ? new Uri(configured, path).ToString()
             : string.Empty;
+
+    /// <summary>
+    /// The directory this API keeps its own state in — the directory <see cref="DbPath"/> names, which
+    /// under the deployed unit is systemd's <c>StateDirectory=</c> (<c>/var/lib/kgsm-api</c>).
+    /// </summary>
+    /// <remarks>
+    /// Derived from the database path rather than configured separately, for the same reason
+    /// <see cref="RawgCacheDir"/>'s default is: a host says where its state lives once, and a second
+    /// knob is a second place for it to be wrong. A bare relative database name (the coded default)
+    /// leaves the state directory as the working directory.
+    /// </remarks>
+    public string StateDir =>
+        Path.GetDirectoryName(DbPath) is { Length: > 0 } dir ? dir : ".";
+
+    /// <summary>
+    /// The file this host keeps its session signing key in, used only when
+    /// <see cref="SigningKey"/> is blank.
+    /// </summary>
+    public string SigningKeyPath => Path.Combine(StateDir, "signing-key");
+
+    /// <summary>
+    /// The file the bootstrap administrator's one-time password is left in, on a host that had no
+    /// accounts at all when it first started.
+    /// </summary>
+    public string InitialAdminPasswordPath => Path.Combine(StateDir, "initial-admin-password");
 
     /// <summary>
     /// The address a browser reaches this API on, scheme and authority only — the same origin

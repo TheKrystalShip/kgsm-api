@@ -54,8 +54,7 @@ public sealed class AuthServiceGraphTests
                         Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-state-{Guid.NewGuid():N}"),
                     ["Api:KgsmJournalDir"] =
                         Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-journal-{Guid.NewGuid():N}"),
-                    ["Api:DbPath"] =
-                        Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-{Guid.NewGuid():N}.db"),
+                    ["Api:DbPath"] = AuthTestFactory.NewDbPath("kgsm-api-graph"),
                     ["KgsmAuth:Providers:discord:ClientId"] = wired ? "graph-client" : "",
                     ["KgsmAuth:Providers:discord:ClientSecret"] = wired ? "graph-secret" : "",
                     ["Api:DiscordRedirectUri"] =

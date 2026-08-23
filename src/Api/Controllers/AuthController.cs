@@ -328,6 +328,12 @@ public sealed class AuthController(
         await RecordAuthAsync(ApiJournal.LoginEvent, principal.Identity, principal.Tier,
             minted.SessionId, userAgent, ct, userId: result.User!.UserId);
 
+        // Somebody has signed in with the bootstrap administrator's password, so the file it was left
+        // in is no longer the only copy of anything. Scoped to that account by name, and a no-op on
+        // every host past its first sign-in.
+        FirstAdmin.ConsumePasswordFile(
+            options.InitialAdminPasswordPath, result.User!.Username, logger);
+
         return Ok(new LoginResult(
             minted.Access.Token, minted.Refresh.Token, KgsmTiers.ToWire(principal.Tier),
             principal.Identity.Handle, UserStatuses.ToWire(result.User!.Status),

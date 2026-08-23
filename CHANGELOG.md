@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the API completes itself: its own signing key, and the administrator it begins with (`0.131.0`)
+
+A host is given only what no host can generate for itself. Two things that used to be a person's
+first two chores are now the service's:
+
+**The session signing key.** `Api__SigningKey` still wins whenever it is set. With none,
+`Services/Auth/HostSigningKey.cs` generates 384 random bits on the first start, keeps them in
+`/var/lib/kgsm-api/signing-key` at `0600`, and reads them back on every later start — so sessions and
+30-day refresh tokens survive a restart and an upgrade on a host nobody handed a secret to. The mode
+is narrowed through the open handle before the key is written, so there is no window where the file
+exists world-readable. A key that cannot be written still starts the service, on a per-process key,
+and says so.
+
+**The first administrator.** `Services/Auth/HostBootstrapper.cs` runs on every start; on a store with
+no accounts at all it creates `admin` at the admin tier and leaves its generated password in
+`/var/lib/kgsm-api/initial-admin-password` (`0600`). The file is written once, never rewritten, and
+removed the first time that account signs in with a password. `kgsm-api user bootstrap` is the same
+`FirstAdmin.CreateAsync` reached from a terminal, printing the password instead — whichever runs
+first wins, because both are gated on the same emptiness check.
+
+`ApiOptions.StateDir` is the directory `Api__DbPath` names, and both files sit in it, so a host says
+where its state lives once.
+
+`deploy/kgsm-api.env.example` comments `Api__SigningKey` out with what it is for, so a node reports
+nothing outstanding for it; `packaging/kgsm-api.install` points at the password file instead of at
+the CLI.
+
 ### Changed — a packaged install enables the API and names the one key blocking it (`0.130.0`)
 
 `packaging/kgsm-api.install` applies kgsm-base's `50-kgsm.preset` to this project's units in
