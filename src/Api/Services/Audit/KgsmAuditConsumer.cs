@@ -127,6 +127,7 @@ public sealed class KgsmAuditConsumer(
         ApiJournal.ServiceConfigChangedEvent, ApiJournal.ServiceRestartedEvent,
         ApiJournal.FileWrittenEvent, ApiJournal.BackupDownloadedEvent,
         ApiJournal.CommandFailedEvent, ApiJournal.CommandRefusedEvent, ApiJournal.CommandCancelledEvent,
+        ApiJournal.LibraryRenamedEvent, ApiJournal.LibraryFailedEvent,
     };
 
     /// <summary>
@@ -731,6 +732,21 @@ public sealed class KgsmAuditConsumer(
         {
             blueprintCache.TryRefresh();
             PublishLive(AuditMapping.FromBlueprintRemovedEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
+
+        // library.add / library.remove — a named placement root was registered or deregistered. The
+        // library CRUD path stamps actor+origin onto the kgsm call, so these echoes carry the real admin;
+        // engine-owned, no double-write. A RENAME has no handler here because kgsm emits nothing for it —
+        // that row is written to this API's own journal and rides the raw hook above with the rest.
+        events.RegisterHandler<LibraryAddedData>(d =>
+        {
+            PublishLive(AuditMapping.FromLibraryAddedEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
+        events.RegisterHandler<LibraryRemovedData>(d =>
+        {
+            PublishLive(AuditMapping.FromLibraryRemovedEvent(d, options.HostId));
             return Task.CompletedTask;
         });
 

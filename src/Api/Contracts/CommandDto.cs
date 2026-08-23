@@ -55,12 +55,19 @@ public sealed record CommandRequest(string? Verb, string? Origin = null, bool Fo
 /// Install is async: the endpoint returns a <see cref="Job"/> (not a server). When it completes the new
 /// server appears on <c>/servers</c> with a backend-assigned id and a <c>server.install</c> audit entry.
 /// </summary>
+/// <param name="Library">
+/// Which registered library to place the instance in — the named root, not a path. Absent leaves the
+/// choice to the engine's own resolution (its configured default library, or the sole registered one).
+/// A name this host does not carry, or one whose root is offline, is rejected up front with a
+/// <c>400</c> rather than becoming a job that fails a moment later.
+/// </param>
 public sealed record InstallRequest(
     string? Blueprint,
     string? Name = null,
     string? Origin = null,
     int? Port = null,
     bool? Autostart = null,
+    string? Library = null,
     // ---- reserved: accepted & stored, not yet acted on (§3·h additive-only) ----
     string? HostId = null,
     string? Version = null,

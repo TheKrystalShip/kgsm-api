@@ -3,6 +3,9 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using Snap = TheKrystalShip.KGSM.Monitor.Contracts;
+// The sibling namespace TheKrystalShip.Api.Services.Library (the game catalog) shadows the type name,
+// so the engine model is aliased. A placement root and the blueprint catalog share a word and nothing else.
+using KgsmLibrary = TheKrystalShip.KGSM.Core.Models.Library;
 // Disambiguate from Microsoft.Extensions.Hosting.Host (pulled in by ImplicitUsings).
 using Host = TheKrystalShip.Api.Contracts.Host;
 
@@ -26,15 +29,7 @@ public sealed class HostAggregator(
     ApiOptions options, MonitorClient monitor, NetworkAggregator network, LeafHealthMonitor health,
     HostSettingsStore settings, HostIdentityProvider identity, IServiceScopeFactory scopeFactory)
 {
-    // The host's KGSM default install directory is effectively static config, so read it once (lazily,
-    // thread-safe) and cache it for the process lifetime rather than spawning `kgsm config get` on every
-    // GET /hosts poll. A runtime config change needs an api restart to re-surface — acceptable for a base
-    // install path that almost never changes. Null = engine unprovisioned or key unset (honest unknown).
-    private string? _installDir;
-    private bool _installDirRead;
-    private readonly object _installDirGate = new();
-
-    // The node-capacity policy is config the operator TUNES, unlike the install path above, so it is
+    // The node-capacity policy is config the operator TUNES, so it is
     // re-read on a short interval rather than pinned for the process lifetime: a changed floor should
     // reach the panel while the person who changed it is still looking. One kgsm invocation a minute at
     // most, and only while somebody is reading /hosts. The same TTL the watchdog uses for these keys.
@@ -83,30 +78,91 @@ public sealed class HostAggregator(
         }
     }
 
-    private string? ReadInstallDirectory()
+    /// <summary>
+    /// Read this host's library registry — the named roots instances are placed in.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⚠ <b>Measured on every read, never cached.</b> Whether a library is online and how much room it
+    /// has left are facts about a disk that can be unplugged between two page loads. A cached answer here
+    /// would report a mounted drive that is gone, and a free-space figure from an hour ago is a number
+    /// somebody would place an install against.
+    /// </para>
+    /// <para>
+    /// An engine that cannot answer yields <see langword="null"/>, which is not an empty list: a host with
+    /// no library registered is a different, sayable fact from a host whose registry could not be read.
+    /// </para>
+    /// </remarks>
+    private async Task<IReadOnlyList<KgsmLibrary>?> ReadLibrariesAsync()
     {
-        if (_installDirRead) return _installDir;
-        lock (_installDirGate)
+        try
         {
-            if (_installDirRead) return _installDir;
-            try
+            using IServiceScope scope = scopeFactory.CreateScope();
+            if (scope.ServiceProvider.GetService<ILibraryService>() is not ILibraryService libraries)
+                return null;
+
+            // kgsm-lib's services are synchronous process invocations; off the request thread, like every
+            // other call site that reaches the engine from an async path.
+            return await Task.Run(libraries.List).ConfigureAwait(false);
+        }
+        catch
+        {
+            // An engine hiccup is an unknown registry, never a fabricated one.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Join each library to the mount it sits on, so the storage card can name the device.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Status from the engine, metrics from the monitor.</b> The join adds the mount point and the
+    /// backing disk model and nothing else — a library the monitor has no row for stays exactly as
+    /// online as the engine measured it, and a library the monitor can see is not thereby online.
+    /// <para>
+    /// Longest prefix wins: <c>/mnt/ssd</c> and <c>/</c> both contain <c>/mnt/ssd/kgsm</c>, and the
+    /// deeper mount is the filesystem the bytes are actually on.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<LibraryDto> JoinCapacity(
+        IReadOnlyList<KgsmLibrary> libraries, IReadOnlyList<DiskCapacity>? disks)
+    {
+        var mapped = new List<LibraryDto>(libraries.Count);
+        foreach (KgsmLibrary lib in libraries)
+        {
+            DiskCapacity? disk = null;
+            if (disks is not null)
             {
-                using IServiceScope scope = scopeFactory.CreateScope();
-                if (scope.ServiceProvider.GetService<IConfigService>() is IConfigService config)
+                foreach (DiskCapacity candidate in disks)
                 {
-                    string? value = config.Get("default_install_directory");
-                    _installDir = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+                    if (!Contains(candidate.Mount, lib.Path)) continue;
+                    if (disk is null || candidate.Mount.Length > disk.Mount.Length) disk = candidate;
                 }
             }
-            catch
-            {
-                // Any failure (engine hiccup) → honest null, never a fabricated path. Cache it so a one-off
-                // failure doesn't re-spawn kgsm on every poll; an api restart re-attempts.
-                _installDir = null;
-            }
-            _installDirRead = true;
-            return _installDir;
+
+            mapped.Add(new LibraryDto(
+                Name: lib.Name,
+                Path: lib.Path,
+                Online: lib.Online,
+                // Null for an offline library — nothing measured an unplugged disk, and a 0 would read as
+                // a full one.
+                FreeBytes: lib.FreeBytes,
+                TotalBytes: lib.TotalBytes,
+                InstanceCount: lib.InstanceCount,
+                Mount: disk?.Mount,
+                Device: disk?.Device));
         }
+        return mapped;
+    }
+
+    // Is `path` on the filesystem mounted at `mount`? Compared as whole path components, so /mnt/ssd
+    // does not claim /mnt/ssd-backup.
+    private static bool Contains(string mount, string path)
+    {
+        if (string.IsNullOrEmpty(mount) || string.IsNullOrEmpty(path)) return false;
+        if (mount == "/") return path.StartsWith('/');
+        if (!path.StartsWith(mount, StringComparison.Ordinal)) return false;
+        return path.Length == mount.Length || path[mount.Length] == '/';
     }
 
     /// <summary>Build the single host this api serves (the <c>GET /hosts</c> list element — capacity +
@@ -119,6 +175,8 @@ public sealed class HostAggregator(
         // Editable identity overrides (region/label) — the stored value wins, else config (cached; no DB hit
         // on the hot path). Effective label is what the SPA renders as the host name.
         HostSettingsRecord overrides = await settings.GetAsync(ct).ConfigureAwait(false);
+
+        IReadOnlyList<KgsmLibrary>? registry = await ReadLibrariesAsync().ConfigureAwait(false);
 
         return new Host(
             Id: options.HostId,
@@ -140,9 +198,10 @@ public sealed class HostAggregator(
             // The panel running on this host IS this api — its honest in-process version (shared with
             // the GET /api/v1 handshake). A build-time constant, present regardless of the metrics snapshot.
             PanelVersion: ApiInfo.ApiVersion,
-            // The engine's configured base install directory (cached once) — per-host, so the install modal
-            // shows this host's real default. Null when the engine isn't provisioned / the key is unset.
-            InstallDirectory: ReadInstallDirectory(),
+            // The named roots this host places instances in, measured on this read and joined to the
+            // monitor's mounts for the device name. Null when the engine could not answer — which the
+            // client renders as "no placement surface", not as "no libraries".
+            Libraries: registry is null ? null : JoinCapacity(registry, capacity?.Disks),
             MemoryGate: ReadMemoryGate(),
             // M-diag depth: STATIC cpu identity comes straight off the snapshot (not on the metrics tick),
             // null when there is no snapshot; DYNAMIC sensors ride the shared capacity DTO (so the Host view

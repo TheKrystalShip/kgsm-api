@@ -42,12 +42,12 @@ public sealed record Host(
     // from the same shared const as the GET /api/v1 handshake so the two can't drift. NOT the host
     // OS / kernel version (those have no honest source today and stay client-side "—").
     string? PanelVersion = null,
-    // This host's KGSM default install directory (config_default_install_directory) — the base path under
-    // which new instances are created as <dir>/<blueprint>/<instance>. Read once from the engine's own
-    // config (per host: each host runs its own kgsm), so the install modal can show the real, host-specific
-    // base instead of a hardcoded path. Null when the engine isn't provisioned or the key is unset (honest
-    // unknown, never a fabricated default).
-    string? InstallDirectory = null,
+    // The named roots this host places instances in — the engine's library registry, measured on every
+    // read (state and free space are facts about a disk that may be unplugged between two page loads, so
+    // nothing here is cached). Null when the engine isn't provisioned or cannot answer, which is an
+    // honest unknown and NOT the same as an empty list (a host with no library registered): a client
+    // hides the placement surface entirely on null and offers "register one" on empty.
+    IReadOnlyList<LibraryDto>? Libraries = null,
     // This host's node-capacity policy, read from the engine's own config (per host: each host runs its
     // own kgsm, and each may be tuned differently). It is the FLOOR a surface needs to warn before a
     // start — joined against the server's StartMemoryMb and this host's live free memory — so the
@@ -129,6 +129,60 @@ public sealed record MemCapacity(
 /// <see cref="Fs"/> already does — <see cref="Device"/> appears on both surfaces; there is no per-mount home
 /// to keep it off the tick without breaking the byte-identical <c>Host.Disks == tick.Disks</c> invariant.</summary>
 public sealed record DiskCapacity(string Mount, double Used, double Total, string? Fs = null, string? Device = null);
+
+/// <summary>
+/// One named root instances are placed in — a KGSM library, the host-local answer to "which disk does
+/// this server live on".
+/// </summary>
+/// <remarks>
+/// <para>
+/// ⚠ <b>Two sources, never inferred from one another.</b> <see cref="Online"/>, <see cref="FreeBytes"/>
+/// and <see cref="TotalBytes"/> come from the engine's own per-invocation check (the root exists and
+/// carries its marker; <c>df</c> on that root). <see cref="Mount"/> and <see cref="Device"/> come from
+/// the monitor's capacity snapshot, joined by longest-prefix match on the mount point. A library with
+/// no monitor row is still online; a library the monitor can see is not thereby online.
+/// </para>
+/// <para>
+/// ⚠ <see cref="FreeBytes"/>/<see cref="TotalBytes"/> are <see langword="null"/> for an offline library
+/// — nothing measured an unplugged disk. A client must render that as unknown: a <c>0</c> reads as a
+/// full disk, which is the opposite fact.
+/// </para>
+/// </remarks>
+/// <param name="Name">The registry name, host-unique — what <c>--library</c> and the install form take.</param>
+/// <param name="Path">The absolute, canonical library root.</param>
+/// <param name="Online">Whether the root is reachable and carries its marker. Placement into an offline
+/// library is refused by the engine.</param>
+/// <param name="InstanceCount">How many registered instances resolve here. Counted from the instance
+/// registry, so it is answered for an offline library too — which is exactly when it matters, because it
+/// is what a removal is refused over.</param>
+/// <param name="Mount">The filesystem the root sits on, from the monitor. Null when there is no snapshot
+/// or no mount contains the path.</param>
+/// <param name="Device">The backing disk model behind <see cref="Mount"/>, from the monitor. Null on the
+/// same terms.</param>
+public sealed record LibraryDto(
+    string Name,
+    string Path,
+    bool Online,
+    long? FreeBytes,
+    long? TotalBytes,
+    int InstanceCount,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Mount = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Device = null);
+
+/// <summary>The request body for <c>POST /hosts/{id}/libraries</c> — register a root.</summary>
+/// <param name="Path">Absolute path of the root. Required; the engine creates the directory when it does
+/// not exist and adopts a root that already carries a marker.</param>
+/// <param name="Name">Optional registry name. Absent, the engine takes the directory's own name, or the
+/// name written in an existing marker.</param>
+/// <param name="Origin">The driving surface, like <see cref="CommandRequest.Origin"/>.</param>
+public sealed record AddLibraryRequest(string? Path, string? Name = null, string? Origin = null);
+
+/// <summary>The request body for <c>PATCH /hosts/{id}/libraries/{name}</c> — rename a library.</summary>
+/// <remarks>
+/// Instances are unaffected: each records its library's <em>path</em>, and the name lives only in the
+/// registry, so a rename costs nothing and moves no files.
+/// </remarks>
+public sealed record RenameLibraryRequest(string? Name, string? Origin = null);
 
 /// <summary>Host load average over the last 1/5/15 minutes (monitor <c>LoadAvg</c>). Diagnostics-only.</summary>
 public sealed record LoadSample(double One, double Five, double Fifteen);

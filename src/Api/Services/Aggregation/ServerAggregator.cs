@@ -399,7 +399,12 @@ public sealed class ServerAggregator
             DiskBytes: diskBytes,
             OnlinePlayers: onlinePlayers?.Invoke(id),
             StartMemoryMb: startMemoryMb,
-            StartMemorySource: startMemorySource);
+            StartMemorySource: startMemorySource,
+            // Both straight off the instance's own config — the engine resolves the name from the path
+            // per invocation, and answers "unregistered" for a root nothing declares. Blank on an engine
+            // that predates libraries, which stays blank rather than becoming a guessed root.
+            Library: string.IsNullOrWhiteSpace(instance.Library) ? null : instance.Library,
+            LibraryPath: string.IsNullOrWhiteSpace(instance.LibraryDir) ? null : instance.LibraryDir);
     }
 
     // The operator-authored note, or null when the instance has no note. kgsm-lib decodes the body

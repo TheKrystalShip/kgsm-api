@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the disks a server lives on (`0.125.0`)
+
+`GET /hosts` carries `libraries[]` — this host's registered placement roots, each with its name, path,
+online state, free and total bytes, how many instances resolve to it, and the mount and backing-disk
+model joined from the monitor. It replaces `installDirectory`, which could only ever name one root and
+so could not describe a host with two disks.
+
+Three honesty rules ride the shape and each one is load-bearing:
+
+- **`libraries: null` is not `libraries: []`.** Null means the engine could not answer — a host whose
+  kgsm predates libraries, or one where the read failed — and a client hides the placement surface
+  entirely. An empty array means the registry was read and holds nothing, which is a host that needs a
+  root registered.
+- **`freeBytes`/`totalBytes` are null for an offline library.** Nothing measured an unplugged disk, and
+  a `0` reads as a full one, which is the opposite fact and one somebody would act on.
+- **The state comes from the engine and the device from the monitor.** A library the monitor has no row
+  for is exactly as online as the engine measured it; a library the monitor can see is not thereby
+  online.
+
+Nothing about a library is cached. The process-lifetime latch that held `installDirectory` for the life
+of the API is gone: whether a root is mounted and how much room it has left are facts that can change
+between two page loads, and a free-space figure from an hour ago is a number somebody would place an
+install against.
+
+`GET/POST/DELETE/PATCH /hosts/{id}/libraries` manage the registry, through kgsm-lib's `ILibraryService`
+and nothing else. Reads sit at viewer beside the host they already ride on; writes are admin, like the
+other host-shaping writes. **Removal has no force.** The engine refuses while instances still resolve
+to a library and names them; that refusal is served through verbatim as a `409`, because a
+pass-through would let the panel produce in one click the state the engine exists to prevent.
+
+`POST /servers` takes an optional `library` — the name, not a path. A name this host does not carry, or
+one whose root is offline, is a `400` the install form can show beside its selector, rather than a job
+that fails a moment later somewhere nobody is looking. Absent leaves the choice to the engine's own
+resolution. Each server on `GET /servers` now says which library it lives in (`library`, and the root
+it records as `libraryPath`); an instance under no registered root reports the engine's own word for
+that, `unregistered`.
+
+Four audit actions, split by who can honestly say a thing happened. `library.add` and `library.remove`
+are engine echoes — kgsm emits `library_added`/`library_removed`, so this API writes neither and the
+CRUD path only stamps the actor and origin onto the call. `library.rename` is a direct write because
+the engine emits nothing for a rename, and without the row the name in every earlier row would point at
+something a reader could no longer find. `library.failed` is the `command.failed` case again: a refused
+or broken mutation exits non-zero and emits nothing, and a removal refused because three instances
+still live there is precisely the row an operator goes looking for afterwards. The engine's sentence
+rides in `meta.error` and never in the summary.
+
 ### Added — the command outcomes nobody else records (`0.124.0`)
 
 A command that **fails**, is **refused** or is **cancelled** now writes a row to this API's own event

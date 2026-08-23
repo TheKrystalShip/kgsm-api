@@ -209,7 +209,20 @@ public sealed record Server(
     // answer, so nothing is refused and nothing is warned about — never a substituted default, which
     // would put an invented requirement in front of a real start.
     int? StartMemoryMb = null,
-    string? StartMemorySource = null);
+    string? StartMemorySource = null,
+    // Which registered library this instance lives in — the named root, resolved by the engine from the
+    // absolute path the instance records. An instance under no registered root reports the engine's own
+    // word for that, "unregistered": it is on a disk nobody declared, which is a real and recoverable
+    // state (a library was deregistered under it) and not a missing value.
+    //
+    // Empty on a host whose engine predates libraries. It is a NAME, not a path: the path is
+    // LibraryPath below, and a surface showing placement shows the name, because that is what an install
+    // form takes and what a rename changes.
+    string? Library = null,
+    // The absolute root LibraryPath names — what the instance actually records. Carried beside the name
+    // so a surface can say where the files are without joining against the host's registry, and so an
+    // instance whose library is unregistered can still say which directory it is under.
+    string? LibraryPath = null);
 
 /// <summary>
 /// A server's operator-authored note — free text an Operator writes for players and teammates

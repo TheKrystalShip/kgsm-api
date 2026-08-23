@@ -66,6 +66,9 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     public const string CommandRefusedEvent = "command_refused";
     public const string CommandCancelledEvent = "command_cancelled";
 
+    public const string LibraryRenamedEvent = "library_renamed";
+    public const string LibraryFailedEvent = "library_failed";
+
     /// <summary>
     /// Records a session beginning or ending.
     /// </summary>
@@ -273,6 +276,35 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
 
             // The engine's own words and its own number. A run that produced neither — the engine was
             // never reached — leaves both null rather than gaining a sentence this API composed.
+            WriteNullable(w, "Error", error);
+            if (exitCode is { } code)
+                w.WriteNumber("ExitCode", code);
+            else
+                w.WriteNull("ExitCode");
+        }, ct);
+
+    /// <summary>
+    /// Records a library mutation the engine says nothing about — a rename, or an attempt that failed.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Never called for a successful add or remove.</b> kgsm emits <c>library_added</c> and
+    /// <c>library_removed</c> for those, which already become rows; a second one for the same fact cannot
+    /// be deduplicated against an echo, which is the whole reason provenance is stamped instead of
+    /// written.
+    /// </remarks>
+    public Task LibraryOutcomeAsync(
+        string type, string library, string verb, string? path, string? newName,
+        string? error, int? exitCode, string? actor, string? origin,
+        CancellationToken ct = default) =>
+        WriteAsync(type, actor ?? "", origin, w =>
+        {
+            w.WriteString("LibraryName", library);
+            w.WriteString("Verb", verb);
+            WriteNullable(w, "Path", path);
+            WriteNullable(w, "NewName", newName);
+
+            // The engine's own words and its own number. A refused removal names the instances that
+            // blocked it here, and that sentence is the whole value of the row.
             WriteNullable(w, "Error", error);
             if (exitCode is { } code)
                 w.WriteNumber("ExitCode", code);

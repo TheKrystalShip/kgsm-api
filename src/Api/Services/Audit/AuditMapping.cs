@@ -431,6 +431,110 @@ public static class AuditMapping
             },
             ("revertedToSystem", Tri(d.RevertedToSystem)));
 
+    /// <summary>
+    /// Map a kgsm <c>library_added</c> event to a <c>library.add</c> row — the host gained somewhere to put
+    /// servers.
+    /// </summary>
+    /// <remarks>
+    /// Engine-owned echo: the CRUD path stamps actor+origin onto the kgsm call, so this carries the real
+    /// admin rather than the service account, and nothing is direct-written for it.
+    /// </remarks>
+    public static AuditWrite FromLibraryAddedEvent(LibraryAddedData d, string hostId) =>
+        LibraryWrite(d, hostId, AuditAction.LibraryAdd, AuditSeverity.Success,
+            $"registered library {DisplayLibrary(d)}", ("path", d.Path));
+
+    /// <summary>
+    /// Map a kgsm <c>library_removed</c> event to a <c>library.remove</c> row.
+    /// </summary>
+    /// <remarks>
+    /// Warn, not info, and the summary says so: deregistering touches no file, so the instances that
+    /// lived there are still on the disk and now resolve to no library. That is a recoverable state and a
+    /// confusing one, and the trail is where somebody works out when it started.
+    /// </remarks>
+    public static AuditWrite FromLibraryRemovedEvent(LibraryRemovedData d, string hostId) =>
+        LibraryWrite(d, hostId, AuditAction.LibraryRemove, AuditSeverity.Warn,
+            $"deregistered library {DisplayLibrary(d)} — its files are untouched", ("path", d.Path));
+
+    /// <summary>
+    /// Map a <c>library_renamed</c> event to a <c>library.rename</c> row.
+    /// </summary>
+    /// <remarks>
+    /// The one library action this API writes rather than echoes: a rename touches the registry and the
+    /// marker, the engine emits nothing, and without this row the name in every earlier row would refer
+    /// to something a reader could no longer find. Instances are unaffected — each records its library's
+    /// path, not its name.
+    /// </remarks>
+    public static AuditWrite FromLibraryRenamedEvent(LibraryOutcomeEventData d, string hostId) =>
+        LibraryWrite(d, hostId, AuditAction.LibraryRename, AuditSeverity.Info,
+            $"renamed library {DisplayLibrary(d)} to {(string.IsNullOrEmpty(d.NewName) ? "a new name" : d.NewName)}",
+            ("newName", d.NewName));
+
+    /// <summary>
+    /// Map a <c>library_failed</c> event to a <c>library.failed</c> row — a mutation that did not happen.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The engine emits an event when a library verb <em>works</em>; one that fails exits non-zero and
+    /// emits nothing, so there is no echo to ride and no double-write risk. Warn rather than danger:
+    /// the ordinary case is the engine refusing to deregister a library instances still live in, which
+    /// is the protection working, not a fault.
+    /// </para>
+    /// <para>
+    /// The engine's own sentence rides in <c>meta</c> and never in the summary — it names the instances
+    /// that blocked a removal, and a reworded kgsm message must change what a reader can dig into, not
+    /// how the feed reads.
+    /// </para>
+    /// </remarks>
+    public static AuditWrite FromLibraryFailedEvent(LibraryOutcomeEventData d, string hostId) =>
+        LibraryWrite(d, hostId, AuditAction.LibraryFailed, AuditSeverity.Warn,
+            $"could not {LibraryWord(d.Verb)} library {DisplayLibrary(d)}",
+            ("verb", d.Verb), ("path", d.Path), ("newName", d.NewName), ("error", d.Error),
+            ("exitCode", d.ExitCode?.ToString(CultureInfo.InvariantCulture)));
+
+    // The four library rows differ only in action/severity/summary/meta. TARGET is the library, and
+    // ServerId is deliberately NULL: a root holds servers without being one, and filling in a serverId
+    // would make `GET /audit?serverId=` return a disk registration that never touched that instance.
+    private static AuditWrite LibraryWrite(
+        LibraryEventDataBase d, string hostId, string action, string severity, string summary,
+        params (string Key, string? Value)[] extra)
+    {
+        string name = string.IsNullOrEmpty(d.LibraryName) ? "" : d.LibraryName;
+        Dictionary<string, string>? meta = null;
+        if (!string.IsNullOrEmpty(name)) (meta ??= [])["name"] = name;
+        // A blank value is OMITTED, never stored as "" — an absent key reads as unknown rather than as an
+        // empty answer.
+        foreach ((string key, string? value) in extra)
+            if (!string.IsNullOrEmpty(value)) (meta ??= [])[key] = value;
+
+        return new AuditWrite(
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
+            Action: action,
+            Severity: severity,
+            Target: new AuditTarget(AuditTargetKind.Library, name, name),
+            ServerId: null,
+            HostId: hostId,
+            Summary: summary,
+            Meta: meta);
+    }
+
+    // The library verb as a sentence uses it. A verb the set does not name is printed as it was recorded
+    // rather than replaced — a row about a failure must be able to say what failed.
+    private static string LibraryWord(string? verb) => verb switch
+    {
+        "add" => "register",
+        "remove" => "deregister",
+        "rename" => "rename",
+        { Length: > 0 } named => named,
+        _ => "change",
+    };
+
+    // A human-facing fallback for the summary line only, mirroring Display(instance) — the target/meta
+    // keep the raw, possibly-empty value.
+    private static string DisplayLibrary(LibraryEventDataBase d) =>
+        string.IsNullOrEmpty(d.LibraryName) ? "(unnamed)" : d.LibraryName;
+
     // The three blueprint rows differ only in action/severity/summary/meta. TARGET is the blueprint, and
     // ServerId is deliberately NULL: a blueprint is the template servers are installed from, not a server,
     // and filling in serverId would make `GET /audit?serverId=` return an edit that never touched that

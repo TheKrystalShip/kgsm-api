@@ -245,6 +245,18 @@ public static class EngineEventShaping
                 d => AuditMapping.FromBlueprintUpdatedEvent(d, hostId)),
             "blueprint_removed" => MapBlueprint<BlueprintRemovedData>(item,
                 d => AuditMapping.FromBlueprintRemovedEvent(d, hostId)),
+            // library.* — the engine's two, then the two this API writes because kgsm emits nothing for
+            // them. A library-subject payload carries LibraryName rather than InstanceName, so Map's
+            // instance backfill never fires for it (the envelope's `instance` field is empty here, and
+            // copying it anywhere would invent a server relationship that does not exist).
+            "library_added" => Map<LibraryAddedData>(item,
+                d => AuditMapping.FromLibraryAddedEvent(d, hostId)),
+            "library_removed" => Map<LibraryRemovedData>(item,
+                d => AuditMapping.FromLibraryRemovedEvent(d, hostId)),
+            ApiJournal.LibraryRenamedEvent => Map<LibraryOutcomeEventData>(item,
+                d => AuditMapping.FromLibraryRenamedEvent(d, hostId)),
+            ApiJournal.LibraryFailedEvent => Map<LibraryOutcomeEventData>(item,
+                d => AuditMapping.FromLibraryFailedEvent(d, hostId)),
             _ => null,
         };
 

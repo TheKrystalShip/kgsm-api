@@ -75,13 +75,13 @@ public sealed class CommandRunner(
     /// blueprint default). No audit row is written here — kgsm's <c>instance_installed</c> echo carries the
     /// stamped provenance (the lifecycle case).
     /// </summary>
-    public void StartInstall(Job job, string blueprint, int? port = null, string? actor = null, string? origin = null, bool? autostart = null)
+    public void StartInstall(Job job, string blueprint, int? port = null, string? actor = null, string? origin = null, bool? autostart = null, string? library = null)
     {
         // Stamp the blueprint onto the job and broadcast immediately so all connected
         // clients can create a phantom card without waiting for the `running` publish.
         Job withBlueprint = registry.Update(job with { Blueprint = blueprint });
         Publish(withBlueprint);
-        _ = Task.Run(() => ExecuteAsync(withBlueprint, actor, origin, blueprint, backupName: null, installPort: port, installAutostart: autostart));
+        _ = Task.Run(() => ExecuteAsync(withBlueprint, actor, origin, blueprint, backupName: null, installPort: port, installAutostart: autostart, installLibrary: library));
     }
 
     /// <summary>
@@ -114,7 +114,7 @@ public sealed class CommandRunner(
     /// caller that must categorise the failure — <see cref="BatchWorker"/> telling a capacity refusal
     /// from a fault — reads a number the engine defined rather than matching its prose.
     /// </summary>
-    private async Task<int?> ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null, bool? installAutostart = null, bool force = false)
+    private async Task<int?> ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null, bool? installAutostart = null, bool force = false, string? installLibrary = null)
     {
         bool ok = false;
         string? error = null;
@@ -130,7 +130,7 @@ public sealed class CommandRunner(
             using IServiceScope scope = scopeFactory.CreateScope();
             (ok, error, exitCode) = job.Verb switch
             {
-                CommandVerb.Install => RunInstall(scope, job, blueprint!, installPort, actor, origin, installAutostart),
+                CommandVerb.Install => RunInstall(scope, job, blueprint!, installPort, actor, origin, installAutostart, installLibrary),
                 CommandVerb.Uninstall => RunUninstall(scope, job, actor, origin),
                 // update / backup_* live on IInstanceService, NOT ILifecycleService — they get their own
                 // cases so they never fall through to RunLifecycle (whose inner switch would fail them as an
@@ -221,11 +221,12 @@ public sealed class CommandRunner(
     // install (M8·b) — create a new instance from `blueprint`. The job's ServerId is the backend-assigned
     // id the controller resolved via GenerateId; passing it as the install `--name` lands the instance
     // exactly there (kgsm's generate-id echoes an already-unique name verbatim), so the verify target and
-    // the instance_installed event's name match. installDir/version stay null — reserved/inert per §3·h
-    // (only blueprint + name are honored today). NO audit row here: kgsm emits instance_installed →
-    // KgsmAuditConsumer writes the server.install echo with the stamped provenance.
+    // the instance_installed event's name match. version stays null — reserved/inert per §3·h. NO audit
+    // row here: kgsm emits instance_installed → KgsmAuditConsumer writes the server.install echo with the
+    // stamped provenance.
     private (bool ok, string? error, int? exitCode) RunInstall(
-        IServiceScope scope, Job job, string blueprint, int? port, string? actor, string? origin, bool? autostart = null)
+        IServiceScope scope, Job job, string blueprint, int? port, string? actor, string? origin, bool? autostart = null,
+        string? library = null)
     {
         var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
         if (instances is null)
@@ -233,9 +234,10 @@ public sealed class CommandRunner(
 
         // port (the install form's Game Port) overrides the blueprint's primary port when supplied; null
         // keeps the blueprint default. autostart requests a one-shot start after install completes.
-        // installDir/version stay null — kgsm uses its host-config default dir and the latest version
-        // (the SPA disables version selection; install dir is host-config, shown read-only).
-        KgsmResult result = instances.Install(blueprint, installDir: null, version: null, name: job.ServerId, actor: actor, origin: origin, port: port, start: autostart);
+        // library names which registered root to place it in; null leaves the engine to resolve its own
+        // default, which is what a host with a single library wants and what every caller predating the
+        // choice sends. version stays null (the SPA disables version selection).
+        KgsmResult result = instances.Install(blueprint, library: library, version: null, name: job.ServerId, actor: actor, origin: origin, port: port, start: autostart);
         return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
 

@@ -362,6 +362,26 @@ public sealed class ServersController(
             return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
                 "the kgsm engine is not provisioned on this host");
 
+        // The placement root, when the caller named one. Checked against the live registry so a wrong or
+        // unplugged library is a synchronous 400 the form can show beside the selector, rather than a
+        // job that fails a moment later somewhere the person is no longer looking. A registry this API
+        // cannot read is NOT a refusal: the engine resolves the name itself and will say so if it is
+        // wrong, and refusing here on an unreadable list would block installs over a check, not a fact.
+        string? library = string.IsNullOrWhiteSpace(body?.Library) ? null : body!.Library!.Trim();
+        if (library is not null
+            && HttpContext.RequestServices.GetService(typeof(ILibraryService)) is ILibraryService libraryService
+            && libraryService.List() is { } registry)
+        {
+            Library? chosen = registry.FirstOrDefault(l =>
+                string.Equals(l.Name, library, StringComparison.Ordinal));
+            if (chosen is null)
+                return Error(StatusCodes.Status400BadRequest, "bad_request",
+                    $"no library named '{library}' is registered on this host");
+            if (!chosen.Online)
+                return Error(StatusCodes.Status400BadRequest, "bad_request",
+                    $"library '{library}' is offline — its root {chosen.Path} is not reachable");
+        }
+
         // The backend assigns the id (§3·h: "the id is the backend's to assign"). generate-id validates
         // the blueprint and the optional custom name; a failure is a client-input problem (unknown blueprint
         // / an unusable or already-taken name) → 400 with kgsm's real detail. The resolved id is unique now,
@@ -385,7 +405,7 @@ public sealed class ServersController(
                 $"an install is already in flight for '{assignedId}'");
 
         string? actor = AuditPrincipal.ActorString(User);
-        runner.StartInstall(job, blueprint, port, actor, origin, autostart: body?.Autostart);
+        runner.StartInstall(job, blueprint, port, actor, origin, autostart: body?.Autostart, library: library);
         return StatusCode(StatusCodes.Status202Accepted, new CommandAccepted(job));
     }
 

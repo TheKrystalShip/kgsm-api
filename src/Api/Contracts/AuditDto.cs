@@ -216,6 +216,21 @@ public static class AuditAction
     public const string BlueprintWrite = "blueprint.write";
     public const string BlueprintRevert = "blueprint.revert";
 
+    // library.* — a named placement root was registered, renamed or deregistered. The subject is a
+    // library, never a server: a root is registered before anything lives in it and survives every
+    // instance leaving it, so these rows carry no serverId.
+    //
+    // Split by who can honestly say it happened. kgsm emits library_added/library_removed, so add and
+    // remove arrive as engine echoes and this API writes neither. A RENAME touches only the registry and
+    // the marker and the engine emits nothing for it, so library.rename is a direct write — the only
+    // record it can have. library.failed is the same case as command.failed: a refused or broken
+    // mutation exits non-zero and emits nothing, and a removal refused because instances still live
+    // there is precisely the row an operator goes looking for afterwards.
+    public const string LibraryAdd = "library.add";
+    public const string LibraryRemove = "library.remove";
+    public const string LibraryRename = "library.rename";
+    public const string LibraryFailed = "library.failed";
+
     // assistant.* — what the assistant leaf reports about its own conduct, and deliberately NOT a
     // record of what it did. Every action it performs runs through kgsm with provenance attached, so
     // the engine's own events already carry them attributed to the person who asked; a second copy here
@@ -376,6 +391,10 @@ public static class AuditTargetKind
     // a server id — a blueprint is the template installed servers are created from, so these rows carry no
     // serverId and must never be read as being about an instance.
     public const string Blueprint = "blueprint";
+    // A named placement root (the target of the library.* actions). Its id is the library name, which is
+    // NOT a server id — a library holds servers without being one — so these rows carry no serverId and
+    // must never be read as being about an instance.
+    public const string Library = "library";
 }
 
 /// <summary>
