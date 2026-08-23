@@ -158,7 +158,7 @@ public sealed class ServerAggregator
         Server server = BuildServer(id, instance, _cache.Statuses, _backups.Readings,
             metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
             IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability), _updateLag.Lookup,
-            _runTimes.Lookup, BlueprintMinRamOf(_blueprints));
+            _runTimes.Lookup, BlueprintMinRamOf(_blueprints), _cache.LibraryOnline);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -217,7 +217,7 @@ public sealed class ServerAggregator
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
                 _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById,
                 OnlinePlayersOf(_players, _observability), _updateLag.Lookup, _runTimes.Lookup,
-                BlueprintMinRamOf(_blueprints)));
+                BlueprintMinRamOf(_blueprints), _cache.LibraryOnline));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -275,7 +275,8 @@ public sealed class ServerAggregator
         Func<string, int?>? onlinePlayers = null,
         Func<string, DateTimeOffset?>? updateAvailableSince = null,
         Func<string, Availability.RunTimes>? runTimes = null,
-        Func<string, int?>? blueprintMinRamMb = null)
+        Func<string, int?>? blueprintMinRamMb = null,
+        IReadOnlyDictionary<string, bool>? libraryOnline = null)
     {
         string status = ServerStatus.Unknown;
         string? version = null;
@@ -404,8 +405,43 @@ public sealed class ServerAggregator
             // per invocation, and answers "unregistered" for a root nothing declares. Blank on an engine
             // that predates libraries, which stays blank rather than becoming a guessed root.
             Library: string.IsNullOrWhiteSpace(instance.Library) ? null : instance.Library,
-            LibraryPath: string.IsNullOrWhiteSpace(instance.LibraryDir) ? null : instance.LibraryDir);
+            LibraryPath: string.IsNullOrWhiteSpace(instance.LibraryDir) ? null : instance.LibraryDir,
+            LibraryState: LibraryStateOf(instance, libraryOnline));
     }
+
+    /// <summary>
+    /// Whether this instance's library root is reachable — the second axis beside run-state.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both halves come from the engine and neither is inferred from the other: the instance says which
+    /// library it was placed in, the registry says whether that root is mounted and carries its marker.
+    /// The engine computes the same join per invocation to decide whether to refuse a lifecycle verb, so
+    /// this reports the answer the refusal will give rather than a second opinion about it.
+    /// </para>
+    /// <para>
+    /// ⚠ An unreadable registry is <see langword="null"/>, never <c>offline</c>. Reporting a disk as
+    /// gone because one engine invocation failed would put every server on the host behind a warning
+    /// about hardware that is fine.
+    /// </para>
+    /// </remarks>
+    private static string? LibraryStateOf(Instance instance, IReadOnlyDictionary<string, bool>? libraryOnline)
+    {
+        string name = instance.Library ?? "";
+        if (name.Length == 0) return null;                 // an engine predating libraries
+        if (name == UnregisteredLibrary) return name;      // the engine's own word, passed through
+        if (libraryOnline is null) return null;
+        return libraryOnline.TryGetValue(name, out bool online)
+            ? (online ? "online" : "offline")
+            // Named a library the registry does not hold: it was deregistered between the two reads.
+            // That is what "unregistered" means, and it is the engine's word for it.
+            : UnregisteredLibrary;
+    }
+
+    // The engine's term for an instance whose root no library claims. Not a placeholder this API chose:
+    // kgsm reports it verbatim on the instance, and both halves of the join have to spell it the same
+    // way or a deregistered library would read as two different states depending on which read saw it.
+    private const string UnregisteredLibrary = "unregistered";
 
     // The operator-authored note, or null when the instance has no note. kgsm-lib decodes the body
     // (Instance.NoteBody); attribution is honest-null when the config carries none — a hand-edited

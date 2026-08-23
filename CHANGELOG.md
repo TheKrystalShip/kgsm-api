@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a server whose disk is not mounted (`0.126.0`)
+
+Each server on `GET /servers` now reports `libraryState` — `online｜offline｜unregistered`, or `null`
+when the registry could not be read. It is a **separate axis from `status`** and is never folded into
+it: status is run-state measured by the supervisor, this is whether the files exist to run at all. An
+offline library makes the run-state unknowable rather than false, since nothing can be read through a
+dangling symlink, so a surface joins the two and shows this one first — exactly as it joins status
+with metrics.
+
+Both halves come from the engine and neither is inferred from the other: the instance says which
+library it was placed in, the registry says whether that root is mounted and carries its marker. The
+engine computes the same join per invocation to decide whether to refuse a lifecycle verb, so this
+reports the answer the refusal will give rather than a second opinion about it.
+
+The registry read rides the **instance cache's own refresh**, alongside the roster it answers about.
+A different cadence would let a server's record and the state of the disk it sits on disagree; a
+refresh that fails keeps the last known map rather than blanking the library on every card. An
+unreadable registry is `null`, never `offline` — reporting a disk as gone because one engine
+invocation failed would put every server on the host behind a warning about hardware that is fine.
+
 ### Added — the disks a server lives on (`0.125.0`)
 
 `GET /hosts` carries `libraries[]` — this host's registered placement roots, each with its name, path,

@@ -560,4 +560,66 @@ public sealed class ServerAggregatorBuildServerTests
     {
         [id] = Reading<InstanceRuntimeStatus>.Measured(new InstanceRuntimeStatus { InstanceName = id, Status = false }),
     };
+    // ---- library state: the second axis, never folded into run-state ---------------------------
+
+    private static Instance InLibrary(string name, string dir = "/mnt/ssd") =>
+        new() { Name = "factorio-1", BlueprintFile = "factorio.bp.yaml", Library = name, LibraryDir = dir };
+
+    [Fact]
+    public void LibraryState_JoinsTheInstanceAgainstTheRegistry()
+    {
+        Server s = ServerAggregator.BuildServer("factorio-1", InLibrary("ssd"), Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = false });
+
+        Assert.Equal("ssd", s.Library);
+        Assert.Equal("/mnt/ssd", s.LibraryPath);
+        Assert.Equal("offline", s.LibraryState);
+        // Run-state is untouched. The engine measured the process up; that its files are on an
+        // unplugged disk is a different fact, and folding one into the other loses both.
+        Assert.Equal(ServerStatus.Running, s.Status);
+    }
+
+    [Fact]
+    public void LibraryState_UnreadableRegistry_IsUnknownNotOffline()
+    {
+        // Reporting a disk as gone because one engine invocation failed would put every server on the
+        // host behind a warning about hardware that is fine.
+        Server s = ServerAggregator.BuildServer("factorio-1", InLibrary("ssd"), Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            libraryOnline: null);
+
+        Assert.Null(s.LibraryState);
+        Assert.Equal("ssd", s.Library);
+    }
+
+    [Fact]
+    public void LibraryState_UnregisteredIsTheEnginesOwnWord()
+    {
+        Server named = ServerAggregator.BuildServer("factorio-1", InLibrary("unregistered"), Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = true });
+
+        // A library the registry does not hold means it was deregistered between the two reads — the
+        // same fact, and it has to be spelled the same way whichever read noticed.
+        Server dropped = ServerAggregator.BuildServer("factorio-1", InLibrary("gone"), Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = true });
+
+        Assert.Equal("unregistered", named.LibraryState);
+        Assert.Equal("unregistered", dropped.LibraryState);
+    }
+
+    [Fact]
+    public void LibraryState_EnginePredatingLibraries_IsNull()
+    {
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = true });
+
+        Assert.Null(s.Library);
+        Assert.Null(s.LibraryPath);
+        Assert.Null(s.LibraryState);
+    }
+
 }

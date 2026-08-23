@@ -219,6 +219,17 @@ public sealed record Server(
     // LibraryPath below, and a surface showing placement shows the name, because that is what an install
     // form takes and what a rename changes.
     string? Library = null,
+    // Whether that library's root is reachable: online | offline | unregistered, or null when the
+    // registry could not be read (honest unknown — NOT "offline", which would report a disk as gone
+    // because one engine invocation failed).
+    //
+    // ⚠ A SEPARATE AXIS FROM Status, and never folded into it. Status is run-state, measured by the
+    // supervisor; this is whether the files exist to run at all. An offline library makes the run-state
+    // unknowable rather than false — nothing can be read through a dangling symlink — so a surface
+    // joins the two and shows this one first, exactly as it joins status with metrics. The engine
+    // refuses every lifecycle verb on an offline library, so an operator needs to see WHY before the
+    // refusal, not after it.
+    string? LibraryState = null,
     // The absolute root LibraryPath names — what the instance actually records. Carried beside the name
     // so a surface can say where the files are without joining against the host's registry, and so an
     // instance whose library is unregistered can still say which directory it is under.
