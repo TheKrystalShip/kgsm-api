@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — an unreadable server was reported as a stopped one (`0.127.0`)
+
+An instance whose library is not mounted came back from `GET /servers` as `status: "stopped"`,
+`runtime: "native"`. Neither was measured. The engine is explicit about this — it reports
+`status: null` for such an instance, with *"an unreadable instance is not a stopped one"* written
+beside the code — and it omits `runtime` from the payload entirely, because the config naming it is
+on the disk that is gone.
+
+Both facts are destroyed one layer down: kgsm-lib models `InstanceRuntimeStatus.Status` as a
+**non-nullable `bool`**, so the engine's null arrives as `false`; and `InstanceRuntime` has no member
+for "not reported", so an absent value lands on `Native`, its zero. Nothing above that boundary could
+tell either apart from a real reading.
+
+An instance on an offline library now reports `status: "unknown"` (already in the frozen vocabulary)
+and `runtime: null`. Every other field in that block — version, the update triple, the process start
+time — is read out of the same unreachable directory and is skipped with it. A mounted library is
+untouched: the guard is scoped to the case where nothing can be read, not a blanket downgrade of
+every instance that carries a library.
+
+⚠ `runtime` being nullable is a divergence from the frozen `native｜container` pair, taken on the
+rule that outranks it: honest unknown over a plausible default. `blueprint` stays empty for such an
+instance — the engine reports it, but kgsm-lib derives `Instance.Blueprint` from `BlueprintFile`,
+which the offline payload omits, and maps nothing to the `blueprint` field it does carry.
+
 ### Added — a server whose disk is not mounted (`0.126.0`)
 
 Each server on `GET /servers` now reports `libraryState` — `online｜offline｜unregistered`, or `null`

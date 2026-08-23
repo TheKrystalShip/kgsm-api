@@ -57,7 +57,13 @@ public sealed record Server(
     // separate UpdateAvailable/LatestVersion pair below.
     string? Version,
     // native | container — the supervision discriminator (Instance.Runtime), lower-cased.
-    string Runtime,
+    //
+    // ⚠ NULL when the instance's library is not mounted. The engine omits the field entirely from an
+    // offline instance's payload (its config is on the disk that is gone), and kgsm-lib's enum has no
+    // member for "not reported" — an absent value lands on Native, its zero. A honest unknown is the
+    // divergence from the frozen native|container pair, on the same rule as every other field here:
+    // never a plausible default over an unmeasured value.
+    string? Runtime,
     // The host this server runs on (architecture §4·a). Always this api's single host.
     string HostId,
     // Dedicated-server Steam App ID ("0" for non-Steam games). Static per-blueprint.

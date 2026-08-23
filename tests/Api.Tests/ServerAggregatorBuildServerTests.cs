@@ -575,9 +575,10 @@ public sealed class ServerAggregatorBuildServerTests
         Assert.Equal("ssd", s.Library);
         Assert.Equal("/mnt/ssd", s.LibraryPath);
         Assert.Equal("offline", s.LibraryState);
-        // Run-state is untouched. The engine measured the process up; that its files are on an
-        // unplugged disk is a different fact, and folding one into the other loses both.
-        Assert.Equal(ServerStatus.Running, s.Status);
+        // The two stay separate FIELDS — but a library that is not mounted is exactly the case where no
+        // run-state can be read, so the status is unknown rather than whatever the coerced reading said.
+        // See OfflineLibrary_RunStateIsUnknownNotStopped.
+        Assert.Equal(ServerStatus.Unknown, s.Status);
     }
 
     [Fact]
@@ -620,6 +621,44 @@ public sealed class ServerAggregatorBuildServerTests
         Assert.Null(s.Library);
         Assert.Null(s.LibraryPath);
         Assert.Null(s.LibraryState);
+    }
+
+    [Fact]
+    public void OfflineLibrary_RunStateIsUnknownNotStopped()
+    {
+        // The ENGINE says status:null for an instance it cannot read — "an unreadable instance is not a
+        // stopped one". kgsm-lib models that field as a non-nullable bool, so the null arrives as false;
+        // believing it would publish a claim that the process is not running, which nothing measured.
+        Server s = ServerAggregator.BuildServer("factorio-1", InLibrary("ssd"), Down("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = false });
+
+        Assert.Equal(ServerStatus.Unknown, s.Status);
+        Assert.Equal("offline", s.LibraryState);
+        // Everything else in that block is read out of the same unreachable directory.
+        Assert.Null(s.Version);
+        Assert.Null(s.UpdateAvailable);
+    }
+
+    [Fact]
+    public void OfflineLibrary_RuntimeIsNullNotNative()
+    {
+        // The engine omits `runtime` from an offline instance's payload and kgsm-lib's enum has no
+        // member for "not reported", so an absent value lands on Native — its zero. Reporting that
+        // would name a supervision type nobody read.
+        Server offline = ServerAggregator.BuildServer("factorio-1", InLibrary("ssd"), Down("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = false });
+
+        Server online = ServerAggregator.BuildServer("factorio-1", InLibrary("ssd"), Down("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = true });
+
+        Assert.Null(offline.Runtime);
+        // A mounted library reads normally — the guard is scoped to the unreadable case, not a blanket
+        // downgrade of every instance that happens to carry a library.
+        Assert.Equal("native", online.Runtime);
+        Assert.Equal(ServerStatus.Stopped, online.Status);
     }
 
 }

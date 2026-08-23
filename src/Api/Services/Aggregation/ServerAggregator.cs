@@ -278,6 +278,10 @@ public sealed class ServerAggregator
         Func<string, int?>? blueprintMinRamMb = null,
         IReadOnlyDictionary<string, bool>? libraryOnline = null)
     {
+        // Resolved first, because it decides whether the readings below can be believed at all.
+        string? libraryState = LibraryStateOf(instance, libraryOnline);
+        bool filesUnreadable = libraryState == "offline";
+
         string status = ServerStatus.Unknown;
         string? version = null;
         bool? updateAvailable = null;
@@ -285,7 +289,15 @@ public sealed class ServerAggregator
         DateTimeOffset? updateCheckedAt = null;
         DateTimeOffset? startedAt = null;
         DateTimeOffset? stoppedAt = null;
-        if (statuses.TryGetValue(id, out Reading<InstanceRuntimeStatus>? reading)
+        // ⚠ An instance whose library is not mounted has NO readable run-state, and the reading must not
+        // be believed. The engine says so — it reports `status: null` for one, with "an unreadable
+        // instance is not a stopped one" written beside it — but kgsm-lib models that field as a
+        // non-nullable bool, so the null arrives here as `false` and would publish "stopped": a claim
+        // that the process is not running, which nothing measured. Every other field in the block is
+        // read out of the instance's own directory and is equally absent, so the whole block is skipped
+        // and the status stays `unknown`, which is what it is.
+        if (!filesUnreadable
+            && statuses.TryGetValue(id, out Reading<InstanceRuntimeStatus>? reading)
             && reading is { IsMeasured: true, Value: { } runtimeStatus })
         {
             status = runtimeStatus.Status
@@ -377,7 +389,14 @@ public sealed class ServerAggregator
             Blueprint: CleanBlueprintId(instance),
             Status: status,
             Version: version,
-            Runtime: instance.Runtime == InstanceRuntime.Container ? "container" : "native",
+            // ⚠ Null when the files cannot be read. The engine omits `runtime` entirely from an offline
+            // instance's payload, and kgsm-lib's InstanceRuntime enum has no member for "not reported"
+            // — an absent value deserializes to Native, its zero. Publishing that would report a
+            // supervision type nobody read, so the library check is the only thing standing between a
+            // default and a fabricated fact.
+            Runtime: filesUnreadable
+                ? null
+                : instance.Runtime == InstanceRuntime.Container ? "container" : "native",
             HostId: hostId,
             SteamAppId: string.IsNullOrWhiteSpace(instance.SteamAppId) ? "0" : instance.SteamAppId,
             ClientSteamAppId: string.IsNullOrWhiteSpace(instance.ClientSteamAppId) ? "0" : instance.ClientSteamAppId,
@@ -406,7 +425,7 @@ public sealed class ServerAggregator
             // that predates libraries, which stays blank rather than becoming a guessed root.
             Library: string.IsNullOrWhiteSpace(instance.Library) ? null : instance.Library,
             LibraryPath: string.IsNullOrWhiteSpace(instance.LibraryDir) ? null : instance.LibraryDir,
-            LibraryState: LibraryStateOf(instance, libraryOnline));
+            LibraryState: libraryState);
     }
 
     /// <summary>
