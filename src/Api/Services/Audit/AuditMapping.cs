@@ -320,6 +320,58 @@ public static class AuditMapping
         string.Equals(key, InstanceNote.UpdatedByKey, StringComparison.Ordinal)
         || string.Equals(key, InstanceNote.UpdatedAtKey, StringComparison.Ordinal);
 
+    /// <summary>
+    /// Whether a changed config key is the instance's display label. A rename writes that one key, so the
+    /// engine emits an <c>instance_config_changed</c> for it beside the richer
+    /// <c>instance_display_name_changed</c>; both audit paths drop this one so a rename reads as the
+    /// single <c>server.rename</c> row that actually says what the label went from and to.
+    /// </summary>
+    public static bool IsDisplayNameKey(string? key) =>
+        string.Equals(key, DisplayNameConfigKey, StringComparison.Ordinal);
+
+    /// <summary>The instance-config key the display label is stored under.</summary>
+    public const string DisplayNameConfigKey = "display_name";
+
+    /// <summary>
+    /// Map a kgsm <c>instance_display_name_changed</c> event to a <c>server.rename</c> row at
+    /// <see cref="AuditSeverity.Info"/>. The label is decoration, so this is not a warning — but it is
+    /// recorded, because a feed that only ever showed the current label would make its own older rows
+    /// unreadable to whoever remembers the previous one.
+    /// <para>Target and <c>serverId</c> are the instance <b>id</b>, which the rename did not touch: the
+    /// audit trail keys on immutable identity, so every row about this server — before and after —
+    /// still joins to it. Both labels ride <c>meta</c> under the engine's own field names, so the
+    /// redactor's per-field lookup keeps working if either is ever reclassified upstream; the engine
+    /// classifies both Public today, on the grounds that a label is text somebody chose to be read.
+    /// A cleared label is reported as the id the instance now reads as rather than as an empty
+    /// string.</para>
+    /// </summary>
+    public static AuditWrite FromDisplayNameChangedEvent(InstanceDisplayNameChangedData d, string hostId)
+    {
+        string instance = Instance(d);
+        string from = Label(d.OldDisplayName, instance);
+        string to = Label(d.NewDisplayName, instance);
+        return new AuditWrite(
+            Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
+            Origin: NormalizeOrigin(d.Origin),
+            Actor: ParseActor(d.Actor),
+            Action: AuditAction.ServerRename,
+            Severity: AuditSeverity.Info,
+            Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
+            ServerId: instance,
+            HostId: hostId,
+            Summary: $"renamed {Display(instance)} from '{from}' to '{to}'",
+            Meta: new Dictionary<string, string>
+            {
+                ["oldDisplayName"] = from,
+                ["newDisplayName"] = to,
+            });
+    }
+
+    // An instance with no label of its own reads as its id — the same substitution kgsm-lib's
+    // Instance.DisplayName makes — so a cleared label is reported as what it now shows, never as blank.
+    private static string Label(string? label, string instance) =>
+        string.IsNullOrEmpty(label) ? Display(instance) : label;
+
     public static AuditWrite FromConfigChangedEvent(InstanceConfigChangedData d, string hostId)
     {
         string instance = Instance(d);

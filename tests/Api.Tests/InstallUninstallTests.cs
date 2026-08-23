@@ -141,6 +141,72 @@ public sealed class InstallUninstallTests
     }
 
     [Fact]
+    public async Task Install_FreeTextName_DerivesPathSafeId()
+    {
+        // The label is what a create form asks for. The id is derived from it as a courtesy — a slug the
+        // engine validated and echoed back — so the job is keyed on something a person recognises rather
+        // than on `factorio-NN`. The label itself never has to survive the charset.
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator,
+            "{\"blueprint\":\"factorio\",\"name\":\"Sunday Server!\"}");
+        Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
+
+        JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
+        Assert.Equal("sunday-server", job.GetProperty("serverId").GetString());
+    }
+
+    [Fact]
+    public async Task Install_NameWithNoUsableSlug_FallsBackToGeneratedId()
+    {
+        // A label written entirely outside the id charset yields no slug, and that is not a reason to
+        // refuse a create: the engine mints its own id and the label rides along untouched.
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator,
+            "{\"blueprint\":\"factorio\",\"name\":\"\\u65e5\\u66dc\\u30b5\\u30fc\\u30d0\\u30fc\"}");
+        Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
+
+        JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
+        Assert.Equal("factorio-ab12", job.GetProperty("serverId").GetString());
+    }
+
+    [Fact]
+    public async Task Install_NameCollidingWithTheRoster_FallsBackToGeneratedId()
+    {
+        // The derived slug is a courtesy, so a collision falls through to the engine's generated id
+        // rather than failing a create nobody asked to be picky about. (The fake roster holds factorio-1.)
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator,
+            "{\"blueprint\":\"factorio\",\"name\":\"Factorio 1\"}");
+        Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
+
+        JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
+        Assert.Equal("factorio-ab12", job.GetProperty("serverId").GetString());
+    }
+
+    [Fact]
+    public async Task Install_ExplicitId_IsHonored()
+    {
+        // A caller that must know the id in advance names it, and gets exactly that id.
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator,
+            "{\"blueprint\":\"factorio\",\"id\":\"factorio-x1\",\"name\":\"Sunday Server\"}");
+        Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
+
+        JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
+        Assert.Equal("factorio-x1", job.GetProperty("serverId").GetString());
+    }
+
+    [Theory]
+    [InlineData("bad id")]          // a space is not in the charset
+    [InlineData("-leading")]        // must start alphanumeric
+    [InlineData("factorio-1")]      // already on the roster
+    public async Task Install_UnusableExplicitId_400(string id)
+    {
+        // An id the CALLER named is answered honestly — never silently adjusted into a different one,
+        // which is the whole reason a caller names it.
+        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator,
+            $"{{\"blueprint\":\"factorio\",\"id\":\"{id}\"}}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task Install_Viewer_403()
     {
         // Operator-gated: a viewer reading /servers cannot create one. (Gate is orthogonal to permissions.)
@@ -257,21 +323,42 @@ public sealed class InstallUninstallTests
 
     /// <summary>
     /// Switch-on-input fake (the project convention, like <c>FakeDiscordResolver</c>): no mutable per-call
-    /// state. <c>generate-id</c> rejects a sentinel "zzznope" blueprint and otherwise echoes a custom name
-    /// or returns a deterministic generated id; install/uninstall succeed; the roster carries one instance
-    /// so the uninstall gate has something to admit.
+    /// state. <c>generate-id</c> rejects a sentinel "zzznope" blueprint, applies the engine's own id
+    /// charset and roster check to a proposed id, and otherwise returns a deterministic generated id;
+    /// install/uninstall succeed; the roster carries one instance so the uninstall gate has something to
+    /// admit — and so a proposed id colliding with it is refused the way the engine refuses it.
     /// </summary>
     private sealed class FakeInstanceService : IInstanceService
     {
-        public KgsmResult GenerateId(string blueprintName, string? customName = null) =>
-            string.Equals(blueprintName, "zzznope", StringComparison.Ordinal)
-                ? new KgsmResult(27, "", $"Blueprint '{blueprintName}' not found or invalid")
-                : new KgsmResult(0, customName ?? $"{blueprintName}-ab12");
+        // The engine's id charset, so a test asserting that a bad id is refused is asserting against the
+        // same rule the engine applies rather than against a stand-in that happens to agree today.
+        private static readonly System.Text.RegularExpressions.Regex IdFormat =
+            new("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        public KgsmResult GenerateId(string blueprintName, string? id = null)
+        {
+            if (string.Equals(blueprintName, "zzznope", StringComparison.Ordinal))
+                return new KgsmResult(27, "", $"Blueprint '{blueprintName}' not found or invalid");
+
+            if (id is null)
+                return new KgsmResult(0, $"{blueprintName}-ab12");
+
+            if (!IdFormat.IsMatch(id))
+                return new KgsmResult(2, "", $"Invalid instance id '{id}'");
+
+            return GetAll().ContainsKey(id)
+                ? new KgsmResult(2, "", $"Instance '{id}' already exists")
+                : new KgsmResult(0, id);
+        }
 
         // Accepts the Game Port override (the runner forwards it via Install(port:)); the gate tests assert
         // the 202 synchronously, the out-of-range rejection is asserted on the controller before this runs.
-        public KgsmResult Install(string blueprintName, string? installDir = null, string? version = null,
-            string? name = null, string? actor = null, string? origin = null, int? port = null, bool? start = null) => new(0);
+        public KgsmResult Install(string blueprintName, string? library = null, string? version = null,
+            string? displayName = null, string? actor = null, string? origin = null, int? port = null,
+            bool? start = null, string? id = null) => new(0);
+
+        public KgsmResult SetDisplayName(string instanceId, string displayName, string? actor = null, string? origin = null) =>
+            throw new NotImplementedException();
 
         public KgsmResult Uninstall(string instanceName, string? actor = null, string? origin = null) => new(0);
         public KgsmResult Move(string instanceName, string library, bool skipSpaceCheck = false, string? actor = null, string? origin = null) => throw new NotImplementedException();

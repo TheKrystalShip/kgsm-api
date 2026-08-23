@@ -37,9 +37,11 @@ public sealed record CommandRequest(string? Verb, string? Origin = null, bool Fo
 /// install form, but the installer (kgsm) needs exactly one thing — which <strong>blueprint</strong>.
 /// <list type="bullet">
 ///   <item><description><b>Required:</b> <see cref="Blueprint"/> — the library id the user picked.</description></item>
-///   <item><description><b>Honored today:</b> <see cref="Name"/> — passed to kgsm as the instance
-///     <em>name</em> (not a free-text display label: kgsm validates it as an instance id and falls back
-///     to an auto-generated <c>blueprint-suffix</c> if it isn't a usable unique name). <see cref="Origin"/>
+///   <item><description><b>Honored today:</b> <see cref="Name"/> — the free-text label the new server is
+///     read by, stored as the instance's <c>display_name</c> and never part of a path.
+///     <see cref="Id"/> — the instance id, which a caller only names when it has to know it in advance;
+///     leaving it out is what a human-facing form does, and the backend assigns one (see below).
+///     <see cref="Origin"/>
 ///     (the driving surface, like <see cref="CommandRequest.Origin"/>) is stamped onto the engine call so
 ///     the resulting <c>instance_installed</c> event — and its <c>server.install</c> audit row — records it.
 ///     <see cref="Port"/> — the install form's Game Port; validated 1-65535 and passed to kgsm as
@@ -55,6 +57,21 @@ public sealed record CommandRequest(string? Verb, string? Origin = null, bool Fo
 /// Install is async: the endpoint returns a <see cref="Job"/> (not a server). When it completes the new
 /// server appears on <c>/servers</c> with a backend-assigned id and a <c>server.install</c> audit entry.
 /// </summary>
+/// <param name="Name">
+/// The label the new server is read by — free text, stored as the instance's <c>display_name</c>. It
+/// decorates and never identifies: spaces, punctuation and emoji are all legal, two servers may carry the
+/// same one, and changing it later is <c>PUT /servers/{id}/display-name</c>. Absent leaves the instance
+/// reading as its id.
+/// </param>
+/// <param name="Id">
+/// The instance id to install under — the durable key every path, event and downstream store uses, and
+/// immutable once installed. Absent is the normal case and the one a create form sends: the backend
+/// assigns one, deriving a path-safe slug from <paramref name="Name"/> when that yields a free id and
+/// falling back to the engine's own <c>blueprint</c>/<c>blueprint-NN</c> otherwise. Naming it is for a
+/// caller that must know the id before the install finishes; it is validated against the engine's charset
+/// (<c>^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$</c>) and the live roster, and a bad or taken one is a <c>400</c>
+/// rather than an adjusted id the caller never asked for.
+/// </param>
 /// <param name="Library">
 /// Which registered library to place the instance in — the named root, not a path. Absent leaves the
 /// choice to the engine's own resolution (its configured default library, or the sole registered one).
@@ -68,6 +85,7 @@ public sealed record InstallRequest(
     int? Port = null,
     bool? Autostart = null,
     string? Library = null,
+    string? Id = null,
     // ---- reserved: accepted & stored, not yet acted on (§3·h additive-only) ----
     string? HostId = null,
     string? Version = null,

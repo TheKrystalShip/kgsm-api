@@ -123,6 +123,16 @@ public static class AuditAction
     // that learns only the destination cannot tell which disk just got its space back — and getting a
     // disk empty before it is unplugged is the whole reason the verb exists.
     public const string ServerMove = "server.move";
+
+    // server.rename — the label somebody reads the server by changed. Nothing was renamed on disk: the
+    // instance id is immutable, so this row's target and serverId are the same string they were before
+    // and after, and every earlier row about this server still joins to it. That is exactly why the
+    // action exists — a feed showing only the current label would silently rewrite its own history, and
+    // a reader who remembers "Sunday Server" needs the line that says what it is called now. The row
+    // carries both labels in `meta`; kgsm emits its own instance_config_changed for the same write, and
+    // that one is dropped so a rename reads as one line rather than two.
+    public const string ServerRename = "server.rename";
+
     // server.crash — the resident supervisor's autonomous crash signals (kgsm-watchdog, kgsm-lib
     // 1.9.0). Wired in M6·0: both InstanceCrashed (auto-restarting, warn) and InstanceFailed
     // (retries exhausted, danger) map to this single doc-given action, distinguished by severity +

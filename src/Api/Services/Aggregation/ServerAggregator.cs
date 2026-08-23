@@ -386,7 +386,10 @@ public sealed class ServerAggregator
 
         return new Server(
             Id: id,
-            Name: string.IsNullOrWhiteSpace(instance.Name) ? id : instance.Name,
+            // The label, not the id. kgsm-lib resolves an instance with no label of its own to its id
+            // (including the offline-library case, where the config stating it cannot be read), so there
+            // is nothing to coalesce here and nothing that could render as a nameless row.
+            Name: instance.DisplayName,
             Blueprint: instance.Blueprint,
             Status: status,
             Version: version,

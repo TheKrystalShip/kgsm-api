@@ -42,9 +42,15 @@ namespace TheKrystalShip.Api.Contracts;
 /// SPA binds a stable shape.
 /// </summary>
 public sealed record Server(
-    // Stable kgsm instance id and the join key (== monitor ServerMetrics.Id == the lib dict key).
+    // Stable kgsm instance id and the join key (== monitor ServerMetrics.Id == the lib dict key). It is
+    // auto-generated at install, path-safe, and immutable for the instance's lifetime — every route,
+    // keyed store, audit row and metrics series on this host is keyed on it, and nothing renames it.
     string Id,
-    // Display name. Equal to Id today (kgsm has no separate alias); kept distinct for future labels.
+    // The label a person reads this server by (the instance's `display_name`), which an operator changes
+    // whenever they like through PUT /servers/{id}/display-name. Free text — spaces, punctuation and emoji
+    // are all legal, because it never reaches a path — and NOT unique: two servers may carry the same
+    // label, so a surface that needs to tell them apart shows Id beside it. An instance with no label of
+    // its own reads as its Id, so this is never blank and never a fabricated prettier name.
     string Name,
     // Blueprint id this instance was installed from (the honest analog of the aspirational `game`).
     string Blueprint,

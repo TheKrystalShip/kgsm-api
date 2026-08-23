@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a server's name is separate from its id (`0.129.0`)
+
+An instance's id is now what it always was mechanically and never was in practice: a key. It is
+auto-generated, path-safe, and immutable, and it is what every route, audit row, player record and
+metric series on this host is keyed on. The name a person reads a server by is a separate field the
+engine stores as `display_name`, which an operator changes whenever they like without anything on disk
+moving. What made this worth doing is that a typo'd server name used to be permanent — the only fix was
+uninstall and reinstall.
+
+- **`Server.name` carries the label**, sourced from kgsm-lib's `Instance.DisplayName`. An instance with
+  no label of its own reads as its id, so the field is never blank. `Server.id` is unchanged and routes
+  stay `/servers/{id}`.
+- **`PUT /servers/{id}/display-name`** (operator) renames; **`DELETE`** clears it, after which the server
+  reads as its id again and the response says so. An empty `PUT` is a `400` — clearing is `DELETE`, so an
+  emptied field cannot silently strip a server's name — and a label over 200 characters is rejected rather
+  than truncated. The route means the id and never resolves a label: labels are not unique, and resolving
+  one would let two servers sharing a name rename each other.
+- **`POST /servers` takes a label, and optionally an id.** `name` is now free text that becomes the
+  label. The new optional `id` is for a caller that must know the id before the install finishes; the
+  engine validates it against its charset and the live roster, and a bad or taken one comes back as a
+  `400` with kgsm's own detail rather than as a silently adjusted id. Sending no `id` gets one derived
+  from the label as a path-safe slug (`"Sunday Server"` → `sunday-server`) when the engine accepts it,
+  and the engine's own generated id otherwise — a label that collides or does not survive the charset
+  never fails the create.
+- **`server.rename`** is a new audit action, shaped from kgsm's `instance_display_name_changed`, carrying
+  both labels in `meta`. Its target is the **id**, which the rename did not touch, so every earlier row
+  about that server still joins to it. The companion `instance_config_changed` naming `display_name` is
+  dropped by both audit paths, so a rename reads as one line rather than two. A rename typed at the CLI
+  is audited by the same path as one made here.
+- Receiving that event refreshes the roster cache, so an open panel re-labels within a tick whichever
+  surface drove the change.
+
+Pins kgsm-lib **6.1.0**.
+
 ### Fixed — an offline library named a disk nobody measured (`0.128.1`)
 
 A library's `mount`/`device` come from the monitor's capacity snapshot, joined to the engine's registry

@@ -696,11 +696,28 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceConfigChangedData>(d =>
         {
             // A server note spans three keys, so one edit emits three of these. Publish only the body's
-            // event; the two attribution keys would triple the same action in the live feed. The
-            // monitor-history path (EngineEventShaping) drops the same pair, so the merged /audit and
-            // the live stream can't disagree about what an edit looks like.
-            if (!AuditMapping.IsNoteAttributionKey(d.Key))
+            // event; the two attribution keys would triple the same action in the live feed. A rename
+            // writes display_name and emits its own richer event beside this one, so that key is dropped
+            // here too. The monitor-history path (EngineEventShaping) drops the same set, so the merged
+            // /audit and the live stream can't disagree about what an edit looks like.
+            if (!AuditMapping.IsNoteAttributionKey(d.Key) && !AuditMapping.IsDisplayNameKey(d.Key))
                 PublishLive(AuditMapping.FromConfigChangedEvent(d, options.HostId));
+            return Task.CompletedTask;
+        });
+
+        // server.rename — the label a person reads an instance by changed (the id did not; nothing on
+        // disk is renamed, which is what makes this safe on a running server). Engine-owned → live
+        // publish only, no double-write, whether the write came from this API's own display-name
+        // endpoint, the CLI or another surface.
+        //
+        // The refresh is the point of handling it at all: the label rides the Server DTO, so a cache
+        // still holding the old one would leave every open panel showing it until the next reconcile.
+        // Once the re-read lands, DomainPump's diff sees the changed Name and pushes the server.patch —
+        // which is how a rename typed at the CLI reaches an open browser without a reload.
+        events.RegisterHandler<InstanceDisplayNameChangedData>(d =>
+        {
+            instanceCache.TryRefresh();
+            PublishLive(AuditMapping.FromDisplayNameChangedEvent(d, options.HostId));
             return Task.CompletedTask;
         });
 

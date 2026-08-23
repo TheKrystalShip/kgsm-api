@@ -77,7 +77,7 @@ public static class EngineEventShaping
         ArgumentNullException.ThrowIfNull(item);
         if (IsPhase(item.Type)) return null;
         if (IsLeafLifecycle(item.Type)) return null;
-        if (IsNoteAttributionChange(item)) return null;
+        if (IsSupersededConfigChange(item)) return null;
 
         AuditWrite? write = item.Type switch
         {
@@ -242,6 +242,8 @@ public static class EngineEventShaping
                 d => AuditMapping.FromPlayerModerationEvent(d, hostId, AuditAction.PlayerBan, "banned")),
             "instance_player_unbanned" => Map<InstancePlayerUnbannedData>(item,
                 d => AuditMapping.FromPlayerModerationEvent(d, hostId, AuditAction.PlayerUnban, "unbanned")),
+            "instance_display_name_changed" => Map<InstanceDisplayNameChangedData>(item,
+                d => AuditMapping.FromDisplayNameChangedEvent(d, hostId)),
             "instance_config_changed" => Map<InstanceConfigChangedData>(item, d => AuditMapping.FromConfigChangedEvent(d, hostId)),
             "instance_input_sent" => Map<InstanceInputSentData>(item, d => AuditMapping.FromInputSentEvent(d, hostId)),
             // The blueprint events are the first whose subject is NOT an instance, so they go through
@@ -270,12 +272,13 @@ public static class EngineEventShaping
         return write is not null ? AuditMapping.ToRecordDirect(write, item.Id) : GenericShape(item, hostId);
     }
 
-    // A server note is one operator action spread over three config keys (body + who + when), so the
-    // engine emits three instance_config_changed events for it. Only the body's event is surfaced; the
-    // two attribution keys are dropped here so an edit reads as one line in a feed that shows three.
+    // Two operator actions each write more config keys than they are worth rows. A server note spans
+    // three (body + who + when), so its two attribution keys are dropped and only the body's event is
+    // surfaced. A rename writes display_name, and the engine emits instance_display_name_changed for the
+    // same write — that one names both labels, so the bare key event is dropped in its favour.
     // Nothing is destroyed — the raw events remain in the journal, which is the record.
-    // The live path (KgsmAuditConsumer) applies the same rule, so both halves of the merge agree.
-    private static bool IsNoteAttributionChange(EventHistoryEntry item)
+    // The live path (KgsmAuditConsumer) applies the same rules, so both halves of the merge agree.
+    private static bool IsSupersededConfigChange(EventHistoryEntry item)
     {
         if (!string.Equals(item.Type, "instance_config_changed", StringComparison.Ordinal)) return false;
         if (item.Data is not { ValueKind: JsonValueKind.Object } data) return false;
@@ -285,8 +288,10 @@ public static class EngineEventShaping
         if (!data.TryGetProperty("Key", out JsonElement key) && !data.TryGetProperty("key", out key))
             return false;
 
-        return key.ValueKind == JsonValueKind.String
-            && AuditMapping.IsNoteAttributionKey(key.GetString());
+        if (key.ValueKind != JsonValueKind.String) return false;
+
+        string? name = key.GetString();
+        return AuditMapping.IsNoteAttributionKey(name) || AuditMapping.IsDisplayNameKey(name);
     }
 
     // Deserialize item.Data into T (reflection-based STJ — fine under kgsm-api's JIT runtime, unlike

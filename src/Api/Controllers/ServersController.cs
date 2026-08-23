@@ -382,19 +382,28 @@ public sealed class ServersController(
                     $"library '{library}' is offline — its root {chosen.Path} is not reachable");
         }
 
-        // The backend assigns the id (§3·h: "the id is the backend's to assign"). generate-id validates
-        // the blueprint and the optional custom name; a failure is a client-input problem (unknown blueprint
-        // / an unusable or already-taken name) → 400 with kgsm's real detail. The resolved id is unique now,
-        // so the subsequent install --name lands the instance verbatim (kgsm echoes a unique name as-is).
-        string? customName = string.IsNullOrWhiteSpace(body?.Name) ? null : body!.Name!.Trim();
-        KgsmResult gen = instances.GenerateId(blueprint, customName);
-        if (!gen.IsSuccess || string.IsNullOrWhiteSpace(gen.Stdout))
-            return Error(StatusCodes.Status400BadRequest, "bad_request",
-                string.IsNullOrWhiteSpace(gen.Stderr)
-                    ? $"could not install from blueprint '{blueprint}'"
-                    : gen.Stderr.Trim());
+        // The id and the label are two things. `name` is the free text the person typed and becomes the
+        // instance's display_name, which decorates and never identifies; `id` is the durable key, which a
+        // caller only names when it must know it in advance.
+        string? displayName = string.IsNullOrWhiteSpace(body?.Name)
+            ? null
+            : InstanceDisplayName.Sanitize(body!.Name);
+        if (displayName is { Length: 0 }) displayName = null;
 
-        string assignedId = gen.Stdout.Trim();
+        string? requestedId = string.IsNullOrWhiteSpace(body?.Id) ? null : body!.Id!.Trim();
+
+        // The backend assigns the id (§3·h: "the id is the backend's to assign"), because the job
+        // architecture keys on it before the install finishes. generate-id is where the engine validates
+        // the blueprint, the id charset and the roster, so an id is only ever used here after the engine
+        // has echoed it back — this API never decides an id is free.
+        //
+        // An id the CALLER named is answered honestly: refused means 400 with kgsm's own detail, never a
+        // silently adjusted id. A slug derived from the label is a courtesy instead, so a name that
+        // collides or does not survive the charset falls through to the engine's own generated id rather
+        // than failing a create nobody asked to be picky about.
+        if (!TryResolveInstanceId(instances, blueprint, requestedId, displayName,
+                out string assignedId, out string? idError))
+            return Error(StatusCodes.Status400BadRequest, "bad_request", idError!);
 
         // One in-flight command per (resolved) server name. For a generated id this is effectively unique;
         // for a custom name it guards a double-submit of the same install.
@@ -405,8 +414,57 @@ public sealed class ServersController(
                 $"an install is already in flight for '{assignedId}'");
 
         string? actor = AuditPrincipal.ActorString(User);
-        runner.StartInstall(job, blueprint, port, actor, origin, autostart: body?.Autostart, library: library);
+        runner.StartInstall(job, blueprint, port, actor, origin, autostart: body?.Autostart,
+            library: library, displayName: displayName);
         return StatusCode(StatusCodes.Status202Accepted, new CommandAccepted(job));
+    }
+
+    // Resolve the id the new instance installs under, asking the engine every time so the charset and the
+    // roster are checked by the thing that owns both. Returns false with the engine's own message when a
+    // caller-named id is unusable; a derived slug never fails the create, it just stops being used.
+    private static bool TryResolveInstanceId(
+        IInstanceService instances, string blueprint, string? requestedId, string? displayName,
+        out string assignedId, out string? error)
+    {
+        assignedId = string.Empty;
+        error = null;
+
+        if (requestedId is not null)
+        {
+            KgsmResult named = instances.GenerateId(blueprint, requestedId);
+            if (named.IsSuccess && !string.IsNullOrWhiteSpace(named.Stdout))
+            {
+                assignedId = named.Stdout.Trim();
+                return true;
+            }
+
+            error = string.IsNullOrWhiteSpace(named.Stderr)
+                ? $"'{requestedId}' is not a usable instance id"
+                : named.Stderr.Trim();
+            return false;
+        }
+
+        if (InstanceIdSlug.From(displayName) is { } slug)
+        {
+            KgsmResult derived = instances.GenerateId(blueprint, slug);
+            if (derived.IsSuccess && !string.IsNullOrWhiteSpace(derived.Stdout))
+            {
+                assignedId = derived.Stdout.Trim();
+                return true;
+            }
+        }
+
+        KgsmResult generated = instances.GenerateId(blueprint, null);
+        if (generated.IsSuccess && !string.IsNullOrWhiteSpace(generated.Stdout))
+        {
+            assignedId = generated.Stdout.Trim();
+            return true;
+        }
+
+        error = string.IsNullOrWhiteSpace(generated.Stderr)
+            ? $"could not install from blueprint '{blueprint}'"
+            : generated.Stderr.Trim();
+        return false;
     }
 
     /// <summary>

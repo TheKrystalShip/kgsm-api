@@ -70,18 +70,20 @@ public sealed class CommandRunner(
     /// Fire-and-forget an <c>install</c> job (M8·b — <c>POST /servers</c>). <paramref name="blueprint"/> is
     /// the source blueprint; <paramref name="job"/>'s <see cref="Job.ServerId"/> is the backend-assigned
     /// instance id (the controller resolved it via <c>GenerateId</c> and it is passed as the install
-    /// <c>--name</c>, which kgsm honors verbatim for an already-unique name). <paramref name="port"/> is the
+    /// <c>--id</c>, so the instance lands under exactly that key). <paramref name="displayName"/> is the
+    /// free-text label the new server is read by, or null to leave it reading as its id.
+    /// <paramref name="port"/> is the
     /// optional Game Port override from the install form (validated 1-65535 by the controller; null keeps the
     /// blueprint default). No audit row is written here — kgsm's <c>instance_installed</c> echo carries the
     /// stamped provenance (the lifecycle case).
     /// </summary>
-    public void StartInstall(Job job, string blueprint, int? port = null, string? actor = null, string? origin = null, bool? autostart = null, string? library = null)
+    public void StartInstall(Job job, string blueprint, int? port = null, string? actor = null, string? origin = null, bool? autostart = null, string? library = null, string? displayName = null)
     {
         // Stamp the blueprint onto the job and broadcast immediately so all connected
         // clients can create a phantom card without waiting for the `running` publish.
         Job withBlueprint = registry.Update(job with { Blueprint = blueprint });
         Publish(withBlueprint);
-        _ = Task.Run(() => ExecuteAsync(withBlueprint, actor, origin, blueprint, backupName: null, installPort: port, installAutostart: autostart, installLibrary: library));
+        _ = Task.Run(() => ExecuteAsync(withBlueprint, actor, origin, blueprint, backupName: null, installPort: port, installAutostart: autostart, installLibrary: library, installDisplayName: displayName));
     }
 
     /// <summary>
@@ -132,7 +134,7 @@ public sealed class CommandRunner(
     /// caller that must categorise the failure — <see cref="BatchWorker"/> telling a capacity refusal
     /// from a fault — reads a number the engine defined rather than matching its prose.
     /// </summary>
-    private async Task<int?> ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null, bool? installAutostart = null, bool force = false, string? installLibrary = null, string? fromLibrary = null, string? toLibrary = null)
+    private async Task<int?> ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null, bool? installAutostart = null, bool force = false, string? installLibrary = null, string? fromLibrary = null, string? toLibrary = null, string? installDisplayName = null)
     {
         bool ok = false;
         string? error = null;
@@ -148,7 +150,7 @@ public sealed class CommandRunner(
             using IServiceScope scope = scopeFactory.CreateScope();
             (ok, error, exitCode) = job.Verb switch
             {
-                CommandVerb.Install => RunInstall(scope, job, blueprint!, installPort, actor, origin, installAutostart, installLibrary),
+                CommandVerb.Install => RunInstall(scope, job, blueprint!, installPort, actor, origin, installAutostart, installLibrary, installDisplayName),
                 CommandVerb.Uninstall => RunUninstall(scope, job, actor, origin),
                 // update / backup_* live on IInstanceService, NOT ILifecycleService — they get their own
                 // cases so they never fall through to RunLifecycle (whose inner switch would fail them as an
@@ -239,14 +241,15 @@ public sealed class CommandRunner(
     }
 
     // install (M8·b) — create a new instance from `blueprint`. The job's ServerId is the backend-assigned
-    // id the controller resolved via GenerateId; passing it as the install `--name` lands the instance
-    // exactly there (kgsm's generate-id echoes an already-unique name verbatim), so the verify target and
-    // the instance_installed event's name match. version stays null — reserved/inert per §3·h. NO audit
-    // row here: kgsm emits instance_installed → KgsmAuditConsumer writes the server.install echo with the
-    // stamped provenance.
+    // id the controller resolved via GenerateId, and it is passed as the install `--id` so the instance
+    // lands exactly there: the verify target, the job's key and the instance_installed event's name are
+    // then the same string by construction, not by the engine happening to echo a name back. displayName
+    // is the separate free-text label. version stays null — reserved/inert per §3·h. NO audit row here:
+    // kgsm emits instance_installed → KgsmAuditConsumer writes the server.install echo with the stamped
+    // provenance.
     private (bool ok, string? error, int? exitCode) RunInstall(
         IServiceScope scope, Job job, string blueprint, int? port, string? actor, string? origin, bool? autostart = null,
-        string? library = null)
+        string? library = null, string? displayName = null)
     {
         var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
         if (instances is null)
@@ -257,7 +260,9 @@ public sealed class CommandRunner(
         // library names which registered root to place it in; null leaves the engine to resolve its own
         // default, which is what a host with a single library wants and what every caller predating the
         // choice sends. version stays null (the SPA disables version selection).
-        KgsmResult result = instances.Install(blueprint, library: library, version: null, name: job.ServerId, actor: actor, origin: origin, port: port, start: autostart);
+        KgsmResult result = instances.Install(blueprint, library: library, version: null,
+            displayName: displayName, actor: actor, origin: origin, port: port, start: autostart,
+            id: job.ServerId);
         return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
 
