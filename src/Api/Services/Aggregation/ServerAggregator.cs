@@ -391,9 +391,10 @@ public sealed class ServerAggregator
             Status: status,
             Version: version,
             // ⚠ Null when the engine reported none — it omits `runtime` entirely for an instance whose
-            // library is not mounted, because the config naming it is on the disk that is gone. This IS
-            // a divergence from the frozen native|container pair, taken on the rule that outranks it:
-            // publishing either would name a supervision type nobody read.
+            // library is not mounted, because the config naming it is on the disk that is gone. kgsm-lib
+            // carries that as a null on its nullable enum, and the discard arm below is what keeps it one:
+            // a supervision type nobody read has no name here. This IS a divergence from the frozen
+            // native|container pair, taken on the rule that outranks it.
             Runtime: instance.Runtime switch
             {
                 InstanceRuntime.Container => "container",

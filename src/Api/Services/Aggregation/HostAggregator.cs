@@ -116,22 +116,29 @@ public sealed class HostAggregator(
     /// Join each library to the mount it sits on, so the storage card can name the device.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Status from the engine, metrics from the monitor.</b> The join adds the mount point and the
-    /// backing disk model and nothing else — a library the monitor has no row for stays exactly as
-    /// online as the engine measured it, and a library the monitor can see is not thereby online.
+    /// ⚠ <b>Status from the engine, metrics from the monitor, and neither is inferred from the other —
+    /// in both directions.</b> The join adds the mount point and the backing disk model and nothing else,
+    /// so a library the monitor has no row for stays exactly as online as the engine measured it, and a
+    /// library the monitor can see is not thereby online. The mirror of that rule is what bounds the join:
+    /// an <b>offline</b> library is joined to nothing, because its disk is gone and every mount the monitor
+    /// reports belongs to some other one. The root filesystem contains every path by definition, so a join
+    /// run over an unreachable root would name the boot disk's model as the backing device of files that
+    /// are not on it — an invented fact beside a <c>null</c> capacity that says nothing could be measured.
+    /// <see cref="LibraryDto.Mount"/> and <see cref="LibraryDto.Device"/> are <see langword="null"/> there,
+    /// on the same terms as <see cref="LibraryDto.FreeBytes"/>/<see cref="LibraryDto.TotalBytes"/>.
     /// <para>
     /// Longest prefix wins: <c>/mnt/ssd</c> and <c>/</c> both contain <c>/mnt/ssd/kgsm</c>, and the
     /// deeper mount is the filesystem the bytes are actually on.
     /// </para>
     /// </remarks>
-    private static IReadOnlyList<LibraryDto> JoinCapacity(
+    internal static IReadOnlyList<LibraryDto> JoinCapacity(
         IReadOnlyList<KgsmLibrary> libraries, IReadOnlyList<DiskCapacity>? disks)
     {
         var mapped = new List<LibraryDto>(libraries.Count);
         foreach (KgsmLibrary lib in libraries)
         {
             DiskCapacity? disk = null;
-            if (disks is not null)
+            if (disks is not null && lib.Online)
             {
                 foreach (DiskCapacity candidate in disks)
                 {

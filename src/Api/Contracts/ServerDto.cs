@@ -59,10 +59,11 @@ public sealed record Server(
     // native | container — the supervision discriminator (Instance.Runtime), lower-cased.
     //
     // ⚠ NULL when the instance's library is not mounted. The engine omits the field entirely from an
-    // offline instance's payload (its config is on the disk that is gone), and kgsm-lib's enum has no
-    // member for "not reported" — an absent value lands on Native, its zero. A honest unknown is the
+    // offline instance's payload (its config is on the disk that is gone), and kgsm-lib models that as a
+    // nullable enum, so "not reported" arrives as null and travels here as null. A honest unknown is the
     // divergence from the frozen native|container pair, on the same rule as every other field here:
-    // never a plausible default over an unmeasured value.
+    // never a plausible default over an unmeasured value — reading an unreported runtime as native would
+    // send a surface to the watchdog for a container's run-state and get a confident wrong answer back.
     string? Runtime,
     // The host this server runs on (architecture §4·a). Always this api's single host.
     string HostId,

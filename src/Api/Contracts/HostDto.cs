@@ -145,7 +145,9 @@ public sealed record DiskCapacity(string Mount, double Used, double Total, strin
 /// <para>
 /// ⚠ <see cref="FreeBytes"/>/<see cref="TotalBytes"/> are <see langword="null"/> for an offline library
 /// — nothing measured an unplugged disk. A client must render that as unknown: a <c>0</c> reads as a
-/// full disk, which is the opposite fact.
+/// full disk, which is the opposite fact. <see cref="Mount"/>/<see cref="Device"/> are null there on the
+/// same grounds: they are the same class of fact, and naming a device beside an unmeasurable capacity
+/// would say a disk is known when the whole point is that it is gone.
 /// </para>
 /// </remarks>
 /// <param name="Name">The registry name, host-unique — what <c>--library</c> and the install form take.</param>
@@ -155,8 +157,9 @@ public sealed record DiskCapacity(string Mount, double Used, double Total, strin
 /// <param name="InstanceCount">How many registered instances resolve here. Counted from the instance
 /// registry, so it is answered for an offline library too — which is exactly when it matters, because it
 /// is what a removal is refused over.</param>
-/// <param name="Mount">The filesystem the root sits on, from the monitor. Null when there is no snapshot
-/// or no mount contains the path.</param>
+/// <param name="Mount">The filesystem the root sits on, from the monitor. Null when there is no snapshot,
+/// when no mount contains the path, and for an offline library — an unreachable root sits on no measured
+/// filesystem, and the root mount contains every path by definition.</param>
 /// <param name="Device">The backing disk model behind <see cref="Mount"/>, from the monitor. Null on the
 /// same terms.</param>
 public sealed record LibraryDto(

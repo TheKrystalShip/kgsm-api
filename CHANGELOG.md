@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — an offline library named a disk nobody measured (`0.128.1`)
+
+A library's `mount`/`device` come from the monitor's capacity snapshot, joined to the engine's registry
+by longest-prefix match on the mount point. The root filesystem contains every absolute path, so an
+**offline** library — one whose disk is not there — matched `/` and came back carrying the boot disk's
+model. The storage card rendered it verbatim, so the row read *"offline · capacity unmeasured ·
+Samsung SSD 990 EVO Plus 1TB"*: a backing device named beside a state saying nothing could be measured.
+
+The join now runs only for a library the engine reports online, so `mount` and `device` are `null` there
+on the same grounds `freeBytes`/`totalBytes` already are — they are the same class of fact. Both keys are
+`WhenWritingNull` and the SPA already renders the device only when present, so the row loses the invented
+half and keeps the rest.
+
 ### Added — moving a server onto another disk (`0.128.0`)
 
 `POST /servers/{id}/move { library }` — **admin**, because placement shapes the host and that is the
