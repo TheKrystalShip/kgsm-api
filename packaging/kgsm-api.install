@@ -1,32 +1,44 @@
-# pacman's own hooks already create the service account, the state directories and reload the unit
-# files, so this repeats none of that. Enabling a unit is the administrator's call, not a package's.
+# The preset policy in kgsm-base decides whether the API runs on a node; applying it is symlink
+# manipulation on disk, so it works during the transaction and in a chroot alike. Starting it is the
+# node's post-transaction hook's job — and that hook will NOT start this one until the signing key
+# below is set, because a blank key means a per-process key and everyone is signed out on every
+# restart.
+#
+# post_install only. An administrator who disabled this unit keeps it disabled across every later
+# version — re-presetting on upgrade would quietly undo that.
 
 post_install() {
+    systemctl preset kgsm-api.service >/dev/null 2>&1 || true
+
     cat <<'MSG'
 
-  kgsm-api is installed but not running. Before starting it:
+  kgsm-api is enabled and waiting on one value:
 
-    1. Set real values in /etc/kgsm-api/kgsm-api.env  (it ships with the example's blanks)
-    2. If this host signs people in, seed /etc/kgsm/kgsm-auth.env with the shared
-       provider credentials — no package ships those, deliberately
-    3. systemctl enable --now kgsm-api.service
+    Api__SigningKey  in  /etc/kgsm-api/kgsm-api.env      openssl rand -base64 48
+
+  Set it, then start the service. It must not change between restarts — a rotated key invalidates
+  every session and refresh token that was issued under the old one.
+
+    systemctl start kgsm-api.service
 
   The first successful start creates the first administrator and prints its password once:
 
     /opt/kgsm-api/kgsm-api user bootstrap
 
+  If people here sign in through Discord or another provider, that application goes in
+  /etc/kgsm/kgsm-auth.env, which every surface on the host reads. A host whose people sign in with a
+  KGSM password needs nothing there.
+
   Install kgsm-web for the Control Panel UI. Without it the API serves its endpoints and no page,
   which is a supported way to run a node.
+
+  Run kgsm-node-status at any time for what this host runs and what is still outstanding.
 
 MSG
 }
 
 post_upgrade() {
     cat <<'MSG'
-
-  Restart to pick up the new build:
-
-    systemctl restart kgsm-api.service
 
   If pacman wrote a .pacnew beside /etc/kgsm-api/kgsm-api.env, merge it — new settings are declared
   there and a key the file never declares binds to nothing.

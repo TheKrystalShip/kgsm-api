@@ -11,7 +11,7 @@
 # upgrades without rebuilding this and a node can run the API headless.
 
 pkgname=kgsm-api
-pkgver=0.97.0
+pkgver=0.130.0
 pkgrel=1
 pkgdesc="KGSM Control Panel API — the per-host aggregator for the panel and other surfaces"
 arch=('x86_64')
@@ -20,7 +20,9 @@ license=('GPL-3.0-or-later')
 groups=('kgsm-node')
 # No separate debug package: these are shipped to a private fleet, not a distro archive.
 options=('!debug')
-depends=('kgsm' 'systemd' 'glibc' 'aspnet-runtime' 'polkit')
+# kgsm-base carries the kgsm service account this unit runs as, the /var/lib/kgsm tree it scans for
+# leaf descriptors and the account store, and the preset policy deciding whether it runs here.
+depends=('kgsm-base' 'kgsm' 'systemd' 'glibc' 'aspnet-runtime' 'polkit')
 optdepends=(
     'kgsm-web: the Control Panel SPA this serves at / (without it the API runs headless)'
     'kgsm-monitor: host and per-server metrics'
@@ -59,9 +61,6 @@ package() {
 
     install -Dm644 "${repo}/deploy/kgsm-api.service" \
         "${pkgdir}/usr/lib/systemd/system/kgsm-api.service"
-
-    install -Dm644 "${repo}/deploy/sysusers.d/kgsm-api.conf" \
-        "${pkgdir}/usr/lib/sysusers.d/kgsm-api.conf"
 
     install -Dm640 "${repo}/deploy/kgsm-api.env.example" \
         "${pkgdir}/etc/${pkgname}/${pkgname}.env"

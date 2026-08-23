@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a packaged install enables the API and names the one key blocking it (`0.130.0`)
+
+`packaging/kgsm-api.install` applies kgsm-base's `50-kgsm.preset` to this project's units in
+`post_install`, so a node comes up with them enabled instead of needing a person to enable each one.
+The node's post-transaction hook starts what is enabled, stopped and configured. `post_upgrade` does
+not preset: an administrator's `disable` survives every later version.
+
+⚠ The hook refuses to START this one until `Api__SigningKey` is set in
+`/etc/kgsm-api/kgsm-api.env`: a blank key means a per-process key, so every session and refresh token
+dies on each restart. `kgsm-node-status` names that key, and only that key.
+
+`deploy/kgsm-api.env.example` comments `Api__CorsOrigins` out rather than shipping it blank. Unset and
+blank behave identically — `kgsm-api.settings.json` already declares `""` — and a blank key is how a
+node reports that somebody still has to fill something in, which this is not.
+
+`depends=('kgsm-base')`, which carries the `kgsm` account, the `/var/lib/kgsm` tree this API scans
+for leaf descriptors, and `/var/lib/kgsm/auth` where the account store lives — so this package no
+longer ships `/usr/lib/sysusers.d/kgsm-api.conf`, and `deploy/sysusers.d/` is gone.
+
 ### Changed — the seeded env file describes no particular host (`0.129.1`)
 
 `deploy/kgsm-api.env.example` is what both `setup.sh` and the package lay down on a fresh host, so
