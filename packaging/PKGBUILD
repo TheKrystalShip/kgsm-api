@@ -11,7 +11,7 @@
 # upgrades without rebuilding this and a node can run the API headless.
 
 pkgname=kgsm-api
-pkgver=0.130.0
+pkgver=0.131.0
 pkgrel=1
 pkgdesc="KGSM Control Panel API — the per-host aggregator for the panel and other surfaces"
 arch=('x86_64')
@@ -19,7 +19,14 @@ url="https://github.com/TheKrystalShip/kgsm-api"
 license=('GPL-3.0-or-later')
 groups=('kgsm-node')
 # No separate debug package: these are shipped to a private fleet, not a distro archive.
-options=('!debug')
+#
+# !strip is load-bearing, not a preference. This is a .NET single-file publish: the managed
+# assemblies are appended to the apphost ELF and located through a footer at the end of the file.
+# `strip` rewrites the ELF and drops everything past its section table, which takes the bundle with
+# it — leaving a 78KB apphost that starts, finds no bundle, and exits with "Failure processing
+# application bundle; Arithmetic overflow while reading bundle." A Native-AOT binary is a real ELF
+# and survives stripping, which is why only the single-file packages carry this.
+options=('!debug' '!strip')
 # kgsm-base carries the kgsm service account this unit runs as, the /var/lib/kgsm tree it scans for
 # leaf descriptors and the account store, and the preset policy deciding whether it runs here.
 depends=('kgsm-base' 'kgsm' 'systemd' 'glibc' 'aspnet-runtime' 'polkit')

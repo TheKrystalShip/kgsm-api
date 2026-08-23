@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the packaged binary carries its bundle again (`0.131.1`)
+
+`packaging/PKGBUILD` declares `!strip`. This project publishes single-file: the managed assemblies
+are appended to the apphost ELF and found through a footer at the end of the file, and makepkg's
+strip pass rewrites the ELF and drops everything past its section table — which takes the bundle
+with it. The package installed a 78KB apphost that started, found no bundle and exited with
+*"Failure processing application bundle; Arithmetic overflow while reading bundle"*, while the
+build, the package and namcap all looked correct. A Native-AOT binary is a real ELF and survives
+stripping, which is why the option belongs on this package and not on every one.
+
 ### Added — the API completes itself: its own signing key, and the administrator it begins with (`0.131.0`)
 
 A host is given only what no host can generate for itself. Two things that used to be a person's
