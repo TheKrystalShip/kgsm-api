@@ -137,7 +137,15 @@ public class StreamConnectionTests
         });
 
         Task run = conn.RunAsync(cts.Token);
-        await Task.Delay(600);
+
+        // Deadline-polled, not a fixed sleep: a loaded runner stretches the re-check interval
+        // arbitrarily, and the property here is "re-checked repeatedly", not "re-checked fast".
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (Volatile.Read(ref checks) < 2 && DateTime.UtcNow < deadline)
+        {
+            Assert.False(run.IsCompleted, "a valid session was torn down by its own re-check");
+            await Task.Delay(50);
+        }
 
         Assert.False(run.IsCompleted, "a valid session was torn down by its own re-check");
         Assert.True(Volatile.Read(ref checks) >= 2, $"expected repeated re-checks, saw {Volatile.Read(ref checks)}");
