@@ -106,7 +106,7 @@ public sealed class BatchesController(
             // the record of having been called off.
             await journal.CommandOutcomeAsync(
                 ApiJournal.CommandCancelledEvent, member.ServerId, existing.Verb, member.JobId, id,
-                error: null, exitCode: null, actor, resolvedOrigin, ct);
+                error: null, exitCode: null, actor, resolvedOrigin, ct: ct);
 
             if (member.JobId is null) continue;
             Job? job = jobs.Get(member.JobId);

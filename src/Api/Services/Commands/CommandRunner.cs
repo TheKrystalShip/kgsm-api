@@ -110,11 +110,29 @@ public sealed class CommandRunner(
         _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName));
 
     /// <summary>
+    /// Fire-and-forget a <c>move</c> job (<c>POST /servers/{id}/move</c>) — the instance's files into
+    /// another library. <paramref name="fromLibrary"/> is where the roster said it was when the move was
+    /// asked for, carried so a refusal can name both disks; <paramref name="toLibrary"/> is the target.
+    /// </summary>
+    /// <remarks>
+    /// Minutes of copying, and it holds the server's in-flight slot for the whole of it — which is what a
+    /// surface renders "moving" from. ⚠ The engine starts the instance once on the new path to confirm it
+    /// runs there, so an <c>instance_started</c> and an <c>instance_stopped</c> land partway through; a
+    /// card reading run-state alone flickers "running" mid-move, and this job's span is the answer.
+    /// Echo-path audited via kgsm's <c>instance_moved</c> → <c>server.move</c>; no write here for a
+    /// success.
+    /// </remarks>
+    public void StartMove(
+        Job job, string toLibrary, string? fromLibrary = null, string? actor = null, string? origin = null) =>
+        _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName: null,
+            fromLibrary: fromLibrary, toLibrary: toLibrary));
+
+    /// <summary>
     /// Runs the verb, settles the job and verifies. Returns the engine's exit code when it failed, so a
     /// caller that must categorise the failure — <see cref="BatchWorker"/> telling a capacity refusal
     /// from a fault — reads a number the engine defined rather than matching its prose.
     /// </summary>
-    private async Task<int?> ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null, bool? installAutostart = null, bool force = false, string? installLibrary = null)
+    private async Task<int?> ExecuteAsync(Job job, string? actor, string? origin, string? blueprint, string? backupName, int? installPort = null, bool? installAutostart = null, bool force = false, string? installLibrary = null, string? fromLibrary = null, string? toLibrary = null)
     {
         bool ok = false;
         string? error = null;
@@ -138,6 +156,7 @@ public sealed class CommandRunner(
                 CommandVerb.Update => RunUpdate(scope, job, actor, origin),
                 CommandVerb.BackupCreate => RunBackupCreate(scope, job, actor, origin),
                 CommandVerb.BackupRestore => RunBackupRestore(scope, job, backupName!, actor, origin),
+                CommandVerb.Move => RunMove(scope, job, toLibrary!, actor, origin),
                 _ => RunLifecycle(scope, job, actor, origin, force),
             };
         }
@@ -172,7 +191,8 @@ public sealed class CommandRunner(
                 // The one fact on this path that nothing else on the host records. Awaited rather than
                 // fired off, so the journal's order is the order the outcomes happened — an append is a
                 // single write to a file this process owns.
-                await RecordOutcomeAsync(job, actor, origin, error, exitCode).ConfigureAwait(false);
+                await RecordOutcomeAsync(job, actor, origin, error, exitCode, fromLibrary, toLibrary)
+                    .ConfigureAwait(false);
             }
         }
 
@@ -312,6 +332,26 @@ public sealed class CommandRunner(
         return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
 
+    // move — the instance's files into another library. On IInstanceService, so it needs its own case.
+    // The controller already refuses the answerable cases synchronously (a library this host does not
+    // hold, one whose root is away, the instance's current library, a running instance); a subtler
+    // refusal — the target has less free space than the instance occupies, or somebody started the
+    // server between the check and the run — is the engine's to make, and lands as a failed job carrying
+    // its words. Echo-path audited via instance_moved → server.move; no audit row here.
+    //
+    // skipSpaceCheck is deliberately NOT exposed: it is the escape hatch for an operator who has looked
+    // at the disk, and a panel button that overrides a measurement is how a drive gets filled.
+    private (bool ok, string? error, int? exitCode) RunMove(
+        IServiceScope scope, Job job, string library, string? actor, string? origin)
+    {
+        var instances = scope.ServiceProvider.GetService(typeof(IInstanceService)) as IInstanceService;
+        if (instances is null)
+            return (false, "engine not provisioned", null);
+
+        KgsmResult result = instances.Move(job.ServerId, library, skipSpaceCheck: false, actor, origin);
+        return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
+    }
+
     /// <summary>
     /// Records a command that ended without doing the thing, to this API's own journal.
     /// </summary>
@@ -321,7 +361,9 @@ public sealed class CommandRunner(
     /// a reported outcome into an exception because writing it down failed would trade a missing line for
     /// a broken command path.
     /// </remarks>
-    private async Task RecordOutcomeAsync(Job job, string? actor, string? origin, string? error, int? exitCode)
+    private async Task RecordOutcomeAsync(
+        Job job, string? actor, string? origin, string? error, int? exitCode,
+        string? fromLibrary = null, string? toLibrary = null)
     {
         if (EngineRecordsItsOwnFailure(job.Verb)) return;
 
@@ -329,7 +371,8 @@ public sealed class CommandRunner(
         {
             await journal.CommandOutcomeAsync(
                 OutcomeEvent(exitCode), job.ServerId, job.Verb, job.Id, job.BatchId,
-                error, exitCode, actor, AuditMapping.NormalizeOrigin(origin)).ConfigureAwait(false);
+                error, exitCode, actor, AuditMapping.NormalizeOrigin(origin),
+                fromLibrary, toLibrary).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

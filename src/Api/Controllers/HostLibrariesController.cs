@@ -150,27 +150,43 @@ public sealed class HostLibrariesController(
     /// resolve to no library until it is registered again.
     /// </para>
     /// <para>
+    /// <c>?drain=&lt;target&gt;</c> is how a disk is emptied before it is taken out: every instance in
+    /// this library moves into the target, one at a time, and the library is deregistered once the last
+    /// has landed. Every resident has to be stopped first — the engine lists the running ones and moves
+    /// nothing rather than stopping servers on the caller's behalf.
+    /// </para>
+    /// <para>
     /// ⚠ <b>There is no force.</b> The engine refuses while instances still resolve to the library, naming
     /// them, and that refusal is served through as a <c>409</c> with its own words. Adding a
     /// pass-through would let the panel produce, in one click, the state the engine exists to prevent;
-    /// moving the instances off first is the sanctioned path.
+    /// draining is the sanctioned path, and it is the one offered here.
+    /// </para>
+    /// <para>
+    /// ⚠ A drain is <b>minutes of copying per resident instance</b> and this request blocks for all of
+    /// it — unlike a server move, which runs as a job. Nothing in the engine brackets a drain, so there
+    /// is no per-instance progress to stream; a caller needs a client timeout that matches.
     /// </para>
     /// </remarks>
     [HttpDelete("{name}")]
     [Authorize(Policy = AuthPolicy.Admin)]
     public async Task<IActionResult> Remove(
-        string id, string name, [FromQuery] string? origin, CancellationToken ct)
+        string id, string name, [FromQuery] string? origin, [FromQuery] string? drain, CancellationToken ct)
     {
         if (!IsThisHost(id)) return NotFound();
 
         if (!TryResolveOrigin(origin, out string resolvedOrigin))
             return BadOrigin();
 
+        string? drainTo = string.IsNullOrWhiteSpace(drain) ? null : drain.Trim();
+        if (drainTo is not null && string.Equals(drainTo, name, StringComparison.Ordinal))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "a library cannot be drained into itself");
+
         if (Engine() is not ILibraryService libraries) return NoEngine();
 
         string? actor = AuditPrincipal.ActorString(User);
         KgsmResult result = await Task
-            .Run(() => libraries.Remove(name, force: false, actor, resolvedOrigin), ct)
+            .Run(() => libraries.Remove(name, force: false, drainTo, actor, resolvedOrigin), ct)
             .ConfigureAwait(false);
 
         if (!result.IsSuccess)
@@ -224,15 +240,10 @@ public sealed class HostLibrariesController(
         return Error(status, code, detail);
     }
 
-    // The engine's own sentence, verbatim — it names the instances blocking a removal, or why a path
-    // could not be registered, and no wording composed here could carry that. A run that said nothing
-    // gets a bare statement of what did not happen rather than an invented reason.
-    //
-    // ⚠ The one thing dropped is bash's own plumbing diagnostic ("line 59: echo: write error: Broken
-    // pipe"), which kgsm's library handler emits when its output is read through a pipe that closes
-    // early. That is the SHELL complaining about its stdout, not the engine saying why it refused, and
-    // it lands FIRST — so a reader shown the message verbatim reads a pipe error and never reaches the
-    // instance list that explains the refusal. Every line kgsm itself wrote survives untouched.
+    // The engine's own sentence, verbatim — it names the instances blocking a removal, the running ones
+    // blocking a drain, or why a path could not be registered, and no wording composed here could carry
+    // that. A run that said nothing gets a bare statement of what did not happen rather than an invented
+    // reason.
     private static string Detail(KgsmResult result, string verb, string name)
     {
         string stderr = Clean(result.Stderr);
@@ -245,7 +256,6 @@ public sealed class HostLibrariesController(
         string.IsNullOrWhiteSpace(raw)
             ? ""
             : string.Join('\n', raw.Split('\n')
-                .Where(line => !line.Contains(": write error:", StringComparison.Ordinal))
                 .Select(line => line.TrimEnd())
                 .Where(line => line.Length > 0));
 

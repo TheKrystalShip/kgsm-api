@@ -274,6 +274,7 @@ public sealed class InstallUninstallTests
             string? name = null, string? actor = null, string? origin = null, int? port = null, bool? start = null) => new(0);
 
         public KgsmResult Uninstall(string instanceName, string? actor = null, string? origin = null) => new(0);
+        public KgsmResult Move(string instanceName, string library, bool skipSpaceCheck = false, string? actor = null, string? origin = null) => throw new NotImplementedException();
 
         public Dictionary<string, Instance>? GetAllOrNull() => GetAll();
         public Dictionary<string, Instance> GetAll() => new()

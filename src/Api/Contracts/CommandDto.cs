@@ -77,6 +77,18 @@ public sealed record InstallRequest(
     string? Password = null);
 
 /// <summary>
+/// The <c>POST /servers/{id}/move</c> body — which library to move the instance's files into.
+/// </summary>
+/// <param name="Library">
+/// The target library, by registered name. Required. A name this host does not carry, one whose root
+/// is not reachable, and the one the instance is already in are each refused synchronously, so the
+/// form answers beside its own selector rather than producing a job that fails a moment later
+/// somewhere nobody is looking.
+/// </param>
+/// <param name="Origin">The declared driving surface (<c>ui|assistant|discord|api</c>).</param>
+public sealed record MoveServerRequest(string? Library, string? Origin = null);
+
+/// <summary>
 /// The closed lifecycle verb set the API admits. Server-defined —
 /// the client (or, later, the model) cannot invent one. <see cref="Install"/>/<see cref="Uninstall"/>
 /// (M8·b) and <see cref="BackupCreate"/>/<see cref="BackupRestore"/> (Tier-1 ops) are <em>not</em> part of
@@ -111,6 +123,20 @@ public static class CommandVerb
 
     /// <summary>Uninstall an instance (M8·b — <c>DELETE /servers/{id}</c>). NOT in <see cref="IsKnown"/>.</summary>
     public const string Uninstall = "uninstall";
+
+    /// <summary>
+    /// Move an instance's files into another library (<c>POST /servers/{id}/move</c>). NOT in
+    /// <see cref="IsKnown"/>; it carries a target library, so a dedicated route reusing the job
+    /// machinery (the install/backup_restore pattern — the plain verbs are param-less).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Its job is what a surface renders "moving" from.</b> The engine starts the instance once on
+    /// the new path to confirm it runs there, so an <c>instance_started</c> and an
+    /// <c>instance_stopped</c> land partway through with no bracket around them — a card reading
+    /// run-state alone flickers "running" mid-move. The job holds the server's in-flight slot for the
+    /// whole operation, which is the span a surface should trust instead.
+    /// </remarks>
+    public const string Move = "move";
 
     /// <summary>Create a backup of an instance (Tier-1 ops — <c>POST /servers/{id}/backups</c>). NOT in
     /// <see cref="IsKnown"/>; it has a dedicated route (collection target) but reuses the job machinery.</summary>

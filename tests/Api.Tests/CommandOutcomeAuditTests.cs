@@ -194,4 +194,43 @@ public sealed class CommandOutcomeAuditTests
         Assert.False(CommandRunner.EngineRecordsItsOwnFailure(CommandVerb.BackupCreate));
         Assert.False(CommandRunner.EngineRecordsItsOwnFailure(CommandVerb.BackupRestore));
     }
+
+    // ---- a move names the two disks it was between ----------------------------------------------
+
+    [Fact]
+    public void A_refused_move_names_both_libraries()
+    {
+        // The successful move is the engine's own instance_moved, which carries the same pair. This is
+        // the half no producer records — the disk somebody was trying to empty, and the one it could not
+        // be emptied onto — and it is what they come back to afterwards.
+        CommandOutcomeEventData d = Outcome(
+            verb: CommandVerb.Move, error: "not enough free space in library 'archive'", exitCode: 56);
+        d.FromLibrary = "ssd";
+        d.ToLibrary = "archive";
+
+        AuditWrite row = AuditMapping.FromCommandOutcomeEvent(d, ApiJournal.CommandFailedEvent, HostId);
+
+        Assert.Equal("could not move factorio-test", row.Summary);
+        Assert.Equal("ssd", row.Meta!["fromLibrary"]);
+        Assert.Equal("archive", row.Meta["toLibrary"]);
+        Assert.Equal("not enough free space in library 'archive'", row.Meta["error"]);
+    }
+
+    [Fact]
+    public void A_verb_that_is_not_a_move_carries_neither_library()
+    {
+        AuditWrite row = AuditMapping.FromCommandOutcomeEvent(
+            Outcome(error: "boom", exitCode: 1), ApiJournal.CommandFailedEvent, HostId);
+
+        Assert.False(row.Meta!.ContainsKey("fromLibrary"));
+        Assert.False(row.Meta.ContainsKey("toLibrary"));
+    }
+
+    [Fact]
+    public void A_move_the_engine_never_reached_still_records_where_it_was_going()
+    {
+        // The engine reports a move's failure with no event of its own, so this row is the only record —
+        // and one that could not say which disk was being emptied would be the row without its point.
+        Assert.False(CommandRunner.EngineRecordsItsOwnFailure(CommandVerb.Move));
+    }
 }

@@ -12,6 +12,18 @@ The first write path (M3) — `POST /api/v1/servers/{id}/commands { verb }` → 
   derives the target from the instance's own `Instance.Ports` (a client list would let the browser open
   anything). It is **always admissible** (no run-state no-op — declarative/idempotent) and shares the
   one-in-flight slot.
+- **`move` has a dedicated route, and it is admin.** `POST /servers/{id}/move { library }` reuses the job
+  machinery (the install/`backup_restore` pattern — the plain verbs are param-less) and takes the
+  library-CRUD authority rather than operator, because placement shapes the host. ⚠ **The engine starts
+  the instance once on the new path to confirm it runs there**, so an `instance_started` and an
+  `instance_stopped` land partway through with no bracket around them — a surface reading run-state alone
+  flickers "running" mid-move, and the job holding the in-flight slot is the span it should trust instead.
+  The controller answers the four refusals it can make from what it already holds (unknown server, a
+  library this host does not carry, an offline target, the instance's own library, a running instance);
+  **free space is deliberately not one of them** — the engine measures what the instance occupies before
+  it copies, and a second measurement here could disagree with the one that decides. `--skip-space-check`
+  is not exposed: it is the escape hatch for an operator who has looked at the disk, and a panel button
+  that overrides a measurement is how a drive gets filled.
 - **`CommandGate` is pure and minimal.** It rejects ONLY the obvious no-ops against the *real observed*
   status (start-when-running / stop-when-stopped). **The engine is the single authority** on what a verb
   does — a subtler-but-impossible transition runs and surfaces as the job's `failed` + kgsm's real error.
@@ -36,7 +48,10 @@ The first write path (M3) — `POST /api/v1/servers/{id}/commands { verb }` → 
   `AuditService`** (it announces, it has no append path) and **never published from the write site** —
   the API tails its own journal and that tail is what announces the row. ⚠ `update` and `uninstall` are
   excluded (`CommandRunner.EngineRecordsItsOwnFailure`): kgsm emits `instance_update_failed`/
-  `instance_uninstall_failed`, and a second row for a fact a producer already emits is undedupable.
+  `instance_uninstall_failed`, and a second row for a fact a producer already emits is undedupable. A
+  refused `move` carries `fromLibrary`/`toLibrary` on that row: the successful move is the engine's own
+  `instance_moved`, which names the same pair, and the disk somebody could not empty is exactly what they
+  come back to.
 - **`open_ports` is the audit EXCEPTION — a DIRECT write (M6·b).** It goes through `IFirewallService`
   (`EnsureOpenAsync`), which runs no kgsm command and emits **no event**, so there is no echo to read — the
   `auth.*` case. The runner therefore writes the `network.ports.open` row **directly** via `AuditService`

@@ -62,6 +62,7 @@ public static class AuditQueries
         AuditAction.ServerUpdate,
         AuditAction.ServerInstall,
         AuditAction.ServerUninstall,
+        AuditAction.ServerMove,
         AuditAction.ServerCrash,
         AuditAction.BackupCreate,
         AuditAction.BackupRestore,

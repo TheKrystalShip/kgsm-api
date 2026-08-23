@@ -239,10 +239,10 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         await Feed("instance_uninstall_finished", instance, until: () => jobs.InFlightFor(instance) is null);
     }
 
-    /// <summary>The instance is known and observed down.</summary>
+    /// <summary>The instance is known and observed down — measured, never merely unread.</summary>
     private static bool Down(InstanceCache cache, string instance) =>
         cache.Statuses.TryGetValue(instance, out Reading<InstanceRuntimeStatus>? r)
-        && r.Value is not null && !r.Value.Status;
+        && r.Value?.Status == false;
 
     /// <summary>
     /// Append <paramref name="type"/> for <paramref name="instance"/> until <paramref name="until"/>

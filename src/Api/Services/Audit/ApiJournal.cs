@@ -266,6 +266,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     public Task CommandOutcomeAsync(
         string type, string instance, string verb, string? jobId, string? batchId,
         string? error, int? exitCode, string? actor, string? origin,
+        string? fromLibrary = null, string? toLibrary = null,
         CancellationToken ct = default) =>
         WriteAsync(type, actor ?? "", origin, w =>
         {
@@ -281,6 +282,12 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
                 w.WriteNumber("ExitCode", code);
             else
                 w.WriteNull("ExitCode");
+
+            // A move names the two disks it was between; every other verb leaves both null. The
+            // successful move is the engine's own instance_moved, which carries the same pair — this is
+            // the half no producer records, and the half somebody emptying a drive comes back to.
+            WriteNullable(w, "FromLibrary", fromLibrary);
+            WriteNullable(w, "ToLibrary", toLibrary);
         }, ct);
 
     /// <summary>

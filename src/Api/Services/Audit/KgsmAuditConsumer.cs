@@ -452,12 +452,23 @@ public sealed class KgsmAuditConsumer(
             return WriteServer(d, AuditAction.ServerUninstall, AuditSeverity.Danger, "could not uninstall");
         });
 
-        // server.install — carries the blueprint it was installed from.
+        // server.install — carries the blueprint it was installed from, and the library it landed in.
         events.RegisterHandler<InstanceInstalledData>(d =>
         {
             instanceCache.TryRefresh();
             return WriteServer(d, AuditAction.ServerInstall, AuditSeverity.Success, "installed",
-                Meta(("blueprint", d.Blueprint)));
+                Meta(("blueprint", d.Blueprint), ("library", d.Library)));
+        });
+
+        // server.move — the instance's files are on a different disk now. The roster refresh is what
+        // makes it matter beyond the row: every absolute path the instance holds was rewritten, so a
+        // cached record still names a directory that no longer exists. Named from BOTH libraries,
+        // because a drain is asked "which disk is empty now".
+        events.RegisterHandler<InstanceMovedData>(d =>
+        {
+            instanceCache.TryRefresh();
+            return WriteServer(d, AuditAction.ServerMove, AuditSeverity.Info, "moved",
+                Meta(("fromLibrary", d.FromLibrary), ("toLibrary", d.ToLibrary)));
         });
 
         // The two backup verbs' brackets. Archiving a large world is minutes of work and the scheduler

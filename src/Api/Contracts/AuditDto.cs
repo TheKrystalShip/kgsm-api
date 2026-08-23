@@ -116,6 +116,13 @@ public static class AuditAction
     public const string ServerUpdateAvailable = "server.update_available";
     public const string ServerInstall = "server.install";
     public const string ServerUninstall = "server.uninstall";
+
+    // server.move — the instance's files are on a different disk. Its own action rather than a
+    // configuration change, because nothing about the server changed: the same instance, the same
+    // version, the same world, in a different place. The row names BOTH libraries, since a reader
+    // that learns only the destination cannot tell which disk just got its space back — and getting a
+    // disk empty before it is unplugged is the whole reason the verb exists.
+    public const string ServerMove = "server.move";
     // server.crash — the resident supervisor's autonomous crash signals (kgsm-watchdog, kgsm-lib
     // 1.9.0). Wired in M6·0: both InstanceCrashed (auto-restarting, warn) and InstanceFailed
     // (retries exhausted, danger) map to this single doc-given action, distinguished by severity +

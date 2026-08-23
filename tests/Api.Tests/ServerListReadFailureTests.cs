@@ -84,6 +84,7 @@ public sealed class ServerListReadFailureTests
         public KgsmResult GenerateId(string blueprintName, string? customName = null) => throw new NotImplementedException();
         public KgsmResult Install(string blueprintName, string? installDir = null, string? version = null, string? name = null, string? actor = null, string? origin = null, int? port = null, bool? start = null) => throw new NotImplementedException();
         public KgsmResult Uninstall(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public KgsmResult Move(string instanceName, string library, bool skipSpaceCheck = false, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public Instance? GetInstanceInfo(string instanceName) => throw new NotImplementedException();
         public InstanceRuntimeStatus? GetInstanceStatus(string instanceName) => throw new NotImplementedException();
         public ICollection<string> GetLogs(string instanceName, int maxLines = 10) => throw new NotImplementedException();

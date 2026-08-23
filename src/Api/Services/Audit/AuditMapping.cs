@@ -1196,6 +1196,8 @@ public static class AuditMapping
         if (!string.IsNullOrEmpty(d.BatchId)) meta["batchId"] = d.BatchId!;
         if (d.ExitCode is { } code) meta["exitCode"] = code.ToString(CultureInfo.InvariantCulture);
         if (!string.IsNullOrEmpty(d.Error)) meta["error"] = d.Error!;
+        if (!string.IsNullOrEmpty(d.FromLibrary)) meta["fromLibrary"] = d.FromLibrary!;
+        if (!string.IsNullOrEmpty(d.ToLibrary)) meta["toLibrary"] = d.ToLibrary!;
 
         return ApiWrite(d, action, severity,
             new AuditTarget(AuditTargetKind.Server, d.InstanceName, d.InstanceName),

@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — moving a server onto another disk (`0.128.0`)
+
+`POST /servers/{id}/move { library }` — **admin**, because placement shapes the host and that is the
+authority registering and deregistering a library already takes. It returns `202` + a job whose verb
+is `move`, the copy runs off-request, and a fresh `server.patch` lands on settle with the instance
+reporting its new library. The audit row is kgsm's `instance_moved` echo, naming **both** libraries:
+a reader that learns only where the files went cannot tell which disk just got its space back.
+
+⚠ **The job's span is the operation, and run-state is not.** The engine starts the instance once on
+the new path to confirm it runs there, so an `instance_started` and an `instance_stopped` land
+partway through with no bracket around them — a surface watching `status` alone sees the server come
+up and go down mid-move. The job holds the server's in-flight slot from accept to settle, and that
+is what a card renders "moving" from.
+
+Four refusals are answered synchronously, so the form answers beside its own selector instead of
+producing a job that fails a moment later somewhere nobody is looking: an unknown server is a `404`,
+a library this host does not carry a `400`, and an offline target / the instance's own library / a
+running instance a `409`. Free space is deliberately **not** among them — the engine measures what
+the instance actually occupies before it copies, and a second measurement here could disagree with
+the one that decides; a shortfall lands as a failed job carrying the engine's measured figure.
+`--skip-space-check` is not exposed: it is the escape hatch for an operator who has looked at the
+disk, and a panel button that overrides a measurement is how a drive gets filled.
+
+`DELETE /hosts/{id}/libraries/{name}?drain=<target>` moves every resident instance into the target
+and deregisters once the last has landed — the way a disk is emptied before it goes. Every resident
+has to be stopped first; the engine lists the running ones and moves nothing rather than stopping
+servers on the caller's behalf, and that refusal comes through verbatim. ⚠ There is still **no
+force**, and the drain blocks for the whole copy: nothing in the engine brackets it, so there is no
+per-instance progress to stream.
+
+A move the engine refused is a `command.failed` row carrying `fromLibrary`/`toLibrary`. The
+successful move is the engine's own event; this is the half no producer records.
+
+`server.install` rows now name the **library** the install landed in, from `instance_installed`'s new
+`Library` field. On a host with several disks that is the half of an install record its operator most
+needs, and it existed nowhere before.
+
+### Changed — the engine's own answer about a disk, instead of a join made here (`0.128.0`)
+
+`libraryState` comes off `Instance.LibraryState` (kgsm-lib 6.0.0), which the engine measures per
+invocation from the instance registry — the one read that still works when the instance's own config
+cannot be opened. The instance cache no longer reads the library registry on every refresh: that
+join was a second opinion about a question the engine already answers, and dropping it removes a
+kgsm invocation per cache cycle.
+
+`status` and `runtime` are the engine's values straight through. kgsm-lib carries both as nullables
+now, so an instance whose library is not mounted reports `status: "unknown"` and `runtime: null`
+because that is what was read, not because a guard caught a coerced default. `blueprint` is answered
+for such an instance too — the name comes out of the instance registry rather than from the
+`blueprint_file` path on the absent disk — which closes the gap `0.127.0` recorded as needing the
+library.
+
+⚠ An instance with no reported runtime is dated by neither supervisor. Which one to ask is exactly
+what an unreadable instance does not say, and the watchdog's ledger can still hold a row from before
+its disk went.
+
+The library endpoints no longer strip bash's pipe diagnostic out of a refusal — the engine stopped
+emitting it at source, so every line in a refusal is one kgsm wrote.
+
 ### Fixed — an unreadable server was reported as a stopped one (`0.127.0`)
 
 An instance whose library is not mounted came back from `GET /servers` as `status: "stopped"`,

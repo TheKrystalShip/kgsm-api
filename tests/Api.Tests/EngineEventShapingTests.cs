@@ -550,4 +550,58 @@ public sealed class BlueprintEventShapingTests
         Assert.False(shaped!.Meta!.ContainsKey("overridesSystem"));
         Assert.False(shaped.Meta.ContainsKey("runtime"));
     }
+
+    // --- placement: which disk an instance's files are on ------------------------------------------
+
+    [Fact]
+    public void Installed_NamesTheLibraryItLandedIn()
+    {
+        // On a host with several disks this is the half of an install record its operator most needs,
+        // and nothing else on the host records it.
+        var item = new EventHistoryEntry(
+            Id: "evt_inst1", Ts: Ts, Type: "instance_installed", Instance: "fac-1", Blueprint: null,
+            Actor: "user:heisen", Origin: "ui", Hostname: null,
+            Data: Data(new { InstanceName = "fac-1", Blueprint = "factorio", Library = "ssd" }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.Equal(AuditAction.ServerInstall, shaped!.Action);
+        Assert.Equal("factorio", shaped.Meta!["blueprint"]);
+        Assert.Equal("ssd", shaped.Meta["library"]);
+    }
+
+    [Fact]
+    public void Moved_NamesBothLibraries()
+    {
+        // Both, not just the destination: a reader that learns only where the files went cannot tell
+        // which disk just got its space back, and that is the question a drain is asked.
+        var item = new EventHistoryEntry(
+            Id: "evt_mv1", Ts: Ts, Type: "instance_moved", Instance: "fac-1", Blueprint: null,
+            Actor: "user:heisen", Origin: "ui", Hostname: null,
+            Data: Data(new { InstanceName = "fac-1", FromLibrary = "ssd", ToLibrary = "archive" }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.Equal(AuditAction.ServerMove, shaped!.Action);
+        // Nothing about the server changed — the same instance, the same world, in a different place.
+        Assert.Equal(AuditSeverity.Info, shaped.Severity);
+        Assert.Equal("ssd", shaped.Meta!["fromLibrary"]);
+        Assert.Equal("archive", shaped.Meta["toLibrary"]);
+        Assert.Equal("fac-1", shaped.ServerId);
+    }
+
+    [Fact]
+    public void Moved_FromAnUnregisteredRoot_ReportsTheEnginesOwnWord()
+    {
+        // "unregistered" is a measurement — the files were under a root this host holds no entry for —
+        // and it has to survive to the row rather than becoming a blank.
+        var item = new EventHistoryEntry(
+            Id: "evt_mv2", Ts: Ts, Type: "instance_moved", Instance: "fac-1", Blueprint: null,
+            Actor: "user:heisen", Origin: "api", Hostname: null,
+            Data: Data(new { InstanceName = "fac-1", FromLibrary = "unregistered", ToLibrary = "ssd" }));
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.Equal("unregistered", shaped!.Meta!["fromLibrary"]);
+    }
 }

@@ -137,10 +137,7 @@ public sealed class DomainPump(
                             diskById, onlinePlayers, updateSince, runClock,
                             // Composed from the SAME helper the REST read uses, so a stream frame and a
                             // GET can never disagree about what a start is expected to cost.
-                            ServerAggregator.BlueprintMinRamOf(blueprints),
-                            // Same registry read the roster came from, so a card's library state is never
-                            // fresher or staler than the instance record it sits on.
-                            cache.LibraryOnline);
+                            ServerAggregator.BlueprintMinRamOf(blueprints));
 
                     if (!primed)
                     {

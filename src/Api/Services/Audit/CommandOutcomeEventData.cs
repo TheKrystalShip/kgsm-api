@@ -43,4 +43,19 @@ public sealed class CommandOutcomeEventData : EventDataBase
 
     /// <summary>Gets or sets the engine's exit code, when a process ran to produce one.</summary>
     public int? ExitCode { get; set; }
+
+    /// <summary>
+    /// Gets or sets the library the instance was in when a <c>move</c> was asked for.
+    /// </summary>
+    /// <remarks>
+    /// Only a move names either library; every other verb leaves both null. They are here because the
+    /// engine's <c>instance_moved</c> carries them for a move that WORKED, and a refused one — the disk
+    /// somebody was trying to empty, and the disk it could not be emptied onto — is exactly the record
+    /// they go looking for afterwards. Null when the roster could not say where the instance was, which
+    /// is a real unknown rather than a blank to fill.
+    /// </remarks>
+    public string? FromLibrary { get; set; }
+
+    /// <summary>Gets or sets the library a <c>move</c> was asked to put it in.</summary>
+    public string? ToLibrary { get; set; }
 }

@@ -176,7 +176,7 @@ public sealed class NetworkAggregator(
 
         var map = new Dictionary<string, string>(roster.Count, StringComparer.Ordinal);
         foreach ((string id, Instance inst) in roster)
-            map[id] = ServerAggregator.CleanBlueprintId(inst);
+            map[id] = inst.Blueprint;
         return map;
     }
 

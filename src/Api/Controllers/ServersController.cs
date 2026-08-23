@@ -455,6 +455,102 @@ public sealed class ServersController(
         return StatusCode(StatusCodes.Status202Accepted, new CommandAccepted(job));
     }
 
+    /// <summary>
+    /// Move a server's files into another library — <c>POST /servers/{id}/move</c>. Async like install:
+    /// <c>202</c> + a job, the copy runs off-request, and a fresh <c>server.patch</c> lands on settle
+    /// with the instance reporting its new library. A <c>server.move</c> audit entry naming both
+    /// libraries comes from kgsm's <c>instance_moved</c> echo.
+    /// <list type="bullet">
+    /// <item><c>400</c> — no <c>library</c>, a bad origin, or a library this host does not carry.</item>
+    /// <item><c>404</c> — unknown server id.</item>
+    /// <item><c>409</c> — the server is running, the target library's root is not reachable, the server
+    /// is already in that library, or a command is already in flight for it.</item>
+    /// <item><c>503</c> — the kgsm engine is not provisioned on this host.</item>
+    /// <item><c>202</c> — accepted: <c>{ job }</c>.</item>
+    /// </list>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Admin, not operator. Every other write here acts on one server; this one shapes where the host
+    /// keeps its data, which is the same authority registering and deregistering a library takes.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>The job is the operation's span, and run-state is not.</b> The engine starts the instance
+    /// once on the new path to confirm it runs there, so a surface watching <c>status</c> alone sees the
+    /// server come up and go down again partway through. The move's job holds the server's in-flight
+    /// slot from accept to settle, which is what a card should render "moving" from.
+    /// </para>
+    /// <para>
+    /// The four synchronous refusals are the ones this API can answer from what it already holds. Free
+    /// space is not among them: the engine measures what the instance actually occupies before it
+    /// copies, and re-deriving that here would be a second answer able to disagree with the one that
+    /// decides. It lands as a failed job carrying the engine's measured shortfall.
+    /// </para>
+    /// </remarks>
+    [HttpPost("{id}/move")]
+    [Authorize(Policy = AuthPolicy.Admin)] // placement shapes the host — the library-CRUD authority
+    public async Task<IActionResult> Move(
+        string id, [FromBody] MoveServerRequest? body, CancellationToken ct)
+    {
+        string? library = body?.Library?.Trim();
+        if (string.IsNullOrEmpty(library))
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "library is required");
+
+        if (!TryResolveOrigin(body?.Origin, out string origin))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "unknown origin; expected one of: ui, assistant, discord, api");
+
+        if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the kgsm engine is not provisioned on this host");
+
+        // The roster is the authority on which servers exist, and it also carries where this one lives.
+        IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct);
+        Server? server = servers.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.Ordinal));
+        if (server is null) return NotFound();
+
+        if (string.Equals(server.Library, library, StringComparison.Ordinal))
+            return Error(StatusCodes.Status409Conflict, "conflict",
+                $"'{id}' is already in library '{library}'");
+
+        // Only a MEASURED running state blocks. An unknown one never does — the same rule CommandGate
+        // holds for every other verb, and the engine refuses a running instance itself regardless.
+        if (server.Status is ServerStatus.Running or ServerStatus.Starting)
+            return Error(StatusCodes.Status409Conflict, "conflict",
+                $"'{id}' is running; stop it before moving it");
+
+        // Checked against the live registry so a wrong or unplugged target answers beside the picker.
+        // A registry this API cannot read is NOT a refusal: the engine resolves the name itself and will
+        // say so, and refusing here on an unreadable list would block moves over a check, not a fact.
+        if (HttpContext.RequestServices.GetService(typeof(ILibraryService)) is ILibraryService libraryService
+            && libraryService.List() is { } registry)
+        {
+            Library? target = registry.FirstOrDefault(l =>
+                string.Equals(l.Name, library, StringComparison.Ordinal));
+            if (target is null)
+                return Error(StatusCodes.Status400BadRequest, "bad_request",
+                    $"no library named '{library}' is registered on this host");
+            if (!target.Online)
+                return Error(StatusCodes.Status409Conflict, "conflict",
+                    $"library '{library}' is offline — its root {target.Path} is not reachable");
+        }
+
+        string jobId = "job_" + Guid.NewGuid().ToString("N")[..8];
+        Job? job = jobs.TryStart(jobId, id, CommandVerb.Move, DateTimeOffset.UtcNow);
+        if (job is null)
+        {
+            Job? existing = jobs.InFlightFor(id);
+            return Error(StatusCodes.Status409Conflict, "conflict",
+                existing is not null
+                    ? $"a command is already in flight for this server (job {existing.Id})"
+                    : "a command is already in flight for this server");
+        }
+
+        string? actor = AuditPrincipal.ActorString(User);
+        runner.StartMove(job, library, server.Library, actor, origin);
+        return StatusCode(StatusCodes.Status202Accepted, new CommandAccepted(job));
+    }
+
     // Resolve the caller-declared driving surface (M5): ui|assistant|discord|api, default api; an unknown
     // value (or "system", reserved for autonomous engine actions) is rejected so the caller can 400. Kept
     // independent of the actor — the two provenance axes never derive from each other.

@@ -17,7 +17,7 @@ namespace TheKrystalShip.Api.Tests;
 /// </summary>
 public sealed class ServerAggregatorBuildServerTests
 {
-    private static readonly Instance TestInstance = new() { Name = "factorio-1", BlueprintFile = "factorio.bp.yaml" };
+    private static readonly Instance TestInstance = new() { Name = "factorio-1", BlueprintFile = "factorio.bp.yaml", Runtime = InstanceRuntime.Native };
     private static readonly Dictionary<string, Snap.ServerMetrics> NoMetrics = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, BackupReading> NoBackupReadings = new(StringComparer.Ordinal);
     // No long-running operation owns the instance — what JobRegistry.InFlightFor reports for an idle server.
@@ -562,61 +562,59 @@ public sealed class ServerAggregatorBuildServerTests
     };
     // ---- library state: the second axis, never folded into run-state ---------------------------
 
-    private static Instance InLibrary(string name, string dir = "/mnt/ssd") =>
-        new() { Name = "factorio-1", BlueprintFile = "factorio.bp.yaml", Library = name, LibraryDir = dir };
+    private static Instance InLibrary(
+        string name, InstanceLibraryState? state, string dir = "/mnt/ssd") =>
+        new()
+        {
+            Name = "factorio-1",
+            BlueprintFile = "factorio.bp.yaml",
+            Runtime = InstanceRuntime.Native,
+            Library = name,
+            LibraryDir = dir,
+            LibraryState = state,
+        };
+
+    // What the engine reports for an instance it cannot read: the registry's four facts, and null for
+    // every reading that would have come out of the absent directory.
+    private static Instance Away(string name = "ssd") =>
+        new()
+        {
+            Name = "factorio-1",
+            Blueprint = "factorio",
+            Library = name,
+            LibraryDir = "/mnt/ssd",
+            LibraryState = InstanceLibraryState.Offline,
+        };
+
+    private static Dictionary<string, Reading<InstanceRuntimeStatus>> Unread(string id) => new()
+    {
+        [id] = Reading<InstanceRuntimeStatus>.Measured(new InstanceRuntimeStatus
+        {
+            InstanceName = id,
+            Status = null,
+            LibraryState = InstanceLibraryState.Offline,
+        }),
+    };
 
     [Fact]
-    public void LibraryState_JoinsTheInstanceAgainstTheRegistry()
+    public void LibraryState_IsTheEnginesOwnMeasurement()
     {
-        Server s = ServerAggregator.BuildServer("factorio-1", InLibrary("ssd"), Up("factorio-1"),
-            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
-            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = false });
+        Server s = ServerAggregator.BuildServer("factorio-1",
+            InLibrary("ssd", InstanceLibraryState.Offline), Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob);
 
         Assert.Equal("ssd", s.Library);
         Assert.Equal("/mnt/ssd", s.LibraryPath);
         Assert.Equal("offline", s.LibraryState);
-        // The two stay separate FIELDS — but a library that is not mounted is exactly the case where no
-        // run-state can be read, so the status is unknown rather than whatever the coerced reading said.
-        // See OfflineLibrary_RunStateIsUnknownNotStopped.
-        Assert.Equal(ServerStatus.Unknown, s.Status);
-    }
-
-    [Fact]
-    public void LibraryState_UnreadableRegistry_IsUnknownNotOffline()
-    {
-        // Reporting a disk as gone because one engine invocation failed would put every server on the
-        // host behind a warning about hardware that is fine.
-        Server s = ServerAggregator.BuildServer("factorio-1", InLibrary("ssd"), Up("factorio-1"),
-            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
-            libraryOnline: null);
-
-        Assert.Null(s.LibraryState);
-        Assert.Equal("ssd", s.Library);
-    }
-
-    [Fact]
-    public void LibraryState_UnregisteredIsTheEnginesOwnWord()
-    {
-        Server named = ServerAggregator.BuildServer("factorio-1", InLibrary("unregistered"), Up("factorio-1"),
-            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
-            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = true });
-
-        // A library the registry does not hold means it was deregistered between the two reads — the
-        // same fact, and it has to be spelled the same way whichever read noticed.
-        Server dropped = ServerAggregator.BuildServer("factorio-1", InLibrary("gone"), Up("factorio-1"),
-            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
-            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = true });
-
-        Assert.Equal("unregistered", named.LibraryState);
-        Assert.Equal("unregistered", dropped.LibraryState);
     }
 
     [Fact]
     public void LibraryState_EnginePredatingLibraries_IsNull()
     {
+        // Absent is unknown, never offline: reading it as a disk being gone would put every server on
+        // such a host behind a warning about hardware that is fine.
         Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, Up("factorio-1"),
-            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
-            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = true });
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob);
 
         Assert.Null(s.Library);
         Assert.Null(s.LibraryPath);
@@ -624,41 +622,63 @@ public sealed class ServerAggregatorBuildServerTests
     }
 
     [Fact]
+    public void LibraryState_UnregisteredIsTheEnginesOwnWord()
+    {
+        // A measurement, not an absence: the files are there and readable, and this host holds no entry
+        // naming the root they are under.
+        Server s = ServerAggregator.BuildServer("factorio-1",
+            InLibrary("unregistered", InstanceLibraryState.Unregistered), Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob);
+
+        Assert.Equal("unregistered", s.LibraryState);
+        Assert.Equal(ServerStatus.Running, s.Status);
+    }
+
+    [Fact]
     public void OfflineLibrary_RunStateIsUnknownNotStopped()
     {
-        // The ENGINE says status:null for an instance it cannot read — "an unreadable instance is not a
-        // stopped one". kgsm-lib models that field as a non-nullable bool, so the null arrives as false;
-        // believing it would publish a claim that the process is not running, which nothing measured.
-        Server s = ServerAggregator.BuildServer("factorio-1", InLibrary("ssd"), Down("factorio-1"),
+        // The engine says status:null for an instance it cannot read — an unreadable instance is not a
+        // stopped one, and publishing "stopped" would claim the process is down, which nothing measured.
+        Server s = ServerAggregator.BuildServer("factorio-1", Away(), Unread("factorio-1"),
             NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
-            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = false });
+            runTimes: Clock(exited: Exited));
 
         Assert.Equal(ServerStatus.Unknown, s.Status);
         Assert.Equal("offline", s.LibraryState);
-        // Everything else in that block is read out of the same unreachable directory.
+        // Everything else comes out of the same unreachable directory.
         Assert.Null(s.Version);
         Assert.Null(s.UpdateAvailable);
+        Assert.Null(s.StartedAt);
+        // The supervisor's ledger can still hold a row from before the disk went; which supervisor to
+        // ask is exactly what an unreadable instance does not say.
+        Assert.Null(s.StoppedAt);
     }
 
     [Fact]
     public void OfflineLibrary_RuntimeIsNullNotNative()
     {
-        // The engine omits `runtime` from an offline instance's payload and kgsm-lib's enum has no
-        // member for "not reported", so an absent value lands on Native — its zero. Reporting that
-        // would name a supervision type nobody read.
-        Server offline = ServerAggregator.BuildServer("factorio-1", InLibrary("ssd"), Down("factorio-1"),
-            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
-            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = false });
+        // The engine omits `runtime` for an instance whose library is not mounted, because the config
+        // naming it is on the disk that is gone. Reporting native would name a supervision type nobody
+        // read — and would send a console offer to a server that might be a container.
+        Server offline = ServerAggregator.BuildServer("factorio-1", Away(), Unread("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob);
 
-        Server online = ServerAggregator.BuildServer("factorio-1", InLibrary("ssd"), Down("factorio-1"),
-            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
-            libraryOnline: new Dictionary<string, bool>(StringComparer.Ordinal) { ["ssd"] = true });
+        Server mounted = ServerAggregator.BuildServer("factorio-1",
+            InLibrary("ssd", InstanceLibraryState.Online), Down("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob);
 
         Assert.Null(offline.Runtime);
-        // A mounted library reads normally — the guard is scoped to the unreadable case, not a blanket
-        // downgrade of every instance that happens to carry a library.
-        Assert.Equal("native", online.Runtime);
-        Assert.Equal(ServerStatus.Stopped, online.Status);
+        Assert.Equal("native", mounted.Runtime);
+        Assert.Equal(ServerStatus.Stopped, mounted.Status);
     }
 
+    [Fact]
+    public void OfflineLibrary_BlueprintIsTheNameTheRegistryHolds()
+    {
+        // blueprint_file is on the absent disk; the name is on this host, in the instance registry.
+        Server s = ServerAggregator.BuildServer("factorio-1", Away(), Unread("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob);
+
+        Assert.Equal("factorio", s.Blueprint);
+    }
 }

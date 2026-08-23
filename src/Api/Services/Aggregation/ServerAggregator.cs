@@ -158,7 +158,7 @@ public sealed class ServerAggregator
         Server server = BuildServer(id, instance, _cache.Statuses, _backups.Readings,
             metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
             IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability), _updateLag.Lookup,
-            _runTimes.Lookup, BlueprintMinRamOf(_blueprints), _cache.LibraryOnline);
+            _runTimes.Lookup, BlueprintMinRamOf(_blueprints));
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -217,7 +217,7 @@ public sealed class ServerAggregator
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
                 _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById,
                 OnlinePlayersOf(_players, _observability), _updateLag.Lookup, _runTimes.Lookup,
-                BlueprintMinRamOf(_blueprints), _cache.LibraryOnline));
+                BlueprintMinRamOf(_blueprints)));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -275,12 +275,9 @@ public sealed class ServerAggregator
         Func<string, int?>? onlinePlayers = null,
         Func<string, DateTimeOffset?>? updateAvailableSince = null,
         Func<string, Availability.RunTimes>? runTimes = null,
-        Func<string, int?>? blueprintMinRamMb = null,
-        IReadOnlyDictionary<string, bool>? libraryOnline = null)
+        Func<string, int?>? blueprintMinRamMb = null)
     {
-        // Resolved first, because it decides whether the readings below can be believed at all.
-        string? libraryState = LibraryStateOf(instance, libraryOnline);
-        bool filesUnreadable = libraryState == "offline";
+        string? libraryState = LibraryStateOf(instance);
 
         string status = ServerStatus.Unknown;
         string? version = null;
@@ -289,20 +286,20 @@ public sealed class ServerAggregator
         DateTimeOffset? updateCheckedAt = null;
         DateTimeOffset? startedAt = null;
         DateTimeOffset? stoppedAt = null;
-        // ⚠ An instance whose library is not mounted has NO readable run-state, and the reading must not
-        // be believed. The engine says so — it reports `status: null` for one, with "an unreadable
-        // instance is not a stopped one" written beside it — but kgsm-lib models that field as a
-        // non-nullable bool, so the null arrives here as `false` and would publish "stopped": a claim
-        // that the process is not running, which nothing measured. Every other field in the block is
-        // read out of the instance's own directory and is equally absent, so the whole block is skipped
-        // and the status stays `unknown`, which is what it is.
-        if (!filesUnreadable
-            && statuses.TryGetValue(id, out Reading<InstanceRuntimeStatus>? reading)
+        if (statuses.TryGetValue(id, out Reading<InstanceRuntimeStatus>? reading)
             && reading is { IsMeasured: true, Value: { } runtimeStatus })
         {
-            status = runtimeStatus.Status
-                ? (isStarting(id) ? ServerStatus.Starting : ServerStatus.Running)
-                : ServerStatus.Stopped;
+            // ⚠ Three answers, not two. The engine reports `status: null` for an instance whose library
+            // is not mounted — every reading a status takes comes out of a directory that is not there,
+            // and an unreadable instance is not a stopped one. Nothing else in this block needs a guard:
+            // the version, the update triple and the start time are read from the same absent directory
+            // and arrive honestly null on their own.
+            status = runtimeStatus.Status switch
+            {
+                true => isStarting(id) ? ServerStatus.Starting : ServerStatus.Running,
+                false => ServerStatus.Stopped,
+                null => ServerStatus.Unknown,
+            };
             version = string.IsNullOrWhiteSpace(runtimeStatus.Version.Current)
                 ? null
                 : runtimeStatus.Version.Current;
@@ -329,10 +326,14 @@ public sealed class ServerAggregator
         // this host supervises. It is the run-state authority for those, so it is also what dates them.
         // A container keeps the engine's reading (the daemon does not supervise one) and has no stop time
         // to report. Both stay honestly null when nothing dates them.
+        //
+        // ⚠ An instance with no reported runtime takes neither branch. Which supervisor to ask is exactly
+        // what an unreadable instance does not say, and the ledger can still hold a row from before its
+        // disk went — dating a run off it would put a start time on a server nobody can see.
         if (runTimes is not null)
         {
             Availability.RunTimes rt = runTimes(id);
-            if (instance.Runtime != InstanceRuntime.Container)
+            if (instance.Runtime == InstanceRuntime.Native)
             {
                 startedAt = rt.SpawnedAt ?? startedAt;
                 // Only meaningful while the instance is NOT running: the ledger keeps the last run's end,
@@ -377,7 +378,7 @@ public sealed class ServerAggregator
             startMemoryMb = capMb;
             startMemorySource = StartMemorySource.Cap;
         }
-        else if (blueprintMinRamMb?.Invoke(CleanBlueprintId(instance)) is { } minRamMb and > 0)
+        else if (blueprintMinRamMb?.Invoke(instance.Blueprint) is { } minRamMb and > 0)
         {
             startMemoryMb = minRamMb;
             startMemorySource = StartMemorySource.Blueprint;
@@ -386,17 +387,19 @@ public sealed class ServerAggregator
         return new Server(
             Id: id,
             Name: string.IsNullOrWhiteSpace(instance.Name) ? id : instance.Name,
-            Blueprint: CleanBlueprintId(instance),
+            Blueprint: instance.Blueprint,
             Status: status,
             Version: version,
-            // ⚠ Null when the files cannot be read. The engine omits `runtime` entirely from an offline
-            // instance's payload, and kgsm-lib's InstanceRuntime enum has no member for "not reported"
-            // — an absent value deserializes to Native, its zero. Publishing that would report a
-            // supervision type nobody read, so the library check is the only thing standing between a
-            // default and a fabricated fact.
-            Runtime: filesUnreadable
-                ? null
-                : instance.Runtime == InstanceRuntime.Container ? "container" : "native",
+            // ⚠ Null when the engine reported none — it omits `runtime` entirely for an instance whose
+            // library is not mounted, because the config naming it is on the disk that is gone. This IS
+            // a divergence from the frozen native|container pair, taken on the rule that outranks it:
+            // publishing either would name a supervision type nobody read.
+            Runtime: instance.Runtime switch
+            {
+                InstanceRuntime.Container => "container",
+                InstanceRuntime.Native => "native",
+                _ => null,
+            },
             HostId: hostId,
             SteamAppId: string.IsNullOrWhiteSpace(instance.SteamAppId) ? "0" : instance.SteamAppId,
             ClientSteamAppId: string.IsNullOrWhiteSpace(instance.ClientSteamAppId) ? "0" : instance.ClientSteamAppId,
@@ -433,34 +436,25 @@ public sealed class ServerAggregator
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Both halves come from the engine and neither is inferred from the other: the instance says which
-    /// library it was placed in, the registry says whether that root is mounted and carries its marker.
-    /// The engine computes the same join per invocation to decide whether to refuse a lifecycle verb, so
-    /// this reports the answer the refusal will give rather than a second opinion about it.
+    /// The engine's own measurement, made per invocation from the instance registry — the one read that
+    /// works when the instance's own config cannot be opened, which is precisely the case this reports.
+    /// It is the same answer a lifecycle verb's refusal will give, rather than a second opinion about it.
     /// </para>
     /// <para>
-    /// ⚠ An unreadable registry is <see langword="null"/>, never <c>offline</c>. Reporting a disk as
-    /// gone because one engine invocation failed would put every server on the host behind a warning
-    /// about hardware that is fine.
+    /// ⚠ Absent is <see langword="null"/>, never <c>offline</c>. Only an engine predating libraries
+    /// leaves it unstated, and reading that as a disk being gone would put every server on such a host
+    /// behind a warning about hardware that is fine.
     /// </para>
     /// </remarks>
-    private static string? LibraryStateOf(Instance instance, IReadOnlyDictionary<string, bool>? libraryOnline)
+    private static string? LibraryStateOf(Instance instance) => instance.LibraryState switch
     {
-        string name = instance.Library ?? "";
-        if (name.Length == 0) return null;                 // an engine predating libraries
-        if (name == UnregisteredLibrary) return name;      // the engine's own word, passed through
-        if (libraryOnline is null) return null;
-        return libraryOnline.TryGetValue(name, out bool online)
-            ? (online ? "online" : "offline")
-            // Named a library the registry does not hold: it was deregistered between the two reads.
-            // That is what "unregistered" means, and it is the engine's word for it.
-            : UnregisteredLibrary;
-    }
-
-    // The engine's term for an instance whose root no library claims. Not a placeholder this API chose:
-    // kgsm reports it verbatim on the instance, and both halves of the join have to spell it the same
-    // way or a deregistered library would read as two different states depending on which read saw it.
-    private const string UnregisteredLibrary = "unregistered";
+        InstanceLibraryState.Online => "online",
+        InstanceLibraryState.Offline => "offline",
+        // The engine's own word for an instance whose root no library claims. A measurement: the files
+        // are there and readable, and this host simply holds no entry naming the root they are under.
+        InstanceLibraryState.Unregistered => "unregistered",
+        _ => null,
+    };
 
     // The operator-authored note, or null when the instance has no note. kgsm-lib decodes the body
     // (Instance.NoteBody); attribution is honest-null when the config carries none — a hand-edited
@@ -496,22 +490,6 @@ public sealed class ServerAggregator
         return null;
     }
 
-    // The clean blueprint id, e.g. "factorio" from ".../factorio.bp.yaml". Unified blueprints are
-    // "<name>.bp.yaml", so strip that compound suffix deliberately — Path.GetFileNameWithoutExtension
-    // (what Instance.Blueprint uses) only drops the last extension and would leave "factorio.bp".
-    // internal so the M6·b NetworkAggregator can reuse it for the host open-ports `app` join.
-    internal static string CleanBlueprintId(Instance instance)
-    {
-        string file = Path.GetFileName(instance.BlueprintFile);
-        foreach (string suffix in BlueprintSuffixes)
-            if (file.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
-                return file[..^suffix.Length];
-
-        // Fallback for an unexpected shape: the lib's own derivation (drops the last extension).
-        return string.IsNullOrEmpty(instance.Blueprint) ? file : instance.Blueprint;
-    }
-
-    private static readonly string[] BlueprintSuffixes = [".bp.yaml", ".bp.yml"];
 }
 
 /// <summary>

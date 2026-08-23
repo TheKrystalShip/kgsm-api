@@ -2,7 +2,6 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 // The sibling namespace TheKrystalShip.Api.Services.Library (the game catalog) shadows the type name,
 // so the engine model is aliased. A placement root and the blueprint catalog share a word and nothing else.
-using KgsmLibrary = TheKrystalShip.KGSM.Core.Models.Library;
 
 namespace TheKrystalShip.Api.Services.Aggregation;
 
@@ -99,11 +98,6 @@ public sealed class InstanceCache : IHostedService, IDisposable
     private IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> _statuses =
         new Dictionary<string, Reading<InstanceRuntimeStatus>>();
     private bool _engineRead = true;
-    // library name -> is its root reachable right now. Read on the SAME refresh as the roster on
-    // purpose: whether an instance's disk is mounted is a fact about that instance, and reading it on
-    // a different cadence would let a server's own record and the state of the disk it sits on
-    // disagree. Null until the first read, and after one that failed.
-    private IReadOnlyDictionary<string, bool>? _libraryOnline;
     private PeriodicTimer? _timer;
     private CancellationToken _stoppingToken = CancellationToken.None;
 
@@ -142,14 +136,6 @@ public sealed class InstanceCache : IHostedService, IDisposable
     /// "couldn't read" from "genuinely empty" (the 503/skip-tick decision) check this.
     /// </summary>
     public bool EngineRead => _engineRead;
-
-    /// <summary>
-    /// Which of this host's libraries were reachable at the last refresh, by name. Synchronous,
-    /// lock-free read. <see langword="null"/> when nothing has read the registry yet or the read failed
-    /// — which a caller must keep apart from an empty map, because "no library is registered" and "the
-    /// registry could not be read" say different things about a server sitting in one.
-    /// </summary>
-    public IReadOnlyDictionary<string, bool>? LibraryOnline => _libraryOnline;
 
     /// <summary>
     /// Trigger an immediate, non-blocking refresh. Returns <c>false</c> if a refresh is already in
@@ -421,20 +407,6 @@ public sealed class InstanceCache : IHostedService, IDisposable
             // remarks on the class and on ReconcileStartingLatch itself. It only ever closes a starting
             // window on new evidence; it never promotes starting -> running on a still-up read.
             ReconcileStartingLatch(statuses);
-
-            // The registry, on the same read as the roster it answers about. A failure leaves the last
-            // known map in place rather than clearing it: the instances are still there, and dropping
-            // to "unknown" on one flaky invocation would blank the library on every card.
-            if (_services.GetService(typeof(ILibraryService)) is ILibraryService libraries)
-            {
-                List<KgsmLibrary>? registry = await Task.Run(() => libraries.List(), ct).ConfigureAwait(false);
-                if (registry is not null)
-                {
-                    var online = new Dictionary<string, bool>(registry.Count, StringComparer.Ordinal);
-                    foreach (KgsmLibrary lib in registry) online[lib.Name] = lib.Online;
-                    _libraryOnline = online;
-                }
-            }
 
             _roster = roster;
             _statuses = statuses;

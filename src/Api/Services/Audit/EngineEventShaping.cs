@@ -154,7 +154,14 @@ public static class EngineEventShaping
                 d => AuditMapping.FromUpdateAvailableEvent(d, hostId)),
             "instance_installed" => Map<InstanceInstalledData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerInstall, AuditSeverity.Success, "installed", hostId,
-                    Meta(("blueprint", d.Blueprint)))),
+                    // The library is where it landed. On a host with several disks that is the half of
+                    // an install record its operator most needs, and nothing else records it.
+                    Meta(("blueprint", d.Blueprint), ("library", d.Library)))),
+            // Info, not Success: moving a server between two roots on the same host changes nothing about
+            // the server, and the news is which library gave up the space and which took it.
+            "instance_moved" => Map<InstanceMovedData>(item,
+                d => AuditMapping.FromServerEvent(d, AuditAction.ServerMove, AuditSeverity.Info, "moved", hostId,
+                    Meta(("fromLibrary", d.FromLibrary), ("toLibrary", d.ToLibrary)))),
             "instance_backup_created" => Map<InstanceBackupCreatedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.BackupCreate, AuditSeverity.Success, "backed up", hostId,
                     Meta(("source", d.Source), ("version", d.Version)))),
