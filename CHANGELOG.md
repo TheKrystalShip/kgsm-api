@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the seeded env file describes no particular host (`0.129.1`)
+
+`deploy/kgsm-api.env.example` is what both `setup.sh` and the package lay down on a fresh host, so
+every host-specific value in it is a commented example: the OAuth callback, the post-login redirect,
+the public base URL, the bind address and the two Kestrel certificate paths. Uncommenting is how a
+host says which one it is.
+
+The bind address commented out means the unit's `Api__Urls=http://0.0.0.0:8080` applies, which needs
+no certificate — an https bind whose certificate path names a file that is not there is a Kestrel
+that refuses to start. The four TLS lines are uncommented together or not at all.
+
+`Api__SigningKey=` stays live and blank: it is required, and blank is not a value pointing anywhere.
+
+### Added — the leaf-config drop-ins are packaged (`0.129.1`)
+
+`packaging/PKGBUILD` renders `deploy/leaf-config/dropins/50-kgsm-api-override.conf.in` once per leaf
+into `/usr/lib/systemd/system/<unit>.d/50-kgsm-api-override.conf`, from the same leaf→unit map
+`deploy/setup-leaf-config.sh` carries — so the Services panel can apply a config change on a node,
+where nothing runs that script. Shipping a drop-in for another package's unit is conflict-free (the
+path is unique to this package) and `EnvironmentFile=-` keeps it inert until the API first writes an
+override, so an uninstalled leaf costs nothing.
+
 ### Added — a server's name is separate from its id (`0.129.0`)
 
 An instance's id is now what it always was mechanically and never was in practice: a key. It is
