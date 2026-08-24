@@ -1,8 +1,7 @@
 # CLAUDE.md — tests/Api.Tests/
 
-The API's test project — **xUnit + `WebApplicationFactory`**, stood up at **M4·a** (auth was the
-milestone that justified it). It boots the **real** pipeline in-process and replaces only the external
-dependency at the seam. Run with `dotnet test kgsm-api.slnx` (or this `.csproj`). net10, not under the
+The API's test project — **xUnit + `WebApplicationFactory`**. It boots the **real** pipeline
+in-process and replaces only the external dependency at the seam. Run with `dotnet test kgsm-api.slnx` (or this `.csproj`). net10, not under the
 Api's `TreatWarningsAsErrors`.
 
 ## How it works (the pattern to follow)
@@ -36,8 +35,8 @@ Api's `TreatWarningsAsErrors`.
   locks it). For tests that need to read frames off an open connection, wrap the response in
   `SseTestHelpers.Frames(resp)` → an `SseFrameReader` whose `WaitForFrame(predicate, timeout)` polls
   `data:` blocks (skipping `:`-comment-only ones like `connected`/`keepalive`) until one matches or the
-  timeout elapses — the SSE-era analogue of the old WS `Send`/`Receive` pair, minus `Send` (topics are
-  baked into the connect URL now, immutable per connection).
+  timeout elapses. There is no client→server channel — topics are baked into the connect URL,
+  immutable per connection.
 
 ## Two fakes that are FILES, not dictionaries
 
@@ -85,9 +84,8 @@ pipeline. Use the same trick for any other `HttpContext.Connection` fact a test 
   stream protocol, the no-token sweep) against a real running process. The two are complementary, not
   redundant.
 
-## Convention for future milestones
+## Convention for new tests
 
-Each milestone's *behavioral* tests land here, faking the relevant boundary (the leaf client, the
-event socket, the Discord seam); smoke keeps proving the wire contract. M5 audit, M6 alerts, M7
-assistant, etc. add their fakes + assertions alongside these. Keep fakes switch-on-input (like
+*Behavioral* tests land here, faking the relevant boundary (the leaf client, the event socket, the
+Discord seam); smoke keeps proving the wire contract. Keep fakes switch-on-input (like
 `FakeDiscordResolver`) rather than mutable, so tests stay parallel-safe.

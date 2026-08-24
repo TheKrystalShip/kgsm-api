@@ -1,7 +1,7 @@
 # CLAUDE.md — Realtime/
 
-The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. Built; the contract is frozen in `PLAN.md §6` (stream row) +
-`§8` (M2 log). This file is the local "what you must not break."
+The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The contract is frozen in
+`PLAN.md §6` (stream row). This file is the local "what you must not break."
 
 ## Locked decisions (do not relitigate)
 
@@ -19,7 +19,7 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. Built; t
   on (re)connect it re-hydrates via REST. Don't send a full snapshot when a client subscribes.
 - **Coalesce-to-latest per key** is the backpressure rule: a slow client gets the *newest* frame, never
   an unbounded backlog; a stalled send is torn down → the client reconnects (§3·j). Don't buffer history.
-  **Exception — the `audit` topic (M5):** audit appends are distinct immutable facts, not supersede-by-latest
+  **Exception — the `audit` topic:** audit appends are distinct immutable facts, not supersede-by-latest
   patches, so each carries a **unique** coalesce key (the event id, `StreamProtocol.AuditEntityKey`) — never
   the static topic name, which would silently drop all but the latest append. The client prepends; on
   reconnect it re-hydrates via `GET /audit` (the stream stays patch-only, no replay).
@@ -29,7 +29,7 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. Built; t
 - **The `servers` topic carries status/roster ONLY — never the 1s metric firehose.** Resource ticks
   live on `servers/{id}/metrics`. `DomainPump`'s change-detection deliberately ignores the metrics block
   (and `diskBytes`, which is one) so it never double-streams. Breaking this floods the status topic
-  (smoke check 22 guards it).
+  (a smoke check guards it).
 - **Two metric topics, split by what is asking.** `servers/{id}/metrics` is one chart's feed, at the
   scrape cadence. `servers/metrics` is one frame for the WHOLE roster on a 2s card cadence
   (`MetricsPump.RosterIntervalMs`) — what a grid of server cards reads, because a client that opens a
@@ -37,9 +37,9 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. Built; t
   REST hydrate: `{ id, metrics, diskBytes }`, the same two parts `Server` carries, so a merge is
   field-for-field. **A row may be half-null** — a stopped instance has no sample and a real footprint,
   which is the whole reason disk sits outside the metrics block. Never fill either half in.
-- **`network.patch` rides its OWN topic `servers/{id}/network` (M6·b) — never `server.patch`.** The same
+- **`network.patch` rides its OWN topic `servers/{id}/network` — never `server.patch`.** The same
   topic-separation discipline as metrics: keeping the firewall block off the `servers` topic is what lets
-  `server.patch` stay the frozen M1·b `Server`. **No pump publishes it** — it is pushed ONLY by the
+  `server.patch` stay the frozen `Server`. **No pump publishes it** — it is pushed ONLY by the
   `open_ports` verify (the firewall is socket-activated + idle-exits; a periodic probe would defeat that).
   Don't add a network pump; don't fold `network` into `server.patch`.
 - **One shared `MetricsMapping`** makes a stream tick byte-identical to the REST element it patches —
@@ -55,16 +55,13 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. Built; t
   out-of-band changes). `LeafHealthMonitor` is **always-on** (~2s) — the single source feeding both this
   stream's `capabilities.patch` and the REST `GET /hosts` capability block, so they can't disagree.
 
-## Auth (M4·a, header bearer since the SSE migration)
+## Auth
 
 `/stream` is `[Authorize(Policy = viewer)]`. Fetch-based SSE sends the bearer as a normal
-`Authorization: Bearer` header through the standard JwtBearer pipeline — no query-string token hack
-(the old `?access_token=`/`OnMessageReceived` carve-out is **removed**; a query token alone no longer
-authenticates, tested). This is *why* SSE replaced the WS transport: a browser can't set a header on a
-WS handshake, and a handshake `401` was an opaque `1006` close the client couldn't read, forcing
-client-side expiry prediction. SSE exposes a **readable `401`** so the stream heals through the same
-reactive rotate-on-401 path as every REST call — **don't reintroduce client-side expiry math for this
-endpoint.**
+`Authorization: Bearer` header through the standard JwtBearer pipeline — a query-string token
+authenticates nothing (regression-pinned: `Stream_Sse_QueryTokenIgnored`). SSE exposes a
+**readable `401`**, so the stream heals through the same reactive rotate-on-401 path as every
+REST call — **don't introduce client-side expiry math for this endpoint.**
 
 **The connection re-checks its own session every 20s.** `[Authorize]` gates the CONNECT and nothing in
 the framework re-runs it on a request that lasts hours, so `StreamController` hands the connection a

@@ -1,9 +1,9 @@
 # CLAUDE.md — Services/Alerts/
 
-The **condition-mirror** alert engine (M6·a, architecture.html §3·c) — the live "needs attention"
-surface. `GET /api/v1/alerts?status=firing|resolved&since=24h` + the `alerts` WS topic
-(`alert.raise`/`resolve`/`retract`). Built; the contract is frozen in `PLAN.md §6` (alert row) + `§8`
-(M6·a log). This file is the local "what you must not break."
+The **condition-mirror** alert engine (architecture.html §3·c) — the live "needs attention"
+surface. `GET /api/v1/alerts?status=firing|resolved&since=24h` + the `alerts` SSE topic
+(`alert.raise`/`resolve`/`retract`). The contract is frozen in `PLAN.md §6` (alert row).
+This file is the local "what you must not break."
 
 **Three producers, one engine.** The watchdog crash source and the engine update-availability source are
 polled by this API; the metrics-threshold source is **mirrored from kgsm-monitor**, which evaluates the
@@ -56,25 +56,22 @@ resolved condition to the audit action that fixed it.
   (so the id exists); the poll stashes it and, when a crash later resolves because the server recovered,
   stamps it as `resolution.actionId`. The poll can't learn an audit id on its own — this is the sole reason
   the engine touches the event path, and it's lock-free (a `ConcurrentDictionary`, not shared alert state).
-  **The bridge and its limit:** the watchdog's autonomous crash-restart now emits `instance_restarted`
-  (`system`/`system`, kgsm-watchdog `d4b453f`) → a `server.restart` row through the same `WriteServerAndBridge`
+  **The bridge and its limit:** the watchdog's autonomous crash-restart emits `instance_restarted`
+  (`system`/`system`) → a `server.restart` row through the same `WriteServerAndBridge`
   handler, so a **pure auto-heal bridges** `resolution.actionId` once that row is consumed (within the resolve
   probation) — alongside an **operator/api** start|restart recovery. The watchdog's **boot-autostart** also
   emits (`instance_started`, `system`/`system`) → it is **audited** as a `server.start` row but **NOT bridged**:
   `KgsmAuditConsumer.IsRecoveryAction` excludes the system-origin start, because a fresh boot bring-up is not a
   crash recovery — letting it bridge could stamp a stale id on a later crash whose own recovery event dropped
-  (honest-null over a plausible-but-wrong link — though episode-scoping below now also catches this). **Still
+  (honest-null over a plausible-but-wrong link). **Still
   null (never fabricated):** a **stop-cleared** crash (a stop is not a recovery), and a crash that resolves
-  before its `server.restart` row is consumed (an honest race). **The bridge is episode-scoped (root-cause
-  closed).** `_lastStartAction` stashes the action's audit-row timestamp, and `BuildResolution` honors it only
-  when it **post-dates that crash's raise** (`action.At >= RaisedAt`). So a dropped recovery event can no
-  longer let a stale "last start/restart ever" — operator OR system — mislink a later, unrelated crash: the
+  before its `server.restart` row is consumed (an honest race). **The bridge is episode-scoped.**
+  `_lastStartAction` stashes the action's audit-row timestamp, and `BuildResolution` honors it only
+  when it **post-dates that crash's raise** (`action.At >= RaisedAt`) — a dropped recovery event therefore
+  never lets a stale "last start/restart ever" — operator OR system — mislink a later, unrelated crash: the
   resolution is honest `null` instead. Soundness rests on one invariant: kgsm/watchdog emit lifecycle events at
   operation **completion** (server up), never initiation, so a real recovery's timestamp is always at/after the
-  poll that observed the server *down* (single-host → both share a wall clock). This subsumes the
-  `IsRecoveryAction` boot-autostart exclusion above (a boot start's timestamp predates any later crash anyway),
-  which is now belt-and-braces. *(The watchdog-emit halves are live-validated on the wire; the full on-host
-  bridge round-trip with a running API is owed.)*
+  poll that observed the server *down* (single-host → both share a wall clock).
 
 ### Metrics-threshold source — mirrored from kgsm-monitor
 
@@ -123,8 +120,7 @@ resolved condition to the audit action that fixed it.
 - **It measures nothing, and that is the point.** kgsm establishes the fact (the scheduler's sweep
   runs the networked check, the engine records what it found beside the instance), so this pass reads
   it off `InstanceCache.Statuses` — the same fast status the roster is built from. **Never add a probe,
-  a version comparison or an upstream call here**; that is exactly what `UpdateCheckCache` was, and it
-  was deleted.
+  a version comparison or an upstream call here** — read `InstanceCache.Statuses` and nothing else.
 - **Neither dwell applies, deliberately.** The metric fire-dwell exists because a value can spike and an
   update record cannot; the clear-probation exists because a crash-loop flaps and an applied update does
   not. A raise and a clear both take effect on the tick that observes them.
@@ -160,7 +156,7 @@ A firing record carries `actions[]` — the operations a surface may draw a butt
   no cause, so every verb available would be a guess at which; and a cleared condition has nothing left to
   do about it. `Actions` is `null` on every resolved record.
 
-## WS message contract (architecture.html §3·c)
+## Stream message contract (architecture.html §3·c)
 
 - `alert.raise` → the **full `Alert`** record (status `firing`). Re-pushed to flip `escalated`/`attempts`.
 - `alert.resolve` → **`{ id, resolution }`** (`AlertResolved`). Client stamps `resolvedAt`, moves to the
@@ -178,7 +174,7 @@ A firing record carries `actions[]` — the operations a surface may draw a butt
   immutable snapshot. `_lastStartAction` is the only cross-thread state (concurrent). Keep it that way —
   don't mutate `_firing`/`_resolved`/`_clearSince`/`_breachSince` off the loop, or you reintroduce a lock.
 - **Always-on, not subscriber-gated** (like `LeafHealthMonitor`, unlike the metric pumps): `GET /alerts`
-  must serve fresh truth regardless of WS subscribers. With no watchdog provisioned the loop logs once and
+  must serve fresh truth regardless of stream subscribers. With no watchdog provisioned the loop logs once and
   serves an **empty** feed (degrade gracefully — never a 500).
 - **Severity is the §3·c subset** (`danger|warn|info`) — no `success` (a firing condition is never a
   success). `resolution.by` is **always `system`** (the server observed the clear, never the client).
@@ -186,7 +182,7 @@ A firing record carries `actions[]` — the operations a surface may draw a butt
   `serverId`/`hostId` to route from if it doesn't recognize the surface. Confirm the surface vocabulary at
   the frontend gate before adding values.
 
-## Auth (M4·a)
+## Auth
 
-`GET /alerts` is `[Authorize(Policy = viewer)]` and the `alerts` WS topic rides the viewer-gated
-`/stream` socket — a core read surface, consistent with `/audit`.
+`GET /alerts` is `[Authorize(Policy = viewer)]` and the `alerts` topic rides the viewer-gated
+`/stream` connection — a core read surface, consistent with `/audit`.

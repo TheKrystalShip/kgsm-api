@@ -25,7 +25,7 @@ dev escape hatch (synthetic admin). Trust `PLAN.md`'s per-milestone status, not 
 - **`PLAN.md`** — the milestone roadmap (M0…v1.0), principles, the cross-team contract
   registry, project layout, and the validation log. The authority for *this backend*.
 - **`../architecture.html`** — the **frontend team's** external-surface spec (v0.3): REST
-  `/api/v1`, per-host WebSocket, assistant SSE, auth Model A, the §6 conventions. The
+  `/api/v1`, the per-host realtime stream, assistant SSE, auth Model A, the §6 conventions. The
   authority for *the wire contracts*. Freeze contracts **from this doc**, never invent them.
 - **`../system-architecture.md`** — the ecosystem keystone (topology, invariants, the
   open-decision ledger). The API is its `web-API aggregator`.
@@ -33,7 +33,7 @@ dev escape hatch (synthetic admin). Trust `PLAN.md`'s per-milestone status, not 
 - **Directory-local `CLAUDE.md` guides** — the locked decisions + "what you must not break"
   for the subsystems with the densest invariants (auto-loaded when you work in them):
   `src/Api/Services/Auth/` (the auth seam, stateless JWT, secure-by-default tiers),
-  `src/Api/Realtime/` (the WS protocol), `src/Api/Services/Commands/` (the gate→job→verify write
+  `src/Api/Realtime/` (the SSE stream protocol), `src/Api/Services/Commands/` (the gate→job→verify write
   path), and `tests/Api.Tests/` (the WebApplicationFactory + faked-seam test pattern).
 
 ## Commands
@@ -125,21 +125,19 @@ Two consequences worth knowing before touching this code:
 Note the two polkit rules are separate on purpose: `48-kgsm-api-deploy.rules` lets **you** deploy,
 `49-kgsm-api-leaf-restart.rules` lets **the running service** restart leaves.
 
-`scripts/smoke.sh` is the **stand-in for the frontend** until the SPA can reach a host —
-it asserts every M0/M1/M2/M3 contract (and the M4·a no-token sweep) — **31/31**. The M0–M3 checks
-run under `Api__AuthDisabled=true` (the escape hatch — synthetic admin) so they exercise the domain
-contracts unchanged; a dedicated **auth-ENABLED** instance then proves the no-token sweep (every
-protected endpoint `401`s with the frozen envelope, `/health`+`/api/v1` stay open, the login endpoint
-`503`s until Discord is configured). The 3 M3 checks prove the command gate/rejection
-contract (`400`/`404`/`409`) **without mutation** — the gate rejects before a verb runs. The write
-happy path (the stub smoke can't reach it) was **live-validated on the trusted host** (2026-06-15):
-`202`+job, `job.patch` `running→succeeded`, verify `server.patch`, and the in-flight `409` guard under
-6 concurrent POSTs (1×202 / 5×409). NB real native lifecycle needs `kgsm-watchdog` up — without it,
-kgsm direct-spawns an orphan and run-state tracking is unreliable (PLAN §8).
+`scripts/smoke.sh` is the **"mock frontend"** — it asserts the whole HTTP contract surface, plus
+an **auth-ENABLED** no-token sweep. The domain checks run under `Api__AuthDisabled=true` (the
+escape hatch — synthetic admin) so they exercise the contracts unchanged; a dedicated
+auth-enabled instance then proves the no-token sweep (every protected endpoint `401`s with the
+frozen envelope, `/health`+`/api/v1` stay open, the login endpoint `503`s until Discord is
+configured). The command-gate checks prove the gate/rejection contract (`400`/`404`/`409`)
+**without mutation** — the gate rejects before a verb runs. NB real native lifecycle needs
+`kgsm-watchdog` up — without it, kgsm direct-spawns an orphan and run-state tracking is
+unreliable.
 It runs two phases: Phase A degrade (no monitor,
 live kgsm) and Phase B an **embedded stub monitor** (a unix socket serving a canned `Snapshot`)
-that makes the host happy path + the M1·b servers-join present-branch deterministic with no
-external monitor. **M2** is covered by an embedded **SSE reader** (a plain `curl`/fetch-style
+that makes the host happy path + the servers-join present-branch deterministic with no
+external monitor. The stream is covered by an embedded **SSE reader** (a plain `curl`/fetch-style
 `text/event-stream` read against `?topics=`, no external dependency) that subscribes, reads honest
 ticks, and — killing **then restarting** the stub monitor mid-stream — proves the degrade→recover
 capability lifecycle (down flip + tick silence, then operational flip + ticks resume,
@@ -198,18 +196,17 @@ root-owned `/etc/kgsm-api/kgsm-api.env`**, and the boolean knobs take **`true`/`
 older `1`/`0`/`yes`/`on` spellings are refused at startup with an error naming the key. The Discord
 application is **shared external config** (the same one the host's Discord bot and assistant use) —
 configuration, not a process dependency on kgsm-bot (keystone §4). **`tests/Api.Tests/`** (xUnit + `WebApplicationFactory`,
-the Discord seam faked) stands up at M4·a — `dotnet test kgsm-api.slnx`; it owns the 401/403/tier
+the Discord seam faked) runs with `dotnet test kgsm-api.slnx`; it owns the 401/403/tier
 matrix + the callback/refresh/session flow, with smoke covering the HTTP contract surface.
 
 ## The stack decision — do NOT undo it
 
 **Standard JIT, MVC controllers + EF Core (SQLite). NOT Native AOT** — even though the
-rest of the ecosystem (kgsm-lib/monitor/watchdog) is AOT. This was decided deliberately
-at M0: a spike proved AOT *viable*, then JIT was chosen anyway for long-term
-maintainability, because controllers and EF Core are both AOT-incompatible (verified:
-"MVC does not support native AOT"; "EF Core isn't fully compatible with NativeAOT").
+rest of the ecosystem (kgsm-lib/monitor/watchdog) is AOT. JIT is deliberate: controllers
+and EF Core are both AOT-incompatible ("MVC does not support native AOT"; "EF Core isn't
+fully compatible with NativeAOT"), and long-term maintainability wins here.
 
-- **Do not suggest making the API AOT "for consistency"** — it was considered and rejected.
+- **The API stays JIT — do not propose making it AOT "for consistency".**
   The API is the one component where this is sound: it's *not embedded* in an AOT host
   (unlike kgsm-lib) and is the broadest, highest-churn surface.
 - Ecosystem correctness is intact: **kgsm-lib stays AOT-safe and is consumed unchanged**
@@ -226,26 +223,26 @@ exactly one correct access path:
 - **Engine** (instances, run-state, config, lifecycle commands) → **only via `kgsm-lib`**
   (`TheKrystalShip.KGSM`, the single C#↔engine chokepoint; it reaches the watchdog via
   `IWatchdogClient`). **Never shell out to `kgsm.sh` or open the watchdog socket directly.**
-  Consumed as a versioned `PackageReference` from the org's GitHub Packages feed. Wired at **M1·b** for
-  `GET /servers` (`IInstanceService.GetAll` + `GetAllStatuses(fast:true)`) and at **M3** for the write
+  Consumed as a versioned `PackageReference` from the org's GitHub Packages feed. It backs
+  `GET /servers` (`IInstanceService.GetAll` + `GetAllStatuses(fast:true)`) and the write
   path (`ILifecycleService.Start/Stop/Restart`, run off-request by the `CommandRunner` in its own DI
   scope — the verb routes native→watchdog, container→Docker inside the engine). kgsm-lib is **base,
   not a leaf**: provisioned-by-default at `Api__KgsmPath` (`/usr/bin/kgsm`); an empty path is
   a surfaced misconfiguration (empty `/servers` + a one-time log), not a §4·b capability. The
-  process-based `IInstanceService` is transient → resolved per-request from the provider. **M5** reads the
-  kgsm **event journal** (`Api__KgsmJournalDir`) via kgsm-lib's `IEventService` — `KgsmAuditConsumer`
-  tails a directory the engine writes and every consumer reads, so nothing is reserved here and nothing
+  process-based `IInstanceService` is transient → resolved per-request from the provider. `KgsmAuditConsumer`
+  tails the kgsm **event journal** (`Api__KgsmJournalDir`) via kgsm-lib's `IEventService` —
+  a directory the engine writes and every consumer reads, so nothing is reserved here and nothing
   needs configuring on the engine side. It starts at the **tail with no cursor**: the API never persists
   an engine event, it publishes each one live (SSE + notifications), so a replay would re-announce what
   was already announced — and nothing is lost, because the durable record is kgsm-monitor's and
-  `GET /audit` merges it from there. M3's command path also **stamps**
-  `(actor, origin)` on `ILifecycleService.Start/Stop/Restart` (kgsm-lib **1.8.0**) so the engine event —
-  and the audit row M5 writes from it — carries who/through-what; the API never writes an audit row for
+  `GET /audit` merges it from there. The command path also **stamps**
+  `(actor, origin)` on `ILifecycleService.Start/Stop/Restart` so the engine event —
+  and the audit row written from it — carries who/through-what; the API never writes an audit row for
   its own command (kgsm owns `server.*` → no double-write, see §5 below).
 - **Monitor** (host + per-instance metrics) → **scrape its unix socket**
   (`/run/kgsm-monitor/metrics.sock`, `GET /metrics`) directly — that's the monitor's neutral public
-  output; reuse the watchdog client's `SocketsHttpHandler.ConnectCallback` pattern (done in
-  `Services/Leaves/MonitorClient.cs`, M1·a). M2 added `CheckHealthAsync` (`GET /health`) as the
+  output; reuse the watchdog client's `SocketsHttpHandler.ConnectCallback` pattern
+  (`Services/Leaves/MonitorClient.cs`). `CheckHealthAsync` (`GET /health`) is the
   liveness signal, **separate from the data scrape** (a warming monitor is operational with no
   frame yet). The snapshot is deserialized into the **shared
   `TheKrystalShip.KGSM.Monitor.Contracts`** package (the `Snapshot` graph + its source-gen
@@ -282,11 +279,11 @@ exactly one correct access path:
   reach the leaf directly. Socket activation is not the reason — the firewall is socket-activated too and
   does carry a Link, because disconnecting it degrades the ports surface.
 
-**Leaf health & the capability model (M2).** Capability **availability** is owned by the always-on
+**Leaf health & the capability model.** Capability **availability** is owned by the always-on
 **`Services/Leaves/LeafHealthMonitor.cs`**, which polls each *provisioned* leaf's health every ~2s
 (monitor + assistant `GET /health`; watchdog `IsReadyAsync` via kgsm-lib — never a direct socket).
 It is the **single source** feeding both the REST `GET /hosts` capability block (`HostAggregator`
-reads its cached `Current`) and the M2 `hosts/{id}/capabilities` stream (it publishes flips). Two
+reads its cached `Current`) and the `hosts/{id}/capabilities` stream (it publishes flips). Two
 axes, never conflated: **`provisioned`** (the capability *set*) is **runtime-flippable** — seeded at
 startup from config, then an admin can connect/disconnect a leaf live from the Services panel (a
 DB-backed `LeafRegistry` the `LeafHealthMonitor` reads each tick; the `hosts/{id}/capabilities` patch
@@ -294,34 +291,32 @@ carries the changed *set*, not just each capability's `status`); **`status`** is
 availability. A leaf failing flips only `status` (operational→down→operational) with
 `provisioned:true` — "temporarily unavailable, still there", **never** "lost"; never invent a softer
 status nor suppress the down flip. `since` = when *this api* observed the flip.
-**Uniform `/health` across the ecosystem (unified 2026-06-15):** every leaf now serves `GET /health`
-(`200` ⇒ can provide its capability; else ⇒ unavailable). monitor `/healthz`→`/health`; assistant already
-`/health`; watchdog merged `/healthz`+`/ready`→`/health` (readiness; `/ready` kept as a deprecated transition
-alias) — reached via kgsm-lib `IsReadyAsync` (the api pins kgsm-lib **1.6.0**, which still hits `/ready`, so
-it rides the alias until it adopts **1.7.0**). The api's own ops endpoint is also `/health` now. (PLAN.md §8.)
+**Uniform `/health` across the ecosystem:** every leaf serves `GET /health`
+(`200` ⇒ can provide its capability; else ⇒ unavailable); the watchdog's is a readiness probe,
+reached via kgsm-lib `IsReadyAsync`. The api's own ops endpoint is also `/health`.
 
 **Degrade gracefully:** a missing/down leaf removes only its capability (the §4·b
 capabilities block makes this first-class), never a 500. The API must run with any subset
 of leaves present.
 
-## Invariants — violating these is how the old API died
+## Invariants — non-negotiable
 
 1. **Never fabricate a metric, status, or alert.** Measured, or explicitly "unknown" —
-   never invented (no `Random`, no GC-heap-as-RAM; that scrapped the old one). Honest
+   never invented (no `Random`, no GC-heap-as-RAM). Honest
    `null`/`unknown` over a plausible default.
 2. **Metric-presence ≠ status, status-presence ≠ status.** Run-state comes from kgsm-lib's
    façade (`Reading<InstanceRuntimeStatus>`, which can itself be `unknown`); metrics come
    from the monitor; join them — never infer run-state from whether a metrics row exists.
 3. **Freeze contracts FROM `architecture.html`, don't invent them.** The aspirational
    `Server` example there asks for `cpu`(0–100), `ram.max`, `players`, `ip` — none honestly
-   sourceable today. The **honest DTO** (M1·b) emits `cpuPctCore` (% of one core, can
+   sourceable today. The **honest DTO** emits `cpuPctCore` (% of one core, can
    exceed 100), `memBytes`, nullable `io*`, and **omits the unsourceable** — this divergence
    is a deliberate, frontend-negotiated contract, the project's most important conversation.
    Record every frozen shape in `PLAN.md §6`.
 4. **Additive-only within `/api/v1`** (path-versioned). Grow into reserved fields, no break.
 5. **Persistence is downstream of the stateless engine.** The API persists only its *own*
-   operational metadata — the append-only **audit log** (M5) and the **session registry** (M4·c,
-   revocation state — see `Services/Auth/CLAUDE.md`; identity itself stays in the JWT, no user
+   operational metadata — the append-only **audit log** and the **session registry**
+   (revocation state — see `Services/Auth/CLAUDE.md`; identity itself stays in the JWT, no user
    row) via EF; the domain is live-scraped, never stored. KGSM stays stateless (the watchdog
    is the lone resident exception, and it's engine, not this API). **The audit is event-sourced,
    single-writer, no double-write:** kgsm owns `server.*`/`backup.*`, so the API records the
@@ -339,14 +334,14 @@ of leaves present.
   `Z` automatically.
 - **Errors:** every non-2xx returns the frozen envelope `{ "error": { "code", "message",
   "details?" } }` (`architecture.html §6`) — via `ApiExceptionHandler` (500s) and
-  `UseStatusCodePages` (404, and 401/403 once M4 lands). `/health` is **ours** (ops), not a
+  `UseStatusCodePages` (404, 401, 403). `/health` is **ours** (ops), not a
   frontend contract.
 - **Namespaces** are `TheKrystalShip.Api.*` (ecosystem-wide `TheKrystalShip.*`).
 - **Versioning (two axes — don't conflate):** the **route version** is the `/api/v1` path segment
   (`ApiInfo.ApiVersion = "v1"`, surfaced as `version`/`panelVersion`) — additive-only, changes only on a
   breaking generation. The **build version** is the assembly InformationalVersion = `<Version>` (in
-  `Api.csproj`, currently `0.1.0`) **+ the git SHA auto-stamped by the `SetSourceRevisionId` target**, e.g.
-  `0.1.0+<sha>` — surfaced as `build` on `GET /api/v1` and `identity.build` on the Host DTO (the honest
+  `Api.csproj`) **+ the git SHA auto-stamped by the `SetSourceRevisionId` target**, i.e.
+  `<version>+<sha>` — surfaced as `build` on `GET /api/v1` and `identity.build` on the Host DTO (the honest
   "which build is this host running"). Bump `<Version>` per release; the SHA degrades to absent (never
   fabricated) outside a git checkout. **Full reference: `README.md` §Versioning.**
 - **Logging:** the ecosystem convention (`../logging-convention.md`) — the host does
@@ -370,29 +365,25 @@ of leaves present.
 
 - **`legacy/`** is the scrapped .NET 9 API — harvest patterns (e.g. log-streaming) but
   treat nothing in it as correct (it fabricates metrics).
-- **EF `EnsureCreated`, NOT migrations (settled at M5, user directive 2026-06-15).** Greenfield/dev
+- **EF `EnsureCreated`, NOT migrations.** Greenfield/dev
   authority: the schema (`AuditEntry`) is created via `EnsureCreatedAsync` (no `__EFMigrationsHistory`),
   and a schema change means **wiping the dev DB**, not adding a migration. ⚠ `EnsureCreated` **no-ops on
   an existing DB** — so after any entity change, delete the DB file (smoke `rm -f`s its own `SMOKE_DB`)
   or the new column/table silently won't exist and queries 500 at runtime, not build. Don't introduce
-  `Migrations/` without re-deciding this. The M0 `Probe` table is gone (replaced by `AuditEntry`);
+  `Migrations/` without re-deciding this.
   `_dbcheck` is a **read** round-trip (the append-only audit table must never be probe-written).
 - **Diagnostics endpoints** (`/api/v1/_throw`, `/api/v1/_dbcheck`) are smoke-only probes —
   remove/restrict before any public exposure.
-- **Trust window:** M3 (commands, which mutate) lands before M4 (auth) — **CONFIRMED acceptable**
-  (user, 2026-06-15) **only** on a trusted, non-public network until M4. The M3 write path is
-  unauthenticated by design this milestone; the gate enforces state guards only (permissions at M4).
-  See `PLAN.md` M3.
 - **`SuppressMapClientErrors=true`** (Startup): `[ApiController]` would otherwise turn a
   controller `NotFound()`/`BadRequest()` into RFC-9110 ProblemDetails. We suppress it so 4xx
   flow through `UseStatusCodePages` → the `{error}` envelope (one error shape everywhere).
-  **⚠ RESOLVED at M8·b:** `SuppressMapClientErrors` only covers *result*-based 4xx — a model-binding/
+  ⚠ `SuppressMapClientErrors` only covers *result*-based 4xx — a model-binding/
   validation `400` (malformed JSON, or a body field of the wrong type, e.g. `InstallRequest`'s typed
-  `int?`/`bool?` reserved fields) is rejected by `[ApiController]` **before the action runs** and emitted
-  `ValidationProblemDetails`. Now Startup's `ConfigureApiBehaviorOptions` sets an
+  `int?`/`bool?` reserved fields) is rejected by `[ApiController]` **before the action runs**, as
+  `ValidationProblemDetails`. Startup's `ConfigureApiBehaviorOptions` therefore sets an
   `InvalidModelStateResponseFactory` that returns the frozen `{error:{code:"bad_request"…}}` envelope
   (regression-tested, type-mismatch + malformed JSON). **Don't remove it** — it's what keeps invariant #4
-  (every non-2xx is the envelope) true for any typed request body, here and on every future POST/PATCH.
+  (every non-2xx is the envelope) true for any typed request body, here and on every POST/PATCH.
 - A finished feature is committed without being asked (the ecosystem-wide rule — see the workspace
   `CLAUDE.md`). Pushing still needs an explicit request.
 
@@ -415,6 +406,12 @@ history; never duplicate it into docs or code.
   survive it: *"temporary shim for the rework"*, *"added to satisfy the new requirement"*,
   milestone/phase labels (*"per M2"*, *"the Phase 1 step"*). If a line's justification is the work
   that produced it rather than the system as it now stands, it goes.
+- **No volatile numbers.** Counts and versions that drift — how many projects/files/tests/
+  partials exist, a dependency's pinned version, a file's line count — never go in prose: they are
+  stale the moment anything changes, and nothing fails to remind anyone. Name the authoritative
+  source instead (the csproj, the directory, the barrel file). A number belongs in prose only when
+  it *is* the contract (a port, a timeout, a cap) or a measured fact that is itself the reason a
+  design exists.
 - **Edits are replacements, not appends.** When changing an existing feature, rewrite the affected
   doc/comment fresh as if writing it for the first time — never append a correction under the
   stale version, and never leave the stale version standing beside the new. The current revision

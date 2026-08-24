@@ -36,6 +36,10 @@ file is the local "what you must not break."
   covered too** — it re-checks its own `sid` every 20s, so a revoke cuts the live channel within ≤20s
   rather than leaving it pushing until the tab closes. Expired/revoked rows are hard-deleted
   by the 10-min `SessionCleanupWorker`. A token with no `sid` claim → `401` (no grandfathering).
+  The revoke surface: `GET /auth/sessions` (viewer sees own; admin `?userId=` cross-user),
+  `POST /auth/session/revoke {sid?|all?}` (self), admin `POST /auth/sessions/{sid}/revoke` and
+  `POST /auth/users/{userId}/sessions/revoke-all` — each revoke writes an `auth.session.*` audit
+  action, and `/me.recentLogins` reads the registry.
   `Api__SessionsDisabled=true` makes the whole registry inert — no per-request check, no revoke surface, no GC
   (the stateless-JWT escape hatch).
 - **`ISignInService` is the seam the login path depends on**, and it lives in
@@ -54,8 +58,8 @@ file is the local "what you must not break."
   be constructed takes down the endpoints whose job is to report the problem.
 - **An identity names its provider.** `KgsmIdentity.Handle` (`provider:subject`) is the token subject,
   the session-row key and the `userId` on the wire — built by the identity, never interpolated at a
-  call site. For a Discord login it is the same `discord:<id>` string it has always been, so live
-  sessions and stored rows are unaffected by the provider becoming explicit.
+  call site. For a Discord login it is `discord:<id>` — changing that spelling is a flag day that
+  invalidates every live token and orphans every stored session row.
 - **The session machinery is the ecosystem's too.** `ISessionTokenService`, `SessionValidator`,
   `SessionCleanupWorker`, `ISessionRegistry` and the claim readers come from
   `TheKrystalShip.KGSM.Auth.Sessions`. `SessionStore` stays here — it IS this API's `ISessionRegistry`
@@ -86,7 +90,10 @@ file is the local "what you must not break."
   **NOT a process dependency on kgsm-bot** (keystone §4); hold our own copy in config and never reach
   into the bot. The guild, the bot token and the role ids in that same shared file are kgsm-bot's:
   they bind to nothing here, and describing one on this leaf's configuration page would offer an
-  operator a knob that changes nothing.
+  operator a knob that changes nothing. The login endpoints `503` until the `Api__Discord*` settings
+  are configured. ⚠ Dev credentials ride `kgsm-api.settings.Development.json`, which is read only
+  when `ASPNETCORE_ENVIRONMENT=Development` — under any other environment the login endpoints `503`
+  as if unconfigured.
 - **Connecting a provider account is self-service, and both writes need the credential proved again**
   (`IdentitiesController`, `ReauthGate`). A link outlives the session that makes it — afterwards,
   whoever holds that provider account can sign in as this one — and a live session can be a borrowed
@@ -120,7 +127,7 @@ file is the local "what you must not break."
   partitioned on the caller's forwarded address) covers `/auth/login` and `/auth/register`. It is
   generous on purpose — behind a shared connection several real people are one caller here.
 - **Auth is ON by default.** `Api__AuthDisabled=true` swaps in `DisabledAuthHandler` (synthetic
-  admin — the pre-M4 open window), loudly logged. Never enable it on an exposed host.
+  admin), loudly logged. Never enable it on an exposed host.
 - **A host completes itself; only shared secrets are a person's job.** `HostBootstrapper` runs on every
   start and settles two things: the signing key (above), and — on a store with no accounts at all — the
   administrator this host begins with, whose generated password is left in
@@ -150,7 +157,7 @@ file is the local "what you must not break."
   carried since staging. Someone demoted or switched off between the notification and the tap is
   refused. Every refusal about the handle is one `404` with one message, because separate answers let
   somebody probe which handles exist.
-- **Tier gating** (hierarchical: admin ⊇ operator ⊇ viewer): viewer = reads + the `/stream` WS,
+- **Tier gating** (hierarchical: admin ⊇ operator ⊇ viewer): viewer = reads + the `/stream` SSE stream,
   operator = the command `POST`, admin = diagnostics + reserved (settings/install/audit-config).
   `401` = no/invalid bearer (challenge); `403` = authenticated, tier too low (forbid) — keep that split.
 - **Honest failure modes** (the security analog of never-fabricate-a-status): the identity provider
@@ -177,33 +184,9 @@ file is the local "what you must not break."
   admin on every node that trusts it. `ClusterSessionRequest.Tier` stays on the wire (renaming it is a
   cluster-wide version skew) and is ignored.
 
-- **OAuth `state` CSRF (M4·b).** `/start` sets a one-time HttpOnly `state` cookie (`kgsm_oauth_state`);
+- **OAuth `state` CSRF.** `/start` sets a one-time HttpOnly `state` cookie (`kgsm_oauth_state`);
   `/callback` requires the echoed `state` to equal the cookie (constant-time) *before* any Discord
   exchange, else `400 invalid_state`, then clears it (no replay). **Stateless** — a client cookie, no
   server store (honors the no-session-table decision). `SameSite=Lax` (NOT Strict — it must ride
   Discord's top-level redirect back), `Secure = Request.IsHttps` (off on http loopback, on under
   https), `Path=/auth/discord`. Don't switch it to a server-side pending-state store.
-
-## M4 status — backend built & live-validated (2026-06-15)
-
-The real HTTP identity provider is **live-validated** on the trusted host: a real Discord login
-verified an identity, the account it proved decided the tier, the bearer was minted, and that bearer
-passed live tier-gating end-to-end (PLAN.md §8 M4·b). The login endpoints `503` only until
-the `Api__Discord*` settings are configured. **What's still owed for the *full* M4: only the frontend gate**
-(the per-host session state machine + tier-gated controls — the SPA, still `planned`).
-To run with the dev creds, the env must be `Development` (`ASPNETCORE_ENVIRONMENT=Development`)
-or `kgsm-api.settings.Development.json` is ignored and the login endpoints `503` as if unconfigured.
-
-## Session registry status — self-validated 2026-07-09; live OAuth soak owed
-
-The registry + revocation surface (the four locked bullets above) is built and self-validated
-(**655/655 tests, 0-warn**): the `SessionEntry` registry + cached validator, `sid` claim, sliding-window
-refresh with `jti` rotation/reuse-detection, server-side logout, the revoke surface (`GET /auth/sessions`
-viewer-self / admin `?userId=`; `POST /auth/session/revoke {sid?|all?}`; admin `POST /auth/sessions/{sid}/revoke`
-+ `POST /auth/users/{userId}/sessions/revoke-all`), three `auth.session.*` audit actions, `/me.recentLogins`,
-mint-time `expiresAt`, and the 10-min GC worker.
-**Owed:** a live OAuth soak (a real Discord bounce leaving a real device UA in a row + a self-revoke-all
-forcing a relogin). ⚠ **Deploy note:** a token with no `sid` claim `401`s, so at the first deploy of the
-registry every pre-existing refresh token dies — announce a forced relogin. Fresh DBs get the `sessions` table
-from `EnsureCreated`; an already-deployed DB needs the table + `CurrentJti` column created once in place (audit
-rows untouched).

@@ -1,8 +1,8 @@
 # CLAUDE.md — Services/Audit/
 
-The append-only **audit log** (M5, architecture.html §3·d) — persistence *downstream* of the stateless
-engine (keystone O3). `GET /api/v1/audit` (keyset) + the `audit` WS topic (`audit.append`). Built; the
-contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is the local "what you must not break."
+The append-only **audit log** (architecture.html §3·d) — persistence *downstream* of the stateless
+engine (keystone O3). `GET /api/v1/audit` (keyset) + the `audit` SSE topic (`audit.append`). The
+contract is frozen in `PLAN.md §6` (audit row). This file is the local "what you must not break."
 
 ## Locked decisions (do not relitigate)
 
@@ -10,7 +10,7 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   the watchdog owns what it supervises; the monitor owns what it measured; and this API owns `auth.*`,
   `user.*`, `identity.*`, `service.*`, `file.write` and `backup.download`, which it writes to **its own
   journal** (`ApiJournal` → `Api__EventJournalDir`). `GET /audit` is the merge of every journal plus the
-  local table's frozen pre-cutover rows. **Nothing writes an audit row directly** — there is no append
+  local table's historical rows. **Nothing writes an audit row directly** — there is no append
   path on `AuditService`.
   The API **never** records a row when it *issues* a command to another component: the command path only
   **stamps** `actor`+`origin` onto `ILifecycleService.*(serverId, actor, origin)` so they ride that
@@ -60,9 +60,8 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
 - **What is a step and what is the news is the engine's answer, not a list here.** `EngineEventShaping`
   shapes nothing for a type `KgsmEventCatalog` classifies `Phase` — the brackets kgsm puts around an
   install, a stop, an update. Those are live state (they claim and release the in-flight job slot), and
-  the fact worth an append-only row is the one in the middle. **Do not reintroduce a local skip-list**:
-  it drifts silently, and the version that did missed the whole install bracket, so an install wrote a
-  dozen `engine.instance_files_created` rows beside itself. The live path stays in step structurally —
+  the fact worth an append-only row is the one in the middle. **Do not add a local skip-list**:
+  `KgsmEventCatalog` decides, and a local list drifts silently. The live path stays in step structurally —
   `KgsmAuditConsumer` publishes only for the types it maps, and the phase types it registers publish
   nothing.
 - **`server.ready` is its own action, not a refinement of `server.start`.** The engine emits both:
@@ -101,9 +100,9 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
 ## Invariants when you touch this
 
 - **`AuditService` announces; it does not write.** It publishes to the realtime topic and the
-  notification bus, and owns `EnsureCreated` for the table holding pre-cutover history. Reads
-  (`AuditController`) use the request scope directly via `AuditQueries`. Don't reintroduce an append
-  path — a second writer for a fact a producer already records is what the journals removed.
+  notification bus, and owns `EnsureCreated` for the table holding historical rows. Reads
+  (`AuditController`) use the request scope directly via `AuditQueries`. Don't add an append
+  path — a second writer for a fact a producer already records is undedupable.
 - **Keyset pagination on a composite `(ts, id)`**, newest first, spanning the local table and every
   journal. Never offset pagination (it skips/repeats as the head grows). `nextCursor` only when the page
   came back full.
@@ -111,8 +110,8 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   journal-side equivalent, so they narrow the EF query in SQL and the shaped records in memory — and the
   two must mean the same thing (`actor` matches the parsed actor NAME on both sides). ⚠ A filter
   implemented on only one half does not return a short page; it returns *everybody's* rows from the other
-  half, which reads as a working filter until somebody checks. `actor` was in exactly that state.
-- **WS coalesce key = the unique event id** (`StreamProtocol.AuditEntityKey`), NOT a static `"audit"` key:
+  half, which reads as a working filter until somebody checks.
+- **Stream coalesce key = the unique event id** (`StreamProtocol.AuditEntityKey`), NOT a static `"audit"` key:
   audit appends are distinct facts and must never supersede one another in a slow client's queue. (Contrast
   the metric/status patches, which *are* supersede-by-latest.)
 - **Actor parse fidelity** (`AuditMapping.ParseActor`): `provider:name` → `{kind,name,provider}`, kind
@@ -131,15 +130,15 @@ contract is frozen in `PLAN.md §6` (audit row) + `§8` (M5 log). This file is t
   notification publish behind something that can tell a replay from a new event.
 - **Engine history is read from the journal, never from a leaf.** `AuditQueries` takes kgsm-lib's
   `IEventJournalHistory`; the merge is local API-only rows ∪ the journal's shaped engine rows. This is
-  what makes the audit trail complete on a host with no optional leaves installed, and it is the reason
-  `engineHistoryDegraded` now means "unreadable journal or no engine" rather than "a leaf is down".
+  what makes the audit trail complete on a host with no optional leaves installed, and it is why
+  `engineHistoryDegraded` means "unreadable journal or no engine".
   **Resolve the reader from the request scope, not the constructor** — kgsm-lib registers only when the
   engine is provisioned, so a constructor parameter turns an engine-less host into a 500 on the one
   endpoint that explains what happened.
 - **An event's id is its journal position** (`AuditId.ForPosition`, `evt_<producer>_<segment>_<offset>`), not
-  a hash of its contents. Content hashing could not separate two identical events inside one second —
-  the engine's timestamps have one-second granularity — so the merge's dedup dropped the second one.
-  The id also sorts like the journal, which is why one `(ts, id)` cursor still spans both merge sources.
+  a hash of its contents. A position-derived id keeps two identical events inside one second distinct —
+  the engine's timestamps have one-second granularity, so a content hash cannot, and the merge's dedup
+  would collapse them. The id also sorts like the journal, which is why one `(ts, id)` cursor still spans both merge sources.
   `EngineEventIdTracker` must keep deriving the live-push id from the same position, or a client
   reconciling an SSE row against `GET /audit` sees one fact under two ids.
 
