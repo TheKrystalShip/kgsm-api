@@ -138,7 +138,7 @@
          engine read (vs an empty dict for a genuine zero roster), so GET /servers can 503-keep-stale
          and the DomainPump can skip a tick instead of fabricating "zero servers" / tombstoning every
          instance on a transient kgsm read hiccup (the vanishing-list fix). 1.29.0 (player-presence
-         generalization, see player-presence-contract.md) extends InstancePlayerJoinedData with
+         generalization) extends InstancePlayerJoinedData with
          PlayerAddr + SessionKey, and InstancePlayerLeftData with the same two plus Reason — the
          consumer vocabulary for the watchdog's generalized native log-scraping session map (real
          ip:port / opaque session correlation token / disconnect reason). Consumed here by the new

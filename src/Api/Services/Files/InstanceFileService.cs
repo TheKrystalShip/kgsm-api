@@ -63,8 +63,8 @@ public sealed record WriteResult(
 
 /// <summary>The jailed, content-level file I/O for an installed instance (Tier 3 #12 — the file browser).
 /// A thin HTTP/status-mapping wrapper: all jail resolution and byte I/O live in kgsm-lib's
-/// <see cref="IInstanceFiles"/> (the single filesystem authority shared with the assistant — see
-/// <c>instance-filesystem-authority-plan.md</c>). This class only translates kgsm-lib's
+/// <see cref="IInstanceFiles"/> (the single filesystem authority shared with the
+/// assistant). This class only translates kgsm-lib's
 /// <see cref="FileOpOutcome"/> into the <see cref="FileOp"/> the controller switches on, and adapts
 /// kgsm-lib's <see cref="FileEntry"/>/<see cref="FileContent"/>/<see cref="FileStat"/> into the
 /// kgsm-api-owned presentation shapes (<see cref="FsEntry"/> etc.).</summary>

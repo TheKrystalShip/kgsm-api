@@ -16,11 +16,11 @@ using TheKrystalShip.KGSM.Auth;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// Coverage for <c>GET /servers/{id}/players</c> (player-presence-contract.md §5), proven through the
+/// Coverage for <c>GET /servers/{id}/players</c> (the permanent player roster), proven through the
 /// real pipeline with the engine seam faked (the project's <c>FakeOpsInstanceService</c> convention —
-/// see <c>Tier1OpsTests</c>). Load-bearing: **operator**-gated (the contract's explicit call, unlike the
+/// see <c>Tier1OpsTests</c>). Load-bearing: **operator**-gated (the roster contract's explicit call, unlike the
 /// viewer-gated read on other server sub-resources); the honest <c>unknown</c>-vs-<c>configured</c>-empty
-/// distinction (§5's central rule — a game with no detection must NEVER read as "0 players online");
+/// distinction (the roster contract's central rule — a game with no detection must NEVER read as "0 players online");
 /// and that the live roster (<see cref="PlayerHistoryService"/>, pre-seeded here the same way the audit
 /// consumer would drive it) actually surfaces through the endpoint when detection IS configured.
 /// </summary>

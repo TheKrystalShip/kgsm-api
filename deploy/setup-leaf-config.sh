@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # setup-leaf-config.sh — one-time privileged wiring for the kgsm-api "runtime leaf configuration"
-# feature (see ../leaf-runtime-config-plan.md "Privilege model" + deploy/leaf-config/README.md).
+# feature (see deploy/leaf-config/README.md).
 #
 #   ./deploy/setup-leaf-config.sh
 #

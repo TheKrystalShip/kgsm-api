@@ -242,7 +242,7 @@ public static class AuditMapping
     /// Map a kgsm <c>instance_player_left</c> event to a <c>player.leave</c> row — the leave counterpart of
     /// <see cref="FromPlayerJoinedEvent"/>, identical provenance/identity rules, plus the disconnect
     /// <c>reason</c> when the game's log carried one (never fabricated; kick/ban classification of this
-    /// vocabulary is deferred to a future version — player-presence-contract.md §6).
+    /// vocabulary is deferred to a future version).
     /// </summary>
     public static AuditWrite FromPlayerLeftEvent(InstancePlayerLeftData d, string hostId) =>
         PlayerWrite(d, hostId, AuditAction.PlayerLeave, "left",
@@ -659,7 +659,7 @@ public static class AuditMapping
 
     // Meta off a player event (id/name/addr/reason, all nullable, plus sessionKey); empties dropped, null
     // when nothing is present — never store "". The honest identity, never fabricated. Rides the existing
-    // Meta JSON column — no schema change (player-presence-contract.md §5).
+    // Meta JSON column — no schema change.
     private static IReadOnlyDictionary<string, string>? PlayerMeta(
         string? id, string? name, string? addr, string? sessionKey, string? reason)
     {

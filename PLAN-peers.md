@@ -535,11 +535,10 @@ The message-bus receive endpoint — one endpoint, typed envelope. Full contract
 
 ## 8 · SPA changes
 
-> **The SPA-side authority is `kgsm-web/docs/cluster-plan.md`** — the phased browser plan
-> (SPA-C0…C5, aligned to these phases), with the real file seams, the two SPA-facing API
-> dependencies it surfaces (a viewer-readable node list; a user-authed vouch *initiator* —
-> neither built yet), and the honest baseline (the SPA is single-host for auth today; SSO is
-> what unblocks N≥2). The bullets below are the API-side summary; follow that doc for the build.
+> **The SPA-side authority is `kgsm-web/CLAUDE.md`** — the SPA's cluster surface (discovery,
+> node-roster registration, and the two SPA-facing API dependencies: a viewer-readable node
+> list and a user-authed vouch *initiator*), and the honest baseline (the SPA is single-host
+> for auth today; SSO is what unblocks N≥2). The bullets below are the API-side summary.
 
 - Rename the `localStorage` connection registry `hosts → nodes` (same structure;
   provide a one-time in-place migration so existing connections survive the

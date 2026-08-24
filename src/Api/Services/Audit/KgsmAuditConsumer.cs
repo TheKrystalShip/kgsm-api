@@ -236,8 +236,8 @@ public sealed class KgsmAuditConsumer(
         // server.start row but NOT bridged (a boot bring-up is not a crash recovery — IsRecoveryAction
         // excludes the system-origin start). A stop-cleared crash links null. Honest, never fabricated.
         // See Services/Alerts/CLAUDE.md.
-        // Player-presence roster reset (player-presence-contract.md §5): "Reset a server's roster on
-        // instance stop/start/restart" — a fresh start invalidates every prior session (new log = new
+        // Player-presence roster reset: a server's roster resets on
+        // instance stop/start/restart — a fresh start invalidates every prior session (new log = new
         // EventChannelTail inode on the watchdog side), a stop obviously ends them all, and a restart is
         // its OWN distinct event (not a stop+start pair) whose underlying process dies without emitting
         // per-player "left" lines — without this reset those sessions would linger as phantom "connected"

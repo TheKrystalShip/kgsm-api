@@ -517,13 +517,13 @@ public class Startup(IConfiguration configuration)
             services.AddSingleton<ISessionValidator, InertSessionValidator>();
         }
 
-        // Player-presence live roster (player-presence-contract.md §5) — an in-memory projection driven
+        // Player-presence live roster — an in-memory projection driven
         // FROM KgsmAuditConsumer's own player.join/player.leave (+ start/stop reset) handlers, never via a
         // second IEventService registration for the same event types (kgsm-lib keeps one handler per type;
         // see PlayerRosterService's remarks). GET /servers/{id}/players reads it directly.
         services.AddSingleton<PlayerRosterService>();
 
-        // Player-presence permanent roster (player-presence-contract.md §5) — the DB-backed authority for
+        // Player-presence permanent roster — the DB-backed authority for
         // GET /servers/{id}/players and all roster WS frames. Maintains an in-memory cache for fast reads,
         // persists to SQLite for durability, publishes WS frames on every status change. Called FROM
         // KgsmAuditConsumer alongside PlayerRosterService (session-level dedup). On startup, marks stale

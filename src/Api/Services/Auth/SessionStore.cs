@@ -21,7 +21,7 @@ namespace TheKrystalShip.Api.Services.Auth;
 /// <c>CREATE TABLE IF NOT EXISTS</c>, unlike <c>HostSettingsStore</c>/<c>LeafRegistry</c> which had
 /// to — those lands before the one-shot migration script posture). If <c>EnsureCreated</c> no-ops
 /// on the existing DB AND the one-shot command hasn't run, the first read/write throws — which is
-/// the honest signal the operator must run the one-shot first. See <c>docs/session-management-plan.md</c> §9.
+/// the honest signal the operator must run the one-shot first. See <c>Services/Auth/CLAUDE.md</c>.
 /// </remarks>
 public sealed class SessionStore(
     IServiceScopeFactory scopeFactory,

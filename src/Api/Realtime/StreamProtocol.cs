@@ -189,7 +189,7 @@ public static class StreamProtocol
     /// </summary>
     public static string AuditEntityKey(string id) => $"audit:{id}";
 
-    // --- players (the permanent player roster, player-presence-contract.md §5) ---
+    // --- players (the permanent player roster) ---
     /// <summary>Player roster transitions, host-wide (like <see cref="AuditTopic"/> — one topic,
     /// every server's presence events; the payload's <c>serverId</c> tells them apart, exactly like
     /// <see cref="Contracts.AuditRecord.ServerId"/>). Published by <see cref="Services.Players.PlayerHistoryService"/>
@@ -209,7 +209,7 @@ public static class StreamProtocol
     /// players for that server are set to <c>offline</c> in the history. The client updates every
     /// entry it holds for that server rather than waiting for N individual
     /// <see cref="PlayersLeave"/> frames that will never arrive (the underlying sessions vanish without
-    /// emitting their own leave lines — player-presence-contract.md §5).</summary>
+    /// emitting their own leave lines).</summary>
     public const string PlayersReset = "players.reset";
     /// <summary>A player was banned: <c>data = { serverId, player }</c> — same shape with
     /// <c>status: "banned"</c> and <c>banReason</c> populated.</summary>

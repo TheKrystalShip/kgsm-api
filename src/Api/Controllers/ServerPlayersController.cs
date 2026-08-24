@@ -13,7 +13,7 @@ using TheKrystalShip.KGSM.Core.Models.Enums;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// The permanent player roster — <c>GET /servers/{id}/players</c> (player-presence-contract.md §5).
+/// The permanent player roster — <c>GET /servers/{id}/players</c>.
 /// Reads the DB-backed <see cref="PlayerHistoryService"/> projection: ALL players who have ever
 /// connected, each with their current status (online/offline/banned/unknown). The history is the
 /// only authority — no separate "currently online" view.

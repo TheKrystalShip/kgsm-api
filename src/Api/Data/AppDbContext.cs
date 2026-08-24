@@ -45,7 +45,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// on an existing DB (EnsureCreated no-ops there).</summary>
     public DbSet<LeafOverrideEntity> LeafOverrides => Set<LeafOverrideEntity>();
 
-    /// <summary>The permanent player roster — one row per unique player per server (player-presence-contract.md §5).
+    /// <summary>The permanent player roster — one row per unique player per server.
     /// Once a player connects they are never removed; status toggles between online/offline/banned/unknown.
     /// Created by the same <c>EnsureCreated</c>; the deployed DB needs a one-time wipe when it lands.</summary>
     public DbSet<PlayerRecord> PlayerHistory => Set<PlayerRecord>();
@@ -55,8 +55,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// to decide "is this session still alive" — what the stateless JWT alone cannot answer. Created
     /// automatically by <c>EnsureCreated</c> on a fresh DB (registered in <see cref="OnModelCreating"/>);
     /// on the already-deployed DB the table is added by a one-shot <c>sqlite3</c> command (D11), so
-    /// the audit log is untouched. ⚠ Re-opens the M4·a "no session table" lock — see
-    /// <c>Services/Auth/CLAUDE.md</c> + <c>docs/session-management-plan.md</c>.</summary>
+    /// the audit log is untouched. See <c>Services/Auth/CLAUDE.md</c>.</summary>
     public DbSet<SessionEntry> Sessions => Set<SessionEntry>();
 
     /// <summary>The cluster message bus's transactional outbox (Phase 1 foundation — see
@@ -350,8 +349,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(a => new { a.Severity, a.RowId }).IsDescending(false, true);
         });
 
-        // M4·c — the session registry (re-opens the M4·a "no session table" lock; see
-        // SessionEntry + docs/session-management-plan.md). Timestamps are stored as UTC ticks
+        // The session registry (see SessionEntry + Services/Auth/CLAUDE.md). Timestamps are stored as UTC ticks
         // (INTEGER) via ValueConverter — the same posture as AuditEntry.Ts/HostSettingsEntity.UpdatedAt
         // — because SQLite has no date type and EF can't translate a DateTimeOffset >= stored as TEXT,
         // which the per-request validator's `Expires > now` query needs (SQLite single-writer style: the

@@ -742,8 +742,8 @@ public sealed class ApiOptions
     /// <summary>Auth is on unless the dev escape hatch is set.</summary>
     public bool AuthEnabled => !AuthDisabled;
 
-    // --- Sessions (M4·c) — the session registry + cached per-request validator
-    // (re-opens the M4·a "no session table" lock — see docs/session-management-plan.md).
+    // --- Sessions — the session registry + cached per-request validator
+    // (authority: Services/Auth/CLAUDE.md).
     // Sessions are operational state, NOT a user profile row; identity stays in the JWT claims.
     // The registry is the authority the cached validator reads to decide "is this session alive"
     // — what the stateless JWT alone cannot answer (close the 30d-refresh revocation gap).

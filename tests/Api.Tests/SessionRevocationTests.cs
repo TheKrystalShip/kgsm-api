@@ -15,7 +15,7 @@ using TheKrystalShip.KGSM.Auth.Sessions;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// M4·c Increment 6 — the revocation endpoints (<c>docs/session-management-plan.md</c> §5/§8):
+/// The session-revocation endpoints (authority: <c>src/Api/Services/Auth/CLAUDE.md</c>):
 /// <c>GET /auth/sessions</c>, <c>POST /auth/session/revoke</c> (self), <c>POST
 /// /auth/sessions/{sid}/revoke</c> (admin cross-user), <c>POST /auth/users/{userId}/sessions/revoke-all</c>
 /// (admin). Every test uses fresh sid(s) minted through the shared <see cref="AuthTestFactory"/> DB, so

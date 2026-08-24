@@ -3,7 +3,7 @@ using TheKrystalShip.Api.Data;
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// The permanent player roster response for one server (player-presence-contract.md §5) —
+/// The permanent player roster response for one server —
 /// <c>GET /servers/{id}/players</c>. Returns ALL players who have ever connected, each with
 /// their current status (online/offline/banned/unknown). The roster of record lives in the
 /// <see cref="Data.PlayerRecord"/> table; this is a read of the DB-backed
@@ -26,7 +26,7 @@ public sealed record PlayersResponse(
     string Detection, IReadOnlyList<RosterPlayer> Players, ModerationCapability Moderation);
 
 /// <summary>
-/// A player in the permanent roster (player-presence-contract.md §5), keyed on
+/// A player in the permanent roster, keyed on
 /// <see cref="PlayerIdentity"/> — the stable dedup key (first non-blank of PlayerId, PlayerName,
 /// PlayerAddr, SessionKey). One row per unique player per server; never deleted, only status changes.
 /// </summary>

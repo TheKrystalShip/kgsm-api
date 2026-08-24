@@ -201,7 +201,7 @@ The registry + revocation surface (the four locked bullets above) is built and s
 refresh with `jti` rotation/reuse-detection, server-side logout, the revoke surface (`GET /auth/sessions`
 viewer-self / admin `?userId=`; `POST /auth/session/revoke {sid?|all?}`; admin `POST /auth/sessions/{sid}/revoke`
 + `POST /auth/users/{userId}/sessions/revoke-all`), three `auth.session.*` audit actions, `/me.recentLogins`,
-mint-time `expiresAt`, and the 10-min GC worker. Full record: `docs/session-management-plan.md`.
+mint-time `expiresAt`, and the 10-min GC worker.
 **Owed:** a live OAuth soak (a real Discord bounce leaving a real device UA in a row + a self-revoke-all
 forcing a relogin). ⚠ **Deploy note:** a token with no `sid` claim `401`s, so at the first deploy of the
 registry every pre-existing refresh token dies — announce a forced relogin. Fresh DBs get the `sessions` table

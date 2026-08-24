@@ -14,8 +14,8 @@ using Xunit;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// Closes Phase 6 of <c>blueprint-editor-plan.md</c>: the <see cref="BlueprintCache"/> is bust-driven
-/// by the audit consumer's blueprint-event handlers (Phase 4 §4.5 — the wiring lives at
+/// The <see cref="BlueprintCache"/> is bust-driven
+/// by the audit consumer's blueprint-event handlers (the wiring lives at
 /// <c>KgsmAuditConsumer.RegisterHandlers</c>), so an engineer-originated or assistant-originated
 /// blueprint edit refreshes the catalog the engine serves on the next read. <see cref="KgsmAuditConsumer"/>
 /// is a singleton hosted service — its <see cref="KgsmAuditConsumer.StartAsync"/> runs once at host

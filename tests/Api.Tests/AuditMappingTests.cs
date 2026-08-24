@@ -442,12 +442,12 @@ public sealed class AuditMappingTests
         Assert.Null(w.Meta);
     }
 
-    // --- player-presence-contract.md §5 additions: addr / sessionKey / reason in meta ----------------
+    // --- roster contract: addr / sessionKey / reason land in meta ------------------------------------
     [Fact]
     public void FromPlayerJoinedEvent_WithAddrAndSessionKey_BothLandInMeta()
     {
         // romestead-shaped: no stable account id, a real ip:port address, and the addr doubling as the
-        // session token (contract §"networking predicts the token type").
+        // session token (the networking layer predicts the token type).
         var data = new InstancePlayerJoinedData
         {
             InstanceName = "romestead-1",

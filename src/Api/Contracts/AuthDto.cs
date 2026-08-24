@@ -49,7 +49,7 @@ public sealed record SessionUser(
     string Display,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AvatarUrl);
 
-// ── M4·c Increment 6 — the revocation surface (docs/session-management-plan.md §5) ──────────────
+// ── The session-revocation surface (authority: Services/Auth/CLAUDE.md) ────────────────────────
 
 // GET /auth/sessions — the caller's own active-session set (or, for an admin passing ?userId=,
 // another user's). `data` mirrors the SessionEntry registry row-for-row (D5 fields), never the

@@ -29,10 +29,10 @@ Api's `TreatWarningsAsErrors`.
 - **Mint tokens via the server's OWN token service** — `factory.AccessToken(tier)` /
   `RefreshToken(tier)` resolve `ISessionTokenService` from `factory.Services`, so the key + host audience
   match the running pipeline. For a deliberately-wrong-signature token, `TestTokens.MintAccessWithKey`.
-- **`/api/v1/stream` (fetch-based SSE since the 2026-07-02 migration, `sse-migration-plan.md`)** is
+- **`/api/v1/stream` (fetch-based SSE; protocol: `../../src/Api/Realtime/CLAUDE.md`)** is
   exercised with `SseTestHelpers.OpenStream(client, path, token)` — a `GET` with
   `HttpCompletionOption.ResponseHeadersRead` and an `Authorization: Bearer` header (never a query-string
-  token; that hack is gone server-side and a dedicated regression test, `Stream_Sse_QueryTokenIgnored`,
+  token; the server ignores query tokens and a dedicated regression test, `Stream_Sse_QueryTokenIgnored`,
   locks it). For tests that need to read frames off an open connection, wrap the response in
   `SseTestHelpers.Frames(resp)` → an `SseFrameReader` whose `WaitForFrame(predicate, timeout)` polls
   `data:` blocks (skipping `:`-comment-only ones like `connected`/`keepalive`) until one matches or the

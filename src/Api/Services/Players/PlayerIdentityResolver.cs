@@ -13,7 +13,7 @@ namespace TheKrystalShip.Api.Services.Players;
 /// romestead — the <b>character name</b> is the person, so it ranks <b>above</b> the network address.
 /// This is the fix for the reconnect-duplicate bug: <c>addr</c> is <c>ip:port</c>, and both the port
 /// (ephemeral, reassigned every connection) and the ip (ISP-mutable) fracture a durable identity, so
-/// keying the person-row on <c>addr</c> minted a new row per reconnect (player-presence-contract.md §5).</para>
+/// keying the person-row on <c>addr</c> minted a new row per reconnect.</para>
 /// <para><b>Name is present on both join and leave.</b> Even when a game's <c>player_left_regex</c>
 /// captures only <c>addr</c>, the watchdog's <c>PlayerSessionMap</c> backfills the join-captured name
 /// onto the leave event, so keying on name still correlates a leave to the right person-row.</para>

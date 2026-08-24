@@ -2,9 +2,7 @@
 
 This directory holds the **one-time privileged wiring** for the kgsm-api *runtime leaf
 configuration* feature: from the **Services panel** an admin edits a leaf's config and the API
-delivers it and applies it, while everything keeps running. The locked design is
-[`../../../leaf-runtime-config-plan.md`](../../../leaf-runtime-config-plan.md) ("Privilege model"
-and "Config-delivery contract").
+delivers it and applies it, while everything keeps running.
 
 You do **not** run anything in here by hand — **`./deploy/deploy.sh` calls
 `deploy/setup-leaf-config.sh` on every deploy**, so a single command on a fresh checkout reaches a

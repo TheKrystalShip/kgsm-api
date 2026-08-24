@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace TheKrystalShip.Api.Data;
 
 /// <summary>
-/// The permanent player roster record — one row per unique player per server (player-presence-contract.md §5).
+/// The permanent player roster record — one row per unique player per server.
 /// Once a player connects, they are never removed; their <see cref="Status"/> toggles between
 /// <see cref="PlayerStatus.online"/>, <see cref="PlayerStatus.offline"/>, <see cref="PlayerStatus.banned"/>,
 /// and <see cref="PlayerStatus.unknown"/> as events arrive. The roster is the authority for the

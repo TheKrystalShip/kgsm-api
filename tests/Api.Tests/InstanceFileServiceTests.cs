@@ -5,9 +5,9 @@ using TheKrystalShip.KGSM.Core.Models;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// Unit coverage for <see cref="InstanceFileService"/> — now a thin HTTP-status-mapping wrapper around
-/// kgsm-lib's <see cref="IInstanceFiles"/> (the single jailed filesystem authority, moved there per
-/// <c>instance-filesystem-authority-plan.md</c> Phase 3). The jail mechanics themselves (traversal/symlink
+/// Unit coverage for <see cref="InstanceFileService"/> — a thin HTTP-status-mapping wrapper around
+/// kgsm-lib's <see cref="IInstanceFiles"/> (the single jailed filesystem
+/// authority). The jail mechanics themselves (traversal/symlink
 /// escape, atomic write, etag) are kgsm-lib's own responsibility and covered in
 /// <c>kgsm-lib.Tests/Services/InstanceFilesTests.cs</c> — this suite instead proves: every
 /// <see cref="FileOpOutcome"/> maps to the right <see cref="FileOp"/>/DTO shape, kgsm-lib's

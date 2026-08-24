@@ -10,8 +10,8 @@
 #   iff capacity is present, 'down' iff capacity is null (never a fabricated number).
 #   M1·b (§3): GET /servers + /servers/{id} (kgsm-lib domain+run-state ⋈ monitor metrics) —
 #   the honest Server DTO, the 404 envelope, and the per-server metrics<->presence coupling.
-#   M2 (§3·b/§3·j): GET /api/v1/stream fetch-based SSE (migrated off WebSocket 2026-07-02,
-#   sse-migration-plan.md) — the { topic, type, data } envelope, topics chosen at connect via
+#   M2 (§3·b/§3·j): GET /api/v1/stream fetch-based SSE (protocol:
+#   src/Api/Realtime/CLAUDE.md) — the { topic, type, data } envelope, topics chosen at connect via
 #   ?topics=a,b,c, per-server + host metric ticks carried through honestly, the servers topic staying
 #   quiet under the metric firehose, and the capability lifecycle: kill the monitor -> metric ticks
 #   fall silent + a capabilities patch reports metrics 'down' (provisioned:true — never "lost"); restart

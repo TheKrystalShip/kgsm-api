@@ -19,9 +19,9 @@ internal static class SseTestHelpers
 {
     /// <summary>
     /// Issue <c>GET {path}</c> as a long-lived SSE request: an <c>Accept: text/event-stream</c> header
-    /// (matching the real client, <c>sse-migration-plan.md §2b</c>) and, if <paramref name="token"/> is
-    /// given, an <c>Authorization: Bearer</c> header — <strong>never</strong> a query-string token; that
-    /// hack is what the migration removed. Reads with <see cref="HttpCompletionOption.ResponseHeadersRead"/>
+    /// (matching the real client; protocol: <c>src/Api/Realtime/CLAUDE.md</c>) and, if <paramref name="token"/> is
+    /// given, an <c>Authorization: Bearer</c> header — <strong>never</strong> a query-string token; the
+    /// server ignores query tokens. Reads with <see cref="HttpCompletionOption.ResponseHeadersRead"/>
     /// so the call returns as soon as the response headers land, before the (never-ending) body is read —
     /// a caller that only needs the status/content-type can assert on the result directly.
     /// </summary>

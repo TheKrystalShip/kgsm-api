@@ -9,7 +9,7 @@ using TheKrystalShip.KGSM.Auth;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// SSE delivery for the permanent player roster (player-presence-contract.md §5), in-process
+/// SSE delivery for the permanent player roster, in-process
 /// against the real pipeline — the same pattern as <c>AuditTests.AuditTopic_DeliversAppend</c>:
 /// seed through <see cref="PlayerHistoryService"/> directly (resolved off the running app's DI,
 /// same singleton <c>KgsmAuditConsumer</c> would drive) and assert what the real

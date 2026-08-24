@@ -8,8 +8,8 @@ namespace TheKrystalShip.Api.Data;
 /// <see cref="Revoked"/> flag + <see cref="Expires"/> hard cap are the authority a cached
 /// per-request validator reads to decide "is this session still alive" — what the stateless
 /// JWT alone cannot answer. Identity itself stays in the JWT; this row is operational, not a
-/// user profile (the user-row half of the M4·a lock stays locked — see
-/// <c>Services/Auth/CLAUDE.md</c> + <c>docs/session-management-plan.md</c>).
+/// user profile (the user-row half of the "no user table" lock stays locked — see
+/// <c>Services/Auth/CLAUDE.md</c>).
 /// <para>
 /// It joins <see cref="AuditEntry"/>/<see cref="HostSettingsEntity"/>/<see cref="IntegrationEntity"/>
 /// as the API's own operational metadata (the domain itself is live-scraped, never stored).
@@ -101,7 +101,7 @@ public sealed class SessionEntry
     /// <c>/auth/session/refresh</c>. The refresh action validates the presented refresh's <c>jti</c>
     /// against this — a stale <c>jti</c> (an OLD refresh token, e.g. stolen before the legit user
     /// rotated) → 401. <b>No grace period</b> (a tab race resolves to one tab 401ing → re-auth via
-    /// Discord OAuth; acceptable for a small panel — see <c>docs/session-management-plan.md</c>).
+    /// Discord OAuth; acceptable for a small panel).
     /// <see langword="null"/> only on rows created before this increment shipped (the one-shot
     /// ALTER TABLE on the prod DB); every newly-created row sets it from the login mint. The refresh
     /// action treats a null row jti + non-null presented jti as "first-rotation adoption" — accepts

@@ -226,9 +226,9 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
-    // --- the single most important regression test in this file: the old ?access_token= hack is GONE ---
+    // --- the single most important regression test in this file: query-string tokens never authenticate ---
     // (a query token with no Authorization header must never authenticate — SSE sends the bearer only as
-    // a header through the normal JwtBearer pipeline; see sse-migration-plan.md §1).
+    // a header through the normal JwtBearer pipeline; protocol: src/Api/Realtime/CLAUDE.md).
     [Fact]
     public async Task Stream_Sse_QueryTokenIgnored()
     {

@@ -15,11 +15,11 @@ using TheKrystalShip.KGSM.Auth.Sessions;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// M4·c Increment 6 — the revocation surface (<c>docs/session-management-plan.md</c> §5). The
+/// The session-revocation surface (authority: <c>Services/Auth/CLAUDE.md</c>). The
 /// registry (<see cref="SessionStore"/>) is the authority on "is this session still alive"; this
 /// controller is its read + control surface: list the active set, revoke one/all of your own
-/// sessions, or — admin only — revoke any user's session(s) cross-user (D4, a deliberate power
-/// grant recorded in the plan).
+/// sessions, or — admin only — revoke any user's session(s) cross-user (a deliberate power
+/// grant).
 /// <para>
 /// Root-routed (<c>/auth/...</c>, NOT under <c>/api/v1</c>) — same posture as
 /// <see cref="AuthController"/>: these are session-lifecycle endpoints, not domain resources.

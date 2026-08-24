@@ -1,7 +1,6 @@
 # CLAUDE.md — Realtime/
 
-The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE (M2; migrated off WebSocket
-2026-07-02, `sse-migration-plan.md`). Built; the contract is frozen in `PLAN.md §6` (stream row) +
+The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. Built; the contract is frozen in `PLAN.md §6` (stream row) +
 `§8` (M2 log). This file is the local "what you must not break."
 
 ## Locked decisions (do not relitigate)

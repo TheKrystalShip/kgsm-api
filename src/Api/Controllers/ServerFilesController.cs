@@ -21,7 +21,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// <para>
 /// The controller does its own engine-provisioned/unknown-id pre-check (<c>IInstanceService.GetInstanceInfo</c>
 /// via the chokepoint); the actual jailed list/read/write is kgsm-lib's <c>IInstanceFiles</c> — the single
-/// filesystem authority shared with the assistant (<c>instance-filesystem-authority-plan.md</c>) — reached
+/// filesystem authority shared with the assistant — reached
 /// through the kgsm-api-owned <see cref="IInstanceFileService"/> wrapper (status mapping + presentation
 /// hints only, no I/O of its own). A save is a mutation with no kgsm event, so the API writes the
 /// <c>file.write</c> audit row itself (the <c>auth.*</c> direct-write pattern, no double-write) — recording
