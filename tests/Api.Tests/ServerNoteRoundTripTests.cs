@@ -119,13 +119,7 @@ public sealed class ServerNoteRoundTripTests : IClassFixture<ServerNoteRoundTrip
             (await Put(KgsmTier.Operator, SourcedConfigFactory.Instance,
                 JsonSerializer.Serialize(new { body, origin = "ui" }))).StatusCode);
 
-        HttpResponseMessage list = await Client(KgsmTier.Viewer).GetAsync("/api/v1/servers");
-        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
-
-        using JsonDocument doc = JsonDocument.Parse(await list.Content.ReadAsStringAsync());
-        JsonElement row = doc.RootElement.EnumerateArray()
-            .First(s => s.GetProperty("id").GetString() == SourcedConfigFactory.Instance);
-        Assert.Equal(body, row.GetProperty("note").GetProperty("body").GetString());
+        Assert.Equal(body, await RosterNoteAsync(SourcedConfigFactory.Instance, body));
     }
 
     [Fact]
@@ -186,6 +180,44 @@ public sealed class ServerNoteRoundTripTests : IClassFixture<ServerNoteRoundTrip
     private Task<HttpResponseMessage> Put(KgsmTier tier, string id, string json) =>
         Client(tier).PutAsync($"/api/v1/servers/{id}/note",
             new StringContent(json, Encoding.UTF8, "application/json"));
+
+    /// <summary>
+    /// The note <paramref name="instance"/> carries on <c>GET /servers</c>, read until it is
+    /// <paramref name="want"/> or the budget is spent — then whatever the last read saw, so a body that
+    /// arrives mangled fails on the value rather than on a timeout.
+    /// </summary>
+    /// <remarks>
+    /// The roster is served from the instance cache and a note write refreshes that cache
+    /// fire-and-forget, so the row a single read returns is whichever refresh last finished. Polling
+    /// keeps the assertion on what this path does to a body — never on how quickly the cache turns
+    /// over, which is a property of the machine the suite runs on.
+    /// </remarks>
+    private async Task<string?> RosterNoteAsync(string instance, string want)
+    {
+        string? seen = null;
+        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+        do
+        {
+            HttpResponseMessage list = await Client(KgsmTier.Viewer).GetAsync("/api/v1/servers");
+            Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+
+            using (JsonDocument doc = JsonDocument.Parse(await list.Content.ReadAsStringAsync()))
+            {
+                JsonElement note = doc.RootElement.EnumerateArray()
+                    .First(s => s.GetProperty("id").GetString() == instance)
+                    .GetProperty("note");
+                seen = note.ValueKind == JsonValueKind.Null ? null : note.GetProperty("body").GetString();
+            }
+
+            if (seen == want)
+                return seen;
+
+            await Task.Delay(50);
+        }
+        while (DateTime.UtcNow < deadline);
+
+        return seen;
+    }
 
     /// <summary>
     /// <see cref="AuthTestFactory"/> whose <see cref="IInstanceService"/> keeps the note in a real

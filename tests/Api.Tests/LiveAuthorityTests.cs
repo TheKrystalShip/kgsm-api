@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -143,35 +144,73 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
         Assert.Equal("authority_unavailable", error.GetProperty("code").GetString());
     }
 
+    // Resolving per request costs a lookup per request, so answers are cached, and that cache is the
+    // only staleness left in the model. It has two halves — an answer is reused while it is held, and
+    // it is not held forever — and each is proved against a TTL chosen so the *other* half cannot
+    // decide the outcome. A window measured in a fraction of a second would make both tests a race
+    // against whatever else this machine is running.
+
     [Fact]
-    public async Task TheCacheTtlIsTheDemotionLagAndNothingLongerThanIt()
+    public async Task ACachedAnswerIsReusedSoAChangeMadeElsewhereIsNotSeenPerRequest()
     {
-        // Resolving per request costs a lookup per request, so answers are cached — and the TTL is
-        // therefore exactly how long a demotion can go unnoticed. Measured here rather than assumed,
-        // because it is the only staleness left in the model.
-        using WebApplicationFactory<Program> cached = factory.WithWebHostBuilder(builder =>
+        // An hour-long window: no request sequence can outrun it, so what this asserts is that the
+        // second request read the first one's answer rather than the store.
+        using WebApplicationFactory<Program> cached = CachedFor(TimeSpan.FromHours(1));
+
+        using HttpClient client = Bearing(
+            cached, AuthTestFactory.MintTokenWithRow(cached.Services, KgsmTier.Operator, access: true));
+        Assert.Equal(HttpStatusCode.NotFound, (await OperatorAction(client)).StatusCode);
+
+        await DemoteInTheStoreAsync(cached);
+
+        Assert.Equal(HttpStatusCode.NotFound, (await OperatorAction(client)).StatusCode);
+    }
+
+    [Fact]
+    public async Task ACachedAnswerAgesOutSoTheTtlBoundsTheDemotionLag()
+    {
+        // The other half, and the one that makes the TTL a lag rather than a lifetime: the entry the
+        // first request wrote expires on its own. A one-second TTL polled for the flip asserts that it
+        // happens without asserting when — the entry either ages out or it never does, and only the
+        // second is a defect.
+        using WebApplicationFactory<Program> cached = CachedFor(TimeSpan.FromSeconds(1));
+
+        using HttpClient client = Bearing(
+            cached, AuthTestFactory.MintTokenWithRow(cached.Services, KgsmTier.Operator, access: true));
+        Assert.Equal(HttpStatusCode.NotFound, (await OperatorAction(client)).StatusCode);
+
+        await DemoteInTheStoreAsync(cached);
+
+        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+        HttpStatusCode status;
+        while ((status = (await OperatorAction(client)).StatusCode) != HttpStatusCode.Forbidden
+               && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
+
+        Assert.Equal(HttpStatusCode.Forbidden, status);
+    }
+
+    /// <summary>A host holding its own account store, resolving authority against a cache of
+    /// <paramref name="ttl"/>.</summary>
+    private WebApplicationFactory<Program> CachedFor(TimeSpan ttl) =>
+        factory.WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {
                     ["Api:UsersDbPath"] =
                         Path.Combine(Path.GetTempPath(), $"kgsm-api-ttl-users-{Guid.NewGuid():N}.db"),
-                    ["Api:AuthorityCacheSeconds"] = "1",
+                    ["Api:AuthorityCacheSeconds"] =
+                        ((int)ttl.TotalSeconds).ToString(CultureInfo.InvariantCulture),
                 })));
 
-        string token = AuthTestFactory.MintTokenWithRow(cached.Services, KgsmTier.Operator, access: true);
-        using HttpClient client = Bearing(cached, token);
-        Assert.Equal(HttpStatusCode.NotFound, (await OperatorAction(client)).StatusCode);
-
-        // Straight into the store, so nothing drops the cache on the way past — the shape of a change
-        // made on another surface sharing this host.
-        var users = cached.Services.GetRequiredService<UserDirectory>();
+    /// <summary>Lower the account's tier straight in the store, so nothing drops the cache on the way
+    /// past — the shape of a change made on another surface sharing this host.</summary>
+    private static async Task DemoteInTheStoreAsync(WebApplicationFactory<Program> host)
+    {
+        var users = host.Services.GetRequiredService<UserDirectory>();
         KgsmUser account = (await users.Store.FindByCredentialAsync(FakeDiscordResolver.Identity.Handle))!;
         await users.Store.UpdateAsync(account with { Tier = KgsmTier.Viewer });
-
-        Assert.Equal(HttpStatusCode.NotFound, (await OperatorAction(client)).StatusCode);
-
-        await Task.Delay(TimeSpan.FromSeconds(1.5));
-
-        Assert.Equal(HttpStatusCode.Forbidden, (await OperatorAction(client)).StatusCode);
     }
 }

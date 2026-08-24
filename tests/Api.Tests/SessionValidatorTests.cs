@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -152,44 +153,80 @@ public sealed class SessionValidatorTests(AuthTestFactory factory) : IClassFixtu
 
     // --- The cache (behavioral — proving the cache works, no DB-hit counter) --------------------
 
-    [Fact]
-    public async Task CacheWindow_ServesStaleTrueThenExpiresTo401()
-    {
-        // Prove the cache IS working (not just re-querying every request): a revoked row returns 200
-        // WITHIN the cache window (the stale `true` is served), then 401 AFTER the cache expires (the
-        // TTL backstop re-queries → finds Revoked=true → false). Uses a SHORT cache TTL (600ms — above
-        // the SessionsCacheTtlMs 500ms floor) so the wait is fast; the production default 5000ms would
-        // make this test slow.
-        WebApplicationFactory<Program> fast = factory.WithWebHostBuilder(b =>
-            b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(
-                new Dictionary<string, string?> { ["Api:SessionsCacheTtlMs"] = "600" })));
+    // The cache has two halves — a `true` is reused while it is held, and it is not held forever — and
+    // each is proved against a TTL chosen so the *other* half cannot decide the outcome. A window
+    // measured in a fraction of a second would make both of these a race against whatever else is
+    // running on the machine rather than a statement about the validator.
 
-        (string token, string sid) = MintWithKnownSid(fast.Services, KgsmTier.Viewer);
-        HttpClient c = fast.CreateClient();
+    [Fact]
+    public async Task CacheWindow_ServesStaleTrue_200()
+    {
+        // The cache IS a cache, not a per-request DB read: a revoked row still answers 200 while the
+        // entry from the first request is held. An hour-long TTL means no request sequence can outrun
+        // the window, so what this asserts is the reuse.
+        WebApplicationFactory<Program> held = WithCacheTtl(TimeSpan.FromHours(1));
+
+        (string token, string sid) = MintWithKnownSid(held.Services, KgsmTier.Viewer);
+        HttpClient c = held.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        // Request 1 → 200. The validator's FIRST check: cache miss → DB → true, cached for 200ms.
+        // Request 1 → 200. The validator's FIRST check: cache miss → DB → true, and the entry is cached.
         Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/api/v1/me")).StatusCode);
 
         // Revoke the row directly — but do NOT call Evict (simulating a revoke that didn't evict, or a
         // race: the revoke path writes Revoked=true but the cache entry from request 1 is still live).
-        using (IServiceScope scope = fast.Services.CreateScope())
-        {
-            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            SessionEntry? row = db.Sessions.FirstOrDefault(s => s.Id == sid);
-            if (row is not null) { row.Revoked = true; row.RevokedAt = DateTimeOffset.UtcNow; db.SaveChanges(); }
-        }
+        RevokeRowIn(held, sid);
 
-        // Request 2 → STILL 200 (within the 200ms cache window, the stale `true` is served — the DB
-        // would now return false, but the cache short-circuits). THIS is the proof the cache works:
-        // without it, this request would 401 (the row is revoked).
+        // Request 2 → STILL 200: the DB would now return false, and the cache short-circuits it.
+        Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/api/v1/me")).StatusCode);
+    }
+
+    [Fact]
+    public async Task CacheEntryExpires_SoARevokeThatDidNotEvictStillLands_401()
+    {
+        // The TTL backstop, and what makes the cache a lag rather than a hole: the entry expires on its
+        // own, the next check re-queries, and the revoked row answers 401. A short TTL polled for the
+        // flip asserts that it happens without asserting when — the entry either ages out or it never
+        // does, and only the second is a defect.
+        WebApplicationFactory<Program> backstop = WithCacheTtl(TimeSpan.FromMilliseconds(600));
+
+        (string token, string sid) = MintWithKnownSid(backstop.Services, KgsmTier.Viewer);
+        HttpClient c = backstop.CreateClient();
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
         Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/api/v1/me")).StatusCode);
 
-        // Wait for the cache entry to expire (600ms TTL + margin).
-        await Task.Delay(800);
+        RevokeRowIn(backstop, sid);
 
-        // Request 3 → 401 (cache expired → DB re-query → Revoked=true → false). The TTL backstop.
-        Assert.Equal(HttpStatusCode.Unauthorized, (await c.GetAsync("/api/v1/me")).StatusCode);
+        DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+        HttpStatusCode status;
+        while ((status = (await c.GetAsync("/api/v1/me")).StatusCode) != HttpStatusCode.Unauthorized
+               && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(50);
+        }
+
+        Assert.Equal(HttpStatusCode.Unauthorized, status);
+    }
+
+    /// <summary>A host whose session-validity cache holds an answer for <paramref name="ttl"/>.</summary>
+    private WebApplicationFactory<Program> WithCacheTtl(TimeSpan ttl) =>
+        factory.WithWebHostBuilder(b =>
+            b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Api:SessionsCacheTtlMs"] =
+                        ((int)ttl.TotalMilliseconds).ToString(CultureInfo.InvariantCulture),
+                })));
+
+    /// <summary>Mark <paramref name="sid"/>'s row revoked in <paramref name="host"/>'s own DB, without
+    /// evicting the cache entry the last request left behind.</summary>
+    private static void RevokeRowIn(WebApplicationFactory<Program> host, string sid)
+    {
+        using IServiceScope scope = host.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        SessionEntry? row = db.Sessions.FirstOrDefault(s => s.Id == sid);
+        if (row is not null) { row.Revoked = true; row.RevokedAt = DateTimeOffset.UtcNow; db.SaveChanges(); }
     }
 
     [Fact]
