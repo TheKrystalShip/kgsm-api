@@ -19,6 +19,11 @@ public interface IMonitorHistoryClient
     /// the caller then serves an empty response, never a fabricated curve).</summary>
     Task<string?> GetHistoryJsonAsync(string kind, string id, string? range, CancellationToken ct);
 
+    /// <summary>Fetch the monitor's range summary (<c>GET /metrics/history/summary</c>) verbatim — one
+    /// aggregate per entity of a kind, for a surface drawing many ranges at once. Returns <c>null</c> on
+    /// the same terms as the history relay.</summary>
+    Task<string?> GetHistorySummaryJsonAsync(string kind, string? range, CancellationToken ct);
+
     /// <summary>Fetch the monitor's own self-report (<c>GET /stats</c>) verbatim — what it is sampling
     /// and what its history store actually holds. Returns <c>null</c> on the same terms as the history
     /// relay (unprovisioned, unreachable, slow, non-2xx): the caller reports that it could not be read,
@@ -194,6 +199,36 @@ public sealed class MonitorClient : IMonitorHistoryClient, IDisposable
         {
             _logger.LogDebug(ex, "monitor /health probe failed");
             return false;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> GetHistorySummaryJsonAsync(string kind, string? range, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Monitor))
+            return null; // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            string url =
+                $"/metrics/history/summary?kind={Uri.EscapeDataString(kind)}&range={Uri.EscapeDataString(range ?? "1h")}";
+            using HttpResponseMessage resp = await _http.GetAsync(url, ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("monitor /metrics/history/summary returned {Status}", (int)resp.StatusCode);
+                return null;
+            }
+            return await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("monitor /metrics/history/summary timed out after {Timeout}", ScrapeTimeout);
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "monitor /metrics/history/summary failed");
+            return null;
         }
     }
 

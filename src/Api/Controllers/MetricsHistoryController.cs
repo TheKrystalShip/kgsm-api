@@ -92,6 +92,42 @@ public sealed class MetricsHistoryController(
         return await ProxyAsync("gpu", uuid, range, ct);
     }
 
+    /// <summary>
+    /// Every hwmon channel's range at once — min/max/mean over the window, one row per channel.
+    /// </summary>
+    /// <remarks>
+    /// A thermal panel draws a range per channel, which through the per-entity route is one request each,
+    /// every one returning a full window of points the client reduces to three numbers. This is the same
+    /// rows, aggregated where they live.
+    /// </remarks>
+    [HttpGet("hosts/{id}/sensors/metrics/summary")]
+    public async Task<IActionResult> GetSensorSummary(string id, [FromQuery] string? range, CancellationToken ct)
+    {
+        if (id != options.HostId)
+            return NotFound();
+
+        string? json = await monitor.GetHistorySummaryJsonAsync("sensor", range, ct);
+        return json is null
+            ? Ok(new MetricsSummaryRelay("sensor", range ?? MetricsRange.OneHour, "raw", []))
+            : Content(json, "application/json");
+    }
+
+    /// <summary>
+    /// One hwmon channel's series. The channel id is a query parameter, not a path segment: a sensor id is
+    /// <c>chip/device/tempN</c> and carries the separator a path would be split on.
+    /// </summary>
+    [HttpGet("hosts/{id}/sensors/metrics/history")]
+    public async Task<IActionResult> GetSensorHistory(
+        string id, [FromQuery] string? sensor, [FromQuery] string? range, CancellationToken ct)
+    {
+        if (id != options.HostId)
+            return NotFound();
+        if (string.IsNullOrWhiteSpace(sensor))
+            return BadRequest();
+
+        return await ProxyAsync("sensor", sensor, range, ct);
+    }
+
     private async Task<IActionResult> ProxyAsync(string kind, string id, string? range, CancellationToken ct)
     {
         string? json = await monitor.GetHistoryJsonAsync(kind, id, range, ct);
@@ -101,6 +137,10 @@ public sealed class MetricsHistoryController(
         // Relay the monitor's body unchanged (it already carries the SPA's exact shape).
         return Content(json, "application/json");
     }
+
+    /// <summary>The empty summary shape, for a monitor that could not be read. Mirrors the daemon's own
+    /// field names so a client parses one shape either way.</summary>
+    private sealed record MetricsSummaryRelay(string Kind, string Range, string Tier, object[] Entries);
 
     private static MetricsHistoryResponse EmptyResponse(string entityId, string kind, string range) =>
         new(entityId, kind, range, 0, "raw", new Dictionary<string, List<MetricsHistoryPoint>>());

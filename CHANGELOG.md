@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — sensor history and range summaries (`0.136.0`)
+
+`GET /hosts/{id}/sensors/metrics/summary` relays every hwmon channel's range for a window in one
+request, and `GET /hosts/{id}/sensors/metrics/history?sensor=<id>` relays one channel's series. The
+channel is a query parameter rather than a path segment because a sensor id is `chip/device/tempN`
+and carries the separator a path would be split on. A monitor that cannot be read answers an empty
+summary, which is a different statement from a host with no sensors.
+
 ### Added — per-device thermal limits on the wire (`0.135.0`, Monitor.Contracts `1.11.0`)
 
 `SensorSample` carries `limitHighC` / `limitCriticalC` — the device's own opinion of hot, passed through

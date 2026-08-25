@@ -39,6 +39,11 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         public Task<string?> GetHistoryJsonAsync(string kind, string id, string? range, CancellationToken ct) =>
             Task.FromResult(json);
 
+        // The summary relay shares the seam; these tests are about the per-entity body, so it answers the
+        // same fixed json — a fake that returned null here would be testing the empty path by accident.
+        public Task<string?> GetHistorySummaryJsonAsync(string kind, string? range, CancellationToken ct) =>
+            Task.FromResult(json);
+
         public Task<string?> GetStatsJsonAsync(CancellationToken ct) => Task.FromResult<string?>(null);
 
         // The threshold relays share the interface but not these tests' subject. A read answers null (the
