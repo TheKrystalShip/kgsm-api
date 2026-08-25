@@ -93,6 +93,27 @@ public sealed class MetricsHistoryController(
     }
 
     /// <summary>
+    /// Every GPU's range at once — the same aggregate the hwmon summary returns, for the device kind whose
+    /// rows are keyed by UUID.
+    /// </summary>
+    /// <remarks>
+    /// A card's temperature belongs on the same thermal surface as the hwmon channels, and the surface asks
+    /// for its window once. Separate from the sensor summary because the two kinds are separate row sets
+    /// keyed differently, and folding them would put a UUID and a <c>chip/device/tempN</c> in one namespace.
+    /// </remarks>
+    [HttpGet("hosts/{id}/gpus/metrics/summary")]
+    public async Task<IActionResult> GetGpuSummary(string id, [FromQuery] string? range, CancellationToken ct)
+    {
+        if (id != options.HostId)
+            return NotFound();
+
+        string? json = await monitor.GetHistorySummaryJsonAsync("gpu", range, ct);
+        return json is null
+            ? Ok(new MetricsSummaryRelay("gpu", range ?? MetricsRange.OneHour, "raw", []))
+            : Content(json, "application/json");
+    }
+
+    /// <summary>
     /// Every hwmon channel's range at once — min/max/mean over the window, one row per channel.
     /// </summary>
     /// <remarks>

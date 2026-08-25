@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — every GPU's range in one request (`0.137.0`)
+
+`GET /hosts/{id}/gpus/metrics/summary` relays each device's min/max/mean over a window, the same
+aggregate the hwmon summary returns for the kind whose rows are keyed by UUID. A card's temperature
+belongs on the same thermal surface as the hwmon channels, and that surface asks for its window once.
+Kept separate from the sensor summary because the two are separate row sets keyed differently, and
+folding them would put a UUID and a `chip/device/tempN` in one namespace.
+
 ### Added — sensor history and range summaries (`0.136.0`)
 
 `GET /hosts/{id}/sensors/metrics/summary` relays every hwmon channel's range for a window in one
