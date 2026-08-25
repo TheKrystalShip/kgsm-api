@@ -78,7 +78,8 @@ internal static class MetricsMapping
             // 1:1 — the monitor already produced the °C value (don't re-round) and already classified the
             // channel. Role/name are carried, never recomputed here: the daemon that read the register is the
             // one that knows what it is, and a second catalog in the aggregator would drift from it.
-            list.Add(new SensorSample(r.Id, r.Chip, r.Label, r.ValueC, r.Role, r.Name));
+            list.Add(new SensorSample(r.Id, r.Chip, r.Label, r.ValueC, r.Role, r.Name,
+                r.LimitHighC, r.LimitCriticalC, r.Primary, r.DuplicateOf));
         return list;
     }
 
@@ -138,7 +139,11 @@ internal static class MetricsMapping
                 SmPct: d.SmPct is { } sm ? Math.Round(sm, 1) : null,
                 TempC: d.TempC is { } t ? Math.Round(t, 1) : null,
                 PowerW: d.PowerW is { } p ? Math.Round(p, 1) : null,
-                PowerCapW: d.PowerCapW is { } c ? Math.Round(c, 1) : null));
+                PowerCapW: d.PowerCapW is { } c ? Math.Round(c, 1) : null,
+                // Limits pass through unrounded — they are device settings, not measurements, and a
+                // rounded threshold is a different threshold.
+                TempLimitC: d.TempLimitC,
+                TempShutdownC: d.TempShutdownC));
         return samples;
     }
 

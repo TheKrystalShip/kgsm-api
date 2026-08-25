@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — per-device thermal limits on the wire (`0.135.0`, Monitor.Contracts `1.11.0`)
+
+`SensorSample` carries `limitHighC` / `limitCriticalC` — the device's own opinion of hot, passed through
+unrounded because a rounded threshold is a different threshold — plus `primary` and `duplicateOf`, which
+say which channel speaks for a device and which merely restates another. `GpuSample` gains `tempLimitC`
+/ `tempShutdownC` from the driver. Null limits mean the device publishes none that could be one, and a
+consumer falls back to the host's threshold policy rather than to a guess.
+
 ### Added — temperatures that say what they measure, and fan speeds (`0.134.0`, Monitor.Contracts `1.10.0`)
 
 `SensorSample` carries the monitor's classification of each hwmon channel beside the number: an `id`,

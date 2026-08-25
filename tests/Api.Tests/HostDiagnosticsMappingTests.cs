@@ -31,7 +31,8 @@ public sealed class HostDiagnosticsMappingTests
             Io: new Snap.DiskIo(1000, 2000)),
         Net: new Snap.NetworkMetrics(
             Ifaces: [new Snap.InterfaceRate("eth0", 100, 200, 1, 2, Mac: "aa:bb:cc:dd:ee:ff", Errors: 0)]),
-        Sensors: [new Snap.SensorReading("k10temp/0000:00:18.3/temp1", "k10temp", "Tctl", 42.5, "cpu", "CPU temperature")],
+        Sensors: [new Snap.SensorReading("nvme/nvme0/temp1", "nvme", "Composite", 42.5, "drive", "SSD",
+            LimitHighC: 80.85, LimitCriticalC: 84.85, Primary: true, DuplicateOf: null)],
         Fans: [new Snap.FanReading("nct6792/nct6775.2592/fan1", "nct6792", null, 2406, "Fan 1")],
         Servers: [],
         Leaves: [],
@@ -85,13 +86,17 @@ public sealed class HostDiagnosticsMappingTests
     public void ToHostMetrics_Sensors_PassThrough()
     {
         SensorSample sensor = Assert.Single(MetricsMapping.ToHostMetrics(FullSnapshot()).Sensors);
-        Assert.Equal("k10temp", sensor.Chip);
-        Assert.Equal("Tctl", sensor.Label);
+        Assert.Equal("nvme", sensor.Chip);
+        Assert.Equal("Composite", sensor.Label);
         Assert.Equal(42.5, sensor.ValueC);    // passed through 1:1 (the monitor already produced the °C value)
         // The classification is carried, not recomputed — the aggregator holds no chip table of its own.
-        Assert.Equal("k10temp/0000:00:18.3/temp1", sensor.Id);
-        Assert.Equal("cpu", sensor.Role);
-        Assert.Equal("CPU temperature", sensor.Name);
+        Assert.Equal("nvme/nvme0/temp1", sensor.Id);
+        Assert.Equal("drive", sensor.Role);
+        Assert.Equal("SSD", sensor.Name);
+        // The device's own limits ride through unrounded — a rounded threshold is a different threshold.
+        Assert.Equal(80.85, sensor.LimitHighC);
+        Assert.Equal(84.85, sensor.LimitCriticalC);
+        Assert.True(sensor.Primary);
     }
 
     [Fact]

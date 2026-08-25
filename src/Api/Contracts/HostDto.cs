@@ -221,13 +221,21 @@ public sealed record CpuInfoSample(string? Model, int? Cores, int? Threads, doub
 /// <para><see cref="Id"/> is the key to correlate and de-duplicate on, not <see cref="Chip"/>: chips share
 /// names (two DDR4 DIMMs are both <c>jc42</c>) and the hwmon index behind them moves between reboots. It is
 /// also what a <c>HostTempC</c> threshold condition puts in its <c>ref</c>.</para>
+/// <para><see cref="LimitHighC"/> / <see cref="LimitCriticalC"/> are the DEVICE's own opinion of hot, and
+/// null when it publishes none that could be one — a consumer reads null as "no opinion" and falls back to
+/// the host's threshold policy, never to a guess. <see cref="Primary"/> marks the channel that speaks for
+/// its device (a package over its per-die channels, an NVMe composite over its component sensors), and
+/// <see cref="DuplicateOf"/> names the reading a channel restates. Both are structural facts from the
+/// monitor, not inferences from values agreeing.</para>
 /// <para><see cref="Role"/> and <see cref="Name"/> are the monitor's classification of the channel — the
 /// daemon that reads the register is the one that knows what the register is. Both are null together when
 /// the monitor's catalog has no entry for the chip, which means unrecognised hardware, NOT a doubtful
 /// reading: <see cref="ValueC"/> is measured either way and a surface falls back to chip/label.</para>
 /// </remarks>
 public sealed record SensorSample(
-    string Id, string Chip, string? Label, double ValueC, string? Role, string? Name);
+    string Id, string Chip, string? Label, double ValueC, string? Role, string? Name,
+    double? LimitHighC = null, double? LimitCriticalC = null,
+    bool Primary = true, string? DuplicateOf = null);
 
 /// <summary>One hwmon fan tachometer (monitor <c>FanReading</c>), in RPM, passed through 1:1.</summary>
 /// <remarks>
@@ -275,7 +283,11 @@ public sealed record GpuSample(
     double? SmPct,
     double? TempC = null,
     double? PowerW = null,
-    double? PowerCapW = null);
+    double? PowerCapW = null,
+    // The driver's own thermal lines: the temperature the part is rated to run to, and the one at which it
+    // is cut. Null when the driver publishes neither, or published a figure that cannot be a limit.
+    double? TempLimitC = null,
+    double? TempShutdownC = null);
 
 /// <summary>
 /// One compute context on a GPU (monitor <c>GpuProcess</c>), carried on the <see cref="Host"/> detail only and
