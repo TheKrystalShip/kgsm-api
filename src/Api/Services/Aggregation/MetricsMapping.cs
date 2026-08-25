@@ -42,6 +42,7 @@ internal static class MetricsMapping
             // ride MemCapacity above) so this tick mirrors the Host view exactly. Static cpu-info is NOT on the
             // tick (it rides the Host view via ToCpuInfo).
             Sensors: MapSensors(s.Sensors),
+            Fans: MapFans(s.Fans),
             Gpus: ToGpus(s.Gpu),
             Slice: ToSlice(s.Slice));
 
@@ -74,8 +75,21 @@ internal static class MetricsMapping
         if (sensors is null || sensors.Length == 0) return [];
         var list = new List<SensorSample>(sensors.Length);
         foreach (Snap.SensorReading r in sensors)
-            // Pass chip/label/valueC through 1:1 — the monitor already produced the °C value; don't re-round.
-            list.Add(new SensorSample(r.Chip, r.Label, r.ValueC));
+            // 1:1 — the monitor already produced the °C value (don't re-round) and already classified the
+            // channel. Role/name are carried, never recomputed here: the daemon that read the register is the
+            // one that knows what it is, and a second catalog in the aggregator would drift from it.
+            list.Add(new SensorSample(r.Id, r.Chip, r.Label, r.ValueC, r.Role, r.Name));
+        return list;
+    }
+
+    // Fan tachometers — same 1:1 pass-through and the same null-tolerance. The monitor has already dropped
+    // the zero readings, so every row here is a fan that is turning.
+    private static IReadOnlyList<FanSample> MapFans(Snap.FanReading[]? fans)
+    {
+        if (fans is null || fans.Length == 0) return [];
+        var list = new List<FanSample>(fans.Length);
+        foreach (Snap.FanReading f in fans)
+            list.Add(new FanSample(f.Id, f.Chip, f.Label, f.Rpm, f.Name));
         return list;
     }
 

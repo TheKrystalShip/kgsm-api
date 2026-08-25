@@ -316,7 +316,7 @@ public sealed class MetricsThresholdAlertTests
             Mounts: [new Snap.MountUsage("/", "ext4", 10, 100, 10.0, Device: null)],
             Io: new Snap.DiskIo(0, 0)),
         Net: new Snap.NetworkMetrics(Ifaces: []),
-        Sensors: [new Snap.SensorReading("k10temp", "Tctl", 30.0)],
+        Sensors: [new Snap.SensorReading("k10temp/0000:00:18.3/temp1", "k10temp", "Tctl", 30.0, "cpu", "CPU temperature")],
         Servers: [],
         Leaves: [],
         Conditions: conditions);

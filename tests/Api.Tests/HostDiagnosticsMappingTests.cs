@@ -31,7 +31,8 @@ public sealed class HostDiagnosticsMappingTests
             Io: new Snap.DiskIo(1000, 2000)),
         Net: new Snap.NetworkMetrics(
             Ifaces: [new Snap.InterfaceRate("eth0", 100, 200, 1, 2, Mac: "aa:bb:cc:dd:ee:ff", Errors: 0)]),
-        Sensors: [new Snap.SensorReading("k10temp", "Tctl", 42.5)],
+        Sensors: [new Snap.SensorReading("k10temp/0000:00:18.3/temp1", "k10temp", "Tctl", 42.5, "cpu", "CPU temperature")],
+        Fans: [new Snap.FanReading("nct6792/nct6775.2592/fan1", "nct6792", null, 2406, "Fan 1")],
         Servers: [],
         Leaves: [],
         Conditions: []);
@@ -87,6 +88,27 @@ public sealed class HostDiagnosticsMappingTests
         Assert.Equal("k10temp", sensor.Chip);
         Assert.Equal("Tctl", sensor.Label);
         Assert.Equal(42.5, sensor.ValueC);    // passed through 1:1 (the monitor already produced the °C value)
+        // The classification is carried, not recomputed — the aggregator holds no chip table of its own.
+        Assert.Equal("k10temp/0000:00:18.3/temp1", sensor.Id);
+        Assert.Equal("cpu", sensor.Role);
+        Assert.Equal("CPU temperature", sensor.Name);
+    }
+
+    [Fact]
+    public void ToHostMetrics_Fans_PassThrough()
+    {
+        FanSample fan = Assert.Single(MetricsMapping.ToHostMetrics(FullSnapshot()).Fans);
+        Assert.Equal("nct6792/nct6775.2592/fan1", fan.Id);
+        Assert.Equal(2406, fan.Rpm);
+        Assert.Equal("Fan 1", fan.Name);
+    }
+
+    [Fact]
+    public void ToHostMetrics_Fans_NullTolerant_NoNre()
+    {
+        // A monitor on an older contract sends no fans array at all; that is an empty list, not a throw.
+        Snap.Snapshot s = FullSnapshot() with { Fans = null };
+        Assert.Empty(MetricsMapping.ToHostMetrics(s).Fans);
     }
 
     [Fact]

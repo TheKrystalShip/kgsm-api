@@ -65,6 +65,9 @@ public sealed record Host(
     // Sensor temperatures (hwmon) — DYNAMIC, so mirrored on HostMetricsDto too. Empty array when no hwmon chip
     // exposes a temperature (never an invented row); null only when there is no snapshot at all.
     IReadOnlyList<SensorSample>? Sensors = null,
+    // Fan tachometers (hwmon) — DYNAMIC, mirrored on HostMetricsDto exactly like Sensors. Empty array when
+    // no fan is turning or the host exposes no tachometer; null only when there is no snapshot at all.
+    IReadOnlyList<FanSample>? Fans = null,
     // The host's GPUs — DYNAMIC, so mirrored on HostMetricsDto too (like Sensors above), which is what lets
     // the overview render a device on its first REST load and keep it current from the tick. Null when the
     // host has no readable card, or when the metrics capability is not operational.
@@ -212,11 +215,29 @@ public sealed record InterfaceSample(
 /// is already in GHz (the monitor converts kHz→GHz) — passed through rounded, never re-converted.</summary>
 public sealed record CpuInfoSample(string? Model, int? Cores, int? Threads, double? MaxFreqGhz);
 
-/// <summary>One hwmon temperature reading (monitor <c>SensorReading</c>, Monitor.Contracts 1.1.0):
-/// <see cref="Chip"/> (e.g. <c>k10temp</c>), an optional <see cref="Label"/> (e.g. <c>Tctl</c>), and
-/// <see cref="ValueC"/> in °C. Passed through 1:1 from the snapshot — the sensors array is empty (never an
-/// invented row) when no chip exposes a temperature.</summary>
-public sealed record SensorSample(string Chip, string? Label, double ValueC);
+/// <summary>One hwmon temperature reading (monitor <c>SensorReading</c>). Passed through 1:1 from the
+/// snapshot — the sensors array is empty (never an invented row) when no chip exposes a temperature.</summary>
+/// <remarks>
+/// <para><see cref="Id"/> is the key to correlate and de-duplicate on, not <see cref="Chip"/>: chips share
+/// names (two DDR4 DIMMs are both <c>jc42</c>) and the hwmon index behind them moves between reboots. It is
+/// also what a <c>HostTempC</c> threshold condition puts in its <c>ref</c>.</para>
+/// <para><see cref="Role"/> and <see cref="Name"/> are the monitor's classification of the channel — the
+/// daemon that reads the register is the one that knows what the register is. Both are null together when
+/// the monitor's catalog has no entry for the chip, which means unrecognised hardware, NOT a doubtful
+/// reading: <see cref="ValueC"/> is measured either way and a surface falls back to chip/label.</para>
+/// </remarks>
+public sealed record SensorSample(
+    string Id, string Chip, string? Label, double ValueC, string? Role, string? Name);
+
+/// <summary>One hwmon fan tachometer (monitor <c>FanReading</c>), in RPM, passed through 1:1.</summary>
+/// <remarks>
+/// Separate from <see cref="SensorSample"/> because that record's <c>ValueC</c> is a °C contract. Only fans
+/// that are turning appear: an unpopulated header and a stopped fan both read zero and hwmon cannot
+/// separate them, so the monitor omits zeros rather than asserting fans that do not exist. <see cref="Name"/>
+/// is the driver's own label where it publishes one and the channel number otherwise — which header drives
+/// which physical fan is board wiring that hwmon does not carry.
+/// </remarks>
+public sealed record FanSample(string Id, string Chip, string? Label, int Rpm, string? Name);
 
 /// <summary>
 /// The kgsm.slice aggregate (monitor <c>SliceMetrics</c>) — the game servers' collective share of the

@@ -211,10 +211,11 @@ public sealed class HostAggregator(
             Libraries: registry is null ? null : JoinCapacity(registry, capacity?.Disks),
             MemoryGate: ReadMemoryGate(),
             // M-diag depth: STATIC cpu identity comes straight off the snapshot (not on the metrics tick),
-            // null when there is no snapshot; DYNAMIC sensors ride the shared capacity DTO (so the Host view
-            // and a metrics tick carry the same hwmon list). Honest-null/empty when not measurable.
+            // null when there is no snapshot; DYNAMIC sensors and fans ride the shared capacity DTO (so the
+            // Host view and a metrics tick carry the same hwmon lists). Honest-null/empty when not measurable.
             Cpu: snapshot is null ? null : MetricsMapping.ToCpuInfo(snapshot.Cpu.Info),
             Sensors: capacity?.Sensors,
+            Fans: capacity?.Fans,
             Gpus: capacity?.Gpus,
             Slice: capacity?.Slice,
             // The identity card: operator-declared region joined with the runtime-derived OS/runtime/build/

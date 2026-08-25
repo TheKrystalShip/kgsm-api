@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — temperatures that say what they measure, and fan speeds (`0.134.0`, Monitor.Contracts `1.10.0`)
+
+`SensorSample` carries the monitor's classification of each hwmon channel beside the number: an `id`,
+a `role` (`cpu` / `gpu` / `memory` / `drive` / `board` / `chipset` / `network`) and a human `name`.
+All three are passed through 1:1 and none is recomputed here — the daemon that read the register is
+the one that knows what it is, and a second chip table in the aggregator would drift from the first.
+`role` and `name` are null together when the monitor's catalog has no entry for a chip, which means
+unrecognised hardware and not a doubtful reading: the value is measured either way and a surface falls
+back to chip/label.
+
+`id` is the key to correlate on rather than `chip`, which is not unique — a board with two DDR4 DIMMs
+reports two chips both named `jc42`, and it is also what a `HostTempC` condition now puts in its
+`ref`, so namesake chips are separate alert targets.
+
+`Host.fans` / `HostMetricsDto.fans` (`FanSample` — `id`, `chip`, `label`, `rpm`, `name`) carries the
+tachometers that are turning, on the same DYNAMIC terms as `sensors`: mirrored from the host view onto
+the metrics tick so a client's hydrate and its stream agree. Separate from `sensors` because that
+record's `valueC` is a °C contract the `HostTempC` threshold fans out over. A monitor on an older
+contract sends no array at all, which reads as empty rather than throwing.
+
 ### Added — the kgsm.slice aggregate on the host view and the metrics tick (`0.133.0`, Monitor.Contracts `1.9.0`)
 
 `Host.slice` / `HostMetricsDto.slice` (`KgsmSliceSample` — `cpuPctCore`, `memBytes`, `pids`) carries

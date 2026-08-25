@@ -11,7 +11,7 @@ namespace TheKrystalShip.Api.Contracts;
 /// reads — per-core CPU, load average, host-aggregate block-IO, per-interface throughput, hostname, uptime,
 /// and the sample timestamp (<see cref="SampleTs"/>, the honest freshness source). The Monitor.Contracts 1.1.0
 /// depth adds the DYNAMIC fields: mem cached/buffers (on <see cref="MemCapacity"/>), per-interface mac/errors
-/// (on <see cref="InterfaceSample"/>), and the hwmon <see cref="Sensors"/> list — all measured, honest-null/empty
+/// (on <see cref="InterfaceSample"/>), and the hwmon <see cref="Sensors"/> and <see cref="Fans"/> lists — all measured, honest-null/empty
 /// when absent. The STATIC CPU identity and per-mount disk device are constant per frame: cpu-info rides the
 /// <see cref="Host"/> view only (not this tick); disk device rides the shared <see cref="DiskCapacity"/> shape
 /// (so it appears here too — the byte-identical <c>Host.Disks == tick.Disks</c> invariant, as <c>Fs</c> already
@@ -32,6 +32,9 @@ public sealed record HostMetricsDto(
     // WS tick stays byte-identical to the REST element (cached/buffers + mac/errors ride MemCapacity/InterfaceSample
     // above). Empty array when no hwmon chip reports (never invented); on the tick a snapshot always exists.
     IReadOnlyList<SensorSample> Sensors,
+    // Fan tachometers, mirrored from the Host view on the same terms as Sensors. Empty when no fan is
+    // turning or the host exposes no tachometer.
+    IReadOnlyList<FanSample> Fans,
     // The host's GPUs. Null when the host has no readable card — an ordinary host, not a degraded one, so a
     // client renders no GPU section rather than reporting anything. Devices only: they describe hardware and
     // name no process, so they ride the tick ungated, while the per-process breakdown stays on the Host detail
