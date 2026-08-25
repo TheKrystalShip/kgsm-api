@@ -4,6 +4,31 @@ using TheKrystalShip.KGSM.Auth.Users;
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
+/// Where an identity stands on this host right now: the account it proves, what that account may do,
+/// and what state it is in.
+/// </summary>
+/// <param name="AccountId">
+/// The account's id, or <see langword="null"/> when the identity proves none. It is the id and not a
+/// handle because it is the one name every credential on an account shares — a person signed in
+/// through a linked provider and the same person signed in with a password are one account here.
+/// </param>
+/// <param name="Tier">
+/// The tier to authorize on — the account's <em>effective</em> tier, so one awaiting approval is
+/// <see cref="KgsmTier.None"/> whatever its record carries.
+/// </param>
+/// <param name="Status">
+/// The account's state in wire form (<c>active</c>, <c>pending</c>, <c>disabled</c>), or
+/// <see cref="UnknownStatus"/> when the identity proves no account here or the store could not be
+/// read. <c>none</c> and <c>unknown</c> together are what let a panel tell somebody waiting on an
+/// admin from somebody this host has never heard of.
+/// </param>
+public sealed record AccountStanding(string? AccountId, KgsmTier Tier, string Status)
+{
+    /// <summary>The status of an account this host cannot name — never a guessed one.</summary>
+    public const string UnknownStatus = "unknown";
+}
+
+/// <summary>
 /// This host's KGSM accounts, and whether they can be reached at all.
 /// </summary>
 /// <remarks>
@@ -91,6 +116,37 @@ public sealed class UserDirectory
     /// </summary>
     public IdentityLinkService Linking =>
         _linking ?? throw new InvalidOperationException("The KGSM account store is unavailable.");
+
+    /// <summary>
+    /// Where <paramref name="identity"/> stands on this host — the one answer <c>GET /me</c> and the
+    /// <c>me</c> stream topic both speak, so the two can never describe the same person differently.
+    /// </summary>
+    /// <remarks>
+    /// Goes through the cached authority resolution, which is the same read every request already
+    /// makes, so asking again on a request that has just authenticated costs nothing.
+    /// <para>
+    /// A store that cannot be read <b>throws</b> <see cref="KgsmAuthProviderException"/> rather than
+    /// answering <see cref="KgsmTier.None"/>. "We could not ask" is a third answer here as everywhere
+    /// else in this model, and flattening it into a tier would have an outage report every live
+    /// session as demoted — a fabricated standing, and the one thing this ecosystem never emits.
+    /// Each caller decides what to do with the silence: <c>/me</c> renders
+    /// <see cref="AccountStanding.UnknownStatus"/>, a live stream ends and lets the redial re-run the
+    /// full authentication pipeline, which is the authority.
+    /// </para>
+    /// </remarks>
+    public async Task<AccountStanding> StandingAsync(KgsmIdentity identity, CancellationToken ct = default)
+    {
+        if (_authority is null)
+        {
+            throw new KgsmAuthProviderException(
+                UnavailableReason ?? "The KGSM account store is unavailable on this host.");
+        }
+
+        AuthorityAnswer answer = await _authority.ResolveAsync(identity, ct);
+        return answer.User is { } account
+            ? new AccountStanding(account.UserId, answer.Tier, UserStatuses.ToWire(account.Status))
+            : new AccountStanding(null, answer.Tier, AccountStanding.UnknownStatus);
+    }
 
     /// <summary>
     /// Drop every cached authority answer for an account, so the next request on any of its sessions

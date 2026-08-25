@@ -1,3 +1,5 @@
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Realtime;
 
 /// <summary>
@@ -79,6 +81,44 @@ public static class StreamProtocol
     /// secrets) and the host-services board (systemd unit names, pids, memory) — both stricter than the
     /// viewer-gated audit feed, matching their REST endpoint's operator gate.</summary>
     public static bool RequiresOperator(string topic) => IsHostLogsTopic(topic) || IsHostServicesTopic(topic);
+
+    /// <summary>
+    /// The tier a subscription to <paramref name="topic"/> needs. The stream's gate is per topic rather
+    /// than per endpoint: <see cref="MeTopic"/> is news about the caller's own account and needs no
+    /// grant at all, the two operator topics are stricter than the rest, and everything else is the
+    /// viewer floor the panel's reads sit on.
+    /// </summary>
+    /// <remarks>
+    /// Fail-closed on anything it does not recognise: a topic name this build has never heard of —
+    /// a future one, a typo, a probe — answers <see cref="KgsmTier.Viewer"/>, so a caller who holds
+    /// nothing can only ever reach the one topic named here as needing nothing.
+    /// </remarks>
+    public static KgsmTier MinimumTier(string topic) =>
+        RequiresOperator(topic) ? KgsmTier.Operator
+        : topic == MeTopic ? KgsmTier.None
+        : KgsmTier.Viewer;
+
+    // --- me (the caller's own standing on this host) ---
+    /// <summary>What this host says about the <em>caller's own</em> account: <c>me</c>. The live
+    /// companion to <c>GET /api/v1/me</c> — the client hydrates there and applies
+    /// <see cref="MePatch"/> frames from here on, so a tier or status an admin changes lands on an
+    /// open panel instead of waiting for a reload.
+    /// <para>The one topic delivered by <em>audience</em> rather than by subscription alone: a frame
+    /// reaches only the connections authenticated as the account it is about, never the host at large
+    /// (<see cref="StreamHub.PublishToAccount"/>). It is also the one topic
+    /// <see cref="MinimumTier"/> puts at <see cref="KgsmTier.None"/> — somebody awaiting approval
+    /// holds no grant on this host and is exactly who needs to hear that it changed.</para></summary>
+    public const string MeTopic = "me";
+
+    /// <summary>The caller's standing changed: <c>data</c> is a <see cref="Contracts.MeStanding"/> —
+    /// the mutable half of <c>GET /api/v1/me</c> (<c>tier</c> + <c>status</c>), in the same wire
+    /// vocabulary that endpoint answers in. The client merges it over what it hydrated.</summary>
+    public const string MePatch = "me.patch";
+
+    /// <summary>The per-connection coalesce key for <see cref="MePatch"/>: one key for the whole
+    /// topic. Supersede-by-latest is the whole truth here — a connection carries one account's
+    /// standing, and an older reading of it says nothing the newest does not.</summary>
+    public const string MeEntityKey = "me";
 
     // --- server -> client message types (the `type` field of the { topic, type, data } envelope) ---
     /// <summary>A full honest <c>Server</c> element to merge by id (doc-given). Fired on status/roster change.</summary>

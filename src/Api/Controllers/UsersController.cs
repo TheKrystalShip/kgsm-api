@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 
@@ -35,6 +36,7 @@ namespace TheKrystalShip.Api.Controllers;
 [ApiController]
 public sealed class UsersController(
     UserDirectory users,
+    StreamHub stream,
     ApiJournal journal) : ControllerBase
 {
     /// <summary><c>GET /auth/users</c> — every account on this host, oldest first (admin).</summary>
@@ -218,6 +220,13 @@ public sealed class UsersController(
         // with. Other surfaces on this host hold their own caches and pick it up within their own TTL.
         await users.ForgetAsync(userId, ct);
 
+        // Every panel this person has open re-gates itself and is told, on the connection it already
+        // holds. Without it a demotion is a surface that keeps rendering controls the next click
+        // discovers are gone, and an approval is somebody staring at "awaiting approval" until they
+        // think to reload.
+        stream.AuthorityChanged(
+            updated.UserId, updated.EffectiveTier, UserStatuses.ToWire(updated.Status));
+
         await RecordChangesAsync(existing, updated, ct);
         return Ok(await ToRecordAsync(updated, ct));
     }
@@ -253,6 +262,12 @@ public sealed class UsersController(
         await users.ForgetAsync(userId, ct);
 
         await users.Store.DeleteAsync(userId, ct);
+
+        // The account is gone, which is what an identity that proves none reads as everywhere else on
+        // this surface: no tier, and a status this host cannot name. Their open streams re-gate to
+        // that and are told, rather than running on at a tier whose record no longer exists.
+        stream.AuthorityChanged(userId, KgsmTier.None, AccountStanding.UnknownStatus);
+
         await RecordAsync(ApiJournal.UserDeletedEvent, existing,
             fromTier: KgsmTiers.ToWire(existing.Tier),
             fromStatus: UserStatuses.ToWire(existing.Status), ct: ct);

@@ -130,6 +130,32 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     public string RefreshToken(KgsmTier tier) => MintTokenWithRow(Services, tier, access: false);
 
     /// <summary>
+    /// Mint a real access token for <paramref name="identity"/>, insert its session row, and give it an
+    /// account at <paramref name="tier"/>/<paramref name="status"/> — the whole setup for one person.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AccessToken"/> mints for the one standing identity, so every token it hands out is
+    /// the same person holding whichever tier was asked for last. A test about who a frame reaches, or
+    /// about one account changing while another watches, needs two people, and this is how it gets
+    /// them: <see cref="FakeDiscordResolver.IdentityFor"/> names one, and this gives them a session
+    /// and an account of their own.
+    /// </remarks>
+    public string AccessTokenFor(KgsmIdentity identity, KgsmTier tier, UserStatus status = UserStatus.Active)
+    {
+        var tokens = Services.GetRequiredService<ISessionTokenService>();
+        var store = Services.GetRequiredService<SessionStore>();
+        var opts = Services.GetRequiredService<ApiOptions>();
+        string sid = "sid_test_" + Guid.NewGuid().ToString("N");
+        MintedToken minted = tokens.MintAccess(identity, tier, sid);
+        store.CreateAsync(sid, identity.Handle, opts.HostId,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(opts.SessionsRefreshAbsoluteDays),
+            userAgent: null, initialJti: minted.Jti, CancellationToken.None).GetAwaiter().GetResult();
+
+        SetAccount(identity, tier, status);
+        return minted.Token;
+    }
+
+    /// <summary>
     /// Shared mint+insert behind <see cref="AccessToken"/>/<see cref="RefreshToken"/>. Takes an
     /// <see cref="IServiceProvider"/> so a <see cref="Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory{TEntryPoint}"/>
     /// built via <c>WithWebHostBuilder</c> (a DERIVED factory with its OWN random DB + service

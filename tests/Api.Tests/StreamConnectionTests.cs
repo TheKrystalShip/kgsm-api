@@ -2,6 +2,9 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using TheKrystalShip.Api.Realtime;
+using TheKrystalShip.Api.Services.Auth;
+
+using TheKrystalShip.KGSM.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -167,6 +170,109 @@ public class StreamConnectionTests
         Task run = conn.RunAsync(cts.Token);
         await Task.Delay(500);
         Assert.False(run.IsCompleted, "an unchecked stream ended on its own");
+
+        cts.Cancel();
+        await run;
+    }
+
+
+    // ---- the mid-stream authority re-check ---------------------------------
+    // The same clock, asking the other question: what may this reader do now. It is the backstop for
+    // the writers this process never sees — the account store is a shared host file — so it re-reads
+    // rather than waiting to be told.
+
+    private static StreamConnection NewGoverned(
+        Stream body,
+        IEnumerable<string> topics,
+        KgsmTier tier,
+        Func<CancellationToken, ValueTask<AccountStanding>> authority) =>
+        new(body, topics, new JsonSerializerOptions(JsonSerializerDefaults.Web), NullLogger.Instance,
+            sessionAlive: null, TimeSpan.FromMilliseconds(120), tier, accountId: "usr_alice",
+            sessionId: "sid_alice", authority);
+
+    /// <summary>
+    /// A tier changed by something other than this API's own endpoints still reaches the connection:
+    /// the operator-only subscription goes, and the reader is told where they now stand.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_regates_and_tells_the_reader_when_the_store_moves_the_tier()
+    {
+        using var cts = new CancellationTokenSource();
+        var body = new MemoryStream();
+        var demoted = false;
+        StreamConnection conn = NewGoverned(body, ["hosts/h/services", "me"], KgsmTier.Operator,
+            _ => new ValueTask<AccountStanding>(Volatile.Read(ref demoted)
+                ? new AccountStanding("usr_alice", KgsmTier.Viewer, "active")
+                : new AccountStanding("usr_alice", KgsmTier.Operator, "active")));
+
+        Task run = conn.RunAsync(cts.Token);
+        await Task.Delay(300);
+        Assert.True(conn.IsSubscribed("hosts/h/services"), "an unchanged tier must not re-gate anything");
+        Assert.DoesNotContain("me.patch", Encoding.UTF8.GetString(body.ToArray()), StringComparison.Ordinal);
+
+        Volatile.Write(ref demoted, true);
+
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (conn.IsOperator && DateTime.UtcNow < deadline)
+            await Task.Delay(50);
+
+        Assert.False(conn.IsOperator, "the connection kept a tier the store had already taken away");
+        Assert.False(conn.IsSubscribed("hosts/h/services"));
+
+        while (!Encoding.UTF8.GetString(body.ToArray()).Contains("me.patch", StringComparison.Ordinal)
+               && DateTime.UtcNow < deadline)
+            await Task.Delay(50);
+
+        string written = Encoding.UTF8.GetString(body.ToArray());
+        Assert.Contains("\"topic\":\"me\"", written, StringComparison.Ordinal);
+        Assert.Contains("\"tier\":\"viewer\"", written, StringComparison.Ordinal);
+        Assert.Contains("\"status\":\"active\"", written, StringComparison.Ordinal);
+
+        cts.Cancel();
+        await run;
+    }
+
+    /// <summary>
+    /// Fail-closed, and for the same reason the session check is: an account store that cannot be read
+    /// leaves this connection's reach unmeasurable, and it is never softened into a demotion — that
+    /// would report an outage as everybody having lost their access. The redial asks properly.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_ends_the_stream_when_the_authority_check_throws()
+    {
+        using var cts = new CancellationTokenSource();
+        StreamConnection conn = NewGoverned(new MemoryStream(), ["me"], KgsmTier.Viewer,
+            _ => throw new KgsmAuthProviderException("the account store could not be read"));
+
+        Task run = conn.RunAsync(cts.Token);
+        Assert.True(await Ended(run), "an unmeasurable tier was treated as a still-valid one");
+        await run;
+    }
+
+    /// <summary>
+    /// The re-check runs every tick and says nothing while the answer holds. A patch per tick would
+    /// make a panel redraw itself three times a minute to report that nothing happened.
+    /// </summary>
+    [Fact]
+    public async Task RunAsync_pushes_nothing_while_the_tier_holds()
+    {
+        using var cts = new CancellationTokenSource();
+        var body = new MemoryStream();
+        var checks = 0;
+        StreamConnection conn = NewGoverned(body, ["me"], KgsmTier.Viewer, _ =>
+        {
+            Interlocked.Increment(ref checks);
+            return new ValueTask<AccountStanding>(new AccountStanding("usr_alice", KgsmTier.Viewer, "active"));
+        });
+
+        Task run = conn.RunAsync(cts.Token);
+
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+        while (Volatile.Read(ref checks) < 3 && DateTime.UtcNow < deadline)
+            await Task.Delay(50);
+
+        Assert.True(Volatile.Read(ref checks) >= 3, $"expected repeated re-checks, saw {Volatile.Read(ref checks)}");
+        Assert.DoesNotContain("me.patch", Encoding.UTF8.GetString(body.ToArray()), StringComparison.Ordinal);
 
         cts.Cancel();
         await run;

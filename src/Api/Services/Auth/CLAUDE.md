@@ -28,7 +28,11 @@ file is the local "what you must not break."
 - **Every refresh rotates both tokens; reuse is detected.** `/auth/session/refresh` mints a fresh access **and**
   refresh token; a per-token `jti` claim + the row's `CurrentJti` detect reuse — a stale/replayed refresh token
   (`jti` ≠ `CurrentJti`) → `401`. `RefreshResponse` carries a **`refresh`** field; a client MUST adopt both
-  tokens on each call (the old refresh token is dead).
+  tokens on each call (the old refresh token is dead). **The tier on both minted tokens and on the answer
+  is resolved from the account store, not copied off the presented refresh token** — that token lives for
+  weeks, so what it was minted with describes a login and not a person's standing now. An unreadable store
+  answers `502 authority_unavailable` here as everywhere else: it is not grounds to re-mint the old answer,
+  and not grounds to sign somebody out either.
 - **Revocation is ≤5s; the live access token is a ≤15-min hard ceiling.** A revoke (logout / self-revoke /
   admin cross-user) soft-deletes the row (`Revoked=true`) and evicts the cache → effective within ≤5s (the cache
   TTL backstop; ~instant on the same node via `Evict`). The access token is not re-validated mid-life beyond the
@@ -157,8 +161,8 @@ file is the local "what you must not break."
   carried since staging. Someone demoted or switched off between the notification and the tap is
   refused. Every refusal about the handle is one `404` with one message, because separate answers let
   somebody probe which handles exist.
-- **Tier gating** (hierarchical: admin ⊇ operator ⊇ viewer): viewer = reads + the `/stream` SSE stream,
-  operator = the command `POST`, admin = diagnostics + reserved (settings/install/audit-config).
+- **Tier gating** (hierarchical: admin ⊇ operator ⊇ viewer): viewer = reads and the `/stream` topics that
+  carry them, operator = the command `POST`, admin = diagnostics + reserved (settings/install/audit-config).
   `401` = no/invalid bearer (challenge); `403` = authenticated, tier too low (forbid) — keep that split.
 - **Honest failure modes** (the security analog of never-fabricate-a-status): the identity provider
   unreachable → `KgsmAuthProviderException` → `502`; the account store unreadable →
@@ -167,6 +171,14 @@ file is the local "what you must not break."
   silently softened to make a request work.
 - **A refresh token is never an access bearer.** `OnTokenValidated` rejects `tkn != "access"` on
   protected calls; only `/auth/session/refresh` reads a refresh token (from the `Authorization` header).
+- **`/stream` gates per topic, not per endpoint.** Any authenticated caller connects and keeps only the
+  topics their tier reaches (`StreamProtocol.MinimumTier`) — dropped silently, never a 403 on the whole
+  stream. The floor is `me`, which needs no grant, so somebody awaiting approval holds a connection that
+  carries news about their own account and nothing else. Everything else stays at the viewer floor, and
+  the two operator topics above it. **A tier changed while a stream is open is applied to the live
+  connection** — the tier moves, subscriptions above it are dropped, and a `me.patch` says so — by the
+  write that made the change (`StreamHub.AuthorityChanged`) and, for a writer this process never sees, by
+  the connection's own 20s re-read. It only ever takes reach away: a promotion adds no subscription back.
 - **The SSE bearer is a normal `Authorization` header**, so `/stream` authenticates through the standard
   JwtBearer pipeline like every other request — a query-string token authenticates nothing
   (`Stream_Sse_QueryTokenIgnored`). Because that pipeline runs **once per request** and a stream is one

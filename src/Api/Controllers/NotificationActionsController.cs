@@ -53,6 +53,7 @@ public sealed class NotificationActionsController(
     PushSnoozeStore snoozes,
     PushSubscriptionStore subscriptions,
     Services.Auth.UserDirectory users,
+    Realtime.StreamHub stream,
     ServerAggregator aggregator,
     PlayerHistoryService history,
     JobRegistry jobs,
@@ -262,6 +263,12 @@ public sealed class NotificationActionsController(
         // Authority is resolved per request from a short-lived cache; drop this account's entries so the
         // person who was just let in is not still refused for the length of a TTL.
         await users.ForgetAsync(approved.UserId, ct).ConfigureAwait(false);
+
+        // Somebody approved from a lock screen is very often somebody sitting in front of the panel
+        // waiting, so their open connection hears it here too — the same push the Users tab's own
+        // write sends.
+        stream.AuthorityChanged(
+            approved.UserId, approved.EffectiveTier, UserStatuses.ToWire(approved.Status));
 
         await journal.AccountAsync(
             ApiJournal.UserApprovedEvent,

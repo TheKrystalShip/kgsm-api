@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a tier change reaches the person it is about, live (`0.138.0`)
+
+The `me` stream topic carries the caller's own standing — `me.patch` with the `tier` and `status`
+`GET /me` answers in — to the connections authenticated as that account and to nobody else. Every
+write that changes what an account may do pushes it: the Users tab's PATCH and DELETE, and the
+notification approve action. A panel therefore stops rendering controls the next click would refuse,
+and somebody awaiting approval learns they are in without reloading.
+
+The push is half of it; the server stops honouring the old tier too. A connection carries the tier the
+account store gave it and re-reads it on the same 20s clock the session check runs on, so a tier
+changed by another writer on the host — the store is a shared file — lands within that bound. A
+demotion is applied in place: the tier moves and every subscription above it is dropped, so a demoted
+operator stops receiving the host-logs and services topics and starts receiving the redacted audit
+variant on the connection it already holds. A promotion adds nothing back; the client that wants more
+opens a stream asking for more. An unreadable account store ends the stream rather than resolving to
+`none` — "we could not ask" is not a demotion.
+
+`/stream` gates per topic rather than per endpoint. Any authenticated caller connects and keeps only
+what their tier reaches; `me` needs no grant, everything else is the viewer floor it always was, and
+the two operator topics stay above it. That is what lets a pending account hold the one connection it
+has any use for.
+
+### Changed — `POST /auth/session/refresh` answers with the tier the account holds (`0.138.0`)
+
+Both re-minted tokens and the response's `tier` carry what the account store says today rather than
+what the presented refresh token was minted with — a token that lives for weeks describes a login, not
+a standing. An unreadable store answers `502 authority_unavailable`, the same as every other
+authenticated call for as long as the outage lasts.
+
 ### Added — every GPU's range in one request (`0.137.0`)
 
 `GET /hosts/{id}/gpus/metrics/summary` relays each device's min/max/mean over a window, the same

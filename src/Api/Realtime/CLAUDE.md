@@ -42,6 +42,13 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The cont
   `server.patch` stay the frozen `Server`. **No pump publishes it** — it is pushed ONLY by the
   `open_ports` verify (the firewall is socket-activated + idle-exits; a periodic probe would defeat that).
   Don't add a network pump; don't fold `network` into `server.patch`.
+- **`me` is delivered by AUDIENCE, not by subscription alone.** Every other topic is host-wide: anyone
+  subscribed gets the frame. This one carries the *reader's own* standing (`tier` + `status`, the
+  mutable half of `GET /me`), so it goes only to the connections authenticated as the account it is
+  about — `StreamHub.PublishToAccount`, matched on the **account id** so a session established through
+  a linked provider identity is reached as readily as one established with a password. A connection
+  that proves no account belongs to nobody and is never a recipient. Broadcasting it would hand every
+  viewer a directory of who holds what.
 - **One shared `MetricsMapping`** makes a stream tick byte-identical to the REST element it patches —
   REST and the stream must not drift. Map in one place.
 - **Honesty: monitor-down → metric topics go silent**, never a replayed stale frame. The
@@ -57,11 +64,18 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The cont
 
 ## Auth
 
-`/stream` is `[Authorize(Policy = viewer)]`. Fetch-based SSE sends the bearer as a normal
-`Authorization: Bearer` header through the standard JwtBearer pipeline — a query-string token
-authenticates nothing (regression-pinned: `Stream_Sse_QueryTokenIgnored`). SSE exposes a
-**readable `401`**, so the stream heals through the same reactive rotate-on-401 path as every
-REST call — **don't introduce client-side expiry math for this endpoint.**
+`/stream` is `[Authorize]` — any authenticated caller connects, and **the gate is per topic**
+(`StreamProtocol.MinimumTier`): the two operator topics need operator, `me` needs nothing at all, and
+everything else is the viewer floor. A topic the caller's tier does not reach is **silently dropped**
+from the subscription set at connect — never a 403 on the whole stream. What the `me` floor buys is
+the one caller a viewer gate has nothing to say to: somebody awaiting approval, who connects to hear
+about their own account and hears nothing else.
+
+Fetch-based SSE sends the bearer as a normal `Authorization: Bearer` header through the standard
+JwtBearer pipeline — a query-string token authenticates nothing (regression-pinned:
+`Stream_Sse_QueryTokenIgnored`). SSE exposes a **readable `401`**, so the stream heals through the
+same reactive rotate-on-401 path as every REST call — **don't introduce client-side expiry math for
+this endpoint.**
 
 **The connection re-checks its own session every 20s.** `[Authorize]` gates the CONNECT and nothing in
 the framework re-runs it on a request that lasts hours, so `StreamController` hands the connection a
@@ -75,6 +89,17 @@ reconnect banner each time, for a credential the client is about to rotate anywa
 THROWS ends the stream too: "couldn't measure" is not "still valid", and the redial re-runs the full
 auth pipeline, which is the authority. No `sid` (auth-disabled) → no probe, unchanged behaviour.
 
-**Operator-only topics** (`hosts/{id}/logs`) requested by a non-operator are **silently dropped** from
-the connection's subscription set at connect (`StreamController` filters via
-`StreamProtocol.RequiresOperator`) — never a 403 on the whole stream.
+**The connection re-reads what its reader may do on the same 20s clock.** A tier that has moved is
+applied in place: the connection's tier becomes the new one, every subscription above it is dropped
+(`StreamConnection.ApplyTier`), and a `me.patch` tells the reader. Two properties are load-bearing.
+It only ever takes reach away — a promotion adds nothing back, because the subscription set is what
+the client asked for filtered by what it held, and nothing here can tell a topic the client did not
+want from one it was refused; the client that wants more opens a stream asking for more. And an
+unreadable account store **ends the stream** rather than resolving to `none`: "we could not ask" is a
+third answer, and flattening it into a tier would report an outage as everybody having lost their
+access. The redial re-runs the full auth pipeline, which is the authority.
+
+That re-read is the **backstop**, not the fast path. A change made through this API's own endpoints
+(`PATCH /auth/users/{id}`, the delete, the notification approve action) calls
+`StreamHub.AuthorityChanged` and lands at once; the clock covers the writers this process never sees,
+since the account store is a shared host file the assistant, the bot and `kgsm-api user` all write.

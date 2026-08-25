@@ -28,6 +28,15 @@ Api's `TreatWarningsAsErrors`.
 - **Mint tokens via the server's OWN token service** — `factory.AccessToken(tier)` /
   `RefreshToken(tier)` resolve `ISessionTokenService` from `factory.Services`, so the key + host audience
   match the running pipeline. For a deliberately-wrong-signature token, `TestTokens.MintAccessWithKey`.
+  Those two mint for the **one standing identity**, so every token they hand out is the same person
+  holding whichever tier was asked for last. A case about **who** something reaches, or about one
+  account changing while another watches, needs two people: `FakeDiscordResolver.IdentityFor(subject)`
+  names one and `factory.AccessTokenFor(identity, tier, status)` gives them a session and an account of
+  their own.
+- **A token's tier is a label; the account decides.** Every gate resolves authority from the store per
+  request, so minting at a tier proves nothing on its own — `AccessToken`/`AccessTokenFor` set the
+  account to match, and a test that mints a token by hand has to set the account itself or it is
+  asserting against whatever a previous case left behind.
 - **`/api/v1/stream` (fetch-based SSE; protocol: `../../src/Api/Realtime/CLAUDE.md`)** is
   exercised with `SseTestHelpers.OpenStream(client, path, token)` — a `GET` with
   `HttpCompletionOption.ResponseHeadersRead` and an `Authorization: Bearer` header (never a query-string

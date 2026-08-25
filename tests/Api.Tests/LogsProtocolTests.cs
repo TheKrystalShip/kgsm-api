@@ -1,5 +1,7 @@
 using TheKrystalShip.Api.Realtime;
 
+using TheKrystalShip.KGSM.Auth;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -30,6 +32,21 @@ public sealed class LogsProtocolTests
     [InlineData("servers/factorio/console", false)]
     public void RequiresOperator_GatesOnlyHostLogs(string topic, bool expected) =>
         Assert.Equal(expected, StreamProtocol.RequiresOperator(topic));
+
+    /// <summary>
+    /// The per-topic gate, and its fail-closed default: a topic name this build has never heard of
+    /// answers the viewer floor, so a caller holding nothing reaches only the one topic named as
+    /// needing nothing.
+    /// </summary>
+    [Theory]
+    [InlineData("hosts/hotrod/logs", KgsmTier.Operator)]
+    [InlineData("hosts/hotrod/services", KgsmTier.Operator)]
+    [InlineData("me", KgsmTier.None)]
+    [InlineData("servers", KgsmTier.Viewer)]
+    [InlineData("audit", KgsmTier.Viewer)]
+    [InlineData("something-this-build-has-never-heard-of", KgsmTier.Viewer)]
+    public void MinimumTier_GatesEachTopic(string topic, KgsmTier expected) =>
+        Assert.Equal(expected, StreamProtocol.MinimumTier(topic));
 
     [Fact]
     public void HostLogEntityKey_IsUniquePerCursor()

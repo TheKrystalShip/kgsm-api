@@ -61,6 +61,10 @@ public sealed class SessionRotationTests(AuthTestFactory factory) : IClassFixtur
         await store.CreateAsync(sid, FakeDiscordResolver.Identity.Handle, opts.HostId,
             created, shortExpires, userAgent: null, initialJti: r0.Jti, CancellationToken.None);
 
+        // The tier on the answer comes from the account, not from the token being presented, so the
+        // account has to hold the tier this case is about.
+        factory.SetAccount(FakeDiscordResolver.Identity, KgsmTier.Operator);
+
         HttpResponseMessage resp = await PostRefresh(Bearer(r0.Token));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         JsonElement body = await Json(resp);
@@ -123,5 +127,39 @@ public sealed class SessionRotationTests(AuthTestFactory factory) : IClassFixtur
         Assert.Equal(HttpStatusCode.NoContent, (await Bearer(token).PostAsync("/auth/logout", content: null)).StatusCode);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await Bearer(token).GetAsync("/api/v1/me")).StatusCode);
+    }
+
+    // --- The tier on a rotation is the account's, not the presented token's -----------------------
+
+    /// <summary>
+    /// A refresh token lives for weeks, so the tier it was minted with says what its holder could do
+    /// when they signed in and nothing about now. Both re-minted tokens and the answer's <c>tier</c>
+    /// carry what the account holds today — the same value every gate on the next request reads, so
+    /// the panel a rotation hands back is drawn for the person's real standing.
+    /// </summary>
+    [Fact]
+    public async Task Refresh_ReturnsTheTierTheAccountHolds_NotTheOnesOnTheToken()
+    {
+        var tokens = factory.Services.GetRequiredService<ISessionTokenService>();
+        var store = factory.Services.GetRequiredService<SessionStore>();
+        var opts = factory.Services.GetRequiredService<ApiOptions>();
+        string sid = "sid_live_" + Guid.NewGuid().ToString("N");
+        MintedToken r0 = tokens.MintRefresh(FakeDiscordResolver.Identity, KgsmTier.Admin, sid);
+        await store.CreateAsync(sid, FakeDiscordResolver.Identity.Handle, opts.HostId,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(opts.SessionsRefreshAbsoluteDays),
+            userAgent: null, initialJti: r0.Jti, CancellationToken.None);
+
+        // Minted as an admin; demoted since.
+        factory.SetAccount(FakeDiscordResolver.Identity, KgsmTier.Viewer);
+
+        HttpResponseMessage resp = await PostRefresh(Bearer(r0.Token));
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        JsonElement body = await Json(resp);
+        Assert.Equal(KgsmTiers.Viewer, body.GetProperty("tier").GetString());
+
+        // And the minted access bearer is refused where an admin's would pass — the tier that came
+        // back is not merely a label on the answer.
+        string access = body.GetProperty("token").GetString()!;
+        Assert.Equal(HttpStatusCode.Forbidden, (await Bearer(access).GetAsync("/auth/users")).StatusCode);
     }
 }

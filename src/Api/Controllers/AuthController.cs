@@ -707,10 +707,19 @@ public sealed class AuthController(
     /// <c>Authorization: Bearer</c>), no Discord round-trip. M4·c with rotation: the session row's
     /// <c>CurrentJti</c> is validated against the presented refresh's <c>jti</c> (reuse detection — a
     /// stale jti = an OLD/STOLEN refresh token → <c>401</c>); on a match, BOTH tokens are re-minted
-    /// (the refresh's <c>jti</c> rotates, the row slides its <c>Expires</c> forward — the rolling 30-day
-    /// window the user directive opened — and bumps <c>LastSeen</c>). The SPA MUST adopt the new
-    /// refresh token from the response body on every call (the old one is dead). Role is NOT re-checked
-    /// here (the long-term "transparent role changes" idea, deferred).
+    /// (the refresh's <c>jti</c> rotates, the row slides its <c>Expires</c> forward on the rolling 30-day
+    /// window, and bumps <c>LastSeen</c>). The SPA MUST adopt the new
+    /// refresh token from the response body on every call (the old one is dead).
+    /// <para>
+    /// <b>The tier is resolved from the account store, not copied off the presented token.</b> A
+    /// refresh token lives for weeks, so what it was minted with says what the holder could do when
+    /// they signed in and nothing about now. Both minted tokens and the response's <c>tier</c> carry
+    /// what the account says today, which is what every gate on the next request will read anyway —
+    /// so the panel a rotation hands back is drawn for the person's real standing rather than for a
+    /// month-old one. A store that cannot be read answers <c>502 authority_unavailable</c>, the same
+    /// as every other authenticated call for as long as the outage lasts: "we could not ask" is not
+    /// grounds to re-mint the old answer, and not grounds to sign somebody out either.
+    /// </para>
     /// </summary>
     [AllowAnonymous]
     [HttpPost("/auth/session/refresh")]
@@ -725,6 +734,18 @@ public sealed class AuthController(
             return Error(StatusCodes.Status401Unauthorized, "unauthorized",
                 "the refresh token is invalid or expired");
 
+        KgsmTier tier;
+        try
+        {
+            tier = (await users.StandingAsync(claims.Identity, HttpContext.RequestAborted)).Tier;
+        }
+        catch (KgsmAuthProviderException e)
+        {
+            logger.LogError(e, "Could not resolve authority for {Handle} while refreshing.", claims.Identity.Handle);
+            return Error(StatusCodes.Status502BadGateway, "authority_unavailable",
+                "The KGSM account store could not be read.");
+        }
+
         // M4·c rotation — mint BOTH tokens upfront. Each gets a fresh jti; the access jti is
         // informational only (the per-request validator doesn't check jti), the refresh jti is the
         // reuse-detection key that becomes the row's stored CurrentJti. We mint before the row-update
@@ -732,8 +753,8 @@ public sealed class AuthController(
         // carry the SAME sid (D7/D8: same sid across a session's lifetime). The new refresh
         // SURFACES from the response to the SPA.
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        MintedToken access = tokens.MintAccess(claims.Identity, claims.Tier, claims.SessionId);
-        MintedToken refresh = tokens.MintRefresh(claims.Identity, claims.Tier, claims.SessionId);
+        MintedToken access = tokens.MintAccess(claims.Identity, tier, claims.SessionId);
+        MintedToken refresh = tokens.MintRefresh(claims.Identity, tier, claims.SessionId);
 
         // Validate the presented refresh's jti against the row's stored CurrentJti + slide Expires
         // + bump LastSeen + store the new refresh's jti (rotation). Returns false when: no row / row
@@ -749,7 +770,7 @@ public sealed class AuthController(
             return Error(StatusCodes.Status401Unauthorized, "unauthorized",
                 "the refresh token is invalid, expired, or has been superseded");
 
-        return Ok(new RefreshResponse(access.Token, refresh.Token, KgsmTiers.ToWire(claims.Tier), access.ExpiresAt));
+        return Ok(new RefreshResponse(access.Token, refresh.Token, KgsmTiers.ToWire(tier), access.ExpiresAt));
     }
 
     /// <summary>

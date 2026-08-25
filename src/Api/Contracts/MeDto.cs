@@ -38,6 +38,19 @@ namespace TheKrystalShip.Api.Contracts;
 public sealed record MeResponse(SessionUser User, string Tier, IReadOnlyList<string> Scopes,
     IReadOnlyList<RecentLogin> RecentLogins, string Status);
 
+/// <summary>
+/// The mutable half of <see cref="MeResponse"/>, pushed on the <c>me</c> stream topic as
+/// <c>me.patch</c>: what the caller's own account may do here and what state it is in.
+/// </summary>
+/// <remarks>
+/// Both fields carry the same wire vocabulary <c>GET /me</c> answers in — <c>tier</c> is a
+/// <c>KgsmTiers</c> string, <c>status</c> is a <c>UserStatuses</c> one or <c>unknown</c> — so a client
+/// merges a frame straight over what it hydrated with no second mapping. The identity half is left
+/// out because nothing on this path changes it: a tier is a grant on this host, and a display name is
+/// the identity provider's login-time snapshot.
+/// </remarks>
+public sealed record MeStanding(string Tier, string Status);
+
 /// <summary>One <c>auth.login</c> audit row, shaped for the <c>/me</c> recent-logins list. <c>Device</c>
 /// is the login's <c>User-Agent</c> header (threaded into the audit row's <c>meta.userAgent</c> at login
 /// — see <c>AuthController.RecordAuthAsync</c>), or <see langword="null"/> when the caller sent none

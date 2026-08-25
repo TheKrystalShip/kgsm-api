@@ -90,23 +90,20 @@ public sealed class MeController(AppDbContext db, UserDirectory users, ApiOption
     /// <remarks>
     /// A disabled account never reaches here: authority resolution ends its session at validation. An
     /// unreadable store answers <c>unknown</c> rather than picking one, because guessing here is
-    /// guessing about somebody's access.
+    /// guessing about somebody's access. The read is
+    /// <see cref="UserDirectory.StandingAsync"/> — shared with the <c>me</c> stream topic, so a patch
+    /// pushed to an open panel and a fresh <c>GET /me</c> can never describe the same person
+    /// differently.
     /// </remarks>
     private async Task<string> StatusOfAsync(KgsmIdentity id, CancellationToken ct)
     {
-        const string unknown = "unknown";
-        if (!users.Available)
-            return unknown;
-
         try
         {
-            return (await users.Authority.ResolveAsync(id, ct)).User is { } account
-                ? UserStatuses.ToWire(account.Status)
-                : unknown;
+            return (await users.StandingAsync(id, ct)).Status;
         }
         catch (KgsmAuthProviderException)
         {
-            return unknown;
+            return AccountStanding.UnknownStatus;
         }
     }
 }

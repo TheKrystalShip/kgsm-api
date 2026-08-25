@@ -145,11 +145,13 @@ public sealed class RegistrationTests(OpenRegistrationFactory factory) : IClassF
     }
 
     /// <summary>
-    /// And nothing else. The stream is viewer-gated, so a pending account cannot hold one — which is
-    /// why a browser waiting for approval polls <c>/me</c> rather than subscribing to anything.
+    /// And nothing else — bar news about themselves. Every read on the host refuses a pending account,
+    /// and the stream's per-topic gate leaves it holding <c>me</c> alone: the <c>servers</c> topic it
+    /// asked for is dropped at connect, so the connection carries the approval when it comes and
+    /// nothing before it.
     /// </summary>
     [Fact]
-    public async Task TheSessionReachesNothingElse()
+    public async Task TheSessionReachesItsOwnStandingAndNothingElse()
     {
         HttpClient client = factory.CreateClient();
         HttpResponseMessage res = await client.PostAsync("/auth/register", Body(Unique("nothing"), GoodPassword));
@@ -158,7 +160,13 @@ public sealed class RegistrationTests(OpenRegistrationFactory factory) : IClassF
 
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/servers")).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/hosts")).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await client.GetAsync("/api/v1/stream?topics=servers")).StatusCode);
+
+        using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
+            client, "/api/v1/stream?topics=servers,me", token.Token);
+        Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
+
+        using SseFrameReader frames = await SseTestHelpers.Frames(stream);
+        Assert.Null(await frames.WaitForFrame(_ => true, TimeSpan.FromSeconds(1)));
     }
 
     /// <summary>
