@@ -137,4 +137,27 @@ public sealed class HostDiagnosticsMappingTests
         Assert.Null(cpu.Threads);
         Assert.Null(cpu.MaxFreqGhz);
     }
+
+    [Fact]
+    public void ToSlice_PassesThrough_AndAbsentSliceStaysNull()
+    {
+        // A host without kgsm.slice reports no aggregate — null in, null out, never an empty sample.
+        Assert.Null(MetricsMapping.ToSlice(null));
+
+        KgsmSliceSample? s = MetricsMapping.ToSlice(new Snap.SliceMetrics(134.9, 5_834_166_272, 64));
+        Assert.NotNull(s);
+        Assert.Equal(134.9, s!.CpuPctCore);  // per-server unit: percent of ONE core, may exceed 100
+        Assert.Equal(5_834_166_272, s.MemBytes);
+        Assert.Equal(64, s.Pids);
+    }
+
+    [Fact]
+    public void ToSlice_FirstObservation_KeepsCpuNull()
+    {
+        // The monitor's first look at the slice has no delta to rate against; the mapper must not turn
+        // that into a 0% reading.
+        KgsmSliceSample? s = MetricsMapping.ToSlice(new Snap.SliceMetrics(null, 1024, 1));
+        Assert.NotNull(s);
+        Assert.Null(s!.CpuPctCore);
+    }
 }

@@ -36,7 +36,10 @@ public sealed record HostMetricsDto(
     // client renders no GPU section rather than reporting anything. Devices only: they describe hardware and
     // name no process, so they ride the tick ungated, while the per-process breakdown stays on the Host detail
     // behind an operator gate (see GpuProcessSample).
-    IReadOnlyList<GpuSample>? Gpus = null);
+    IReadOnlyList<GpuSample>? Gpus = null,
+    // The kgsm.slice aggregate, mirrored from the Host view (see Host.Slice) so the split a client draws
+    // from a tick is byte-identical to the one it hydrated over REST. Null when the host has no slice.
+    KgsmSliceSample? Slice = null);
 
 /// <summary>
 /// The roster-removal tombstone pushed on the <c>servers</c> topic as <c>server.removed</c> (M2):

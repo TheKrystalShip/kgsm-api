@@ -216,6 +216,7 @@ public sealed class HostAggregator(
             Cpu: snapshot is null ? null : MetricsMapping.ToCpuInfo(snapshot.Cpu.Info),
             Sensors: capacity?.Sensors,
             Gpus: capacity?.Gpus,
+            Slice: capacity?.Slice,
             // The identity card: operator-declared region joined with the runtime-derived OS/runtime/build/
             // start-time (each honest-null when unsourceable). Cheap + static, so present on both list and detail.
             Identity: new HostIdentity(

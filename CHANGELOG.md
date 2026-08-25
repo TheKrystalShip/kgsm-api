@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the kgsm.slice aggregate on the host view and the metrics tick (`0.133.0`, Monitor.Contracts `1.9.0`)
+
+`Host.slice` / `HostMetricsDto.slice` (`KgsmSliceSample` — `cpuPctCore`, `memBytes`, `pids`) carries
+the monitor's new kgsm.slice aggregate: the game servers' collective share of the host, measured at
+the parent cgroup itself. Mirrored on both surfaces like Sensors/Gpus so a tick stays byte-identical
+to the REST element. Passed through 1:1 — null when the host has no slice (no watchdog, nothing
+native ever started), and `cpuPctCore` null on the monitor's first observation rather than a
+fabricated 0%. The slice's history (`sliceCpuPctCore`/`sliceMemBytes`) rides the existing
+`GET /hosts/{id}/metrics/history` proxy with no change here — the monitor persists it under the host
+entity.
+
 ### Added — the engine sits on the Services board as a pseudo-leaf, with its own identity endpoint (`0.132.0`)
 
 kgsm itself is an ecosystem component, so it now appears where the rest of them do. The Services

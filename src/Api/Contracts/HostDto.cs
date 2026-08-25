@@ -69,6 +69,11 @@ public sealed record Host(
     // the overview render a device on its first REST load and keep it current from the tick. Null when the
     // host has no readable card, or when the metrics capability is not operational.
     IReadOnlyList<GpuSample>? Gpus = null,
+    // The kgsm.slice aggregate — what the game servers collectively cost, measured at the parent cgroup
+    // itself (recursive over every descendant, so it also covers instances mid-teardown that have no
+    // per-server row). DYNAMIC, mirrored on HostMetricsDto like Sensors/Gpus. Null when kgsm.slice doesn't
+    // exist on this host (no watchdog, nothing native ever started) or there is no snapshot.
+    KgsmSliceSample? Slice = null,
     // The host identity card — operator-declared region (+ the editable display label, already surfaced as
     // Label) joined with the runtime-derived OS / .NET runtime / build version / API start time. Present on
     // BOTH the list and detail (cheap, static, no leaf needed — like PanelVersion); each inner field is
@@ -212,6 +217,15 @@ public sealed record CpuInfoSample(string? Model, int? Cores, int? Threads, doub
 /// <see cref="ValueC"/> in °C. Passed through 1:1 from the snapshot — the sensors array is empty (never an
 /// invented row) when no chip exposes a temperature.</summary>
 public sealed record SensorSample(string Chip, string? Label, double ValueC);
+
+/// <summary>
+/// The kgsm.slice aggregate (monitor <c>SliceMetrics</c>) — the game servers' collective share of the
+/// host. <see cref="CpuPctCore"/> follows the per-server unit (percent of ONE core, may exceed 100;
+/// null on the monitor's first observation, when there is no delta to rate against); <see cref="MemBytes"/>
+/// stays in bytes like <c>ServerMetricsDto.MemBytes</c>. Each field null when its counter was unreadable —
+/// passed through 1:1, never substituted.
+/// </summary>
+public sealed record KgsmSliceSample(double? CpuPctCore, long? MemBytes, int? Pids);
 
 /// <summary>
 /// One GPU on this host (monitor <c>GpuDevice</c>). Rides the metrics tick: a device describes hardware and

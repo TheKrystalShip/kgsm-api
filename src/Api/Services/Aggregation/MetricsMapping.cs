@@ -42,7 +42,8 @@ internal static class MetricsMapping
             // ride MemCapacity above) so this tick mirrors the Host view exactly. Static cpu-info is NOT on the
             // tick (it rides the Host view via ToCpuInfo).
             Sensors: MapSensors(s.Sensors),
-            Gpus: ToGpus(s.Gpu));
+            Gpus: ToGpus(s.Gpu),
+            Slice: ToSlice(s.Slice));
 
     public static IReadOnlyList<DiskCapacity> MapDisks(Snap.MountUsage[] mounts)
     {
@@ -98,6 +99,13 @@ internal static class MetricsMapping
 
     public static double KibToGib(long kib) => Math.Round(kib / 1048576.0, 2);
     public static double BytesToGib(long bytes) => Math.Round(bytes / 1073741824.0, 2);
+
+    /// <summary>
+    /// The kgsm.slice aggregate, passed through 1:1 — the monitor already rounded the rate and each null
+    /// (absent slice, first observation, unreadable counter) is a measurement fact this mapper preserves.
+    /// </summary>
+    public static KgsmSliceSample? ToSlice(Snap.SliceMetrics? slice) =>
+        slice is null ? null : new KgsmSliceSample(slice.CpuPctCore, slice.MemBytes, slice.Pids);
 
     /// <summary>
     /// The host's GPUs, or null when it has none — no card, no driver, no NVML. Absence of a GPU is an
