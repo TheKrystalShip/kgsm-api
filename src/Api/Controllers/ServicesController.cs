@@ -11,7 +11,8 @@ namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
 /// The host's KGSM leaf-service control center — <c>GET /hosts/{id}/services</c> (the host "Services" tab).
-/// Returns one row per configured leaf (watchdog, monitor, assistant, firewall, api, bot) joining its live
+/// Returns the engine's pseudo-leaf row (state measured by invoking <c>kgsm</c> — see
+/// <see cref="ServicesAggregator"/>) plus one row per configured leaf, each joining its live
 /// <b>systemd</b> liveness (<see cref="SystemdReader"/>) with the api's deep-health probe where it has one
 /// (<see cref="LeafHealthMonitor"/>). Host-OS introspection, sourced directly (like the host logs / file
 /// browser), NOT via kgsm-lib.

@@ -1,4 +1,5 @@
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Services.Engine;
 
 namespace TheKrystalShip.Api.Services.Leaves;
 
@@ -20,7 +21,9 @@ public sealed class ServicesAggregator(
     SystemdReader systemd,
     LeafHealthMonitor health,
     LeafRegistry registry,
-    LeafDescriptorStore descriptors)
+    LeafDescriptorStore descriptors,
+    EngineInfoService engine,
+    ApiOptions options)
 {
     public async Task<ServicesSnapshot> SnapshotAsync(CancellationToken ct)
     {
@@ -29,7 +32,7 @@ public sealed class ServicesAggregator(
         IReadOnlyDictionary<string, UnitState> states = await systemd.ReadAsync(units, ct).ConfigureAwait(false);
         HostCapabilities caps = health.Current;
 
-        var rows = new List<LeafService>(Catalog.Count);
+        var rows = new List<LeafService>(Catalog.Count + 1) { await EngineRowAsync(ct).ConfigureAwait(false) };
         foreach (LeafDescriptor leaf in Catalog)
         {
             UnitState st = states.TryGetValue(leaf.Unit, out UnitState? s) ? s : UnitState.Unknown;
@@ -53,6 +56,41 @@ public sealed class ServicesAggregator(
                 Health: HealthFor(leaf, caps)));
         }
         return new ServicesSnapshot(rows);
+    }
+
+    /// <summary>
+    /// The engine's pseudo-leaf row, first on the board: kgsm itself is an ecosystem component and belongs
+    /// with the rest, but it is a stateless CLI, not a unit — so its row carries none of the systemd fields
+    /// and its state is its own vocabulary: <c>available</c> (the identity probe answered — a real
+    /// invocation, not an inference), <c>unavailable</c> (configured but would not answer), or
+    /// <c>not-installed</c> (no engine configured on this host). Deliberately NOT in the catalog:
+    /// <see cref="Knows"/> stays false for it, so no per-leaf endpoint (config, restart, commands) ever
+    /// treats it as a unit-backed leaf.
+    /// </summary>
+    private async Task<LeafService> EngineRowAsync(CancellationToken ct)
+    {
+        string state = "not-installed";
+        if (options.KgsmProvisioned)
+        {
+            EngineInfo? info;
+            try { info = await engine.GetAsync(ct).ConfigureAwait(false); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { info = null; }
+            state = info is null ? "unavailable" : "available";
+        }
+        return new LeafService(
+            Id: "kgsm",
+            DisplayName: "KGSM",
+            Role: "The game-server engine — blueprints, instances, libraries, config & events",
+            Unit: "",
+            State: state,
+            OnDemand: false,
+            Provisioned: null,
+            SubState: null,
+            Enabled: null,
+            Since: null,
+            MainPid: null,
+            MemoryBytes: null,
+            Health: null);
     }
 
     /// <summary>

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the engine sits on the Services board as a pseudo-leaf, with its own identity endpoint (`0.132.0`)
+
+kgsm itself is an ecosystem component, so it now appears where the rest of them do. The Services
+board (`GET /hosts/{id}/services`) opens with an engine row — id `kgsm`, no unit, and its own
+measured vocabulary: `available` when the identity probe answered, `unavailable` when a configured
+engine would not, `not-installed` when no engine is configured. The row is deliberately NOT in the
+leaf catalog, so no per-leaf endpoint (config, restart, commands, logs) ever treats it as a
+unit-backed service.
+
+`GET /hosts/{id}/engine` (operator, `EngineController`) serves the engine's identity card: the
+version and directory layout read from the engine itself (`kgsm --version` / `--paths --json`
+through kgsm-lib, parsed and cached by `Services/Engine/EngineInfoService` — 60s on success, 15s on
+failure, one probe in flight at a time) plus the entrypoint this API invokes. A host with no engine
+is a 404; an engine that would not answer is a 503, never a row of nulls.
+
 ### Fixed — the packaged binary carries its bundle again (`0.131.1`)
 
 `packaging/PKGBUILD` declares `!strip`. This project publishes single-file: the managed assemblies

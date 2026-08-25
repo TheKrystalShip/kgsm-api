@@ -11,9 +11,11 @@ namespace TheKrystalShip.Api.Contracts;
 /// <param name="Id">Stable short id (<c>watchdog</c>) — the frontend key.</param>
 /// <param name="DisplayName">Human label.</param>
 /// <param name="Role">One-line description of what the leaf does.</param>
-/// <param name="Unit">The backing systemd unit (<c>kgsm-watchdog.service</c>).</param>
+/// <param name="Unit">The backing systemd unit (<c>kgsm-watchdog.service</c>). Empty for the engine's
+/// pseudo-leaf row (<c>kgsm</c>): the engine is a stateless CLI with no unit.</param>
 /// <param name="State"><c>active|inactive|failed|activating|deactivating|reloading|maintenance|masked|
-/// not-installed|unknown</c> — systemd's view (or honest unknown when unreadable).</param>
+/// not-installed|unknown</c> — systemd's view (or honest unknown when unreadable). The engine row speaks
+/// its own vocabulary instead: <c>available|unavailable|not-installed</c>, measured by invoking it.</param>
 /// <param name="OnDemand">Socket-activated / idle-exiting (the firewall): <c>inactive</c> is its normal
 /// resting state, so the UI renders it neutrally rather than as a fault.</param>
 /// <param name="Provisioned">Runtime provisioning (connected-on-this-host) — <c>true</c>/<c>false</c> for the

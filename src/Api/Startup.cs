@@ -549,6 +549,11 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<SystemdReader>();
         services.AddSingleton<ServicesAggregator>();
 
+        // The engine's identity probe (kgsm --version / --paths through kgsm-lib, cached). Two readers:
+        // the Services board's engine pseudo-leaf row, and GET /hosts/{id}/engine. Registered
+        // unconditionally — it answers null itself when the engine isn't provisioned.
+        services.AddSingleton<TheKrystalShip.Api.Services.Engine.EngineInfoService>();
+
         // Leaf runtime config (Phase 2 — the privileged broker). The override store persists the per-leaf
         // KEY=value overrides (the leaf_override table, idempotent CREATE TABLE IF NOT EXISTS like the
         // registry); the renderer materializes them into the API-owned <LeafOverridesDir>/<leaf>.env file a
