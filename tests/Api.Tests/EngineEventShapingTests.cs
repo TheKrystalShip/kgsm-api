@@ -42,7 +42,7 @@ public sealed class EngineEventShapingTests
 
         // The write-time equivalent: KgsmAuditConsumer would have built exactly this from the SAME
         // envelope fields, via AuditMapping.FromCrashEvent + ToRecordDirect (the id supplied by
-        // EngineEventIdTracker at write time, here the monitor's own persisted id — same shape either way).
+        // EngineEnvelopeTracker at write time, here the monitor's own persisted id — same shape either way).
         var expectedData = new InstanceCrashedData
         {
             InstanceName = "factorio-test", ExitCode = "137", Restarts = "2",
@@ -52,6 +52,55 @@ public sealed class EngineEventShapingTests
             AuditMapping.FromCrashEvent(expectedData, HostId), item.Id);
 
         Assert.Equal(JsonSerializer.Serialize(expected), JsonSerializer.Serialize(shaped));
+    }
+
+    /// <summary>
+    /// The same fidelity, for an envelope whose producer stamped its own weight — the case the feed is
+    /// actually made of now.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>This is the one that matters for what somebody sees.</b> A row reaches the panel twice: once
+    /// pushed the moment it happens, and again when the page is read. The typed handler behind the live
+    /// push never receives these fields — they sit on the envelope — so unless both halves apply them,
+    /// a stop arrives grey and turns amber only on a reload, which reads as the panel being wrong about
+    /// what just happened.
+    /// </remarks>
+    [Fact]
+    public void Shape_StampedEnvelope_MatchesWhatTheLivePathPublishes()
+    {
+        var item = new EventHistoryEntry(
+            Id: "evt_deadbeefcafe1234",
+            Ts: Ts,
+            Type: "server.stopped",
+            Instance: "factorio-test",
+            Blueprint: null,
+            Actor: "discord:haru",
+            Origin: "ui",
+            Hostname: null,
+            Data: Data(new { InstanceName = "factorio-test" }),
+            Severity: "warn",
+            Outcome: "neutral",
+            Summary: "stopped factorio-test");
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+        Assert.NotNull(shaped);
+        Assert.Equal("warn", shaped!.Severity);
+
+        // What KgsmAuditConsumer publishes for the same envelope: the type-derived row, then the
+        // producer's own facts over it — read off the envelope by EngineEnvelopeTracker, since the
+        // typed payload carries none of them.
+        var payload = new InstanceStoppedData
+        {
+            InstanceName = "factorio-test", Timestamp = Ts, Actor = "discord:haru", Origin = "ui",
+        };
+        AuditRecord live = AuditMapping.WithProducerFacts(
+            AuditMapping.ToRecordDirect(
+                AuditMapping.FromServerEvent(
+                    payload, "server.stopped", AuditSeverity.Info, "stopped", HostId),
+                item.Id),
+            item.Severity, item.Outcome, item.Summary);
+
+        Assert.Equal(JsonSerializer.Serialize(live), JsonSerializer.Serialize(shaped));
     }
 
     [Fact]

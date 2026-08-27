@@ -168,7 +168,7 @@ public sealed class AuditMappingTests
 
     // --- M6·0: crash events (kgsm-watchdog, system-stamped) → server.crash -------------------------
     [Fact]
-    public void FromCrashEvent_IsWarnServerCrash_SystemProvenance()
+    public void FromCrashEvent_IsDangerWithSystemProvenance()
     {
         var data = new InstanceCrashedData
         {
@@ -182,7 +182,7 @@ public sealed class AuditMappingTests
         AuditWrite w = AuditMapping.FromCrashEvent(data, hostId: "primary");
 
         Assert.Equal("server.crashed", w.Action);
-        Assert.Equal(AuditSeverity.Warn, w.Severity);             // auto-restarting → warn, not danger
+        Assert.Equal(AuditSeverity.Danger, w.Severity);           // going down unasked, retried or not
         Assert.Equal("system", w.Origin);                         // autonomous engine action
         Assert.Equal(ActorKind.System, w.Actor.Kind);
         Assert.Equal(ActorProvider.System, w.Actor.Provider);

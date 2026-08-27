@@ -7,13 +7,14 @@ using TheKrystalShip.KGSM.Events;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// <see cref="EngineEventIdTracker"/> — the raw-handler id capture that lets
+/// <see cref="EngineEnvelopeTracker"/> — the raw-handler capture that lets
 /// <see cref="TheKrystalShip.Api.Services.Audit.KgsmAuditConsumer"/>'s typed handlers (which only ever
-/// receive the typed <c>EventDataBase</c>, never the envelope or its position) tag a live-published row
-/// with the SAME id a later <c>GET /audit</c> will give that event, so a client reconciling the two
-/// sees one fact rather than two.
+/// receive the typed <c>EventDataBase</c>, never the envelope or its position) publish a row carrying
+/// what the producer actually said: the same id a later <c>GET /audit</c> will give that event, and
+/// the same severity, outcome and summary. Both exist so that somebody who sees a row arrive and then
+/// finds it again in history is looking at one fact, not two that disagree.
 /// </summary>
-public sealed class EngineEventIdTrackerTests
+public sealed class EngineEnvelopeTrackerTests
 {
     private static EventWrapper Wrapper(string type = "server.started", string instance = "mc") => new()
     {
@@ -31,13 +32,13 @@ public sealed class EngineEventIdTrackerTests
     /// happening to land on the same value.
     /// </summary>
     [Fact]
-    public async Task OnRawEvent_ThenTakePendingId_IsTheIdOfThatJournalPosition()
+    public async Task OnRawEvent_ThenTakePending_IsTheIdOfThatJournalPosition()
     {
-        var tracker = new EngineEventIdTracker();
+        var tracker = new EngineEnvelopeTracker();
         var position = new EventPosition("2026-08-07.ndjson", 1234);
 
         await tracker.OnRawEvent(Wrapper(), position);
-        string id = tracker.TakePendingId(NullLogger.Instance);
+        string id = tracker.TakePending(NullLogger.Instance).Id!;
 
         Assert.Equal(AuditId.ForPosition(position.Segment, position.Offset), id);
         Assert.Equal("evt_2026-08-07_000000001234", id);
@@ -56,7 +57,7 @@ public sealed class EngineEventIdTrackerTests
     {
         const string name = "01a016e9-d535-7b03-8a6a-b26ae718064c";
 
-        var tracker = new EngineEventIdTracker();
+        var tracker = new EngineEnvelopeTracker();
         var position = new EventPosition("kgsm-watchdog", "2026-08-07.ndjson", 1234)
         {
             EventId = name,
@@ -64,7 +65,7 @@ public sealed class EngineEventIdTrackerTests
 
         await tracker.OnRawEvent(Wrapper(), position);
 
-        Assert.Equal("evt_" + name, tracker.TakePendingId(NullLogger.Instance));
+        Assert.Equal("evt_" + name, tracker.TakePending(NullLogger.Instance).Id);
     }
 
     /// <summary>
@@ -83,7 +84,7 @@ public sealed class EngineEventIdTrackerTests
     [InlineData(null)]
     public async Task OnRawEvent_AgreesWithTheHistoryReadsDerivation(string? eventId)
     {
-        var tracker = new EngineEventIdTracker();
+        var tracker = new EngineEnvelopeTracker();
         var position = new EventPosition("kgsm-watchdog", "2026-08-07.ndjson", 1234)
         {
             EventId = eventId,
@@ -93,7 +94,7 @@ public sealed class EngineEventIdTrackerTests
 
         Assert.Equal(
             AuditId.ForLine(eventId, "kgsm-watchdog", "2026-08-07.ndjson", 1234),
-            tracker.TakePendingId(NullLogger.Instance));
+            tracker.TakePending(NullLogger.Instance).Id);
     }
 
     /// <summary>
@@ -107,14 +108,14 @@ public sealed class EngineEventIdTrackerTests
     [Fact]
     public async Task OnRawEvent_FallsBackToThePositionForAMalformedName()
     {
-        var tracker = new EngineEventIdTracker();
+        var tracker = new EngineEnvelopeTracker();
 
         await tracker.OnRawEvent(Wrapper(), new EventPosition("2026-08-07.ndjson", 1234)
         {
             EventId = "NOT-A-UUID",
         });
 
-        Assert.Equal("evt_2026-08-07_000000001234", tracker.TakePendingId(NullLogger.Instance));
+        Assert.Equal("evt_2026-08-07_000000001234", tracker.TakePending(NullLogger.Instance).Id);
     }
 
     /// <summary>
@@ -125,13 +126,13 @@ public sealed class EngineEventIdTrackerTests
     [Fact]
     public async Task OnRawEvent_IdenticalEnvelopesAtDifferentPositions_GetDifferentIds()
     {
-        var tracker = new EngineEventIdTracker();
+        var tracker = new EngineEnvelopeTracker();
 
         await tracker.OnRawEvent(Wrapper(), new EventPosition("2026-08-07.ndjson", 0));
-        string first = tracker.TakePendingId(NullLogger.Instance);
+        string first = tracker.TakePending(NullLogger.Instance).Id!;
 
         await tracker.OnRawEvent(Wrapper(), new EventPosition("2026-08-07.ndjson", 512));
-        string second = tracker.TakePendingId(NullLogger.Instance);
+        string second = tracker.TakePending(NullLogger.Instance).Id!;
 
         Assert.NotEqual(first, second);
     }
@@ -143,35 +144,35 @@ public sealed class EngineEventIdTrackerTests
     [Fact]
     public async Task OnRawEvent_NoPosition_FallsBackRatherThanNamingAPositionItDoesNotHave()
     {
-        var tracker = new EngineEventIdTracker();
+        var tracker = new EngineEnvelopeTracker();
 
         await tracker.OnRawEvent(Wrapper(), EventPosition.None);
-        string id = tracker.TakePendingId(NullLogger.Instance);
+        string id = tracker.TakePending(NullLogger.Instance).Id!;
 
         Assert.StartsWith("evt_", id);
         Assert.False(AuditId.TryParsePosition(id, out _, out _));
     }
 
     [Fact]
-    public async Task TakePendingId_ClearsAfterTake_SoAStaleIdCanNeverBeReused()
+    public async Task TakePending_ClearsAfterTake_SoAStaleIdCanNeverBeReused()
     {
-        var tracker = new EngineEventIdTracker();
+        var tracker = new EngineEnvelopeTracker();
         await tracker.OnRawEvent(Wrapper(), new EventPosition("2026-08-07.ndjson", 0));
 
-        string first = tracker.TakePendingId(NullLogger.Instance);
+        string first = tracker.TakePending(NullLogger.Instance).Id!;
         // Nothing pending now — a second take must NOT silently return the same (stale) id again.
-        string second = tracker.TakePendingId(NullLogger.Instance);
+        string second = tracker.TakePending(NullLogger.Instance).Id!;
 
         Assert.NotEqual(first, second);
         Assert.StartsWith("evt_", second); // still a well-formed fallback id, never null/throws
     }
 
     [Fact]
-    public void TakePendingId_NoRawEventFired_FallsBackToARandomIdNeverThrows()
+    public void TakePending_NoRawEventFired_FallsBackToARandomIdNeverThrows()
     {
-        var tracker = new EngineEventIdTracker();
+        var tracker = new EngineEnvelopeTracker();
 
-        string id = tracker.TakePendingId(NullLogger.Instance);
+        string id = tracker.TakePending(NullLogger.Instance).Id!;
 
         Assert.False(string.IsNullOrEmpty(id));
         Assert.StartsWith("evt_", id);
@@ -180,14 +181,71 @@ public sealed class EngineEventIdTrackerTests
     [Fact]
     public async Task OnRawEvent_DifferentEnvelopes_ProduceDifferentIds()
     {
-        var tracker = new EngineEventIdTracker();
+        var tracker = new EngineEnvelopeTracker();
 
         await tracker.OnRawEvent(Wrapper(instance: "mc"), new EventPosition("2026-08-07.ndjson", 0));
-        string idA = tracker.TakePendingId(NullLogger.Instance);
+        string idA = tracker.TakePending(NullLogger.Instance).Id!;
 
         await tracker.OnRawEvent(Wrapper(instance: "factorio"), new EventPosition("2026-08-07.ndjson", 256));
-        string idB = tracker.TakePendingId(NullLogger.Instance);
+        string idB = tracker.TakePending(NullLogger.Instance).Id!;
 
         Assert.NotEqual(idA, idB);
+    }
+
+    /// <summary>
+    /// What the producer stamped rides along with the id.
+    /// </summary>
+    /// <remarks>
+    /// The typed payload carries none of these — they sit on the envelope — so without this capture a
+    /// live row falls back to the weight its type implies and only becomes what the producer said once
+    /// somebody reloads the page.
+    /// </remarks>
+    [Fact]
+    public async Task OnRawEvent_CarriesWhatTheProducerStampedBesideThePayload()
+    {
+        var tracker = new EngineEnvelopeTracker();
+        EventWrapper wrapper = Wrapper("server.stopped");
+        wrapper.Severity = "warn";
+        wrapper.Outcome = "neutral";
+        wrapper.Summary = "stopped mc";
+
+        await tracker.OnRawEvent(wrapper, new EventPosition("2026-08-07.ndjson", 1234));
+        PendingEnvelope pending = tracker.TakePending(NullLogger.Instance);
+
+        Assert.Equal("warn", pending.Severity);
+        Assert.Equal("neutral", pending.Outcome);
+        Assert.Equal("stopped mc", pending.Summary);
+    }
+
+    /// <summary>
+    /// A producer that stamped nothing leaves nothing, rather than something ordinary-looking.
+    /// </summary>
+    [Fact]
+    public async Task A_producer_that_said_nothing_stamps_no_facts()
+    {
+        var tracker = new EngineEnvelopeTracker();
+
+        await tracker.OnRawEvent(Wrapper(), new EventPosition("2026-08-07.ndjson", 1234));
+        PendingEnvelope pending = tracker.TakePending(NullLogger.Instance);
+
+        Assert.Null(pending.Severity);
+        Assert.Null(pending.Outcome);
+        Assert.Null(pending.Summary);
+    }
+
+    /// <summary>
+    /// The facts are consumed with the id, so the next event can never inherit the last one's weight.
+    /// </summary>
+    [Fact]
+    public async Task TakePending_ClearsTheFactsToo()
+    {
+        var tracker = new EngineEnvelopeTracker();
+        EventWrapper wrapper = Wrapper("server.crashed");
+        wrapper.Severity = "danger";
+
+        await tracker.OnRawEvent(wrapper, new EventPosition("2026-08-07.ndjson", 1234));
+        Assert.Equal("danger", tracker.TakePending(NullLogger.Instance).Severity);
+
+        Assert.Null(tracker.TakePending(NullLogger.Instance).Severity);
     }
 }

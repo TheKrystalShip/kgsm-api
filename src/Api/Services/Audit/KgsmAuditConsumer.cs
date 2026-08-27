@@ -50,10 +50,10 @@ public sealed class KgsmAuditConsumer(
     ILogger<KgsmAuditConsumer> logger) : IHostedService
 {
     // Captures the journal-position id for each engine envelope (via a RegisterRawHandler
-    // hook — see EngineEventIdTracker remarks) so the typed handlers below, which only ever receive the
+    // hook — see EngineEnvelopeTracker remarks) so the typed handlers below, which only ever receive the
     // typed EventDataBase, can still tag their published-but-not-persisted rows with the SAME id
     // kgsm-monitor independently computed for the identical event.
-    private readonly EngineEventIdTracker idTracker = new();
+    private readonly EngineEnvelopeTracker envelope = new();
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -212,11 +212,11 @@ public sealed class KgsmAuditConsumer(
     private void RegisterHandlers(IEventService events)
     {
         // Captures the journal-position id for the envelope about to be typed-dispatched — see
-        // EngineEventIdTracker + TakePendingEventId. Registered first so it is armed before any typed
+        // EngineEnvelopeTracker + TakePending. Registered first so it is armed before any typed
         // handler below can run (RegisterRawHandler fires before typed dispatch for every event anyway,
         // but registration order here has no bearing on that — kgsm-lib always runs ALL raw handlers
         // before typed dispatch, regardless of relative registration order).
-        events.RegisterRawHandler(idTracker.OnRawEvent);
+        events.RegisterRawHandler(envelope.OnRawEvent);
 
         // This API's OWN events, published live. They cannot go through RegisterHandler<T> like the
         // engine's: kgsm-lib keys a typed handler on the payload CLASS, and several of these types
@@ -893,7 +893,7 @@ public sealed class KgsmAuditConsumer(
     // id to the alert engine: a crash that clears because THIS recovery brought the server back links to
     // it (resolution.actionId — M6·a). A stop is not a recovery (it never reaches here, separate handler).
     // The bridge only needs an id that is INTERNALLY consistent with what GET /audit will later show for
-    // the same event (the deterministic AuditId.ForEvent, captured via idTracker) — it does not need a
+    // the same event (the deterministic AuditId.ForEvent, captured via the envelope tracker) — it does not need a
     // DB round-trip, since AuditWrite.Ts already equals the value a persisted row's Ts would have been.
     private Task WriteServerAndBridge<TData>(TData data, string verb)
         where TData : EventDataBase
@@ -907,11 +907,14 @@ public sealed class KgsmAuditConsumer(
     }
 
     // Shape + publish (never persist) one engine-sourced audit row: tags it with the deterministic id
-    // captured by idTracker's raw handler for this exact event, then fans it out via
+    // captured by the envelope tracker's raw handler for this exact event, then fans it out via
     // AuditService.PublishLive (audit WS topic + notifications — see that method's remarks).
     private AuditRecord PublishLive(AuditWrite write)
     {
-        AuditRecord record = AuditMapping.ToRecordDirect(write, idTracker.TakePendingId(logger));
+        PendingEnvelope pending = envelope.TakePending(logger);
+        AuditRecord record = AuditMapping.WithProducerFacts(
+            AuditMapping.ToRecordDirect(write, pending.Id!),
+            pending.Severity, pending.Outcome, pending.Summary);
         audit.PublishLive(record);
         return record;
     }

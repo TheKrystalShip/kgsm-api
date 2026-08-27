@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a row pushed live says what the producer said (`0.144.0`)
+
+A typed engine handler receives the payload and nothing else, so the severity, outcome and summary
+its producer stamped beside that payload never reached the row published the moment the event
+happened — it carried the weight its type implies instead. The same fact read back out of history
+carried the producer's, so a stop arrived grey and became amber when somebody reloaded the page.
+
+`EngineEnvelopeTracker` reads them off the in-flight envelope, the way it already reads the row's id,
+and both halves of the merged feed apply them through one function. A test asserts the two paths
+produce the same record for the same envelope — the existing fidelity test used an envelope that
+stamped nothing, which is what let this through.
+
+### Changed — a crash is danger (`0.144.0`)
+
+`server.crashed` reads at `danger`, the same weight as the give-up. Which of the two a row is stays
+readable from its name.
+
 ### Changed — an audit row is named by the event that produced it (`0.143.0`)
 
 `action` on an audit row is the producer's own event name — `server.started`, `network.ports.opened`,

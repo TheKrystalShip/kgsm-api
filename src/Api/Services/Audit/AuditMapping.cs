@@ -106,23 +106,28 @@ public static class AuditMapping
     }
 
     /// <summary>
-    /// Map a watchdog <c>server.crashed</c> event (a desired-running process died and is being
-    /// auto-restarted) to a <c>server.crash</c> row at <see cref="AuditSeverity.Warn"/>. Provenance
-    /// is <c>system</c>/<c>system</c> off the envelope (an autonomous engine action — no human
-    /// surface), which <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/> handle unchanged.
+    /// Map a watchdog <c>server.crashed</c> event — a desired-running process died and is being
+    /// auto-restarted.
     /// </summary>
+    /// <remarks>
+    /// <see cref="AuditSeverity.Danger"/>, the same weight as the give-up: a server going down unasked
+    /// is the fleet losing a service, and the supervisor being on its way to bring it back does not
+    /// make that routine. Which of the two it is rides in the name, so nothing is lost by them sharing
+    /// a colour. Provenance is <c>system</c>/<c>system</c> off the envelope (an autonomous engine
+    /// action — no human surface), which <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/> handle
+    /// unchanged.
+    /// </remarks>
     public static AuditWrite FromCrashEvent(InstanceCrashedData d, string hostId)
     {
         string instance = Instance(d);
         return CrashWrite(d, hostId, instance, KgsmEventCatalog.NameOf<InstanceCrashedData>(),
-            AuditSeverity.Warn, $"{Display(instance)} crashed — auto-restarting");
+            AuditSeverity.Danger, $"{Display(instance)} crashed — auto-restarting");
     }
 
     /// <summary>
-    /// Map a watchdog <c>server.crash.exhausted</c> event (the supervisor exhausted its restart retries and
-    /// gave up — the escalation signal, staying down) to a <c>server.crash</c> row at
-    /// <see cref="AuditSeverity.Danger"/>. Same single doc-given action as <see cref="FromCrashEvent"/>;
-    /// the give-up is carried by the severity, the summary, and the exhausted restart count.
+    /// Map a watchdog <c>server.crash.exhausted</c> event — the supervisor exhausted its restart
+    /// retries and gave up, so the server is down and staying down. The summary and the exhausted
+    /// restart count are what separate it from a crash still being retried.
     /// </summary>
     public static AuditWrite FromFailedEvent(InstanceFailedData d, string hostId)
     {
@@ -768,6 +773,56 @@ public static class AuditMapping
         string.IsNullOrEmpty(instance) ? "instance" : instance;
 
     /// <summary>
+    /// What the producer said about its own event, over anything derived from its type.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A producer is the only thing that knows how much its own event matters: the scheduler knows a
+    /// retention sweep is routine and the engine knows an uninstall is not, and neither fact exists
+    /// anywhere else on the host. So a line that carries a severity, an outcome or a summary is the
+    /// authority for it, and the type-derived mapping is the fallback for a producer that has not
+    /// started saying.
+    /// </para>
+    /// <para>
+    /// This is what lets a reader render an event nothing here has a mapper for. A producer that says
+    /// nothing is quiet rather than wrong, and keeps whatever the type-derived mapping gives it.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>Both halves of the merged feed run through here.</b> A row pushed live and the same fact
+    /// read back out of history are one event, and somebody who saw the first and then the second must
+    /// not be shown two different colours for it. The live path reads these off the envelope its typed
+    /// handler never receives (<see cref="EngineEnvelopeTracker"/>).
+    /// </para>
+    /// </remarks>
+    public static AuditRecord WithProducerFacts(
+        AuditRecord record, string? rawSeverity, string? rawOutcome, string? rawSummary)
+    {
+        string? severity = Normalize(rawSeverity, AuditSeverities.All);
+        string? outcome = Normalize(rawOutcome, AuditOutcomes.All);
+        string? summary = string.IsNullOrWhiteSpace(rawSummary) ? null : rawSummary;
+
+        if (severity is null && outcome is null && summary is null) return record;
+
+        return record with
+        {
+            Severity = severity ?? record.Severity,
+            Outcome = outcome ?? record.Outcome,
+            Summary = summary ?? record.Summary,
+        };
+    }
+
+    /// <summary>
+    /// A closed-vocabulary value the producer wrote, or null when it is not one of them.
+    /// </summary>
+    /// <remarks>
+    /// A spelling this API does not know is dropped rather than passed on: forwarding it would put a
+    /// value on the wire that every client would then have to guess at, and the type-derived fallback
+    /// is a real answer where a guess is not.
+    /// </remarks>
+    private static string? Normalize(string? value, IReadOnlyCollection<string> allowed) =>
+        !string.IsNullOrWhiteSpace(value) && allowed.Contains(value) ? value : null;
+
+    /// <summary>
     /// Map a persisted row to its wire record (deserializing the <c>meta</c> JSON blob).
     /// </summary>
     /// <remarks>
@@ -799,7 +854,7 @@ public static class AuditMapping
     /// Map an <see cref="AuditWrite"/> + an externally-supplied id directly to the wire record — no EF
     /// round-trip. Two callers need this: <see cref="AuditService.PublishLive"/> (a kgsm engine event,
     /// post Phase-C, is announced on the <c>audit</c> WS topic but never persisted locally — the id is
-    /// the deterministic <c>AuditId.ForEvent</c> value via <see cref="EngineEventIdTracker"/>) and
+    /// the deterministic <c>AuditId.ForEvent</c> value via <see cref="EngineEnvelopeTracker"/>) and
     /// <see cref="EngineEventShaping"/> (shaping a monitor-persisted raw event at <c>GET /audit</c> read
     /// time — the id is the monitor's own stored id for that event). Both must reuse the SAME id the
     /// monitor computed/stored for the identical envelope, so a live push and a later paginated read of

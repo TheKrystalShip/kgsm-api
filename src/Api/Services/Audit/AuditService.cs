@@ -61,7 +61,7 @@ public sealed class AuditService(
     /// to the local table. Live consumption (realtime SSE + Discord/Slack notifications) stays exactly
     /// as it was: this is the same tail <see cref="AppendAsync"/> runs after a successful write, just
     /// without the write. <paramref name="record"/> must already carry its final id — the deterministic
-    /// <c>AuditId.ForEvent</c> value (via <see cref="EngineEventIdTracker"/>), matching what the monitor
+    /// <c>AuditId.ForEvent</c> value (via <see cref="EngineEnvelopeTracker"/>), matching what the monitor
     /// independently computed for the SAME envelope — so a client reconciling this live push against a
     /// later paginated <c>GET /audit</c> page (which shapes the monitor's persisted copy of the same
     /// event) sees one identity, not two.

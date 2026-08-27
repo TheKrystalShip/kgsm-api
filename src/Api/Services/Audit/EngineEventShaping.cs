@@ -273,51 +273,8 @@ public static class EngineEventShaping
             ? AuditMapping.ToRecordDirect(write, item.Id)
             : GenericShape(item, hostId);
 
-        return WithProducerFacts(record, item);
+        return AuditMapping.WithProducerFacts(record, item.Severity, item.Outcome, item.Summary);
     }
-
-    /// <summary>
-    /// What the producer said about its own event, over anything derived from its type.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A producer is the only thing that knows how much its own event matters: the scheduler knows a
-    /// retention sweep is routine and the engine knows an uninstall is not, and neither fact exists
-    /// anywhere else on the host. So a line that carries a severity, an outcome or a summary is the
-    /// authority for it, and the shaping above is the fallback for a producer that has not started
-    /// saying.
-    /// </para>
-    /// <para>
-    /// This is what lets a reader render an event nothing here has a mapper for. A producer that says
-    /// nothing is quiet rather than wrong, and keeps whatever the type-derived mapping gives it.
-    /// </para>
-    /// </remarks>
-    private static AuditRecord WithProducerFacts(AuditRecord record, EventHistoryEntry item)
-    {
-        string? severity = Normalize(item.Severity, AuditSeverities.All);
-        string? outcome = Normalize(item.Outcome, AuditOutcomes.All);
-        string? summary = string.IsNullOrWhiteSpace(item.Summary) ? null : item.Summary;
-
-        if (severity is null && outcome is null && summary is null) return record;
-
-        return record with
-        {
-            Severity = severity ?? record.Severity,
-            Outcome = outcome ?? record.Outcome,
-            Summary = summary ?? record.Summary,
-        };
-    }
-
-    /// <summary>
-    /// A closed-vocabulary value the producer wrote, or null when it is not one of them.
-    /// </summary>
-    /// <remarks>
-    /// A spelling this API does not know is dropped rather than passed on: forwarding it would put a
-    /// value on the wire that every client would then have to guess at, and the type-derived fallback
-    /// is a real answer where a guess is not.
-    /// </remarks>
-    private static string? Normalize(string? value, IReadOnlyCollection<string> allowed) =>
-        !string.IsNullOrWhiteSpace(value) && allowed.Contains(value) ? value : null;
 
     // Two operator actions each write more config keys than they are worth rows. A server note spans
     // three (body + who + when), so its two attribution keys are dropped and only the body's event is
