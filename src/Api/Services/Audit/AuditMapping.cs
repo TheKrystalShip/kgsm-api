@@ -983,7 +983,11 @@ public static class AuditMapping
     {
         ArgumentNullException.ThrowIfNull(d);
 
-        string who = ActorName(d.Actor) ?? d.Username;
+        // The account name is the better fallback than the generic word, and it is right here on the
+        // payload: a revocation row that cannot name the actor can still name whose session it was.
+        string who = ParseActor(d.Actor) is { Name.Length: > 0 } parsed
+            ? parsed.Name
+            : string.IsNullOrEmpty(d.Username) ? "somebody" : d.Username;
         int count = d.Count ?? 1;
         string sessions = count == 1 ? "a session" : $"{count} sessions";
 

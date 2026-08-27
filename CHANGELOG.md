@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a revocation names the account it cannot attribute (`0.141.1`)
+
+A revocation row names the account when it cannot name the actor, rather than the generic word. The
+username is on the payload either way, so a row that could not resolve who did it can still say whose
+session it was.
+
 ### Changed — a row's weight comes from its producer (`0.141.0`)
 
 An audit row takes its severity, outcome and summary from the producer that raised the event, over
