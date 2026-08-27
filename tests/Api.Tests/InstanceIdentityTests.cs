@@ -67,7 +67,7 @@ public sealed class InstanceIdentityTests
             Origin = "ui",
         }, "hotrod");
 
-        Assert.Equal(AuditAction.ServerRename, w.Action);
+        Assert.Equal("server.renamed", w.Action);
         Assert.Equal(AuditSeverity.Info, w.Severity);
         // Immutable identity: the rename did not touch the id, so every earlier row still joins to it.
         Assert.Equal("factorio-42", w.ServerId);

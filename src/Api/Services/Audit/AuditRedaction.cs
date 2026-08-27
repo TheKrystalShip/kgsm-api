@@ -87,12 +87,15 @@ public static class AuditRedaction
     /// </remarks>
     private static string Summary(AuditRecord record) => record.Action switch
     {
-        AuditAction.ConsoleInput =>
+        var a when a == KgsmEventCatalog.NameOf<InstanceInputSentData>() =>
             AuditMapping.ConsoleInputSummary(null, record.ServerId ?? ""),
 
-        AuditAction.PlayerKick => AuditMapping.ModerationSummary("kicked", null, record.ServerId ?? ""),
-        AuditAction.PlayerBan => AuditMapping.ModerationSummary("banned", null, record.ServerId ?? ""),
-        AuditAction.PlayerUnban => AuditMapping.ModerationSummary("unbanned", null, record.ServerId ?? ""),
+        var a when a == KgsmEventCatalog.NameOf<InstancePlayerKickedData>() =>
+            AuditMapping.ModerationSummary("kicked", null, record.ServerId ?? ""),
+        var a when a == KgsmEventCatalog.NameOf<InstancePlayerBannedData>() =>
+            AuditMapping.ModerationSummary("banned", null, record.ServerId ?? ""),
+        var a when a == KgsmEventCatalog.NameOf<InstancePlayerUnbannedData>() =>
+            AuditMapping.ModerationSummary("unbanned", null, record.ServerId ?? ""),
 
         _ => record.Summary,
     };

@@ -37,20 +37,26 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
 - **Append-only & immutable.** Rows are never updated or deleted; a correction is a *new* row. Don't add
   an update/delete path. `EnsureCreated`, **not an EF migration** (dev authority — wipe the DB on a schema
   change; see the api `CLAUDE.md` gotcha).
-- **Closed `action` vocabulary** (`Contracts/AuditAction`). Clients/the model can't invent one. Add an
-  action only when its producer has landed, never speculatively. `server.crash` covers the watchdog's
-  `server.crashed`→warn / `server.crash.exhausted`→danger (both `system`-stamped); `network.ports.open`/
-  `network.ports.close` are the `network.ports.opened`/`network.ports.closed` echoes. `network.ports.close` is a
-  deliberate **server-side additive** action beyond the doc's `ports.open`-only `network` set — it is
-  honestly sourceable and keeps the trail symmetric (a standalone `files firewall disable` would otherwise
-  leave an opened-never-closed gap); the frontend accepts unknown actions forward-compat.
-  `host.threshold.breach`/`host.threshold.clear` are the metric-threshold pair — see below.
-  `config.*`/`player.*`/… beyond those stay deferred. **The whole `network.*` set is engine-echo-only** — an
-  instance's ports and router forwards are opened by the supervisor when it starts and released when it
-  stops, so the api issues no network command and has nothing to direct-write. The per-event mapping
-  policy lives in the **pure** `AuditMapping.From{Crash,Failed,PortsOpened,PortsClosed,UpnpOpened,
-  UpnpClosed,UpnpReasserted}Event` mappers, unit-tested without a socket.
-- **`network.upnp.reassert` is the one `network.*` action at `warn`.** It records that the watchdog's
+- **`action` is the producer's own event name, and the vocabulary is open.** Nothing here holds a list
+  of the valid ones: a leaf may name an event this build has never heard of and the row still renders,
+  because every presentation decision keys on a dimension the row carries rather than on its identity.
+  Production code never spells an engine name — `KgsmEventCatalog.NameOf<TData>()` derives it from the
+  payload class, so a handler and the name it records cannot drift apart. **Tests spell the literal**,
+  which is the point: an assertion written against the derivation would pass whatever the catalog said.
+  The per-event *shaping* — target, scope, meta, and the fallback sentence for a producer that stamps
+  no summary — lives in the **pure** `AuditMapping.From*Event` mappers, unit-tested without a socket.
+  ⚠ Two vocabularies nearby are **closed on purpose and are not this one**: `NotificationCatalog`
+  (somebody's stored consent points into it — see `Integrations/NotificationModel.cs`) and
+  `PushActionKind` (the operation a button performs, persisted behind a staged handle).
+  **The whole `network.*` set is engine-echo-only** — an instance's ports and router forwards are
+  opened by the supervisor when it starts and released when it stops, so the api issues no network
+  command and has nothing to direct-write.
+- **`StoredActionNames` resolves the local table on the way out.** Rows written before this API stopped
+  keeping its own copy of engine history name their fact in the vocabulary of the build that wrote them.
+  A record is never rewritten, so a reader asks one question in one vocabulary and reaches every row that
+  answers it. ⚠ `AuditQueries.EngineSourcedActions` is the one place that must use the **stored**
+  spellings: it filters in SQL, before the resolution, and the current names would match nothing.
+- **`network.upnp.reasserted` is the one `network.*` event at `warn`.** It records that the watchdog's
   sweep found the ROUTER had dropped a running instance's forwards and put them back — a fact about the
   router, not about anything this host did, and the only signal an operator has that their IGD discards
   mappings it accepted (it can report a lease as infinite and drop it anyway). The open/close pair are

@@ -71,7 +71,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         Assert.NotNull(frame);
         JsonElement data = frame!.Value.GetProperty("data");
         Assert.Equal("audit", frame.Value.GetProperty("topic").GetString());
-        Assert.Equal(AuditAction.ServerStart, data.GetProperty("action").GetString());
+        Assert.Equal("server.started", data.GetProperty("action").GetString());
         Assert.Equal(instance, data.GetProperty("serverId").GetString());
 
         // Provenance rides off the journal envelope — the API never invents either axis.
@@ -123,7 +123,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
 
         using JsonDocument doc = JsonDocument.Parse(await page.Content.ReadAsStringAsync());
         JsonElement row = Assert.Single(doc.RootElement.GetProperty("data").EnumerateArray());
-        Assert.Equal(AuditAction.ServerStop, row.GetProperty("action").GetString());
+        Assert.Equal("server.stopped", row.GetProperty("action").GetString());
 
         // The live push and the stored read agree on the id, so a client reconciling the two sees one
         // fact — both derive it from the same journal position.
@@ -159,7 +159,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         }
 
         Assert.NotNull(frame);
-        Assert.Equal(AuditAction.ServerReady, frame!.Value.GetProperty("data").GetProperty("action").GetString());
+        Assert.Equal("server.ready", frame!.Value.GetProperty("data").GetProperty("action").GetString());
     }
 
     /// <summary>
@@ -286,7 +286,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
 
         // Same row, same id, same history — only the value inside it differs.
         Assert.Equal(operatorRow.GetProperty("id").GetString(), viewerRow.GetProperty("id").GetString());
-        Assert.Equal(AuditAction.PlayerJoin, viewerRow.GetProperty("action").GetString());
+        Assert.Equal("player.joined", viewerRow.GetProperty("action").GetString());
     }
 
     /// <summary>
@@ -310,7 +310,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         Assert.Equal(JsonValueKind.Null, viewerRow.GetProperty("meta").ValueKind);
 
         // Still there, still attributable: withholding what was typed is not hiding that it was.
-        Assert.Equal(AuditAction.ConsoleInput, viewerRow.GetProperty("action").GetString());
+        Assert.Equal("console.input.sent", viewerRow.GetProperty("action").GetString());
         Assert.Equal("haru", viewerRow.GetProperty("actor").GetProperty("name").GetString());
     }
 
@@ -347,7 +347,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
 
         JsonElement? first = await frames.WaitForFrame(Mine, TimeSpan.FromSeconds(20));
         Assert.NotNull(first);
-        Assert.Equal(AuditAction.CommandFailed, first!.Value.GetProperty("data").GetProperty("action").GetString());
+        Assert.Equal("command.failed", first!.Value.GetProperty("data").GetProperty("action").GetString());
         Assert.Equal("kgsm said no",
             first.Value.GetProperty("data").GetProperty("meta").GetProperty("error").GetString());
 
@@ -359,7 +359,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         JsonElement row = await SingleRow(KgsmTier.Operator, instance);
         Assert.Equal(first.Value.GetProperty("data").GetProperty("id").GetString(),
                      row.GetProperty("id").GetString());
-        Assert.Equal(AuditAction.CommandFailed, row.GetProperty("action").GetString());
+        Assert.Equal("command.failed", row.GetProperty("action").GetString());
     }
 
     /// <summary>The one row for <paramref name="instance"/> on the merged page, read at a given tier.</summary>

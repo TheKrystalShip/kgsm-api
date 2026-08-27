@@ -1,4 +1,5 @@
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Services.Integrations;
 
@@ -98,17 +99,18 @@ public sealed class SlackNotificationProvider(HttpClient http, ILogger<SlackNoti
         string server = SlackEscape(string.IsNullOrEmpty(ev.ServerId) ? "a server" : ev.ServerId);
         return ev.Action switch
         {
-            AuditAction.ServerStart => $"🟢 *{server}* is online",
-            AuditAction.ServerRestart => $"🔄 *{server}* restarted",
-            AuditAction.ServerStop => $"⚪ *{server}* went offline",
-            AuditAction.ServerCrash => $"🔴 {SlackEscape(ev.Summary)}",
-            AuditAction.ServerUpdate => $"⬆️ *{server}* was updated",
-            AuditAction.ServerInstall => $"📦 *{server}* was installed",
-            AuditAction.BackupCreate => $"💾 *{server}* backup created",
+            var a when a == KgsmEventCatalog.NameOf<InstanceStartedData>() => $"🟢 *{server}* is online",
+            var a when a == KgsmEventCatalog.NameOf<InstanceRestartedData>() => $"🔄 *{server}* restarted",
+            var a when a == KgsmEventCatalog.NameOf<InstanceStoppedData>() => $"⚪ *{server}* went offline",
+            var a when a == KgsmEventCatalog.NameOf<InstanceCrashedData>() => $"🔴 {SlackEscape(ev.Summary)}",
+            var a when a == KgsmEventCatalog.NameOf<InstanceFailedData>() => $"🔴 {SlackEscape(ev.Summary)}",
+            var a when a == KgsmEventCatalog.NameOf<InstanceVersionUpdatedData>() => $"⬆️ *{server}* was updated",
+            var a when a == KgsmEventCatalog.NameOf<InstanceInstalledData>() => $"📦 *{server}* was installed",
+            var a when a == KgsmEventCatalog.NameOf<InstanceBackupCreatedData>() => $"💾 *{server}* backup created",
             // The summary already names the sensor, the metric and the number, and it is the same sentence
             // the audit trail carries — rephrasing it here would give one fact two wordings.
-            AuditAction.HostThresholdBreach => $"🌡️ {SlackEscape(ev.Summary)}",
-            AuditAction.HostThresholdClear => $"✅ {SlackEscape(ev.Summary)}",
+            var a when a == KgsmEventCatalog.NameOf<HostThresholdBreachedData>() => $"🌡️ {SlackEscape(ev.Summary)}",
+            var a when a == KgsmEventCatalog.NameOf<HostThresholdClearedData>() => $"✅ {SlackEscape(ev.Summary)}",
             _ => $"ℹ️ {SlackEscape(ev.Summary)}",
         };
     }

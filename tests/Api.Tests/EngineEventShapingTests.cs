@@ -64,7 +64,7 @@ public sealed class EngineEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.ServerStart, shaped!.Action);
+        Assert.Equal("server.started", shaped!.Action);
         Assert.Equal("evt_abc123", shaped.Id);
         Assert.Equal(Ts, shaped.Ts);
         Assert.Equal("ui", shaped.Origin);
@@ -87,7 +87,7 @@ public sealed class EngineEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.NetworkPortsOpen, shaped!.Action);
+        Assert.Equal("network.ports.opened", shaped!.Action);
     }
 
     // --- the two backup-removal events shape to their own actions, never to one shared "removed" ------
@@ -101,7 +101,7 @@ public sealed class EngineEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.BackupDelete, shaped!.Action);
+        Assert.Equal("backup.deleted", shaped!.Action);
         // Warn, not Success: destroying a backup is the one backup operation with no undo.
         Assert.Equal(AuditSeverity.Warn, shaped.Severity);
         Assert.Equal("mc-20260731T142233Z-a3f9c1", shaped.Meta!["source"]);
@@ -122,7 +122,7 @@ public sealed class EngineEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.ServerUpdateAvailable, shaped!.Action);
+        Assert.Equal("server.update.available", shaped!.Action);
         Assert.Equal(AuditSeverity.Info, shaped.Severity);
         Assert.Equal("update available for starbound", shaped.Summary);
         Assert.Equal("16000000", shaped.Meta!["currentVersion"]);
@@ -140,7 +140,7 @@ public sealed class EngineEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.BackupPrune, shaped!.Action);
+        Assert.Equal("backup.pruned", shaped!.Action);
         // Info, not Warn: retention policy running to plan is the healthy case. The delete above is
         // the one an operator should notice.
         Assert.Equal(AuditSeverity.Info, shaped.Severity);
@@ -265,7 +265,7 @@ public sealed class EngineEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.AssistantActionDeclined, shaped!.Action);
+        Assert.Equal("assistant.action.declined", shaped!.Action);
         Assert.Equal(AuditSeverity.Warn, shaped.Severity);
         Assert.Equal("mc", shaped.ServerId);
         Assert.Contains("server_command", shaped.Summary);
@@ -305,7 +305,7 @@ public sealed class EngineEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.AssistantActionProposed, shaped!.Action);
+        Assert.Equal("assistant.action.proposed", shaped!.Action);
         Assert.Equal(AuditSeverity.Info, shaped.Severity);
         Assert.Contains("awaiting approval", shaped.Summary);
         Assert.Equal("300", shaped.Meta!["expiresInSec"]);
@@ -328,7 +328,7 @@ public sealed class EngineEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.AssistantClaimCorrected, shaped!.Action);
+        Assert.Equal("assistant.claim.corrected", shaped!.Action);
         Assert.Null(shaped.Target);
         Assert.Null(shaped.ServerId);
         Assert.Equal("outer", shaped.Meta!["net"]);
@@ -358,7 +358,7 @@ public sealed class EngineEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.AssistantBlueprintAuthored, shaped!.Action);
+        Assert.Equal("assistant.blueprint.authored", shaped!.Action);
         Assert.Equal(AuditSeverity.Success, shaped.Severity);
         Assert.Equal(AuditTargetKind.Blueprint, shaped.Target!.Kind);
         Assert.Equal("terraria", shaped.Target.Id);
@@ -398,8 +398,8 @@ public sealed class EngineEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.ServerReady, shaped!.Action);
-        Assert.NotEqual(AuditAction.ServerStart, shaped.Action);
+        Assert.Equal("server.ready", shaped!.Action);
+        Assert.NotEqual("server.started", shaped.Action);
         Assert.Equal("mc", shaped.ServerId);
     }
 
@@ -449,7 +449,7 @@ public sealed class EngineEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.ServerStop, shaped!.Action);
+        Assert.Equal("server.stopped", shaped!.Action);
         Assert.Equal("mc", shaped.ServerId); // filled from item.Instance since Data carried none
     }
 }
@@ -468,7 +468,7 @@ public sealed class BlueprintEventShapingTests
     private static JsonElement Data(object o) => JsonSerializer.SerializeToElement(o);
 
     [Fact]
-    public void Created_ShapesToABlueprintWriteRow_TargetingTheBlueprint()
+    public void Created_ShapesToABlueprintCreatedRow_TargetingTheBlueprint()
     {
         var item = new EventHistoryEntry(
             Id: "evt_bp1", Ts: Ts, Type: "blueprint.created", Instance: null,
@@ -479,7 +479,7 @@ public sealed class BlueprintEventShapingTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.BlueprintWrite, shaped!.Action);
+        Assert.Equal("blueprint.created", shaped!.Action);
         Assert.Equal(AuditTargetKind.Blueprint, shaped.Target!.Kind);
         Assert.Equal("factorio", shaped.Target.Id);
         // A blueprint is the TEMPLATE servers are installed from, not a server — so a serverId here would
@@ -502,7 +502,7 @@ public sealed class BlueprintEventShapingTests
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
-        Assert.Equal(AuditAction.BlueprintWrite, shaped!.Action);
+        Assert.Equal("blueprint.updated", shaped!.Action);
         Assert.Equal(AuditSeverity.Info, shaped.Severity);
         Assert.Equal("false", shaped.Meta!["overridesSystem"]);
     }
@@ -516,7 +516,7 @@ public sealed class BlueprintEventShapingTests
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
-        Assert.Equal(AuditAction.BlueprintRevert, shaped!.Action);
+        Assert.Equal("blueprint.removed", shaped!.Action);
         Assert.Equal(AuditSeverity.Warn, shaped.Severity);
         Assert.Contains("reverted", shaped.Summary);
         Assert.Equal("true", shaped.Meta!["revertedToSystem"]);
@@ -565,7 +565,7 @@ public sealed class BlueprintEventShapingTests
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
-        Assert.Equal(AuditAction.ServerInstall, shaped!.Action);
+        Assert.Equal("server.installed", shaped!.Action);
         Assert.Equal("factorio", shaped.Meta!["blueprint"]);
         Assert.Equal("ssd", shaped.Meta["library"]);
     }
@@ -582,7 +582,7 @@ public sealed class BlueprintEventShapingTests
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
-        Assert.Equal(AuditAction.ServerMove, shaped!.Action);
+        Assert.Equal("server.moved", shaped!.Action);
         // Nothing about the server changed — the same instance, the same world, in a different place.
         Assert.Equal(AuditSeverity.Info, shaped.Severity);
         Assert.Equal("ssd", shaped.Meta!["fromLibrary"]);

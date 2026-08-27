@@ -48,45 +48,49 @@ public static class AuditQueries
     private const int MaxJournalFetches = 20;
 
     /// <summary>
-    /// The dotted actions <see cref="AuditMapping"/>'s <c>From*Event</c> mappers produce that are, post
-    /// Phase-C, EXCLUSIVELY sourced from the kgsm event echo. <see cref="KgsmAuditConsumer"/> no longer
-    /// writes any of these to the local table (it now only publishes them live — see
-    /// <see cref="AuditService.PublishLive"/>), so a local row bearing one is frozen pre-cutover history;
-    /// excluding it here means the merge's engine-sourced rows come solely from the journal.
+    /// The actions a local row can carry that the engine's own journal also answers for.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This API keeps no copy of what the engine did — it shapes those rows out of the journal at read
+    /// time — so a local row bearing one of these is frozen history from before that was true.
+    /// Excluding them here is what keeps the merge's two sources disjoint.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>These are the spellings on disk, and they are the only correct ones for this set.</b> The
+    /// filter runs in SQL against the stored column, before a row is resolved to what its fact is
+    /// called now (<see cref="StoredActionNames"/>), so the current names would match nothing and
+    /// every frozen row would come back beside the journal's own copy of it.
+    /// </para>
+    /// </remarks>
     internal static readonly HashSet<string> EngineSourcedActions = new(StringComparer.Ordinal)
     {
-        AuditAction.ServerStart,
-        AuditAction.ServerStop,
-        AuditAction.ServerRestart,
-        AuditAction.ServerUpdate,
-        AuditAction.ServerInstall,
-        AuditAction.ServerUninstall,
-        AuditAction.ServerMove,
-        AuditAction.ServerCrash,
-        AuditAction.BackupCreate,
-        AuditAction.BackupRestore,
-        AuditAction.BackupDelete,
-        AuditAction.BackupPrune,
-        AuditAction.NetworkPortsOpen,
-        AuditAction.NetworkPortsClose,
-        AuditAction.NetworkUpnpOpen,
-        AuditAction.NetworkUpnpClose,
-        AuditAction.NetworkUpnpReassert,
-        AuditAction.PlayerJoin,
-        AuditAction.PlayerLeave,
-        // The moderation trio is cleanly echo-only, like blueprint.*: the endpoints thread actor+origin
-        // into the kgsm call and the engine emits the event, so there is no second source to preserve.
-        AuditAction.PlayerKick,
-        AuditAction.PlayerBan,
-        AuditAction.PlayerUnban,
-        AuditAction.ConfigSet,
-        AuditAction.ConsoleInput,
-        // blueprint.* is cleanly echo-only: the library editor's PUT/DELETE thread actor+origin into
-        // kgsm-lib's write, which emits the kgsm event — the api never direct-writes one, so unlike
-        // network.ports.open there is no second source to preserve here.
-        AuditAction.BlueprintWrite,
-        AuditAction.BlueprintRevert,
+        "server.start",
+        "server.stop",
+        "server.restart",
+        "server.update",
+        "server.install",
+        "server.uninstall",
+        "server.move",
+        "server.crash",
+        "backup.create",
+        "backup.restore",
+        "backup.delete",
+        "backup.prune",
+        "network.ports.open",
+        "network.ports.close",
+        "network.upnp.open",
+        "network.upnp.close",
+        "network.upnp.reassert",
+        "player.join",
+        "player.leave",
+        "player.kick",
+        "player.ban",
+        "player.unban",
+        "config.set",
+        "console.input",
+        "blueprint.write",
+        "blueprint.revert",
     };
 
     /// <summary>Clamp a client-supplied limit to <c>[1, <see cref="MaxLimit"/>]</c>, defaulting when unset.</summary>
@@ -370,7 +374,7 @@ public static class AuditQueries
 
             foreach (AuditRecord row in merged.Data)
             {
-                if (!string.Equals(row.Action, AuditAction.AuthLogin, StringComparison.Ordinal))
+                if (!string.Equals(row.Action, ApiJournal.LoginEvent, StringComparison.Ordinal))
                     continue;
 
                 found.Add(row);

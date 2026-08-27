@@ -37,7 +37,7 @@ public sealed class LibraryAuditTests
 
         AuditWrite w = AuditMapping.FromLibraryAddedEvent(d, HostId);
 
-        Assert.Equal(AuditAction.LibraryAdd, w.Action);
+        Assert.Equal("library.added", w.Action);
         Assert.Equal(AuditTargetKind.Library, w.Target?.Kind);
         Assert.Equal("ssd", w.Target?.Id);
         // A root holds servers without being one — a serverId here would make GET /audit?serverId= return
@@ -56,7 +56,7 @@ public sealed class LibraryAuditTests
 
         AuditWrite w = AuditMapping.FromLibraryRemovedEvent(d, HostId);
 
-        Assert.Equal(AuditAction.LibraryRemove, w.Action);
+        Assert.Equal("library.removed", w.Action);
         // Deregistering leaves instances on the disk resolving to no library — recoverable, and confusing
         // enough that the trail is where somebody works out when it started.
         Assert.Equal(AuditSeverity.Warn, w.Severity);
@@ -73,7 +73,7 @@ public sealed class LibraryAuditTests
 
         AuditWrite w = AuditMapping.FromLibraryRenamedEvent(d, HostId);
 
-        Assert.Equal(AuditAction.LibraryRename, w.Action);
+        Assert.Equal("library.renamed", w.Action);
         Assert.Contains("ssd", w.Summary, StringComparison.Ordinal);
         Assert.Contains("fast", w.Summary, StringComparison.Ordinal);
         Assert.Equal("fast", w.Meta?["newName"]);
@@ -90,7 +90,7 @@ public sealed class LibraryAuditTests
 
         AuditWrite w = AuditMapping.FromLibraryFailedEvent(d, HostId);
 
-        Assert.Equal(AuditAction.LibraryFailed, w.Action);
+        Assert.Equal("library.failed", w.Action);
         // The protection working, not a fault — a removal refused because instances live there is the
         // ordinary case and must not read as a danger.
         Assert.Equal(AuditSeverity.Warn, w.Severity);
@@ -149,7 +149,7 @@ public sealed class LibraryAuditTests
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Equal(AuditAction.LibraryFailed, shaped!.Action);
+        Assert.Equal("library.failed", shaped!.Action);
         Assert.Equal("still holds 3 instances", shaped.Meta?["error"]);
     }
 

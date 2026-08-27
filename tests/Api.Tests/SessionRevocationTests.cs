@@ -168,7 +168,7 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
         // The audit row lands as auth.session.revoke / info, meta.sid == the revoked sid.
         JsonElement audit = await Json(await Bearer(token2).GetAsync("/api/v1/audit?actor=haru"));
         JsonElement row = audit.GetProperty("data").EnumerateArray()
-            .First(r => r.GetProperty("action").GetString() == "auth.session.revoke"
+            .First(r => r.GetProperty("action").GetString() == "auth.session.revoked"
                 && r.GetProperty("meta").TryGetProperty("sid", out JsonElement s) && s.GetString() == sid1);
         Assert.Equal("info", row.GetProperty("severity").GetString());
     }
@@ -231,7 +231,7 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
         string freshToken = factory.AccessToken(KgsmTier.Viewer);
         JsonElement audit = await Json(await Bearer(freshToken).GetAsync("/api/v1/audit?actor=haru"));
         JsonElement row = audit.GetProperty("data").EnumerateArray()
-            .First(r => r.GetProperty("action").GetString() == "auth.session.revoke.all");
+            .First(r => r.GetProperty("action").GetString() == "auth.session.revoked");
         Assert.Equal("info", row.GetProperty("severity").GetString());
     }
 
@@ -260,7 +260,7 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
 
         JsonElement audit = await Json(await Bearer(adminToken).GetAsync("/api/v1/audit"));
         JsonElement row = audit.GetProperty("data").EnumerateArray()
-            .First(r => r.GetProperty("action").GetString() == "auth.session.revoke.admin"
+            .First(r => r.GetProperty("action").GetString() == "auth.session.revoked"
                 && r.GetProperty("meta").TryGetProperty("sid", out JsonElement s) && s.GetString() == targetSid);
         Assert.Equal("warn", row.GetProperty("severity").GetString());
         Assert.Equal("discord:555000444", row.GetProperty("meta").GetProperty("userId").GetString());
@@ -306,7 +306,7 @@ public sealed class SessionRevocationTests(AuthTestFactory factory) : IClassFixt
 
         JsonElement audit = await Json(await Bearer(adminToken).GetAsync("/api/v1/audit"));
         JsonElement row = audit.GetProperty("data").EnumerateArray()
-            .First(r => r.GetProperty("action").GetString() == "auth.session.revoke.admin"
+            .First(r => r.GetProperty("action").GetString() == "auth.session.revoked"
                 && r.GetProperty("meta").TryGetProperty("userId", out JsonElement u)
                 && u.GetString() == "discord:555000666"
                 && !r.GetProperty("meta").TryGetProperty("sid", out _));

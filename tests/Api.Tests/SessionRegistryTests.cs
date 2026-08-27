@@ -109,7 +109,7 @@ public sealed class SessionRegistryTests(AuthTestFactory factory) : IClassFixtur
         viewer.DefaultRequestHeaders.Authorization = new("Bearer", factory.AccessToken(KgsmTier.Viewer));
         JsonElement body = await Json(await viewer.GetAsync("/api/v1/audit?actor=haru"));
         JsonElement[] rows = body.GetProperty("data").EnumerateArray().ToArray();
-        JsonElement loginRow = rows.First(x => x.GetProperty("action").GetString() == AuditAction.AuthLogin
+        JsonElement loginRow = rows.First(x => x.GetProperty("action").GetString() == "auth.signed_in"
             && x.GetProperty("meta").TryGetProperty("sid", out JsonElement s) && s.GetString() == sid);
         Assert.Equal(sid, loginRow.GetProperty("meta").GetProperty("sid").GetString());
         // The meta still carries the tier (the M5 field — M4·c only adds sid alongside it).

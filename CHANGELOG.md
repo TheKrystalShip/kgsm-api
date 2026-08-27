@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — an audit row is named by the event that produced it (`0.143.0`)
+
+`action` on an audit row is the producer's own event name — `server.started`, `network.ports.opened`,
+`auth.signed_in` — so the feed carries one vocabulary from the journal to the panel and nothing
+translates between them. A row this build has never seen still renders: nothing holds a list of the
+valid names.
+
+Two facts the old translation collapsed are two rows again. A crash the supervisor is still retrying
+(`server.crashed`) and one it has given up on (`server.crash.exhausted`) were a single action told
+apart by severity, which meant a row that failed to carry the severity read as the retrying kind —
+now the name says which, and the notification catalog reads it directly. An update that applied and
+one that failed likewise, as do a blueprint created and a blueprint edited.
+
+A session revocation is one event whose `meta["scope"]` says how far it reached, where it was three
+actions for the same fact.
+
+Rows written before this API stopped keeping its own copy of engine history are resolved to what
+their fact is called now, on the way out (`StoredActionNames`). The record itself is never rewritten.
+
+`KgsmEventCatalog.NameOf<TData>()` is how a typed handler names its event, so a payload class and its
+name cannot drift apart.
+
 ### Changed — the engine vocabulary is dotted (`0.142.0`)
 
 Every event type this API shapes, publishes or writes to its own journal is named in the ecosystem's

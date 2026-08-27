@@ -68,8 +68,8 @@ public sealed class ThresholdAuditProvenanceTests(AuthTestFactory factory) : ICl
         HttpClient c = Client(KgsmTier.Operator);
 
         var byMonitor = await Actions(c, "/api/v1/audit?actor=monitor&limit=200", marker);
-        Assert.Contains(AuditAction.HostThresholdBreach, byMonitor);
-        Assert.Contains(AuditAction.HostThresholdClear, byMonitor);
+        Assert.Contains("host.threshold.breached", byMonitor);
+        Assert.Contains("host.threshold.cleared", byMonitor);
 
         // The negatives are what prove the rows are ATTRIBUTED rather than merely labelled: an operator
         // asking what the watchdog did, or filtering the anonymous autonomous rows, must not be handed
@@ -118,7 +118,7 @@ public sealed class ThresholdAuditProvenanceTests(AuthTestFactory factory) : ICl
     private static AuditWrite BreachWrite(string marker) => new(
         Ts: DateTimeOffset.UtcNow, Origin: AuditOrigin.System,
         Actor: AuditMapping.ParseActor("system:monitor"),
-        Action: AuditAction.HostThresholdBreach, Severity: AuditSeverity.Warn,
+        Action: "host.threshold.breached", Severity: AuditSeverity.Warn,
         Target: new AuditTarget(AuditTargetKind.Host, "test-host", "test-host"),
         ServerId: null, HostId: "test-host",
         Summary: $"{marker} temperature crossed 85°C",
@@ -127,7 +127,7 @@ public sealed class ThresholdAuditProvenanceTests(AuthTestFactory factory) : ICl
     private static AuditWrite ClearWrite(string marker) => new(
         Ts: DateTimeOffset.UtcNow, Origin: AuditOrigin.System,
         Actor: AuditMapping.ParseActor("system:monitor"),
-        Action: AuditAction.HostThresholdClear, Severity: AuditSeverity.Info,
+        Action: "host.threshold.cleared", Severity: AuditSeverity.Info,
         Target: new AuditTarget(AuditTargetKind.Host, "test-host", "test-host"),
         ServerId: null, HostId: "test-host",
         Summary: $"{marker} temperature back to normal after 2m",

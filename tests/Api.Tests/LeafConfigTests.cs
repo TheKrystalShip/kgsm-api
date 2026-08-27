@@ -91,7 +91,7 @@ public sealed class LeafConfigTests
         // A service.config audit row lists the changed keys + outcome — never a value.
         JsonElement audit = await Json(admin.GetAsync("/api/v1/audit"));
         JsonElement row = audit.GetProperty("data").EnumerateArray()
-            .First(r => r.GetProperty("action").GetString() == "service.config");
+            .First(r => r.GetProperty("action").GetString() == "service.config_changed");
         Assert.Equal("applied", row.GetProperty("meta").GetProperty("outcome").GetString());
         Assert.Contains("logLevel", row.GetProperty("meta").GetProperty("keys").GetString());
     }
@@ -147,7 +147,7 @@ public sealed class LeafConfigTests
         // The rollback is audited (warn).
         JsonElement audit = await Json(admin.GetAsync("/api/v1/audit"));
         JsonElement row = audit.GetProperty("data").EnumerateArray()
-            .First(r => r.GetProperty("action").GetString() == "service.config");
+            .First(r => r.GetProperty("action").GetString() == "service.config_changed");
         Assert.Equal("rolled_back", row.GetProperty("meta").GetProperty("outcome").GetString());
     }
 

@@ -94,7 +94,7 @@ public sealed class ApiEventMappingTests
         AuditWrite row = AuditMapping.FromAuthSessionEvent(
             Session(peerNode: "node-b"), ApiJournal.ClusterSessionEvent, HostId);
 
-        Assert.Equal(AuditAction.AuthClusterSession, row.Action);
+        Assert.Equal("auth.cluster.vouched", row.Action);
         Assert.Contains("node-b", row.Summary, StringComparison.Ordinal);
         Assert.Equal("node-b", row.Meta!["peerNode"]);
     }
@@ -124,11 +124,11 @@ public sealed class ApiEventMappingTests
     // ---- revocations --------------------------------------------------------------------------
 
     [Theory]
-    [InlineData("self", AuditAction.AuthSessionRevoke, AuditSeverity.Info)]
-    [InlineData("all", AuditAction.AuthSessionRevokeAll, AuditSeverity.Info)]
+    [InlineData("self", "auth.session.revoked", AuditSeverity.Info)]
+    [InlineData("all", "auth.session.revoked", AuditSeverity.Info)]
     // An admin ending somebody else's session is the substantial-power case; a person managing their
     // own is routine, and a trail that shouted equally about both would be no easier to read.
-    [InlineData("admin", AuditAction.AuthSessionRevokeAdmin, AuditSeverity.Warn)]
+    [InlineData("admin", "auth.session.revoked", AuditSeverity.Warn)]
     public void A_revocation_maps_its_scope_to_an_action_and_a_weight(
         string scope, string action, string severity)
     {
@@ -179,7 +179,7 @@ public sealed class ApiEventMappingTests
         AuditWrite row = AuditMapping.FromUserAccountEvent(
             Account(fromTier: "viewer", toTier: "admin"), ApiJournal.UserTierChangedEvent, HostId);
 
-        Assert.Equal(AuditAction.UserTierChange, row.Action);
+        Assert.Equal("user.tier_changed", row.Action);
         Assert.Equal(AuditSeverity.Warn, row.Severity);
         Assert.Equal("viewer", row.Meta!["fromTier"]);
         Assert.Equal("admin", row.Meta["toTier"]);
@@ -265,7 +265,7 @@ public sealed class ApiEventMappingTests
             Outcome = "applied",
         }, HostId);
 
-        Assert.Equal(AuditAction.ServiceConfig, row.Action);
+        Assert.Equal("service.config_changed", row.Action);
         Assert.Equal("intervalMs,apiKey", row.Meta!["keys"]);
         Assert.DoesNotContain(row.Meta, kv => kv.Key.Contains("value", StringComparison.OrdinalIgnoreCase));
     }
@@ -329,7 +329,7 @@ public sealed class ApiEventMappingTests
             Sha256 = "sha256:abc",
         }, HostId);
 
-        Assert.Equal(AuditAction.FileWrite, row.Action);
+        Assert.Equal("file.written", row.Action);
         Assert.Equal("factorio-1", row.ServerId);
         Assert.Equal("config/server-settings.json", row.Meta!["path"]);
         Assert.Equal("2048", row.Meta["sizeBytes"]);
@@ -354,7 +354,7 @@ public sealed class ApiEventMappingTests
             SizeBytes = 999,
         }, HostId);
 
-        Assert.Equal(AuditAction.BackupDownload, row.Action);
+        Assert.Equal("backup.downloaded", row.Action);
         Assert.Equal(AuditSeverity.Warn, row.Severity);
         Assert.Equal("factorio-1", row.ServerId);
         Assert.Equal("backup-3", row.Meta!["source"]);

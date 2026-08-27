@@ -142,7 +142,7 @@ public sealed class FileBrowserApiTests
         using JsonDocument result = JsonDocument.Parse(await put.Content.ReadAsStringAsync());
         Assert.StartsWith("sha256:", result.RootElement.GetProperty("etag").GetString());
 
-        // The file.write audit row exists, scoped to the server, with path/size/sha256 meta — and the
+        // The file.written audit row exists, scoped to the server, with path/size/sha256 meta — and the
         // raw audit response NEVER contains the secret content (the regression that matters most).
         HttpResponseMessage auditResp = await Client(_engine, KgsmTier.Operator).GetAsync("/api/v1/audit?serverId=" + Server);
         string auditJson = await auditResp.Content.ReadAsStringAsync();
@@ -150,7 +150,7 @@ public sealed class FileBrowserApiTests
 
         using JsonDocument page = JsonDocument.Parse(auditJson);
         JsonElement row = page.RootElement.GetProperty("data").EnumerateArray()
-            .First(e => e.GetProperty("action").GetString() == "file.write");
+            .First(e => e.GetProperty("action").GetString() == "file.written");
         JsonElement meta = row.GetProperty("meta");
         Assert.Equal("edit.cfg", meta.GetProperty("path").GetString());
         Assert.True(meta.TryGetProperty("sizeBytes", out _));

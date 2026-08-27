@@ -114,8 +114,8 @@ public static class AuditMapping
     public static AuditWrite FromCrashEvent(InstanceCrashedData d, string hostId)
     {
         string instance = Instance(d);
-        return CrashWrite(d, hostId, instance, AuditSeverity.Warn,
-            $"{Display(instance)} crashed — auto-restarting");
+        return CrashWrite(d, hostId, instance, KgsmEventCatalog.NameOf<InstanceCrashedData>(),
+            AuditSeverity.Warn, $"{Display(instance)} crashed — auto-restarting");
     }
 
     /// <summary>
@@ -128,8 +128,8 @@ public static class AuditMapping
     {
         string instance = Instance(d);
         string tail = string.IsNullOrEmpty(d.Restarts) ? "" : $" after {d.Restarts} restart(s)";
-        return CrashWrite(d, hostId, instance, AuditSeverity.Danger,
-            $"{Display(instance)} crashed — supervisor gave up{tail}");
+        return CrashWrite(d, hostId, instance, KgsmEventCatalog.NameOf<InstanceFailedData>(),
+            AuditSeverity.Danger, $"{Display(instance)} crashed — supervisor gave up{tail}");
     }
 
     /// <summary>
@@ -140,7 +140,7 @@ public static class AuditMapping
     /// so the api never opens one itself and has nothing to direct-write.
     /// </summary>
     public static AuditWrite FromPortsOpenedEvent(InstancePortsOpenedData d, string hostId) =>
-        PortsWrite(d, hostId, AuditAction.NetworkPortsOpen, "opened", d.Ports);
+        PortsWrite(d, hostId, KgsmEventCatalog.NameOf<InstancePortsOpenedData>(), "opened", d.Ports);
 
     /// <summary>
     /// Map a kgsm <c>network.ports.closed</c> event (the firewall echo — the engine removed the
@@ -150,7 +150,7 @@ public static class AuditMapping
     /// opened-never-closed gap.
     /// </summary>
     public static AuditWrite FromPortsClosedEvent(InstancePortsClosedData d, string hostId) =>
-        PortsWrite(d, hostId, AuditAction.NetworkPortsClose, "closed", d.Ports);
+        PortsWrite(d, hostId, KgsmEventCatalog.NameOf<InstancePortsClosedData>(), "closed", d.Ports);
 
     /// <summary>
     /// Map a kgsm <c>network.upnp.opened</c> event (the watchdog forwarded the instance's ports on
@@ -162,7 +162,7 @@ public static class AuditMapping
     /// this action is cleanly watchdog-echo-only.
     /// </summary>
     public static AuditWrite FromUpnpOpenedEvent(InstanceUpnpOpenedData d, string hostId) =>
-        UpnpWrite(d, hostId, AuditAction.NetworkUpnpOpen, "forwarded", d.Ports);
+        UpnpWrite(d, hostId, KgsmEventCatalog.NameOf<InstanceUpnpOpenedData>(), "forwarded", d.Ports);
 
     /// <summary>
     /// Map a kgsm <c>network.upnp.closed</c> event (the watchdog removed the router forward on a
@@ -171,7 +171,7 @@ public static class AuditMapping
     /// emits no event upstream, so this never records a removal that didn't happen.
     /// </summary>
     public static AuditWrite FromUpnpClosedEvent(InstanceUpnpClosedData d, string hostId) =>
-        UpnpWrite(d, hostId, AuditAction.NetworkUpnpClose, "removed", d.Ports);
+        UpnpWrite(d, hostId, KgsmEventCatalog.NameOf<InstanceUpnpClosedData>(), "removed", d.Ports);
 
     /// <summary>
     /// Map a kgsm <c>network.upnp.reasserted</c> event (the watchdog's sweep found the router had
@@ -185,7 +185,7 @@ public static class AuditMapping
     /// and a run of them is worth noticing.
     /// </summary>
     public static AuditWrite FromUpnpReassertedEvent(InstanceUpnpReassertedData d, string hostId) =>
-        UpnpWrite(d, hostId, AuditAction.NetworkUpnpReassert, "restored dropped", d.Ports,
+        UpnpWrite(d, hostId, KgsmEventCatalog.NameOf<InstanceUpnpReassertedData>(), "restored dropped", d.Ports,
             AuditSeverity.Warn);
 
     /// <summary>
@@ -216,7 +216,7 @@ public static class AuditMapping
             Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
             Origin: NormalizeOrigin(d.Origin),
             Actor: ParseActor(d.Actor),
-            Action: AuditAction.ServerUpdateAvailable,
+            Action: KgsmEventCatalog.NameOf<InstanceUpdateAvailableData>(),
             Severity: AuditSeverity.Info,
             Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
             ServerId: instance,
@@ -235,7 +235,7 @@ public static class AuditMapping
     /// the server (no player target kind), mirroring the crash mapper. Never fabricates a missing field.
     /// </summary>
     public static AuditWrite FromPlayerJoinedEvent(InstancePlayerJoinedData d, string hostId) =>
-        PlayerWrite(d, hostId, AuditAction.PlayerJoin, "joined",
+        PlayerWrite(d, hostId, KgsmEventCatalog.NameOf<InstancePlayerJoinedData>(), "joined",
             d.PlayerId, d.PlayerName, d.PlayerAddr, d.SessionKey, reason: null);
 
     /// <summary>
@@ -245,7 +245,7 @@ public static class AuditMapping
     /// vocabulary is deferred to a future version).
     /// </summary>
     public static AuditWrite FromPlayerLeftEvent(InstancePlayerLeftData d, string hostId) =>
-        PlayerWrite(d, hostId, AuditAction.PlayerLeave, "left",
+        PlayerWrite(d, hostId, KgsmEventCatalog.NameOf<InstancePlayerLeftData>(), "left",
             d.PlayerId, d.PlayerName, d.PlayerAddr, d.SessionKey, d.Reason);
 
     /// <summary>
@@ -272,7 +272,7 @@ public static class AuditMapping
         if (!string.IsNullOrWhiteSpace(d.Command)) (meta ??= [])["command"] = d.Command;
 
         // Removing someone's access is the notable act; restoring it is ordinary news.
-        string severity = action == AuditAction.PlayerUnban ? AuditSeverity.Info : AuditSeverity.Warn;
+        string severity = action == KgsmEventCatalog.NameOf<InstancePlayerUnbannedData>() ? AuditSeverity.Info : AuditSeverity.Warn;
 
         return new AuditWrite(
             Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
@@ -354,7 +354,7 @@ public static class AuditMapping
             Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
             Origin: NormalizeOrigin(d.Origin),
             Actor: ParseActor(d.Actor),
-            Action: AuditAction.ServerRename,
+            Action: KgsmEventCatalog.NameOf<InstanceDisplayNameChangedData>(),
             Severity: AuditSeverity.Info,
             Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
             ServerId: instance,
@@ -380,7 +380,7 @@ public static class AuditMapping
             Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
             Origin: NormalizeOrigin(d.Origin),
             Actor: ParseActor(d.Actor),
-            Action: AuditAction.ConfigSet,
+            Action: KgsmEventCatalog.NameOf<InstanceConfigChangedData>(),
             Severity: AuditSeverity.Info,
             Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
             ServerId: instance,
@@ -410,7 +410,7 @@ public static class AuditMapping
             Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
             Origin: NormalizeOrigin(d.Origin),
             Actor: ParseActor(d.Actor),
-            Action: AuditAction.ConsoleInput,
+            Action: KgsmEventCatalog.NameOf<InstanceInputSentData>(),
             Severity: AuditSeverity.Info,
             Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
             ServerId: instance,
@@ -445,7 +445,7 @@ public static class AuditMapping
     /// admin rather than the service account) — engine-owned, no double-write.
     /// </summary>
     public static AuditWrite FromBlueprintCreatedEvent(BlueprintCreatedData d, string hostId) =>
-        BlueprintWrite(d, hostId, d.Tier, AuditAction.BlueprintWrite, AuditSeverity.Success,
+        BlueprintWrite(d, hostId, d.Tier, KgsmEventCatalog.NameOf<BlueprintCreatedData>(), AuditSeverity.Success,
             // "overrode X" vs "created X" are materially different facts to a reader: the first means this
             // host has stopped tracking the shipped definition of a game it already had, the second means a
             // game was added. An unknown override state claims neither.
@@ -463,7 +463,7 @@ public static class AuditMapping
     /// second action nobody would filter on separately.
     /// </summary>
     public static AuditWrite FromBlueprintUpdatedEvent(BlueprintUpdatedData d, string hostId) =>
-        BlueprintWrite(d, hostId, d.Tier, AuditAction.BlueprintWrite, AuditSeverity.Info,
+        BlueprintWrite(d, hostId, d.Tier, KgsmEventCatalog.NameOf<BlueprintUpdatedData>(), AuditSeverity.Info,
             $"edited blueprint {DisplayBlueprint(d)}",
             ("overridesSystem", Tri(d.OverridesSystem)), ("runtime", d.Runtime));
 
@@ -474,7 +474,7 @@ public static class AuditMapping
     /// entirely — a distinction the summary makes rather than leaving a reader to assume the safer one.
     /// </summary>
     public static AuditWrite FromBlueprintRemovedEvent(BlueprintRemovedData d, string hostId) =>
-        BlueprintWrite(d, hostId, d.Tier, AuditAction.BlueprintRevert, AuditSeverity.Warn,
+        BlueprintWrite(d, hostId, d.Tier, KgsmEventCatalog.NameOf<BlueprintRemovedData>(), AuditSeverity.Warn,
             d.RevertedToSystem switch
             {
                 true => $"reverted blueprint {DisplayBlueprint(d)} to the shipped version",
@@ -492,7 +492,7 @@ public static class AuditMapping
     /// admin rather than the service account, and nothing is direct-written for it.
     /// </remarks>
     public static AuditWrite FromLibraryAddedEvent(LibraryAddedData d, string hostId) =>
-        LibraryWrite(d, hostId, AuditAction.LibraryAdd, AuditSeverity.Success,
+        LibraryWrite(d, hostId, KgsmEventCatalog.NameOf<LibraryAddedData>(), AuditSeverity.Success,
             $"registered library {DisplayLibrary(d)}", ("path", d.Path));
 
     /// <summary>
@@ -504,7 +504,7 @@ public static class AuditMapping
     /// confusing one, and the trail is where somebody works out when it started.
     /// </remarks>
     public static AuditWrite FromLibraryRemovedEvent(LibraryRemovedData d, string hostId) =>
-        LibraryWrite(d, hostId, AuditAction.LibraryRemove, AuditSeverity.Warn,
+        LibraryWrite(d, hostId, KgsmEventCatalog.NameOf<LibraryRemovedData>(), AuditSeverity.Warn,
             $"deregistered library {DisplayLibrary(d)} — its files are untouched", ("path", d.Path));
 
     /// <summary>
@@ -517,7 +517,7 @@ public static class AuditMapping
     /// path, not its name.
     /// </remarks>
     public static AuditWrite FromLibraryRenamedEvent(LibraryOutcomeEventData d, string hostId) =>
-        LibraryWrite(d, hostId, AuditAction.LibraryRename, AuditSeverity.Info,
+        LibraryWrite(d, hostId, ApiJournal.LibraryRenamedEvent, AuditSeverity.Info,
             $"renamed library {DisplayLibrary(d)} to {(string.IsNullOrEmpty(d.NewName) ? "a new name" : d.NewName)}",
             ("newName", d.NewName));
 
@@ -538,7 +538,7 @@ public static class AuditMapping
     /// </para>
     /// </remarks>
     public static AuditWrite FromLibraryFailedEvent(LibraryOutcomeEventData d, string hostId) =>
-        LibraryWrite(d, hostId, AuditAction.LibraryFailed, AuditSeverity.Warn,
+        LibraryWrite(d, hostId, ApiJournal.LibraryFailedEvent, AuditSeverity.Warn,
             $"could not {LibraryWord(d.Verb)} library {DisplayLibrary(d)}",
             ("verb", d.Verb), ("path", d.Path), ("newName", d.NewName), ("error", d.Error),
             ("exitCode", d.ExitCode?.ToString(CultureInfo.InvariantCulture)));
@@ -728,14 +728,14 @@ public static class AuditMapping
                     ? $"{p.Start}/{p.Protocol}"
                     : $"{p.Start}-{p.End}/{p.Protocol}"));
 
-    // The two crash events share everything but severity + summary — build the row once.
+    // The two crash events share everything but their name, severity and summary — build the row once.
     private static AuditWrite CrashWrite(
-        EventDataBase d, string hostId, string instance, string severity, string summary) =>
+        EventDataBase d, string hostId, string instance, string action, string severity, string summary) =>
         new(
             Ts: d.Timestamp ?? DateTimeOffset.UtcNow,
             Origin: NormalizeOrigin(d.Origin),
             Actor: ParseActor(d.Actor),
-            Action: AuditAction.ServerCrash,
+            Action: action,
             Severity: severity,
             Target: new AuditTarget(AuditTargetKind.Server, instance, instance),
             ServerId: instance,
@@ -767,7 +767,14 @@ public static class AuditMapping
     private static string Display(string instance) =>
         string.IsNullOrEmpty(instance) ? "instance" : instance;
 
-    /// <summary>Map a persisted row to its wire record (deserializing the <c>meta</c> JSON blob).</summary>
+    /// <summary>
+    /// Map a persisted row to its wire record (deserializing the <c>meta</c> JSON blob).
+    /// </summary>
+    /// <remarks>
+    /// The action is resolved to what the fact is called now (<see cref="StoredActionNames"/>). The
+    /// row itself is never rewritten — a record is not edited to match a later vocabulary — so the
+    /// one place both spellings have to be reconciled is here, on the way out.
+    /// </remarks>
     public static AuditRecord ToRecord(AuditEntry e)
     {
         IReadOnlyDictionary<string, string>? meta = null;
@@ -784,7 +791,8 @@ public static class AuditMapping
         return new AuditRecord(
             e.Id, e.Ts, e.Origin,
             new AuditActor(e.ActorKind, e.ActorName, e.ActorProvider),
-            e.Action, e.Severity, target, e.ServerId, e.HostId, e.Summary, meta);
+            StoredActionNames.Canonical(e.Action), e.Severity, target, e.ServerId, e.HostId,
+            e.Summary, meta);
     }
 
     /// <summary>
@@ -849,7 +857,7 @@ public static class AuditMapping
             Ts: DateTimeOffset.FromUnixTimeMilliseconds(d.OpenedTs),
             Origin: AuditOrigin.System,
             Actor: ParseActor(MonitorActor),
-            Action: AuditAction.HostThresholdBreach,
+            Action: KgsmEventCatalog.NameOf<HostThresholdBreachedData>(),
             // As loud as the band it reached. A condition that touched danger and eased back to warn was
             // still a danger-band episode, which is why the peak band decides and not the current one.
             Severity: string.Equals(d.PeakBand, "danger", StringComparison.Ordinal)
@@ -901,7 +909,7 @@ public static class AuditMapping
             Ts: DateTimeOffset.FromUnixTimeMilliseconds(d.ClosedTs),
             Origin: AuditOrigin.System,
             Actor: ParseActor(MonitorActor),
-            Action: AuditAction.HostThresholdClear,
+            Action: KgsmEventCatalog.NameOf<HostThresholdClearedData>(),
             // A recovery is information, never a warning.
             Severity: AuditSeverity.Info,
             Target: hostScope
@@ -953,18 +961,17 @@ public static class AuditMapping
         ArgumentNullException.ThrowIfNull(d);
 
         string who = string.IsNullOrEmpty(d.Username) ? d.Identity : d.Username;
-        (string action, string summary) = type switch
+        string summary = type switch
         {
-            ApiJournal.LogoutEvent => (AuditAction.AuthLogout, $"{who} logged out"),
-            ApiJournal.ClusterSessionEvent => (AuditAction.AuthClusterSession,
-                string.IsNullOrEmpty(d.PeerNode)
-                    ? $"{who} joined via a cluster vouch"
-                    : $"{who} joined via a cluster vouch from node '{d.PeerNode}'"),
+            ApiJournal.LogoutEvent => $"{who} logged out",
+            ApiJournal.ClusterSessionEvent => string.IsNullOrEmpty(d.PeerNode)
+                ? $"{who} joined via a cluster vouch"
+                : $"{who} joined via a cluster vouch from node '{d.PeerNode}'",
             // A local credential and a bounce through an external provider are different enough that a
             // reader auditing access wants them apart, and the provider is what says which.
             _ when string.Equals(d.Provider, "local", StringComparison.OrdinalIgnoreCase) =>
-                (AuditAction.AuthLogin, $"{who} signed in with a password"),
-            _ => (AuditAction.AuthLogin, $"{who} logged in"),
+                $"{who} signed in with a password",
+            _ => $"{who} logged in",
         };
 
         var meta = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -975,10 +982,16 @@ public static class AuditMapping
         if (!string.IsNullOrEmpty(d.UserAgent)) meta["userAgent"] = d.UserAgent!;
         if (!string.IsNullOrEmpty(d.PeerNode)) meta["peerNode"] = d.PeerNode!;
 
-        return ApiWrite(d, action, AuditSeverity.Info, target: null, hostId, summary, meta);
+        return ApiWrite(d, type, AuditSeverity.Info, target: null, hostId, summary, meta);
     }
 
-    /// <summary>Map an <c>auth.session.revoked</c> event to one of the three revocation actions.</summary>
+    /// <summary>
+    /// Map an <c>auth.session.revoked</c> event, whose <c>scope</c> says how far the revocation reached.
+    /// </summary>
+    /// <remarks>
+    /// One revocation is one event however wide it was, and the width rides in <c>meta["scope"]</c> —
+    /// where a reader can filter on it — rather than in three names for the same fact.
+    /// </remarks>
     public static AuditWrite FromSessionRevokedEvent(AuthSessionRevokedData d, string hostId)
     {
         ArgumentNullException.ThrowIfNull(d);
@@ -993,21 +1006,22 @@ public static class AuditMapping
 
         // An admin revoking somebody else's session is the substantial-power case and reads louder than
         // a person managing their own, which is routine.
-        (string action, string severity, string summary) = d.Scope switch
+        // An admin revoking somebody else's session is the substantial-power case and reads louder than
+        // a person managing their own, which is routine.
+        (string severity, string summary) = d.Scope switch
         {
-            "all" => (AuditAction.AuthSessionRevokeAll, AuditSeverity.Info,
-                $"{who} logged out everywhere ({count} session(s))"),
-            "admin" => (AuditAction.AuthSessionRevokeAdmin, AuditSeverity.Warn,
-                $"{who} revoked {sessions} belonging to {d.Username}"),
-            _ => (AuditAction.AuthSessionRevoke, AuditSeverity.Info, $"{who} revoked {sessions}"),
+            "all" => (AuditSeverity.Info, $"{who} logged out everywhere ({count} session(s))"),
+            "admin" => (AuditSeverity.Warn, $"{who} revoked {sessions} belonging to {d.Username}"),
+            _ => (AuditSeverity.Info, $"{who} revoked {sessions}"),
         };
 
         var meta = new Dictionary<string, string>(StringComparer.Ordinal);
         if (!string.IsNullOrEmpty(d.Sid)) meta["sid"] = d.Sid!;
         if (!string.IsNullOrEmpty(d.UserId)) meta["userId"] = d.UserId!;
+        if (!string.IsNullOrEmpty(d.Scope)) meta["scope"] = d.Scope!;
         if (d.Count is { } n) meta["count"] = n.ToString(CultureInfo.InvariantCulture);
 
-        return ApiWrite(d, action, severity, target: null, hostId, summary, meta);
+        return ApiWrite(d, ApiJournal.SessionRevokedEvent, severity, target: null, hostId, summary, meta);
     }
 
     /// <summary>Map one of the six <c>user.*</c> events to its account action.</summary>
@@ -1021,37 +1035,32 @@ public static class AuditMapping
 
         string who = ActorName(d.Actor);
         string name = d.Username;
-        (string action, string severity, string summary) = type switch
+        (string severity, string summary) = type switch
         {
-            ApiJournal.UserProvisionedEvent => (AuditAction.UserProvision, AuditSeverity.Warn,
+            ApiJournal.UserProvisionedEvent => (AuditSeverity.Warn,
                 string.IsNullOrEmpty(d.ToTier)
                     ? $"{who} created the account '{name}'"
                     : $"{who} created the account '{name}' with the {d.ToTier} tier"),
 
-            ApiJournal.UserApprovedEvent => (AuditAction.UserApprove, AuditSeverity.Warn,
-                $"{who} approved the account '{name}'"),
+            ApiJournal.UserApprovedEvent => (AuditSeverity.Warn, $"{who} approved the account '{name}'"),
 
             // Two different endings share this event, told apart by where the account landed rather
             // than by a verb chosen at write time: switched off, or put back to awaiting approval.
             ApiJournal.UserDisabledEvent when
                 !string.Equals(d.ToStatus, "disabled", StringComparison.OrdinalIgnoreCase) =>
-                (AuditAction.UserDisable, AuditSeverity.Warn,
-                    $"{who} returned the account '{name}' to awaiting approval"),
-            ApiJournal.UserDisabledEvent => (AuditAction.UserDisable, AuditSeverity.Danger,
-                $"{who} disabled the account '{name}'"),
+                (AuditSeverity.Warn, $"{who} returned the account '{name}' to awaiting approval"),
+            ApiJournal.UserDisabledEvent => (AuditSeverity.Danger, $"{who} disabled the account '{name}'"),
 
-            ApiJournal.UserTierChangedEvent => (AuditAction.UserTierChange, AuditSeverity.Warn,
+            ApiJournal.UserTierChangedEvent => (AuditSeverity.Warn,
                 $"{who} changed '{name}' from {d.FromTier ?? "none"} to {d.ToTier ?? "none"}"),
 
-            ApiJournal.UserDeletedEvent => (AuditAction.UserDelete, AuditSeverity.Danger,
-                $"{who} deleted the account '{name}'"),
+            ApiJournal.UserDeletedEvent => (AuditSeverity.Danger, $"{who} deleted the account '{name}'"),
 
             // Somebody else setting your password reads completely differently from you setting it —
             // it is the only signal an account takeover leaves — so the two get different sentences
             // and different weights.
-            _ when d.ByHolder == true => (AuditAction.UserPassword, AuditSeverity.Info,
-                $"{who} changed their own password"),
-            _ => (AuditAction.UserPassword, AuditSeverity.Warn, $"{who} set the password on '{name}'"),
+            _ when d.ByHolder == true => (AuditSeverity.Info, $"{who} changed their own password"),
+            _ => (AuditSeverity.Warn, $"{who} set the password on '{name}'"),
         };
 
         var meta = new Dictionary<string, string>(StringComparer.Ordinal) { ["username"] = name };
@@ -1066,7 +1075,7 @@ public static class AuditMapping
             ? null
             : new AuditTarget("user", d.UserId!, name);
 
-        return ApiWrite(d, action, severity, target, hostId, summary, meta);
+        return ApiWrite(d, type, severity, target, hostId, summary, meta);
     }
 
     /// <summary>Map an <c>identity.linked</c> / <c>identity.unlinked</c> event.</summary>
@@ -1096,8 +1105,7 @@ public static class AuditMapping
             ? null
             : new AuditTarget("user", d.UserId!, d.Username);
 
-        return ApiWrite(d, linked ? AuditAction.IdentityLink : AuditAction.IdentityUnlink,
-            AuditSeverity.Warn, target, hostId, summary, meta);
+        return ApiWrite(d, type, AuditSeverity.Warn, target, hostId, summary, meta);
     }
 
     /// <summary>Map a <c>service.connected</c> / <c>service.disconnected</c> event.</summary>
@@ -1110,7 +1118,7 @@ public static class AuditMapping
         string display = string.IsNullOrEmpty(d.DisplayName) ? d.Leaf : d.DisplayName!;
 
         return ApiWrite(d,
-            connected ? AuditAction.ServiceConnect : AuditAction.ServiceDisconnect,
+            type,
             AuditSeverity.Info,
             new AuditTarget(AuditTargetKind.Leaf, d.Leaf, display),
             hostId,
@@ -1147,7 +1155,7 @@ public static class AuditMapping
         };
         if (!string.IsNullOrEmpty(d.Outcome)) meta["outcome"] = d.Outcome!;
 
-        return ApiWrite(d, AuditAction.ServiceConfig, severity,
+        return ApiWrite(d, ApiJournal.ServiceConfigChangedEvent, severity,
             new AuditTarget(AuditTargetKind.Leaf, d.Leaf, display), hostId, summary, meta);
     }
 
@@ -1162,7 +1170,7 @@ public static class AuditMapping
 
         string display = string.IsNullOrEmpty(d.DisplayName) ? d.Leaf : d.DisplayName!;
 
-        return ApiWrite(d, AuditAction.ServiceRestart,
+        return ApiWrite(d, ApiJournal.ServiceRestartedEvent,
             d.Ok ? AuditSeverity.Warn : AuditSeverity.Danger,
             new AuditTarget(AuditTargetKind.Host, d.Leaf, display),
             hostId,
@@ -1187,7 +1195,7 @@ public static class AuditMapping
         };
         if (!string.IsNullOrEmpty(d.Sha256)) meta["sha256"] = d.Sha256!;
 
-        return ApiWrite(d, AuditAction.FileWrite, AuditSeverity.Info,
+        return ApiWrite(d, ApiJournal.FileWrittenEvent, AuditSeverity.Info,
             new AuditTarget(AuditTargetKind.Server, d.InstanceName, d.InstanceName),
             hostId, $"edited file {d.Path} on {d.InstanceName}", meta, serverId: d.InstanceName);
     }
@@ -1204,7 +1212,7 @@ public static class AuditMapping
         };
         if (!string.IsNullOrEmpty(d.Sha256)) meta["sha256"] = d.Sha256!;
 
-        return ApiWrite(d, AuditAction.BackupDownload, AuditSeverity.Warn,
+        return ApiWrite(d, ApiJournal.BackupDownloadedEvent, AuditSeverity.Warn,
             new AuditTarget(AuditTargetKind.Server, d.InstanceName, d.InstanceName),
             hostId, $"downloaded a backup of {d.InstanceName}", meta, serverId: d.InstanceName);
     }
@@ -1233,17 +1241,13 @@ public static class AuditMapping
         string instance = Display(d.InstanceName);
         string word = CommandWord(d.Verb);
 
-        (string action, string severity, string summary) = type switch
+        (string severity, string summary) = type switch
         {
-            ApiJournal.CommandRefusedEvent => (
-                AuditAction.CommandRefused, AuditSeverity.Warn,
+            ApiJournal.CommandRefusedEvent => (AuditSeverity.Warn,
                 $"refused to {word} {instance} — not enough free memory on this node"),
-            ApiJournal.CommandCancelledEvent => (
-                AuditAction.CommandCancelled, AuditSeverity.Info,
+            ApiJournal.CommandCancelledEvent => (AuditSeverity.Info,
                 $"cancelled before it ran: {word} {instance}"),
-            _ => (
-                AuditAction.CommandFailed, AuditSeverity.Danger,
-                $"could not {word} {instance}"),
+            _ => (AuditSeverity.Danger, $"could not {word} {instance}"),
         };
 
         var meta = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -1255,7 +1259,7 @@ public static class AuditMapping
         if (!string.IsNullOrEmpty(d.FromLibrary)) meta["fromLibrary"] = d.FromLibrary!;
         if (!string.IsNullOrEmpty(d.ToLibrary)) meta["toLibrary"] = d.ToLibrary!;
 
-        return ApiWrite(d, action, severity,
+        return ApiWrite(d, type, severity,
             new AuditTarget(AuditTargetKind.Server, d.InstanceName, d.InstanceName),
             hostId, summary, meta, serverId: string.IsNullOrEmpty(d.InstanceName) ? null : d.InstanceName);
     }

@@ -34,7 +34,7 @@ public sealed class SlackProviderTests
         };
 
     private static NotificationEvent Online(string server) =>
-        new("online", AuditAction.ServerStart, server, AuditSeverity.Info, $"started {server}", DateTimeOffset.UtcNow, "evt_s");
+        new("online", "server.started", server, AuditSeverity.Info, $"started {server}", DateTimeOffset.UtcNow, "evt_s");
 
     private static NotificationRule Rule(bool ping = false) => new("online", Enabled: true, NotificationCadence.Every, ping);
 

@@ -3,6 +3,7 @@ using System.Text.Json;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Integrations.WebPush;
+using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Services.Integrations;
 
@@ -340,20 +341,21 @@ public sealed class WebPushNotificationProvider(
             // A threshold event's own summary is the detail (which sensor, which number), so the title is
             // the headline. It says "this host" rather than naming one: a phone reads this off the lock
             // screen with no idea which panel sent it, and the body carries the subject.
-            AuditAction.HostThresholdBreach => string.IsNullOrEmpty(ev.ServerId)
+            var a when a == KgsmEventCatalog.NameOf<HostThresholdBreachedData>() => string.IsNullOrEmpty(ev.ServerId)
                 ? "Host threshold crossed"
                 : $"{ev.ServerId} threshold crossed",
-            AuditAction.HostThresholdClear => string.IsNullOrEmpty(ev.ServerId)
+            var a when a == KgsmEventCatalog.NameOf<HostThresholdClearedData>() => string.IsNullOrEmpty(ev.ServerId)
                 ? "Host back to normal"
                 : $"{ev.ServerId} back to normal",
-            AuditAction.ServerStart => $"{server} is online",
-            AuditAction.ServerRestart => $"{server} restarted",
-            AuditAction.ServerStop => $"{server} went offline",
-            AuditAction.ServerCrash => $"{server} crashed",
-            AuditAction.ServerUpdate => $"{server} was updated",
-            AuditAction.ServerUpdateAvailable => $"{server} has an update",
-            AuditAction.ServerInstall => $"{server} was installed",
-            AuditAction.BackupCreate => $"{server} was backed up",
+            var a when a == KgsmEventCatalog.NameOf<InstanceStartedData>() => $"{server} is online",
+            var a when a == KgsmEventCatalog.NameOf<InstanceRestartedData>() => $"{server} restarted",
+            var a when a == KgsmEventCatalog.NameOf<InstanceStoppedData>() => $"{server} went offline",
+            var a when a == KgsmEventCatalog.NameOf<InstanceCrashedData>() => $"{server} crashed",
+            var a when a == KgsmEventCatalog.NameOf<InstanceFailedData>() => $"{server} crashed",
+            var a when a == KgsmEventCatalog.NameOf<InstanceVersionUpdatedData>() => $"{server} was updated",
+            var a when a == KgsmEventCatalog.NameOf<InstanceUpdateAvailableData>() => $"{server} has an update",
+            var a when a == KgsmEventCatalog.NameOf<InstanceInstalledData>() => $"{server} was installed",
+            var a when a == KgsmEventCatalog.NameOf<InstanceBackupCreatedData>() => $"{server} was backed up",
             _ => server,
         };
     }

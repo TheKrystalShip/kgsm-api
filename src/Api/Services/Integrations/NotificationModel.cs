@@ -1,4 +1,6 @@
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Services.Audit;
+using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Services.Integrations;
 
@@ -71,22 +73,22 @@ public static class NotificationCatalog
 {
     public static readonly IReadOnlyList<CatalogEvent> Events =
     [
-        new("online", "Server online", "A server came up and is running (server.start / server.restart)."),
-        new("offline", "Server offline", "A server stopped (server.stop)."),
-        new("crash", "Server crash", "The watchdog detected a server exited unexpectedly and is restarting it (server.crash)."),
-        new("crash_loop", "Server gave up", "The watchdog exhausted its restart retries and left a server down (server.crash, at danger)."),
-        new("update", "Game updated", "A new game build was applied (server.update)."),
-        new("update_available", "Update available", "A new game version is available to install (server.update_available)."),
-        new("installed", "Game installed", "A new server was installed (server.install)."),
-        new("backup", "Backup created", "A server backup completed (backup.create)."),
-        new("threshold_breach", "Threshold crossed", "A metric the monitor watches went over its threshold and stayed there (host.threshold.breach)."),
-        new("threshold_clear", "Threshold recovered", "A metric that was over its threshold came back down (host.threshold.clear)."),
-        new("player_join", "Player joined", "Somebody connected to a server this host can observe presence on (player.join)."),
+        new("online", "Server online", "A server came up and is running (server.started / server.restarted)."),
+        new("offline", "Server offline", "A server stopped (server.stopped)."),
+        new("crash", "Server crash", "The watchdog detected a server exited unexpectedly and is restarting it (server.crashed)."),
+        new("crash_loop", "Server gave up", "The watchdog exhausted its restart retries and left a server down (server.crash.exhausted)."),
+        new("update", "Game updated", "A new game build was applied (server.updated)."),
+        new("update_available", "Update available", "A new game version is available to install (server.update.available)."),
+        new("installed", "Game installed", "A new server was installed (server.installed)."),
+        new("backup", "Backup created", "A server backup completed (backup.created)."),
+        new("threshold_breach", "Threshold crossed", "A metric the monitor watches went over its threshold and stayed there (host.threshold.breached)."),
+        new("threshold_clear", "Threshold recovered", "A metric that was over its threshold came back down (host.threshold.cleared)."),
+        new("player_join", "Player joined", "Somebody connected to a server this host can observe presence on (player.joined)."),
         new("server_empty", "Server sitting empty", "A running server has had nobody connected to it for a while."),
         new("leaf_down", "Service went down", "A KGSM service on this host stopped answering its health check and stayed that way."),
         new("leaf_up", "Service came back", "A KGSM service that was down is answering again."),
         new("restart_soon", "Scheduled restart due", "A running server is minutes away from its scheduled restart."),
-        new("awaiting_approval", "Account awaiting approval", "Somebody signed in for the first time and cannot do anything until an admin approves them (user.provision)."),
+        new("awaiting_approval", "Account awaiting approval", "Somebody signed in for the first time and cannot do anything until an admin approves them (user.provisioned)."),
     ];
 
     /// <summary>
@@ -110,37 +112,46 @@ public static class NotificationCatalog
         new(id, Enabled: !OptIn.Contains(id), NotificationCadence.Every, Ping: false);
 
     /// <summary>
-    /// Map an <see cref="AuditAction"/> (the always-on audit row, M8·c Increment B) to the catalog event
-    /// the providers route on, or <see langword="null"/> when the action is not notifiable (the common
-    /// case — <c>auth.*</c>, <c>network.*</c>, <c>server.uninstall</c>, <c>backup.restore</c> have no
-    /// catalog event, so they are dropped before they ever reach the bus). This is the one place the audit
-    /// vocabulary and the notification catalog meet. <b>Note:</b> both <c>server.start</c> AND
-    /// <c>server.restart</c> map to <c>online</c> — a completed restart means the server is up, so the
-    /// watchdog's autonomous crash-restart (<c>server.restarted</c> → <c>server.restart</c>) delivers the
-    /// "back online" signal that pairs with its crash, not a silent gap.
+    /// Which catalog event an audit row's action announces, or <see langword="null"/> when nothing
+    /// announces it — the common case, and why <c>auth.*</c>, <c>network.*</c>, an uninstall and a
+    /// backup restore are dropped before they ever reach the bus.
     /// </summary>
-    /// <param name="severity">The row's severity, which is the only thing separating the two crash facts.
-    /// The watchdog raises <c>server.crashed</c> while it is still restarting and <c>server.crash.exhausted</c>
-    /// once it has given up, and both are the doc's single <c>server.crash</c> action — the give-up is
-    /// carried by the <see cref="AuditSeverity.Danger"/> the mapper writes. Omitting it reads a crash as the
-    /// restarting kind, which is the safe way round: the escalation is the one that must not be invented.</param>
-    public static string? CatalogIdForAction(string action, string? severity = null) => action switch
+    /// <remarks>
+    /// <para>
+    /// <b>This is where an open vocabulary meets a closed one, and the asymmetry is the point.</b> A
+    /// row renders from its own dimensions, so a leaf may name an event nothing here has heard of and
+    /// the panel still draws it. A notification is different: somebody ticked a box against a catalog
+    /// id and that consent is stored, so an event cannot enrol itself into being announced. An
+    /// unmapped action is silent, which is the honest default for a thing nobody asked to hear about.
+    /// </para>
+    /// <para>
+    /// Both a start and a completed restart mean the server is up, so both announce <c>online</c> —
+    /// the watchdog's autonomous crash-restart therefore delivers the "back online" that pairs with
+    /// its crash, rather than a silent gap.
+    /// </para>
+    /// </remarks>
+    public static string? CatalogIdForAction(string action) => action switch
     {
-        AuditAction.ServerStart => "online",
-        AuditAction.ServerRestart => "online",
-        AuditAction.ServerStop => "offline",
-        // Split, because the coalesce window would otherwise hide it: a give-up arrives at the end of a run
-        // of crashes for the same server, inside the window they were suppressed by, so the one crash
-        // notification a person most needs — "it is down and staying down" — is the one they would not get.
-        AuditAction.ServerCrash => severity == AuditSeverity.Danger ? "crash_loop" : "crash",
-        AuditAction.PlayerJoin => "player_join",
-        AuditAction.UserProvision => "awaiting_approval",
-        AuditAction.ServerUpdate => "update",
-        AuditAction.ServerUpdateAvailable => "update_available",
-        AuditAction.ServerInstall => "installed",
-        AuditAction.BackupCreate => "backup",
-        AuditAction.HostThresholdBreach => "threshold_breach",
-        AuditAction.HostThresholdClear => "threshold_clear",
+        var a when a == KgsmEventCatalog.NameOf<InstanceStartedData>() => "online",
+        var a when a == KgsmEventCatalog.NameOf<InstanceRestartedData>() => "online",
+        var a when a == KgsmEventCatalog.NameOf<InstanceStoppedData>() => "offline",
+
+        // The supervisor still trying, and the supervisor having given up, are two events and stay two
+        // here. They are split because the coalesce window would otherwise hide the second: a give-up
+        // arrives at the end of a run of crashes for the same server, inside the window they were
+        // suppressed by, so the one crash notification a person most needs — "it is down and staying
+        // down" — is the one they would not get.
+        var a when a == KgsmEventCatalog.NameOf<InstanceCrashedData>() => "crash",
+        var a when a == KgsmEventCatalog.NameOf<InstanceFailedData>() => "crash_loop",
+
+        var a when a == KgsmEventCatalog.NameOf<InstancePlayerJoinedData>() => "player_join",
+        var a when a == ApiJournal.UserProvisionedEvent => "awaiting_approval",
+        var a when a == KgsmEventCatalog.NameOf<InstanceVersionUpdatedData>() => "update",
+        var a when a == KgsmEventCatalog.NameOf<InstanceUpdateAvailableData>() => "update_available",
+        var a when a == KgsmEventCatalog.NameOf<InstanceInstalledData>() => "installed",
+        var a when a == KgsmEventCatalog.NameOf<InstanceBackupCreatedData>() => "backup",
+        var a when a == KgsmEventCatalog.NameOf<HostThresholdBreachedData>() => "threshold_breach",
+        var a when a == KgsmEventCatalog.NameOf<HostThresholdClearedData>() => "threshold_clear",
         _ => null,
     };
 }
@@ -153,8 +164,8 @@ public sealed record NotificationTestResult(bool Ok, string? Posted, string? Cha
 /// One notifiable fact, derived from an audit row, en route to the providers (M8·c Increment B). Lean and
 /// provider-agnostic: it carries what a provider needs to <em>route</em> (the <see cref="CatalogId"/> →
 /// the user's rule) and to <em>render</em> a message — never the audit row itself (the bus is decoupled
-/// from the audit contract). <see cref="Action"/> is the source <see cref="AuditAction"/> so a provider
-/// can phrase a nuance (a restart vs a fresh start) while the rule lookup still keys on the catalog id.
+/// from the audit contract). <see cref="Action"/> is the event's own name so a provider can phrase a
+/// nuance (a restart vs a fresh start) while the rule lookup still keys on the catalog id.
 /// </summary>
 /// <param name="SubjectKey">What this event is <em>about</em>, for coalescing repeats — the server for a
 /// lifecycle event, the individual watched condition for a threshold one. It exists because
@@ -185,8 +196,8 @@ public sealed record NotificationEvent(
     string? ActionQualifier = null);
 
 /// <summary>
-/// The <see cref="NotificationEvent.Action"/> values for facts <b>this API observes itself</b>, which are
-/// therefore not <see cref="AuditAction"/> values.
+/// The <see cref="NotificationEvent.Action"/> values for facts <b>this API observes itself</b>, which no
+/// producer's journal therefore names.
 /// </summary>
 /// <remarks>
 /// <b>Nothing here is ever written to the audit log.</b> The audit trail records what the engine and this

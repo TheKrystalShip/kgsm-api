@@ -55,10 +55,11 @@ public sealed class AuditMergeTests : IDisposable
     public async Task PageMergedAsync_ExcludesEngineSourcedActionsFromLocal_EvenWithNoMonitor()
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
-        // Simulates a row frozen in the local table from BEFORE the Phase-C cutover (KgsmAuditConsumer no
-        // longer writes these, but old rows already there don't vanish from the DB — just from the merge).
-        await SeedLocalAsync(AuditAction.ServerStart, now, "evt_frozen1");
-        await SeedLocalAsync(AuditAction.FileWrite, now.AddSeconds(1), "evt_apionly1");
+        // A row frozen in the local table from before this API stopped keeping its own copy of what the
+        // engine did. It carries the spelling the build that wrote it used, which is what the exclusion
+        // has to match: old rows don't vanish from the DB, only from the merge.
+        await SeedLocalAsync("server.start", now, "evt_frozen1");
+        await SeedLocalAsync("file.written", now.AddSeconds(1), "evt_apionly1");
 
         var fake = new FakeEventJournal(_ => EventHistoryPage.Unreadable); // unreadable — degrade, local-only
         AuditPage page = await AuditQueries.PageMergedAsync(
@@ -67,14 +68,14 @@ public sealed class AuditMergeTests : IDisposable
 
         Assert.True(page.EngineHistoryDegraded);
         Assert.Single(page.Data);
-        Assert.Equal(AuditAction.FileWrite, page.Data[0].Action); // the frozen server.start row is excluded
+        Assert.Equal("file.written", page.Data[0].Action); // the frozen server.start row is excluded
     }
 
     // --- Monitor down: local-only rows + an honest degraded marker, never a 500 -----------------------
     [Fact]
     public async Task PageMergedAsync_MonitorDown_LocalOnly_DegradedMarkerTrue()
     {
-        await SeedLocalAsync(AuditAction.FileWrite, DateTimeOffset.UtcNow, "evt_local1");
+        await SeedLocalAsync("file.written", DateTimeOffset.UtcNow, "evt_local1");
         var fake = new FakeEventJournal(_ => EventHistoryPage.Unreadable);
 
         AuditPage page = await AuditQueries.PageMergedAsync(
@@ -94,7 +95,7 @@ public sealed class AuditMergeTests : IDisposable
     [Fact]
     public async Task PageMergedAsync_JournalReaderThrows_DegradesHonestly_NeverThrows()
     {
-        await SeedLocalAsync(AuditAction.FileWrite, DateTimeOffset.UtcNow, "evt_local2");
+        await SeedLocalAsync("file.written", DateTimeOffset.UtcNow, "evt_local2");
         var fake = new FakeEventJournal(_ => throw new IOException("journal exploded"));
 
         AuditPage page = await AuditQueries.PageMergedAsync(
@@ -112,7 +113,7 @@ public sealed class AuditMergeTests : IDisposable
     [Fact]
     public async Task PageMergedAsync_NoEngineProvisioned_DegradesRatherThanClaimingNoEvents()
     {
-        await SeedLocalAsync(AuditAction.FileWrite, DateTimeOffset.UtcNow, "evt_local3");
+        await SeedLocalAsync("file.written", DateTimeOffset.UtcNow, "evt_local3");
 
         AuditPage page = await AuditQueries.PageMergedAsync(
             _db, journal: null, HostId, cursor: null, limit: 50,
@@ -128,8 +129,8 @@ public sealed class AuditMergeTests : IDisposable
     public async Task PageMergedAsync_InterleavesBothSourcesByTsDescending()
     {
         DateTimeOffset t0 = new(2026, 7, 18, 0, 0, 0, TimeSpan.Zero);
-        await SeedLocalAsync(AuditAction.FileWrite, t0.AddSeconds(1), "evt_local1");   // 2nd oldest
-        await SeedLocalAsync(AuditAction.FileWrite, t0.AddSeconds(3), "evt_local2");   // newest
+        await SeedLocalAsync("file.written", t0.AddSeconds(1), "evt_local1");   // 2nd oldest
+        await SeedLocalAsync("file.written", t0.AddSeconds(3), "evt_local2");   // newest
 
         var fake = new FakeEventJournal(_ => FakeEventJournal.Page(
             EngineEvent("evt_mon1", t0.AddSeconds(2)),  // 2nd newest
@@ -164,7 +165,7 @@ public sealed class AuditMergeTests : IDisposable
     public async Task PageMergedAsync_TsTieAcrossSources_PagesStably_NoLossNoDuplicate()
     {
         DateTimeOffset tie = new(2026, 7, 18, 5, 0, 0, TimeSpan.Zero);
-        await SeedLocalAsync(AuditAction.FileWrite, tie, "evt_local_tie");
+        await SeedLocalAsync("file.written", tie, "evt_local_tie");
 
         var fake = new FakeEventJournal(q =>
         {
@@ -227,7 +228,7 @@ public sealed class AuditMergeTests : IDisposable
         var engine = new List<EventHistoryEntry>();
         for (int i = 0; i < 20; i++)
         {
-            await SeedLocalAsync(AuditAction.FileWrite, t0.AddMinutes(i * 2), $"evt_local{i:D2}");
+            await SeedLocalAsync("file.written", t0.AddMinutes(i * 2), $"evt_local{i:D2}");
             engine.Add(EngineEvent($"evt_2026-08-04_{i:D12}", t0.AddMinutes(i * 2 + 1)));
         }
 
@@ -289,7 +290,7 @@ public sealed class AuditMergeTests : IDisposable
 
         // Local rows older than every engine event, so they are what fills a starved page.
         for (int i = 0; i < 8; i++)
-            await SeedLocalAsync(AuditAction.FileWrite, t0.AddMinutes(-10 - i), $"evt_local{i:D2}");
+            await SeedLocalAsync("file.written", t0.AddMinutes(-10 - i), $"evt_local{i:D2}");
 
         var fake = new FakeEventJournal(q =>
         {
@@ -316,7 +317,7 @@ public sealed class AuditMergeTests : IDisposable
         // All 8 slots go to real engine events — the silent ones cost nothing — so no local row is
         // pulled up past engine history that has not been served yet.
         Assert.Equal(8, page.Data.Count);
-        Assert.All(page.Data, r => Assert.Equal(AuditAction.ServerStart, r.Action));
+        Assert.All(page.Data, r => Assert.Equal("server.started", r.Action));
     }
 }
 

@@ -33,26 +33,27 @@ namespace TheKrystalShip.Api.Tests;
 public sealed class NotificationMappingTests
 {
     [Theory]
-    [InlineData(AuditAction.ServerStart, "online")]
-    [InlineData(AuditAction.ServerRestart, "online")] // a completed restart = back online (closes the auto-heal gap)
-    [InlineData(AuditAction.ServerStop, "offline")]
-    [InlineData(AuditAction.ServerCrash, "crash")]
-    [InlineData(AuditAction.ServerUpdate, "update")]
-    [InlineData(AuditAction.ServerUpdateAvailable, "update_available")]
-    [InlineData(AuditAction.ServerInstall, "installed")]
-    [InlineData(AuditAction.BackupCreate, "backup")]
-    [InlineData(AuditAction.HostThresholdBreach, "threshold_breach")]
-    [InlineData(AuditAction.HostThresholdClear, "threshold_clear")] // separate ids: the all-clear is its own choice
-    [InlineData(AuditAction.PlayerJoin, "player_join")]
+    [InlineData("server.started", "online")]
+    [InlineData("server.restarted", "online")] // a completed restart = back online (closes the auto-heal gap)
+    [InlineData("server.stopped", "offline")]
+    [InlineData("server.crashed", "crash")]
+    [InlineData("server.updated", "update")]
+    [InlineData("server.update.available", "update_available")]
+    [InlineData("server.installed", "installed")]
+    [InlineData("backup.created", "backup")]
+    [InlineData("host.threshold.breached", "threshold_breach")]
+    [InlineData("host.threshold.cleared", "threshold_clear")] // separate ids: the all-clear is its own choice
+    [InlineData("player.joined", "player_join")]
     public void CatalogIdForAction_MapsNotifiableActions(string action, string expected) =>
         Assert.Equal(expected, NotificationCatalog.CatalogIdForAction(action));
 
     [Theory]
-    [InlineData(AuditSeverity.Warn, "crash")]        // server.crashed — the watchdog is restarting it
-    [InlineData(AuditSeverity.Danger, "crash_loop")] // server.crash.exhausted — it has given up
-    [InlineData(null, "crash")]                      // unstated reads as the restarting kind, never the escalation
-    public void The_severity_is_what_separates_a_crash_from_a_give_up(string? severity, string expected) =>
-        Assert.Equal(expected, NotificationCatalog.CatalogIdForAction(AuditAction.ServerCrash, severity));
+    [InlineData("server.crashed", "crash")]                 // the watchdog is restarting it
+    [InlineData("server.crash.exhausted", "crash_loop")]    // it has given up
+    public void A_crash_and_a_give_up_are_two_events_and_stay_two(string action, string expected) =>
+        // Nothing outside the name has to be read to tell them apart, so the escalation cannot be lost
+        // by a row that failed to carry the severity that used to be the only thing separating them.
+        Assert.Equal(expected, NotificationCatalog.CatalogIdForAction(action));
 
     [Theory]
     [InlineData("player_join")]
@@ -70,12 +71,12 @@ public sealed class NotificationMappingTests
         Assert.True(NotificationCatalog.DefaultRule(catalogId).Enabled);
 
     [Theory]
-    [InlineData(AuditAction.ServerUninstall)]
-    [InlineData(AuditAction.BackupRestore)]
-    [InlineData(AuditAction.NetworkPortsOpen)]
-    [InlineData(AuditAction.NetworkPortsClose)]
-    [InlineData(AuditAction.AuthLogin)]
-    [InlineData(AuditAction.AuthLogout)]
+    [InlineData("server.uninstalled")]
+    [InlineData("backup.restored")]
+    [InlineData("network.ports.opened")]
+    [InlineData("network.ports.closed")]
+    [InlineData("auth.signed_in")]
+    [InlineData("auth.signed_out")]
     public void CatalogIdForAction_DropsNonNotifiable(string action) =>
         Assert.Null(NotificationCatalog.CatalogIdForAction(action));
 
@@ -84,17 +85,14 @@ public sealed class NotificationMappingTests
     {
         string[] notifiable =
         [
-            AuditAction.ServerStart, AuditAction.ServerRestart, AuditAction.ServerStop,
-            AuditAction.ServerCrash, AuditAction.ServerUpdate, AuditAction.ServerUpdateAvailable,
-            AuditAction.ServerInstall, AuditAction.BackupCreate,
-            AuditAction.HostThresholdBreach, AuditAction.HostThresholdClear, AuditAction.PlayerJoin,
+            "server.started", "server.restarted", "server.stopped",
+            "server.crashed", "server.updated", "server.update.available",
+            "server.installed", "backup.created",
+            "host.threshold.breached", "host.threshold.cleared", "player.joined",
+            "server.crash.exhausted",
         ];
         foreach (string action in notifiable)
             Assert.True(NotificationCatalog.IsKnown(NotificationCatalog.CatalogIdForAction(action)!));
-
-        // Including the one whose id depends on the severity, which the loop above cannot reach.
-        Assert.True(NotificationCatalog.IsKnown(
-            NotificationCatalog.CatalogIdForAction(AuditAction.ServerCrash, AuditSeverity.Danger)!));
     }
 }
 
@@ -137,8 +135,8 @@ public sealed class NotificationBusTests
     public async Task Breach_IsAboutTheCondition_NotTheHost()
     {
         NotificationBus bus = NewBus();
-        bus.Publish(ThresholdRow(AuditAction.HostThresholdBreach, "host-temp", "k10temp/Tctl", DateTimeOffset.UtcNow));
-        bus.Publish(ThresholdRow(AuditAction.HostThresholdBreach, "host-disk", "/", DateTimeOffset.UtcNow));
+        bus.Publish(ThresholdRow("host.threshold.breached", "host-temp", "k10temp/Tctl", DateTimeOffset.UtcNow));
+        bus.Publish(ThresholdRow("host.threshold.breached", "host-disk", "/", DateTimeOffset.UtcNow));
 
         List<NotificationEvent> got = await DrainAsync(bus, 2);
 
@@ -155,7 +153,7 @@ public sealed class NotificationBusTests
         bus.Publish(new AuditRecord(
             Id: "evt_x", Ts: DateTimeOffset.UtcNow, Origin: AuditOrigin.System,
             Actor: new AuditActor(ActorKind.System, "watchdog", ActorProvider.System),
-            Action: AuditAction.ServerCrash, Severity: AuditSeverity.Warn,
+            Action: "server.crashed", Severity: AuditSeverity.Warn,
             Target: new AuditTarget(AuditTargetKind.Server, "srv", "srv"),
             ServerId: "srv", HostId: "test-host", Summary: "srv crashed", Meta: null));
 
@@ -166,7 +164,7 @@ public sealed class NotificationBusTests
     private static AuditRecord JoinRow(string server, string? id, string? name, string? addr) =>
         new(Id: "evt_" + Guid.NewGuid().ToString("N")[..10], Ts: DateTimeOffset.UtcNow, Origin: AuditOrigin.System,
             Actor: new AuditActor(ActorKind.System, "watchdog", ActorProvider.System),
-            Action: AuditAction.PlayerJoin, Severity: AuditSeverity.Info,
+            Action: "player.joined", Severity: AuditSeverity.Info,
             Target: new AuditTarget(AuditTargetKind.Server, server, server),
             ServerId: server, HostId: "test-host", Summary: "somebody joined",
             Meta: new Dictionary<string, string>(
@@ -296,10 +294,10 @@ public sealed class NotificationBusTests
     public async Task Clear_ThatDidNotRecover_IsNotAnnounced(string reason)
     {
         NotificationBus bus = NewBus();
-        bus.Publish(ThresholdRow(AuditAction.HostThresholdClear, "host-temp", "k10temp/Tctl", DateTimeOffset.UtcNow, reason));
+        bus.Publish(ThresholdRow("host.threshold.cleared", "host-temp", "k10temp/Tctl", DateTimeOffset.UtcNow, reason));
         // The barrier: a real recovery published after it. The channel is FIFO, so receiving this one
         // proves the first was dropped rather than merely slow.
-        bus.Publish(ThresholdRow(AuditAction.HostThresholdClear, "host-disk", "/", DateTimeOffset.UtcNow));
+        bus.Publish(ThresholdRow("host.threshold.cleared", "host-disk", "/", DateTimeOffset.UtcNow));
 
         NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
         Assert.Contains("host-disk", only.SubjectKey);
@@ -310,9 +308,9 @@ public sealed class NotificationBusTests
     {
         NotificationBus bus = NewBus();
         // What a cold start transcribing yesterday's episodes looks like.
-        bus.Publish(ThresholdRow(AuditAction.HostThresholdBreach, "host-temp", "k10temp/Tctl",
+        bus.Publish(ThresholdRow("host.threshold.breached", "host-temp", "k10temp/Tctl",
             DateTimeOffset.UtcNow.AddHours(-6)));
-        bus.Publish(ThresholdRow(AuditAction.HostThresholdBreach, "host-disk", "/", DateTimeOffset.UtcNow));
+        bus.Publish(ThresholdRow("host.threshold.breached", "host-disk", "/", DateTimeOffset.UtcNow));
 
         NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
         Assert.Contains("host-disk", only.SubjectKey);
@@ -327,7 +325,7 @@ public sealed class NotificationBusTests
         bus.Publish(new AuditRecord(
             Id: "evt_y", Ts: DateTimeOffset.UtcNow.AddHours(-6), Origin: AuditOrigin.System,
             Actor: new AuditActor(ActorKind.System, "watchdog", ActorProvider.System),
-            Action: AuditAction.ServerCrash, Severity: AuditSeverity.Warn,
+            Action: "server.crashed", Severity: AuditSeverity.Warn,
             Target: new AuditTarget(AuditTargetKind.Server, "srv", "srv"),
             ServerId: "srv", HostId: "test-host", Summary: "srv crashed", Meta: null));
 
@@ -352,14 +350,14 @@ public sealed class NotificationDeliveryE2ETests
     private static AuditWrite CrashWrite(string server) => new(
         Ts: DateTimeOffset.UtcNow, Origin: AuditOrigin.System,
         Actor: new AuditActor(ActorKind.System, "system", ActorProvider.System),
-        Action: AuditAction.ServerCrash, Severity: AuditSeverity.Warn,
+        Action: "server.crashed", Severity: AuditSeverity.Warn,
         Target: new AuditTarget(AuditTargetKind.Server, server, server),
         ServerId: server, HostId: "test-host", Summary: $"{server} crashed — auto-restarting", Meta: null);
 
     private static AuditWrite StartWrite(string server) => new(
         Ts: DateTimeOffset.UtcNow, Origin: AuditOrigin.Api,
         Actor: new AuditActor(ActorKind.Token, "tester", ActorProvider.Api),
-        Action: AuditAction.ServerStart, Severity: AuditSeverity.Info,
+        Action: "server.started", Severity: AuditSeverity.Info,
         Target: new AuditTarget(AuditTargetKind.Server, server, server),
         ServerId: server, HostId: "test-host", Summary: $"started {server}", Meta: null);
 
@@ -527,7 +525,7 @@ public sealed class NotificationDeliveryE2ETests
     private static AuditWrite BreachWrite(string ruleKey, string sensor, string summary) => new(
         Ts: DateTimeOffset.UtcNow, Origin: AuditOrigin.System,
         Actor: new AuditActor(ActorKind.System, "monitor", ActorProvider.System),
-        Action: AuditAction.HostThresholdBreach, Severity: AuditSeverity.Warn,
+        Action: "host.threshold.breached", Severity: AuditSeverity.Warn,
         Target: new AuditTarget(AuditTargetKind.Host, "test-host", "test-host"),
         ServerId: null, HostId: "test-host", Summary: summary,
         Meta: new Dictionary<string, string>

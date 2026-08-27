@@ -34,7 +34,7 @@ public sealed class AuditRedactionTests
     public void APlayersAddressNeedsOperator_TheirNameDoesNot()
     {
         AuditRecord viewer = AuditRedaction.ForViewer(Row(
-            AuditAction.PlayerJoin, "bob joined mc",
+            "player.joined", "bob joined mc",
             ("playerName", "bob"), ("playerAddr", "95.49.44.91"), ("sessionKey", "abc")));
 
         Assert.False(viewer.Meta!.ContainsKey("playerAddr"));
@@ -52,7 +52,7 @@ public sealed class AuditRedactionTests
     public void AConsoleCommandLeavesTheSummaryTooNotJustTheMeta()
     {
         AuditRecord viewer = AuditRedaction.ForViewer(Row(
-            AuditAction.ConsoleInput, "ran 'op somebody' on mc", ("command", "op somebody")));
+            "console.input.sent", "ran 'op somebody' on mc", ("command", "op somebody")));
 
         Assert.Null(viewer.Meta);
         Assert.DoesNotContain("op somebody", viewer.Summary, StringComparison.Ordinal);
@@ -73,7 +73,7 @@ public sealed class AuditRedactionTests
             new InstanceInputSentData { InstanceName = "mc", Command = "" }, "h1");
 
         AuditRecord viewer = AuditRedaction.ForViewer(
-            Row(AuditAction.ConsoleInput, carried.Summary, ("command", "op somebody")));
+            Row("console.input.sent", carried.Summary, ("command", "op somebody")));
 
         Assert.Equal(carriedNothing.Summary, viewer.Summary);
     }
@@ -88,7 +88,7 @@ public sealed class AuditRedactionTests
     public void AModerationTargetNeedsOperatorBecauseItMayBeAnAddress()
     {
         AuditRecord viewer = AuditRedaction.ForViewer(Row(
-            AuditAction.PlayerBan, "banned 95.49.44.91 on mc",
+            "player.banned", "banned 95.49.44.91 on mc",
             ("target", "95.49.44.91"), ("command", "/ban 95.49.44.91")));
 
         Assert.Null(viewer.Meta);
@@ -104,7 +104,7 @@ public sealed class AuditRedactionTests
     [Fact]
     public void TheRowSurvivesEverythingTakenOffIt()
     {
-        AuditRecord full = Row(AuditAction.PlayerBan, "banned bob on mc", ("target", "bob"));
+        AuditRecord full = Row("player.banned", "banned bob on mc", ("target", "bob"));
         AuditRecord viewer = AuditRedaction.ForViewer(full);
 
         Assert.Equal(full.Id, viewer.Id);
@@ -121,7 +121,7 @@ public sealed class AuditRedactionTests
     [Fact]
     public void AnOrdinaryRowIsNotCopiedAtAll()
     {
-        AuditRecord row = Row(AuditAction.ServerStart, "started mc");
+        AuditRecord row = Row("server.started", "started mc");
 
         Assert.Same(row, AuditRedaction.ForViewer(row));
     }

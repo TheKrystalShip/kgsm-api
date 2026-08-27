@@ -1751,7 +1751,7 @@ traced and confirmed already in place — M8·b is a pure api wiring increment:
 - **kgsm bash:** `install.sh`/`uninstall.sh` emit `instance-installed`/`instance-uninstalled`, and the
   actor/origin stamping is at the **global** emit chokepoint (`events.sh` reads `KGSM_EVENT_ACTOR`/`_ORIGIN`
   for *every* event), so these two inherit provenance like start/stop — not a per-verb wiring.
-- **audit:** `AuditAction.ServerInstall`/`ServerUninstall` + the `KgsmAuditConsumer` handlers for
+- **audit:** the `KgsmAuditConsumer` handlers for
   `InstanceInstalled/UninstalledData` were already wired (at M5/M6·0) — the echo path is ready, no double-write.
 - **The load-bearing assumption, verified in source (not assumed):** `install.sh:127` derives the instance
   name by calling `instances.sh generate-id <bp> --name <id>`, and `_cmd_generate_id` (`instances.sh:961`)
@@ -1997,7 +1997,7 @@ only — no upstream change** (no kgsm/kgsm-lib/monitor/watchdog), no EF migrati
 The contract is in §6 ("File browser"). New code: `Services/Files/InstanceFileService.cs` (the jailed I/O core
 + the typed results), `Services/Files/PosixFile.cs` (the `lstat` P/Invoke — the only honest socket/FIFO oracle),
 `Controllers/ServerFilesController.cs` (the three endpoints, operator-gated, instance-resolve/degrade like
-config/backups), `Contracts/FilesDto.cs`, `AuditAction.FileWrite`, the `FilesMaxEntries`/`FilesMaxEditBytes`
+config/backups), `Contracts/FilesDto.cs`, `ApiJournal.FileWrittenEvent`, the `FilesMaxEntries`/`FilesMaxEditBytes`
 `ApiOptions` knobs + appsettings, and the Startup registration.
 
 **Security proven empirically, not by string-logic** (the advisor's load-bearing point): a temp-dir probe

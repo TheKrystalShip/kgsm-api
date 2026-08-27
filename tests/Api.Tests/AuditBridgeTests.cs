@@ -21,7 +21,7 @@ public sealed class AuditBridgeTests
     public void Restart_IsAlwaysRecovery(string? origin)
     {
         var data = new InstanceRestartedData { InstanceName = "mc", Origin = origin };
-        Assert.True(KgsmAuditConsumer.IsRecoveryAction(data, AuditAction.ServerRestart));
+        Assert.True(KgsmAuditConsumer.IsRecoveryAction(data, "server.restarted"));
     }
 
     // A human-driven start (operator/api/discord, or the bare-CLI null origin) IS a recovery: a person
@@ -35,7 +35,7 @@ public sealed class AuditBridgeTests
     public void Start_NonSystemOrigin_IsRecovery(string? origin)
     {
         var data = new InstanceStartedData { InstanceName = "mc", Origin = origin };
-        Assert.True(KgsmAuditConsumer.IsRecoveryAction(data, AuditAction.ServerStart));
+        Assert.True(KgsmAuditConsumer.IsRecoveryAction(data, "server.started"));
     }
 
     // A system-origin start is the watchdog boot-autostart (a caller may never declare origin=system) —
@@ -46,6 +46,6 @@ public sealed class AuditBridgeTests
     public void Start_SystemOrigin_IsNotRecovery(string origin)
     {
         var data = new InstanceStartedData { InstanceName = "mc", Origin = origin };
-        Assert.False(KgsmAuditConsumer.IsRecoveryAction(data, AuditAction.ServerStart));
+        Assert.False(KgsmAuditConsumer.IsRecoveryAction(data, "server.started"));
     }
 }

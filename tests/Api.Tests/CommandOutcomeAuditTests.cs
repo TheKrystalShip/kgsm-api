@@ -43,7 +43,7 @@ public sealed class CommandOutcomeAuditTests
             Outcome(error: "kgsm: no such instance", exitCode: 2),
             ApiJournal.CommandFailedEvent, HostId);
 
-        Assert.Equal(AuditAction.CommandFailed, row.Action);
+        Assert.Equal("command.failed", row.Action);
         Assert.Equal(AuditSeverity.Danger, row.Severity);
         Assert.Equal("could not start factorio-test", row.Summary);
         Assert.Equal("factorio-test", row.ServerId);
@@ -60,7 +60,7 @@ public sealed class CommandOutcomeAuditTests
                     exitCode: 51),
             ApiJournal.CommandRefusedEvent, HostId);
 
-        Assert.Equal(AuditAction.CommandRefused, row.Action);
+        Assert.Equal("command.refused", row.Action);
         Assert.Equal(AuditSeverity.Warn, row.Severity);
         Assert.Contains("refused to start factorio-test", row.Summary, StringComparison.Ordinal);
     }
@@ -72,7 +72,7 @@ public sealed class CommandOutcomeAuditTests
             Outcome(verb: CommandVerb.Update, batchId: "batch_dead1"),
             ApiJournal.CommandCancelledEvent, HostId);
 
-        Assert.Equal(AuditAction.CommandCancelled, row.Action);
+        Assert.Equal("command.cancelled", row.Action);
         Assert.Equal(AuditSeverity.Info, row.Severity);
         Assert.Contains("cancelled before it ran", row.Summary, StringComparison.Ordinal);
         Assert.Equal("batch_dead1", row.Meta!["batchId"]);

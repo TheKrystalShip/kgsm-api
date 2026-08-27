@@ -42,7 +42,7 @@ public sealed class LeafProvisioningTests
         // A service.connect audit row landed, targeting the leaf, actor = the caller.
         JsonElement audit = await Json(admin.GetAsync("/api/v1/audit"));
         JsonElement[] rows = audit.GetProperty("data").EnumerateArray().ToArray();
-        JsonElement connect = rows.First(r => r.GetProperty("action").GetString() == "service.connect");
+        JsonElement connect = rows.First(r => r.GetProperty("action").GetString() == "service.connected");
         Assert.Equal("leaf", connect.GetProperty("target").GetProperty("kind").GetString());
         Assert.Equal(MonitorUnitless, connect.GetProperty("target").GetProperty("id").GetString());
         Assert.Equal("api", connect.GetProperty("origin").GetString());
@@ -66,7 +66,7 @@ public sealed class LeafProvisioningTests
 
         JsonElement audit = await Json(admin.GetAsync("/api/v1/audit"));
         Assert.Contains(audit.GetProperty("data").EnumerateArray(),
-            r => r.GetProperty("action").GetString() == "service.disconnect");
+            r => r.GetProperty("action").GetString() == "service.disconnected");
     }
 
     // ---- the capabilities.patch is emitted on the stream when a leaf connects ----------------------

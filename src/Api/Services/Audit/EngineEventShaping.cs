@@ -90,7 +90,7 @@ public static class EngineEventShaping
             // IsPhase already drops it, exactly like server.install.started. The bracket's open
             // half is not news; its close is.
             AssistantEvents.ActionDeclined => Map<AssistantActionDeclinedEventData>(item,
-                d => Assistant(item, AuditAction.AssistantActionDeclined, AuditSeverity.Warn,
+                d => Assistant(item, item.Type, AuditSeverity.Warn,
                     d.Instance is null
                         ? $"refused {d.Tool} — {Declined(d.DeclineReason)}"
                         : $"refused {d.Tool} on {d.Instance} — {Declined(d.DeclineReason)}",
@@ -98,7 +98,7 @@ public static class EngineEventShaping
                     Meta(("tool", d.Tool), ("reason", d.DeclineReason), ("tier", d.Tier)))),
 
             AssistantEvents.ActionProposed => Map<AssistantActionProposedEventData>(item,
-                d => Assistant(item, AuditAction.AssistantActionProposed, AuditSeverity.Info,
+                d => Assistant(item, item.Type, AuditSeverity.Info,
                     d.Instance is null
                         ? $"proposed {d.Kind}, awaiting approval"
                         : $"proposed {d.Kind} on {d.Instance}, awaiting approval",
@@ -108,7 +108,7 @@ public static class EngineEventShaping
 
             // No target: this is about the assistant's own honesty, not about anything on a server.
             AssistantEvents.ClaimCorrected => Map<AssistantClaimCorrectedEventData>(item,
-                d => Assistant(item, AuditAction.AssistantClaimCorrected, AuditSeverity.Warn,
+                d => Assistant(item, item.Type, AuditSeverity.Warn,
                     $"described work the turn did not do ({d.Check}) — {d.Resolution}",
                     hostId, instance: null,
                     Meta(("check", d.Check), ("resolution", d.Resolution), ("net", d.Net)))),
@@ -116,7 +116,7 @@ public static class EngineEventShaping
             AssistantEvents.BlueprintAuthored => Map<AssistantBlueprintAuthoredEventData>(item,
                 d => new AuditWrite(
                     item.Ts, AuditMapping.NormalizeOrigin(item.Origin), AuditMapping.ParseActor(item.Actor),
-                    AuditAction.AssistantBlueprintAuthored,
+                    item.Type,
                     d.AuthoringOutcome == "verified" ? AuditSeverity.Success : AuditSeverity.Warn,
                     // Blueprint-targeted, and carrying no serverId: the probe was a disposable instance
                     // that no longer exists, and naming it as a server would put a row about a machine
@@ -128,65 +128,65 @@ public static class EngineEventShaping
                          ("durationSec", d.DurationSec?.ToString(CultureInfo.InvariantCulture))))),
 
             "server.started" => Map<InstanceStartedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.ServerStart, AuditSeverity.Info, "started", hostId)),
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Info, "started", hostId)),
             // The moment players can actually connect, which server.start does not report — that one
             // says the process spawned. Two facts about two different moments, and the second is the
             // one somebody asking "when could people get in" is looking for.
             "server.ready" => Map<InstanceReadyData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.ServerReady, AuditSeverity.Info, "finished loading", hostId)),
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Info, "finished loading", hostId)),
             "server.stopped" => Map<InstanceStoppedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.ServerStop, AuditSeverity.Info, "stopped", hostId)),
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Info, "stopped", hostId)),
             "server.restarted" => Map<InstanceRestartedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.ServerRestart, AuditSeverity.Info, "restarted", hostId)),
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Info, "restarted", hostId)),
             "server.uninstalled" => Map<InstanceUninstalledData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.ServerUninstall, AuditSeverity.Warn, "uninstalled", hostId)),
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Warn, "uninstalled", hostId)),
             "server.updated" => Map<InstanceVersionUpdatedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.ServerUpdate, AuditSeverity.Info, "updated", hostId,
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Info, "updated", hostId,
                     Meta(("oldVersion", d.OldVersion), ("newVersion", d.NewVersion)))),
             // The update run that ended without the version moving, for a reason. Same action as the
             // successful one with the severity carrying the outcome — the server.crash shape, rather
             // than an invented action for every way a thing can fail.
             "server.update.failed" => Map<InstanceUpdateFailedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.ServerUpdate, AuditSeverity.Danger, "could not update", hostId)),
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Danger, "could not update", hostId)),
             "server.uninstall.failed" => Map<InstanceUninstallFailedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.ServerUninstall, AuditSeverity.Danger, "could not uninstall", hostId)),
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Danger, "could not uninstall", hostId)),
             "server.update.available" => Map<InstanceUpdateAvailableData>(item,
                 d => AuditMapping.FromUpdateAvailableEvent(d, hostId)),
             "server.installed" => Map<InstanceInstalledData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.ServerInstall, AuditSeverity.Success, "installed", hostId,
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Success, "installed", hostId,
                     // The library is where it landed. On a host with several disks that is the half of
                     // an install record its operator most needs, and nothing else records it.
                     Meta(("blueprint", d.Blueprint), ("library", d.Library)))),
             // Info, not Success: moving a server between two roots on the same host changes nothing about
             // the server, and the news is which library gave up the space and which took it.
             "server.moved" => Map<InstanceMovedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.ServerMove, AuditSeverity.Info, "moved", hostId,
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Info, "moved", hostId,
                     Meta(("fromLibrary", d.FromLibrary), ("toLibrary", d.ToLibrary)))),
             "backup.created" => Map<InstanceBackupCreatedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.BackupCreate, AuditSeverity.Success, "backed up", hostId,
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Success, "backed up", hostId,
                     Meta(("source", d.Source), ("version", d.Version)))),
             "backup.restored" => Map<InstanceBackupRestoredData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.BackupRestore, AuditSeverity.Success, "restored backup for", hostId,
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Success, "restored backup for", hostId,
                     Meta(("source", d.Source), ("version", d.Version)))),
             // Warn, not Success: destroying a backup is the one backup operation with no undo, and it
             // succeeding is exactly what makes it worth surfacing.
             "backup.deleted" => Map<InstanceBackupDeletedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.BackupDelete, AuditSeverity.Warn, "deleted a backup for", hostId,
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Warn, "deleted a backup for", hostId,
                     Meta(("source", d.Source)))),
             "backup.pruned" => Map<InstanceBackupsPrunedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.BackupPrune, AuditSeverity.Info, "pruned backups for", hostId,
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Info, "pruned backups for", hostId,
                     // `pinned` is what the sweep protected. Without it a sweep that removed nothing
                     // because everything was pinned reads exactly like one that found nothing to remove.
                     Meta(("deleted", d.Deleted.ToString(CultureInfo.InvariantCulture)),
                          ("kept", d.Kept.ToString(CultureInfo.InvariantCulture)),
                          ("pinned", d.Pinned.ToString(CultureInfo.InvariantCulture))))),
             "backup.pinned" => Map<InstanceBackupPinnedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.BackupPin, AuditSeverity.Info, "pinned a backup for", hostId,
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Info, "pinned a backup for", hostId,
                     Meta(("source", d.Source)))),
             // Warn, like a delete: unpinning is what lets the next sweep take an archive somebody
             // deliberately protected, and it succeeding is exactly what makes it worth surfacing.
             "backup.unpinned" => Map<InstanceBackupUnpinnedData>(item,
-                d => AuditMapping.FromServerEvent(d, AuditAction.BackupUnpin, AuditSeverity.Warn, "unpinned a backup for", hostId,
+                d => AuditMapping.FromServerEvent(d, item.Type, AuditSeverity.Warn, "unpinned a backup for", hostId,
                     Meta(("source", d.Source)))),
             "server.crashed" => Map<InstanceCrashedData>(item, d => AuditMapping.FromCrashEvent(d, hostId)),
             "server.crash.exhausted" => Map<InstanceFailedData>(item, d => AuditMapping.FromFailedEvent(d, hostId)),
@@ -237,11 +237,11 @@ public static class EngineEventShaping
             "player.joined" => Map<InstancePlayerJoinedData>(item, d => AuditMapping.FromPlayerJoinedEvent(d, hostId)),
             "player.left" => Map<InstancePlayerLeftData>(item, d => AuditMapping.FromPlayerLeftEvent(d, hostId)),
             "player.kicked" => Map<InstancePlayerKickedData>(item,
-                d => AuditMapping.FromPlayerModerationEvent(d, hostId, AuditAction.PlayerKick, "kicked")),
+                d => AuditMapping.FromPlayerModerationEvent(d, hostId, item.Type, "kicked")),
             "player.banned" => Map<InstancePlayerBannedData>(item,
-                d => AuditMapping.FromPlayerModerationEvent(d, hostId, AuditAction.PlayerBan, "banned")),
+                d => AuditMapping.FromPlayerModerationEvent(d, hostId, item.Type, "banned")),
             "player.unbanned" => Map<InstancePlayerUnbannedData>(item,
-                d => AuditMapping.FromPlayerModerationEvent(d, hostId, AuditAction.PlayerUnban, "unbanned")),
+                d => AuditMapping.FromPlayerModerationEvent(d, hostId, item.Type, "unbanned")),
             "server.renamed" => Map<InstanceDisplayNameChangedData>(item,
                 d => AuditMapping.FromDisplayNameChangedEvent(d, hostId)),
             "config.changed" => Map<InstanceConfigChangedData>(item, d => AuditMapping.FromConfigChangedEvent(d, hostId)),

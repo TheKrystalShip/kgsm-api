@@ -416,9 +416,9 @@ public sealed class UsersControllerTests(AuthTestFactory factory) : IClassFixtur
 
         string audit = await (await Admin().GetAsync("/api/v1/audit?limit=200")).Content.ReadAsStringAsync();
 
-        Assert.Contains(AuditAction.UserProvision, audit, StringComparison.Ordinal);
-        Assert.Contains(AuditAction.UserTierChange, audit, StringComparison.Ordinal);
-        Assert.Contains(AuditAction.UserDisable, audit, StringComparison.Ordinal);
+        Assert.Contains("user.provisioned", audit, StringComparison.Ordinal);
+        Assert.Contains("user.tier_changed", audit, StringComparison.Ordinal);
+        Assert.Contains("user.disabled", audit, StringComparison.Ordinal);
         // The account acted upon rides in meta; the actor is whoever did it.
         Assert.Contains(record.Id, audit, StringComparison.Ordinal);
         // And never the password, in any form.

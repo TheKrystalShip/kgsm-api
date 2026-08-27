@@ -68,14 +68,14 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     public async Task GetAudit_NewestFirst_HonestShape()
     {
         string sid = $"order-{Guid.NewGuid():N}";
-        await factory.SeedAuditAsync(ServerWrite(AuditAction.FileWrite, sid));
-        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConfig, sid));
+        await factory.SeedAuditAsync(ServerWrite("file.written", sid));
+        await factory.SeedAuditAsync(ServerWrite("service.config_changed", sid));
 
         JsonElement body = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}"));
         JsonElement[] rows = body.GetProperty("data").EnumerateArray().ToArray();
         Assert.Equal(2, rows.Length);
-        Assert.Equal(AuditAction.ServiceConfig, rows[0].GetProperty("action").GetString());  // newest first
-        Assert.Equal(AuditAction.FileWrite, rows[1].GetProperty("action").GetString());
+        Assert.Equal("service.config_changed", rows[0].GetProperty("action").GetString());  // newest first
+        Assert.Equal("file.written", rows[1].GetProperty("action").GetString());
 
         JsonElement newest = rows[0];
         Assert.StartsWith("evt_", newest.GetProperty("id").GetString());
@@ -93,7 +93,7 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     {
         string sid = $"page-{Guid.NewGuid():N}";
         for (int i = 0; i < 3; i++)
-            await factory.SeedAuditAsync(ServerWrite(AuditAction.FileWrite, sid));
+            await factory.SeedAuditAsync(ServerWrite("file.written", sid));
 
         // Page 1: limit 2 of 3 -> full page + a cursor.
         JsonElement p1 = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&limit=2"));
@@ -113,12 +113,12 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     {
         string sid = $"filter-{Guid.NewGuid():N}";
         string actor = $"actor-{Guid.NewGuid():N}";
-        await factory.SeedAuditAsync(ServerWrite(AuditAction.FileWrite, sid, actor, AuditSeverity.Info));
-        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConfig, sid, actor, AuditSeverity.Warn));
+        await factory.SeedAuditAsync(ServerWrite("file.written", sid, actor, AuditSeverity.Info));
+        await factory.SeedAuditAsync(ServerWrite("service.config_changed", sid, actor, AuditSeverity.Warn));
 
         JsonElement warn = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn"));
         Assert.Equal(1, warn.GetProperty("data").GetArrayLength());
-        Assert.Equal(AuditAction.ServiceConfig, warn.GetProperty("data")[0].GetProperty("action").GetString());
+        Assert.Equal("service.config_changed", warn.GetProperty("data")[0].GetProperty("action").GetString());
 
         JsonElement byActor = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}"));
         Assert.Equal(2, byActor.GetProperty("data").GetArrayLength()); // both rows share the unique actor
@@ -129,17 +129,17 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     public async Task GetAudit_MultiSeverity_OrsTheSet()
     {
         string sid = $"sev-{Guid.NewGuid():N}";
-        await factory.SeedAuditAsync(ServerWrite(AuditAction.FileWrite, sid, severity: AuditSeverity.Info));
-        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConfig, sid, severity: AuditSeverity.Warn));
-        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConnect, sid, severity: AuditSeverity.Danger));
+        await factory.SeedAuditAsync(ServerWrite("file.written", sid, severity: AuditSeverity.Info));
+        await factory.SeedAuditAsync(ServerWrite("service.config_changed", sid, severity: AuditSeverity.Warn));
+        await factory.SeedAuditAsync(ServerWrite("service.connected", sid, severity: AuditSeverity.Danger));
 
         // "attention" pushes down as warn,danger → the two, never the info row.
         JsonElement att = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn,danger"));
         string?[] actions = att.GetProperty("data").EnumerateArray().Select(x => x.GetProperty("action").GetString()).ToArray();
         Assert.Equal(2, actions.Length);
-        Assert.Contains(AuditAction.ServiceConfig, actions);
-        Assert.Contains(AuditAction.ServiceConnect, actions);
-        Assert.DoesNotContain(AuditAction.FileWrite, actions); // info excluded
+        Assert.Contains("service.config_changed", actions);
+        Assert.Contains("service.connected", actions);
+        Assert.DoesNotContain("file.written", actions); // info excluded
 
         // a stray/whitespace entry in the set is dropped, not matched as a blank severity.
         JsonElement spaced = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn,%20,danger"));
@@ -155,14 +155,14 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         // a backdated row + a fresh one (ServerWrite stamps UtcNow)
         await factory.SeedAuditAsync(new AuditWrite(old, AuditOrigin.Ui,
             new AuditActor(ActorKind.User, "haru", ActorProvider.Discord),
-            AuditAction.FileWrite, AuditSeverity.Info,
+            "file.written", AuditSeverity.Info,
             new AuditTarget(AuditTargetKind.Server, sid, sid), sid, AuthTestFactory.HostId, "old", null));
-        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConfig, sid));
+        await factory.SeedAuditAsync(ServerWrite("service.config_changed", sid));
 
         string since = DateTimeOffset.UtcNow.AddDays(-1).ToString("o");
         JsonElement body = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&since={Uri.EscapeDataString(since)}"));
         Assert.Equal(1, body.GetProperty("data").GetArrayLength());
-        Assert.Equal(AuditAction.ServiceConfig, body.GetProperty("data")[0].GetProperty("action").GetString());
+        Assert.Equal("service.config_changed", body.GetProperty("data")[0].GetProperty("action").GetString());
 
         // a garbage since is ignored (no filter), never a silently empty page.
         JsonElement all = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&since=not-a-date"));
@@ -177,16 +177,16 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     public async Task GetAudit_Category_PrefixMatches()
     {
         string actor = $"cat-{Guid.NewGuid():N}";
-        await factory.SeedAuditAsync(ServerWrite(AuditAction.ServiceConnect, $"s-{Guid.NewGuid():N}", actor));
-        await factory.SeedAuditAsync(ServerWrite(AuditAction.FileWrite, $"n-{Guid.NewGuid():N}", actor));
+        await factory.SeedAuditAsync(ServerWrite("service.connected", $"s-{Guid.NewGuid():N}", actor));
+        await factory.SeedAuditAsync(ServerWrite("file.written", $"n-{Guid.NewGuid():N}", actor));
 
         JsonElement file = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}&category=file"));
         Assert.Equal(1, file.GetProperty("data").GetArrayLength());
-        Assert.Equal(AuditAction.FileWrite, file.GetProperty("data")[0].GetProperty("action").GetString());
+        Assert.Equal("file.written", file.GetProperty("data")[0].GetProperty("action").GetString());
 
         JsonElement service = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}&category=service"));
         Assert.Equal(1, service.GetProperty("data").GetArrayLength());
-        Assert.Equal(AuditAction.ServiceConnect, service.GetProperty("data")[0].GetProperty("action").GetString());
+        Assert.Equal("service.connected", service.GetProperty("data")[0].GetProperty("action").GetString());
     }
 
     // --- The API-internal write path, end-to-end (no kgsm event): a real login -> auth.login row ---
@@ -208,8 +208,8 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         // The login is an API-internal action (no kgsm event) — written directly, no double-write.
         JsonElement body = await Json(await Viewer().GetAsync("/api/v1/audit?actor=haru"));
         JsonElement[] rows = body.GetProperty("data").EnumerateArray().ToArray();
-        Assert.Contains(rows, x => x.GetProperty("action").GetString() == AuditAction.AuthLogin);
-        JsonElement loginRow = rows.First(x => x.GetProperty("action").GetString() == AuditAction.AuthLogin);
+        Assert.Contains(rows, x => x.GetProperty("action").GetString() == "auth.signed_in");
+        JsonElement loginRow = rows.First(x => x.GetProperty("action").GetString() == "auth.signed_in");
         Assert.Equal("discord", loginRow.GetProperty("actor").GetProperty("provider").GetString());
         Assert.Equal("operator", loginRow.GetProperty("meta").GetProperty("tier").GetString());
         Assert.Equal(JsonValueKind.Null, loginRow.GetProperty("target").ValueKind); // panel-wide, no target
@@ -235,7 +235,7 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
             // local table is history nothing announces. A real producer's event takes the same path —
             // it is shaped from its journal and handed to exactly this call.
             factory.Services.GetRequiredService<AuditService>().PublishLive(
-                AuditMapping.ToRecordDirect(ServerWrite(AuditAction.ServerStart, sid),
+                AuditMapping.ToRecordDirect(ServerWrite("server.started", sid),
                     "evt_" + Guid.NewGuid().ToString("N")[..10]));
             JsonElement? got = await frames.WaitForFrame(
                 f => f.GetProperty("type").GetString() == "audit.append", TimeSpan.FromMilliseconds(400));
@@ -250,6 +250,6 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         JsonElement env = frame!.Value;
         Assert.Equal("audit", env.GetProperty("topic").GetString());
         Assert.Equal("audit.append", env.GetProperty("type").GetString());
-        Assert.Equal(AuditAction.ServerStart, env.GetProperty("data").GetProperty("action").GetString());
+        Assert.Equal("server.started", env.GetProperty("data").GetProperty("action").GetString());
     }
 }

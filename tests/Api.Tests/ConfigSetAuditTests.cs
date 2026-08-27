@@ -31,8 +31,8 @@ public sealed class ConfigSetAuditTests
 
         AuditWrite w = AuditMapping.FromConfigChangedEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.ConfigSet, w.Action);
-        Assert.Equal("config.set", w.Action);                 // exact wire string
+        Assert.Equal("config.changed", w.Action);
+        Assert.Equal("config.changed", w.Action);             // exact wire string
         Assert.Equal(AuditSeverity.Info, w.Severity);
         Assert.Equal(ts, w.Ts);                                // event time preserved, not re-stamped
         Assert.Equal("ui", w.Origin);                          // echo carries the stamped surface
@@ -89,7 +89,7 @@ public sealed class ConfigSetAuditTests
 
         AuditWrite w = AuditMapping.FromConfigChangedEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.ConfigSet, w.Action);
+        Assert.Equal("config.changed", w.Action);
         Assert.Contains("config changed for valheim", w.Summary);
         Assert.DoesNotContain("set config", w.Summary);
         Assert.Null(w.Meta);                                   // no key → no meta, never an empty "" entry

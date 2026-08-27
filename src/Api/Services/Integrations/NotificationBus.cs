@@ -1,6 +1,8 @@
 using System.Threading.Channels;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.KGSM.Events;
+using TheKrystalShip.Api.Services.Audit;
 
 namespace TheKrystalShip.Api.Services.Integrations;
 
@@ -32,8 +34,8 @@ public interface INotificationBus
     /// The only caller is the empty-server watcher, and the seam exists rather than the watcher writing a
     /// synthetic audit row to get itself noticed: the audit log records actions, and inventing one there to
     /// reach a notification would put a reading in a record of deeds. <see cref="NotificationEvent.Action"/>
-    /// on anything published here is a <see cref="DerivedNotificationAction"/> value, never an
-    /// <see cref="AuditAction"/>.
+    /// on anything published here is a <see cref="DerivedNotificationAction"/> value, never a name any
+    /// producer's journal carries.
     /// </remarks>
     void PublishDerived(NotificationEvent ev);
 
@@ -74,7 +76,7 @@ public sealed class NotificationBus : INotificationBus
 
     public void Publish(AuditRecord record)
     {
-        string? catalogId = NotificationCatalog.CatalogIdForAction(record.Action, record.Severity);
+        string? catalogId = NotificationCatalog.CatalogIdForAction(record.Action);
         if (catalogId is null) return; // not a notifiable action — dropped before the queue (no work, no read)
         if (!IsWorthAnnouncing(record)) return;
 
@@ -110,6 +112,12 @@ public sealed class NotificationBus : INotificationBus
     /// it would be telling somebody about a temperature from last night.
     /// </para>
     /// </summary>
+    // The two halves of one watched condition. Both are asked about together everywhere below, so the
+    // pair is named once rather than re-spelled at each site.
+    private static bool IsThreshold(string action) =>
+        action == KgsmEventCatalog.NameOf<HostThresholdBreachedData>()
+        || action == KgsmEventCatalog.NameOf<HostThresholdClearedData>();
+
     private static bool IsWorthAnnouncing(AuditRecord record)
     {
         // A provisioning that did not leave somebody waiting is not an approval request. Which one it was
@@ -119,14 +127,14 @@ public sealed class NotificationBus : INotificationBus
         // The key is "to" — the state the account landed in. An account-lifecycle row carries the move
         // as a from/to pair (AuditMapping.FromUserAccountEvent), and a provision has no "from" because
         // there was nothing to move out of.
-        if (record.Action == AuditAction.UserProvision)
+        if (record.Action == ApiJournal.UserProvisionedEvent)
             return record.Meta is not null
                 && record.Meta.TryGetValue("to", out string? status)
                 && status == UserStatuses.ToWire(UserStatus.Pending);
 
-        if (record.Action is not (AuditAction.HostThresholdBreach or AuditAction.HostThresholdClear)) return true;
+        if (!IsThreshold(record.Action)) return true;
 
-        if (record.Action == AuditAction.HostThresholdClear
+        if (record.Action == KgsmEventCatalog.NameOf<HostThresholdClearedData>()
             && record.Meta is not null
             && record.Meta.TryGetValue("reason", out string? reason)
             && reason is "unwatched" or "interrupted")
@@ -147,15 +155,15 @@ public sealed class NotificationBus : INotificationBus
         // A join is about a person, and two people arriving a few seconds apart are two facts. Keyed on the
         // server alone the second would be coalesced away — and the whole point of hearing about a join is
         // that it names who arrived, so the one that got dropped could be the one worth answering.
-        if (record.Action == AuditAction.PlayerJoin)
+        if (record.Action == KgsmEventCatalog.NameOf<InstancePlayerJoinedData>())
             return ActionSubjectOf(record) is { Length: > 0 } who ? $"player/{who}/{record.ServerId}" : null;
 
         // Same reasoning for accounts: two people signing up a minute apart are two people to approve, and
         // they both carry a null server.
-        if (record.Action == AuditAction.UserProvision)
+        if (record.Action == ApiJournal.UserProvisionedEvent)
             return ActionSubjectOf(record) is { Length: > 0 } account ? $"user/{account}" : null;
 
-        if (record.Action is not (AuditAction.HostThresholdBreach or AuditAction.HostThresholdClear)) return null;
+        if (!IsThreshold(record.Action)) return null;
         if (record.Meta is null) return null;
         record.Meta.TryGetValue("ruleKey", out string? rule);
         record.Meta.TryGetValue("ref", out string? reference);
@@ -172,11 +180,12 @@ public sealed class NotificationBus : INotificationBus
     {
         // The account, for a provisioning: the id the account store is keyed on, never the username, which
         // is a label somebody can change out from under a staged handle.
-        if (record.Action == AuditAction.UserProvision)
+        if (record.Action == ApiJournal.UserProvisionedEvent)
             return record.Meta is not null && record.Meta.TryGetValue("userId", out string? userId)
                 && !string.IsNullOrWhiteSpace(userId) ? userId : null;
 
-        if (record.Action is not (AuditAction.PlayerJoin or AuditAction.PlayerLeave)) return null;
+        if (record.Action != KgsmEventCatalog.NameOf<InstancePlayerJoinedData>()
+            && record.Action != KgsmEventCatalog.NameOf<InstancePlayerLeftData>()) return null;
         if (record.Meta is null) return null;
         record.Meta.TryGetValue("playerId", out string? id);
         record.Meta.TryGetValue("playerName", out string? name);

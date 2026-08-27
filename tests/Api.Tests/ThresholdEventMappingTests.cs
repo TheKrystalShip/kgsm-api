@@ -61,7 +61,7 @@ public sealed class ThresholdEventMappingTests
         AuditWrite row = AuditMapping.FromThresholdBreachedEvent(Breach(), HostId);
 
         Assert.Equal(DateTimeOffset.FromUnixTimeMilliseconds(Opened), row.Ts);
-        Assert.Equal(AuditAction.HostThresholdBreach, row.Action);
+        Assert.Equal("host.threshold.breached", row.Action);
     }
 
     [Fact]

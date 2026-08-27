@@ -101,10 +101,10 @@ public sealed class AuditMappingTests
             Timestamp = ts,
         };
 
-        AuditWrite w = AuditMapping.FromServerEvent(data, AuditAction.ServerStart, AuditSeverity.Info,
+        AuditWrite w = AuditMapping.FromServerEvent(data, "server.started", AuditSeverity.Info,
             "started", hostId: "primary");
 
-        Assert.Equal(AuditAction.ServerStart, w.Action);
+        Assert.Equal("server.started", w.Action);
         Assert.Equal(ts, w.Ts);                       // event time preserved, not re-stamped
         Assert.Equal("ui", w.Origin);
         Assert.Equal(ActorKind.User, w.Actor.Kind);   // discord:haru → {user, haru, discord}
@@ -123,7 +123,7 @@ public sealed class AuditMappingTests
         var before = DateTimeOffset.UtcNow;
         var data = new InstanceStoppedData { InstanceName = "rust", Actor = "system" }; // Origin/Timestamp null
 
-        AuditWrite w = AuditMapping.FromServerEvent(data, AuditAction.ServerStop, AuditSeverity.Info,
+        AuditWrite w = AuditMapping.FromServerEvent(data, "server.stopped", AuditSeverity.Info,
             "stopped", hostId: "primary");
 
         Assert.Null(w.Origin);                         // unset → null, never fabricated
@@ -139,13 +139,13 @@ public sealed class AuditMappingTests
         var write = new AuditWrite(
             DateTimeOffset.UtcNow, "ui",
             new AuditActor(ActorKind.User, "haru", ActorProvider.Discord),
-            AuditAction.ServerUpdate, AuditSeverity.Info,
+            "server.updated", AuditSeverity.Info,
             new AuditTarget(AuditTargetKind.Server, "mc", "mc"), "mc", "primary", "updated mc", meta);
 
         AuditRecord rec = AuditMapping.ToRecord(AuditMapping.ToEntity(write, "evt_abc123"));
 
         Assert.Equal("evt_abc123", rec.Id);
-        Assert.Equal(AuditAction.ServerUpdate, rec.Action);
+        Assert.Equal("server.updated", rec.Action);
         Assert.Equal("ui", rec.Origin);
         Assert.Equal("haru", rec.Actor.Name);
         Assert.Equal(AuditTargetKind.Server, rec.Target!.Kind);
@@ -160,7 +160,7 @@ public sealed class AuditMappingTests
         var write = new AuditWrite(
             DateTimeOffset.UtcNow, null,
             new AuditActor(ActorKind.System, "system", ActorProvider.System),
-            AuditAction.ServerStop, AuditSeverity.Info, null, null, "primary", "stopped", Meta: null);
+            "server.stopped", AuditSeverity.Info, null, null, "primary", "stopped", Meta: null);
 
         Assert.Null(AuditMapping.ToEntity(write, "evt_x").Meta);
         Assert.Null(AuditMapping.ToRecord(AuditMapping.ToEntity(write, "evt_x")).Target); // null target survives
@@ -181,7 +181,7 @@ public sealed class AuditMappingTests
 
         AuditWrite w = AuditMapping.FromCrashEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.ServerCrash, w.Action);
+        Assert.Equal("server.crashed", w.Action);
         Assert.Equal(AuditSeverity.Warn, w.Severity);             // auto-restarting → warn, not danger
         Assert.Equal("system", w.Origin);                         // autonomous engine action
         Assert.Equal(ActorKind.System, w.Actor.Kind);
@@ -208,7 +208,7 @@ public sealed class AuditMappingTests
 
         AuditWrite w = AuditMapping.FromFailedEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.ServerCrash, w.Action);          // same doc-given action as a crash
+        Assert.Equal("server.crash.exhausted", w.Action);         // its own event, not a louder crash
         Assert.Equal(AuditSeverity.Danger, w.Severity);           // gave up → danger
         Assert.Contains("gave up", w.Summary);
         Assert.Contains("5 restart(s)", w.Summary);
@@ -245,7 +245,7 @@ public sealed class AuditMappingTests
 
         AuditWrite w = AuditMapping.FromPortsOpenedEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.NetworkPortsOpen, w.Action);
+        Assert.Equal("network.ports.opened", w.Action);
         Assert.Equal(AuditSeverity.Info, w.Severity);
         Assert.Equal("ui", w.Origin);                             // a CLI-path open carries its real provenance
         Assert.Equal("valheim", w.ServerId);
@@ -266,7 +266,7 @@ public sealed class AuditMappingTests
 
         AuditWrite w = AuditMapping.FromPortsClosedEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.NetworkPortsClose, w.Action);
+        Assert.Equal("network.ports.closed", w.Action);
         Assert.Equal(AuditSeverity.Info, w.Severity);
         Assert.Null(w.Origin);                                      // unset origin → null, never fabricated
         Assert.Contains("closed firewall ports", w.Summary);
@@ -292,8 +292,8 @@ public sealed class AuditMappingTests
         AuditWrite w = AuditMapping.FromUpnpOpenedEvent(data, hostId: "primary");
 
         // A SEPARATE action from network.ports.open — router NAT forward, not a host ufw rule.
-        Assert.Equal(AuditAction.NetworkUpnpOpen, w.Action);
-        Assert.NotEqual(AuditAction.NetworkPortsOpen, w.Action);
+        Assert.Equal("network.upnp.opened", w.Action);
+        Assert.NotEqual("network.ports.opened", w.Action);
         Assert.Equal(AuditSeverity.Info, w.Severity);
         Assert.Equal("system", w.Origin);
         Assert.Equal(ActorKind.System, w.Actor.Kind);
@@ -315,7 +315,7 @@ public sealed class AuditMappingTests
 
         AuditWrite w = AuditMapping.FromUpnpClosedEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.NetworkUpnpClose, w.Action);
+        Assert.Equal("network.upnp.closed", w.Action);
         Assert.Equal(AuditSeverity.Info, w.Severity);
         Assert.Contains("removed UPnP ports", w.Summary);
         Assert.Equal("2456/udp", w.Meta!["ports"]);
@@ -339,8 +339,8 @@ public sealed class AuditMappingTests
 
         // Distinct from BOTH the open (a bring-up) and the firewall action — this is a fact about the
         // router, and a reader counting these learns how unreliable theirs is.
-        Assert.Equal(AuditAction.NetworkUpnpReassert, w.Action);
-        Assert.NotEqual(AuditAction.NetworkUpnpOpen, w.Action);
+        Assert.Equal("network.upnp.reasserted", w.Action);
+        Assert.NotEqual("network.upnp.opened", w.Action);
 
         // Warn, not Info: unlike the open/close pair this is an unhealthy condition being papered over.
         Assert.Equal(AuditSeverity.Warn, w.Severity);
@@ -355,7 +355,7 @@ public sealed class AuditMappingTests
     {
         // Nothing in the api re-asserts a forward — the watchdog's sweep is the only producer — so the
         // action belongs in the engine-sourced set, and a local row must never be a second source.
-        Assert.Contains(AuditAction.NetworkUpnpReassert, AuditQueries.EngineSourcedActions);
+        Assert.Contains("network.upnp.reassert", AuditQueries.EngineSourcedActions);
     }
 
     // --- player.join / player.left: presence echoes (watchdog-forwarded, system/system) --------------
@@ -373,7 +373,7 @@ public sealed class AuditMappingTests
 
         AuditWrite w = AuditMapping.FromPlayerJoinedEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.PlayerJoin, w.Action);
+        Assert.Equal("player.joined", w.Action);
         Assert.Equal(AuditSeverity.Info, w.Severity);
         Assert.Equal("system", w.Origin);                         // autonomous observation
         Assert.Equal(ActorKind.System, w.Actor.Kind);
@@ -401,7 +401,7 @@ public sealed class AuditMappingTests
 
         AuditWrite w = AuditMapping.FromPlayerLeftEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.PlayerLeave, w.Action);
+        Assert.Equal("player.left", w.Action);
         Assert.Equal(AuditSeverity.Info, w.Severity);
         Assert.Equal("haru left factorio-01", w.Summary);
         Assert.False(w.Meta!.ContainsKey("playerId"));            // null id omitted, never ""
@@ -539,7 +539,7 @@ public sealed class AuditMappingTests
 
         AuditWrite w = AuditMapping.FromInputSentEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.ConsoleInput, w.Action);
+        Assert.Equal("console.input.sent", w.Action);
         Assert.Equal(AuditSeverity.Info, w.Severity);
         Assert.Equal("ui", w.Origin);
         Assert.Equal(ActorKind.User, w.Actor.Kind);
@@ -577,7 +577,7 @@ public sealed class AuditMappingTests
 
         AuditWrite w = AuditMapping.FromInputSentEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.ConsoleInput, w.Action);
+        Assert.Equal("console.input.sent", w.Action);
         Assert.Equal("sent a console command to valheim", w.Summary);
         Assert.Null(w.Meta);
     }
@@ -600,7 +600,7 @@ public sealed class AuditMappingTests
 
         AuditWrite w = AuditMapping.FromUpdateAvailableEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.ServerUpdateAvailable, w.Action);
+        Assert.Equal("server.update.available", w.Action);
         Assert.Equal(AuditSeverity.Info, w.Severity);
         // Provenance off the envelope, not assumed: a sweep is the leaf's, a hand-run check is a person's.
         Assert.Equal(ts, w.Ts);
@@ -645,7 +645,7 @@ public sealed class AuditMappingTests
 
         AuditWrite w = AuditMapping.FromUpdateAvailableEvent(data, hostId: "primary");
 
-        Assert.Equal(AuditAction.ServerUpdateAvailable, w.Action);
+        Assert.Equal("server.update.available", w.Action);
         Assert.Null(w.Meta);  // both versions null → meta omitted, never stored as ""
     }
 

@@ -257,7 +257,7 @@ public sealed class KgsmAuditConsumer(
             history.Reset(d.InstanceName);
             SettleObserved(d.InstanceName);
             domainPump.Nudge();
-            return WriteServerAndBridge(d, AuditAction.ServerStart, "started");
+            return WriteServerAndBridge(d, "started");
         });
         // server.ready — the watchdog's readiness signal: its log-scrape confirms the game finished
         // booting, distinct from server.started (the process merely spawned). It is a fact of its own
@@ -270,7 +270,7 @@ public sealed class KgsmAuditConsumer(
             instanceCache.MarkReady(d.InstanceName);
             // starting -> running is a state change like any other: say it now, not up to a poll later.
             domainPump.Nudge();
-            return WriteServer(d, AuditAction.ServerReady, AuditSeverity.Info, "finished loading");
+            return WriteServer(d, AuditSeverity.Info, "finished loading");
         });
         events.RegisterHandler<InstanceStoppedData>(d =>
         {
@@ -279,7 +279,7 @@ public sealed class KgsmAuditConsumer(
             history.Reset(d.InstanceName);
             SettleObserved(d.InstanceName);
             domainPump.Nudge();
-            return WriteServer(d, AuditAction.ServerStop, AuditSeverity.Info, "stopped");
+            return WriteServer(d, AuditSeverity.Info, "stopped");
         });
         events.RegisterHandler<InstanceRestartedData>(d =>
         {
@@ -300,12 +300,12 @@ public sealed class KgsmAuditConsumer(
             history.Reset(d.InstanceName);
             SettleObserved(d.InstanceName);
             domainPump.Nudge();
-            return WriteServerAndBridge(d, AuditAction.ServerRestart, "restarted");
+            return WriteServerAndBridge(d, "restarted");
         });
         events.RegisterHandler<InstanceUninstalledData>(d =>
         {
             instanceCache.TryRefresh();
-            return WriteServer(d, AuditAction.ServerUninstall, AuditSeverity.Warn, "uninstalled");
+            return WriteServer(d, AuditSeverity.Warn, "uninstalled");
         });
 
         // server.update_available — a newer build exists upstream. kgsm establishes this: it records
@@ -327,7 +327,7 @@ public sealed class KgsmAuditConsumer(
         {
             instanceCache.TryRefresh();
             SettleObserved(d.InstanceName);
-            return WriteServer(d, AuditAction.ServerUpdate, AuditSeverity.Info, "updated",
+            return WriteServer(d, AuditSeverity.Info, "updated",
                 Meta(("oldVersion", d.OldVersion), ("newVersion", d.NewVersion)));
         });
 
@@ -365,7 +365,7 @@ public sealed class KgsmAuditConsumer(
         {
             SettleObserved(d.InstanceName, "kgsm reported the update as failed");
             domainPump.Nudge();
-            return WriteServer(d, AuditAction.ServerUpdate, AuditSeverity.Danger, "could not update");
+            return WriteServer(d, AuditSeverity.Danger, "could not update");
         });
 
         // server.stop.started / server.stop.finished — the same bracket for a shutdown (kgsm
@@ -449,14 +449,14 @@ public sealed class KgsmAuditConsumer(
         {
             SettleObserved(d.InstanceName, "kgsm reported the uninstall as failed");
             instanceCache.TryRefresh();
-            return WriteServer(d, AuditAction.ServerUninstall, AuditSeverity.Danger, "could not uninstall");
+            return WriteServer(d, AuditSeverity.Danger, "could not uninstall");
         });
 
         // server.install — carries the blueprint it was installed from, and the library it landed in.
         events.RegisterHandler<InstanceInstalledData>(d =>
         {
             instanceCache.TryRefresh();
-            return WriteServer(d, AuditAction.ServerInstall, AuditSeverity.Success, "installed",
+            return WriteServer(d, AuditSeverity.Success, "installed",
                 Meta(("blueprint", d.Blueprint), ("library", d.Library)));
         });
 
@@ -467,7 +467,7 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceMovedData>(d =>
         {
             instanceCache.TryRefresh();
-            return WriteServer(d, AuditAction.ServerMove, AuditSeverity.Info, "moved",
+            return WriteServer(d, AuditSeverity.Info, "moved",
                 Meta(("fromLibrary", d.FromLibrary), ("toLibrary", d.ToLibrary)));
         });
 
@@ -504,13 +504,13 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceBackupCreatedData>(d =>
         {
             RefreshBackupsOf(d.InstanceName);
-            return WriteServer(d, AuditAction.BackupCreate, AuditSeverity.Success, "backed up",
+            return WriteServer(d, AuditSeverity.Success, "backed up",
                 Meta(("source", d.Source), ("version", d.Version)));
         });
         events.RegisterHandler<InstanceBackupRestoredData>(d =>
         {
             RefreshBackupsOf(d.InstanceName);
-            return WriteServer(d, AuditAction.BackupRestore, AuditSeverity.Success, "restored backup for",
+            return WriteServer(d, AuditSeverity.Success, "restored backup for",
                 Meta(("source", d.Source), ("version", d.Version)));
         });
 
@@ -522,13 +522,13 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceBackupDeletedData>(d =>
         {
             RefreshBackupsOf(d.InstanceName);
-            return WriteServer(d, AuditAction.BackupDelete, AuditSeverity.Warn, "deleted a backup for",
+            return WriteServer(d, AuditSeverity.Warn, "deleted a backup for",
                 Meta(("source", d.Source)));
         });
         events.RegisterHandler<InstanceBackupsPrunedData>(d =>
         {
             RefreshBackupsOf(d.InstanceName);
-            return WriteServer(d, AuditAction.BackupPrune, AuditSeverity.Info, "pruned backups for",
+            return WriteServer(d, AuditSeverity.Info, "pruned backups for",
                 // `pinned` is what the sweep protected. Without it, a sweep that removed nothing
                 // because everything was pinned reads exactly like one that found nothing to remove.
                 Meta(("deleted", d.Deleted.ToString(CultureInfo.InvariantCulture)),
@@ -542,7 +542,7 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceBackupPinnedData>(d =>
         {
             RefreshBackupsOf(d.InstanceName);
-            return WriteServer(d, AuditAction.BackupPin, AuditSeverity.Info, "pinned a backup for",
+            return WriteServer(d, AuditSeverity.Info, "pinned a backup for",
                 Meta(("source", d.Source)));
         });
         // Warn, like a delete: unpinning is what lets the next sweep take an archive somebody
@@ -550,7 +550,7 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstanceBackupUnpinnedData>(d =>
         {
             RefreshBackupsOf(d.InstanceName);
-            return WriteServer(d, AuditAction.BackupUnpin, AuditSeverity.Warn, "unpinned a backup for",
+            return WriteServer(d, AuditSeverity.Warn, "unpinned a backup for",
                 Meta(("source", d.Source)));
         });
 
@@ -665,7 +665,7 @@ public sealed class KgsmAuditConsumer(
         events.RegisterHandler<InstancePlayerKickedData>(d =>
         {
             PublishLive(AuditMapping.FromPlayerModerationEvent(
-                d, options.HostId, AuditAction.PlayerKick, "kicked"));
+                d, options.HostId, KgsmEventCatalog.NameOf<InstancePlayerKickedData>(), "kicked"));
             return Task.CompletedTask;
         });
         events.RegisterHandler<InstancePlayerBannedData>(d =>
@@ -675,7 +675,7 @@ public sealed class KgsmAuditConsumer(
                 history.Ban(d.InstanceName, identity, reason: null);
 
             PublishLive(AuditMapping.FromPlayerModerationEvent(
-                d, options.HostId, AuditAction.PlayerBan, "banned"));
+                d, options.HostId, KgsmEventCatalog.NameOf<InstancePlayerBannedData>(), "banned"));
             return Task.CompletedTask;
         });
         events.RegisterHandler<InstancePlayerUnbannedData>(d =>
@@ -685,7 +685,7 @@ public sealed class KgsmAuditConsumer(
                 history.Unban(d.InstanceName, identity);
 
             PublishLive(AuditMapping.FromPlayerModerationEvent(
-                d, options.HostId, AuditAction.PlayerUnban, "unbanned"));
+                d, options.HostId, KgsmEventCatalog.NameOf<InstancePlayerUnbannedData>(), "unbanned"));
             return Task.CompletedTask;
         });
 
@@ -724,7 +724,7 @@ public sealed class KgsmAuditConsumer(
         // console.input — an arbitrary console command sent to a running native instance (kgsm-lib 1.24.0).
         // The POST /servers/{id}/console path stamps actor+origin onto SendInput, so this echo carries
         // provenance; engine-owned → live publish only (not a recovery action). Unlike config.set, the
-        // FULL command text rides in meta (recording what was run — see AuditAction.ConsoleInput).
+        // FULL command text rides in meta (recording what was run).
         events.RegisterHandler<InstanceInputSentData>(d =>
         {
             PublishLive(AuditMapping.FromInputSentEvent(d, options.HostId));
@@ -876,11 +876,16 @@ public sealed class KgsmAuditConsumer(
         return Task.CompletedTask;
     }
 
-    private Task WriteServer(
-        EventDataBase data, string action, string severity, string verb,
+    // The payload class is what says which event this is, so the name is derived from it rather than
+    // written out beside each handler — a literal there would be a second spelling of what the type
+    // already declares.
+    private Task WriteServer<TData>(
+        TData data, string severity, string verb,
         IReadOnlyDictionary<string, string>? meta = null)
+        where TData : EventDataBase
     {
-        PublishLive(AuditMapping.FromServerEvent(data, action, severity, verb, options.HostId, meta));
+        PublishLive(AuditMapping.FromServerEvent(
+            data, KgsmEventCatalog.NameOf<TData>(), severity, verb, options.HostId, meta));
         return Task.CompletedTask;
     }
 
@@ -890,8 +895,10 @@ public sealed class KgsmAuditConsumer(
     // The bridge only needs an id that is INTERNALLY consistent with what GET /audit will later show for
     // the same event (the deterministic AuditId.ForEvent, captured via idTracker) — it does not need a
     // DB round-trip, since AuditWrite.Ts already equals the value a persisted row's Ts would have been.
-    private Task WriteServerAndBridge(EventDataBase data, string action, string verb)
+    private Task WriteServerAndBridge<TData>(TData data, string verb)
+        where TData : EventDataBase
     {
+        string action = KgsmEventCatalog.NameOf<TData>();
         AuditRecord row = PublishLive(
             AuditMapping.FromServerEvent(data, action, AuditSeverity.Info, verb, options.HostId));
         if (IsRecoveryAction(data, action) && !string.IsNullOrEmpty(data.InstanceName))
@@ -926,7 +933,7 @@ public sealed class KgsmAuditConsumer(
     //   start stays non-bridging by default; episode-scoping alone would also reject a boot start's
     //   pre-crash timestamp. See Services/Alerts/AlertEngine.BuildResolution.
     internal static bool IsRecoveryAction(EventDataBase data, string action) =>
-        action != AuditAction.ServerStart || !IsSystemOrigin(data);
+        action != KgsmEventCatalog.NameOf<InstanceStartedData>() || !IsSystemOrigin(data);
 
     private static bool IsSystemOrigin(EventDataBase data) =>
         string.Equals(data.Origin, AuditOrigin.System, StringComparison.OrdinalIgnoreCase);
