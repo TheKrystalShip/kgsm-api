@@ -15,7 +15,7 @@ namespace TheKrystalShip.Api.Tests;
 /// </summary>
 public sealed class EngineEventIdTrackerTests
 {
-    private static EventWrapper Wrapper(string type = "instance_started", string instance = "mc") => new()
+    private static EventWrapper Wrapper(string type = "server.started", string instance = "mc") => new()
     {
         EventType = type,
         Data = JsonSerializer.SerializeToElement(new { InstanceName = instance }),

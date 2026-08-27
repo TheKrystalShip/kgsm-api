@@ -116,11 +116,11 @@ public static class NotificationCatalog
     /// catalog event, so they are dropped before they ever reach the bus). This is the one place the audit
     /// vocabulary and the notification catalog meet. <b>Note:</b> both <c>server.start</c> AND
     /// <c>server.restart</c> map to <c>online</c> — a completed restart means the server is up, so the
-    /// watchdog's autonomous crash-restart (<c>instance_restarted</c> → <c>server.restart</c>) delivers the
+    /// watchdog's autonomous crash-restart (<c>server.restarted</c> → <c>server.restart</c>) delivers the
     /// "back online" signal that pairs with its crash, not a silent gap.
     /// </summary>
     /// <param name="severity">The row's severity, which is the only thing separating the two crash facts.
-    /// The watchdog raises <c>instance_crashed</c> while it is still restarting and <c>instance_failed</c>
+    /// The watchdog raises <c>server.crashed</c> while it is still restarting and <c>server.crash.exhausted</c>
     /// once it has given up, and both are the doc's single <c>server.crash</c> action — the give-up is
     /// carried by the <see cref="AuditSeverity.Danger"/> the mapper writes. Omitting it reads a crash as the
     /// restarting kind, which is the safe way round: the escalation is the one that must not be invented.</param>

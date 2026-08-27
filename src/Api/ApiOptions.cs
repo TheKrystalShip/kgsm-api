@@ -346,7 +346,7 @@ public sealed class ApiOptions
     /// backups (<c>Api__BackupScanPollMs</c>, default 300000 = 5min, floor 30000 = 30s). Listing
     /// backups is a kgsm process spawn per instance, so it cannot ride the roster refresh that serves
     /// <c>GET /servers</c>; this relaxed cadence carries the steady state while the kgsm
-    /// <c>instance_backup_created</c>/<c>instance_backup_restored</c> event echo refreshes the one affected
+    /// <c>backup.created</c>/<c>backup.restored</c> event echo refreshes the one affected
     /// instance immediately, which is the case that actually needs to be prompt. A failed read keeps the
     /// prior reading (never wipes); the fields start honest-null until the first scan completes.
     /// </summary>

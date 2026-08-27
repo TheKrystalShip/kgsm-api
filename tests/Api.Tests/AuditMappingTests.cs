@@ -582,7 +582,7 @@ public sealed class AuditMappingTests
         Assert.Null(w.Meta);
     }
 
-    // --- FromUpdateAvailableEvent: the engine's instance_update_available echo -----------------------
+    // --- FromUpdateAvailableEvent: the engine's server.update.available echo -----------------------
 
     [Fact]
     public void FromUpdateAvailable_WithVersions_CarryMeta()

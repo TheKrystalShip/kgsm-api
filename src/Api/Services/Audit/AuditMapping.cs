@@ -106,7 +106,7 @@ public static class AuditMapping
     }
 
     /// <summary>
-    /// Map a watchdog <c>instance_crashed</c> event (a desired-running process died and is being
+    /// Map a watchdog <c>server.crashed</c> event (a desired-running process died and is being
     /// auto-restarted) to a <c>server.crash</c> row at <see cref="AuditSeverity.Warn"/>. Provenance
     /// is <c>system</c>/<c>system</c> off the envelope (an autonomous engine action — no human
     /// surface), which <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/> handle unchanged.
@@ -119,7 +119,7 @@ public static class AuditMapping
     }
 
     /// <summary>
-    /// Map a watchdog <c>instance_failed</c> event (the supervisor exhausted its restart retries and
+    /// Map a watchdog <c>server.crash.exhausted</c> event (the supervisor exhausted its restart retries and
     /// gave up — the escalation signal, staying down) to a <c>server.crash</c> row at
     /// <see cref="AuditSeverity.Danger"/>. Same single doc-given action as <see cref="FromCrashEvent"/>;
     /// the give-up is carried by the severity, the summary, and the exhausted restart count.
@@ -133,7 +133,7 @@ public static class AuditMapping
     }
 
     /// <summary>
-    /// Map a kgsm <c>instance_ports_opened</c> event (the firewall echo — the engine opened
+    /// Map a kgsm <c>network.ports.opened</c> event (the firewall echo — the engine opened
     /// the host-firewall ports on a confirmed success) to a <c>network.ports.open</c> row, recording
     /// the opened ports in <c>meta</c> in the canonical range-preserving form. Engine-sourced only:
     /// an instance's ports are opened by the supervisor when it starts and released when it stops,
@@ -143,7 +143,7 @@ public static class AuditMapping
         PortsWrite(d, hostId, AuditAction.NetworkPortsOpen, "opened", d.Ports);
 
     /// <summary>
-    /// Map a kgsm <c>instance_ports_closed</c> event (the firewall echo — the engine removed the
+    /// Map a kgsm <c>network.ports.closed</c> event (the firewall echo — the engine removed the
     /// host-firewall ports on a confirmed success, on a stop, an uninstall, or a standalone
     /// firewall-disable) to a <c>network.ports.close</c> row. Recording closes keeps the trail
     /// symmetric — a disable that isn't part of an uninstall would otherwise leave an
@@ -153,7 +153,7 @@ public static class AuditMapping
         PortsWrite(d, hostId, AuditAction.NetworkPortsClose, "closed", d.Ports);
 
     /// <summary>
-    /// Map a kgsm <c>instance_upnp_opened</c> event (the watchdog forwarded the instance's ports on
+    /// Map a kgsm <c>network.upnp.opened</c> event (the watchdog forwarded the instance's ports on
     /// the router via upnpc, on a confirmed exit-0) to a <c>network.upnp.open</c> row. DISTINCT from
     /// <see cref="FromPortsOpenedEvent"/>: a router NAT forward is a different fact from a host ufw
     /// rule, so it gets its own action — a reader can tell "the router forwards it" from "the firewall
@@ -165,7 +165,7 @@ public static class AuditMapping
         UpnpWrite(d, hostId, AuditAction.NetworkUpnpOpen, "forwarded", d.Ports);
 
     /// <summary>
-    /// Map a kgsm <c>instance_upnp_closed</c> event (the watchdog removed the router forward on a
+    /// Map a kgsm <c>network.upnp.closed</c> event (the watchdog removed the router forward on a
     /// deliberate stop, confirmed exit-0) to a <c>network.upnp.close</c> row — the close counterpart of
     /// <see cref="FromUpnpOpenedEvent"/>, keeping the UPnP trail symmetric. A "nothing to delete" close
     /// emits no event upstream, so this never records a removal that didn't happen.
@@ -174,7 +174,7 @@ public static class AuditMapping
         UpnpWrite(d, hostId, AuditAction.NetworkUpnpClose, "removed", d.Ports);
 
     /// <summary>
-    /// Map a kgsm <c>instance_upnp_reasserted</c> event (the watchdog's sweep found the router had
+    /// Map a kgsm <c>network.upnp.reasserted</c> event (the watchdog's sweep found the router had
     /// dropped a running instance's forwards and put them back, confirmed exit-0) to a
     /// <c>network.upnp.reassert</c> row. Its own action rather than a second
     /// <see cref="FromUpnpOpenedEvent"/>: an open sits next to a start, whereas this records that the
@@ -189,7 +189,7 @@ public static class AuditMapping
             AuditSeverity.Warn);
 
     /// <summary>
-    /// Map a kgsm <c>instance_update_available</c> event to a <c>server.update_available</c> row at
+    /// Map a kgsm <c>server.update.available</c> event to a <c>server.update_available</c> row at
     /// <see cref="AuditSeverity.Info"/> — an engine echo like every other <c>server.*</c> action, with no
     /// second writer. kgsm records what each check found beside the instance and emits only for a version
     /// it has not announced before, so this is one row per new build, not one per check.
@@ -226,7 +226,7 @@ public static class AuditMapping
     }
 
     /// <summary>
-    /// Map a kgsm <c>instance_player_joined</c> event to a <c>player.join</c> row at
+    /// Map a kgsm <c>player.joined</c> event to a <c>player.join</c> row at
     /// <see cref="AuditSeverity.Info"/>. For our container images this is forwarded by the watchdog from
     /// the in-image detection shim; native detection (log-scraping) is the same shape (provenance
     /// <c>system</c>/<c>system</c> off the envelope, handled unchanged by <see cref="ParseActor"/>/
@@ -239,7 +239,7 @@ public static class AuditMapping
             d.PlayerId, d.PlayerName, d.PlayerAddr, d.SessionKey, reason: null);
 
     /// <summary>
-    /// Map a kgsm <c>instance_player_left</c> event to a <c>player.leave</c> row — the leave counterpart of
+    /// Map a kgsm <c>player.left</c> event to a <c>player.leave</c> row — the leave counterpart of
     /// <see cref="FromPlayerJoinedEvent"/>, identical provenance/identity rules, plus the disconnect
     /// <c>reason</c> when the game's log carried one (never fabricated; kick/ban classification of this
     /// vocabulary is deferred to a future version).
@@ -249,7 +249,7 @@ public static class AuditMapping
             d.PlayerId, d.PlayerName, d.PlayerAddr, d.SessionKey, d.Reason);
 
     /// <summary>
-    /// Map a kgsm moderation event (<c>instance_player_kicked</c>/<c>_banned</c>/<c>_unbanned</c>,
+    /// Map a kgsm moderation event (<c>player.kicked</c>/<c>.banned</c>/<c>.unbanned</c>,
     /// kgsm-lib 2.1.0) to a <c>player.kick</c>/<c>player.ban</c>/<c>player.unban</c> row at
     /// <see cref="AuditSeverity.Warning"/> — an operator removing someone is a notable act, unlike
     /// the informational presence pair.
@@ -299,7 +299,7 @@ public static class AuditMapping
         $"{verb} {(string.IsNullOrWhiteSpace(target) ? "a player" : target)} on {Display(instance)}";
 
     /// <summary>
-    /// Map a kgsm <c>instance_config_changed</c> event (kgsm-lib 1.22.0) to a <c>config.set</c> row at
+    /// Map a kgsm <c>config.changed</c> event (kgsm-lib 1.22.0) to a <c>config.set</c> row at
     /// <see cref="AuditSeverity.Info"/>. The PATCH <c>/servers/{id}/config</c> path stamps actor+origin
     /// onto <c>SetInstanceConfigValue</c>, so this echo carries provenance off the envelope (handled
     /// unchanged by <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/>) — engine-owned, no double-write.
@@ -311,7 +311,7 @@ public static class AuditMapping
     /// <summary>
     /// Whether a changed config key is one of the server note's two <em>attribution</em> keys
     /// (<c>note_updated_by</c> / <c>note_updated_at</c>). A note write touches three keys, so the
-    /// engine emits three <c>instance_config_changed</c> events for one operator action; both audit
+    /// engine emits three <c>config.changed</c> events for one operator action; both audit
     /// paths (the live consumer and the monitor-history shaping) drop these two so the feed shows the
     /// single "set config 'note'" row a reader expects. The body's own event is never suppressed —
     /// changing a player-facing note stays fully audited.
@@ -322,8 +322,8 @@ public static class AuditMapping
 
     /// <summary>
     /// Whether a changed config key is the instance's display label. A rename writes that one key, so the
-    /// engine emits an <c>instance_config_changed</c> for it beside the richer
-    /// <c>instance_display_name_changed</c>; both audit paths drop this one so a rename reads as the
+    /// engine emits a <c>config.changed</c> for it beside the richer
+    /// <c>server.renamed</c>; both audit paths drop this one so a rename reads as the
     /// single <c>server.rename</c> row that actually says what the label went from and to.
     /// </summary>
     public static bool IsDisplayNameKey(string? key) =>
@@ -333,7 +333,7 @@ public static class AuditMapping
     public const string DisplayNameConfigKey = "display_name";
 
     /// <summary>
-    /// Map a kgsm <c>instance_display_name_changed</c> event to a <c>server.rename</c> row at
+    /// Map a kgsm <c>server.renamed</c> event to a <c>server.rename</c> row at
     /// <see cref="AuditSeverity.Info"/>. The label is decoration, so this is not a warning — but it is
     /// recorded, because a feed that only ever showed the current label would make its own older rows
     /// unreadable to whoever remembers the previous one.
@@ -393,7 +393,7 @@ public static class AuditMapping
     }
 
     /// <summary>
-    /// Map a kgsm <c>instance_input_sent</c> event (kgsm-lib 1.24.0) to a <c>console.input</c> row at
+    /// Map a kgsm <c>console.input.sent</c> event (kgsm-lib 1.24.0) to a <c>console.input</c> row at
     /// <see cref="AuditSeverity.Info"/>. The POST <c>/servers/{id}/console</c> path stamps actor+origin
     /// onto <c>SendInput</c>, so this echo carries provenance off the envelope (handled unchanged by
     /// <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/>) — engine-owned, no double-write. UNLIKE
@@ -439,7 +439,7 @@ public static class AuditMapping
     }
 
     /// <summary>
-    /// Map a kgsm <c>blueprint_created</c> event to a <c>blueprint.write</c> row — a blueprint file that
+    /// Map a kgsm <c>blueprint.created</c> event to a <c>blueprint.write</c> row — a blueprint file that
     /// did not exist in the user directory before. Provenance rides off the envelope (the PUT
     /// <c>/library/{id}/file</c> path threads actor+origin into the emit, so the echo carries the real
     /// admin rather than the service account) — engine-owned, no double-write.
@@ -457,7 +457,7 @@ public static class AuditMapping
             ("overridesSystem", Tri(d.OverridesSystem)), ("runtime", d.Runtime));
 
     /// <summary>
-    /// Map a kgsm <c>blueprint_updated</c> event to a <c>blueprint.write</c> row — the same action as
+    /// Map a kgsm <c>blueprint.updated</c> event to a <c>blueprint.write</c> row — the same action as
     /// <see cref="FromBlueprintCreatedEvent"/> at <see cref="AuditSeverity.Info"/>, since "the blueprint
     /// file changed" is one fact; whether the file already existed is carried by the summary, not by a
     /// second action nobody would filter on separately.
@@ -468,7 +468,7 @@ public static class AuditMapping
             ("overridesSystem", Tri(d.OverridesSystem)), ("runtime", d.Runtime));
 
     /// <summary>
-    /// Map a kgsm <c>blueprint_removed</c> event to a <c>blueprint.revert</c> row. Warn, not info: the
+    /// Map a kgsm <c>blueprint.removed</c> event to a <c>blueprint.revert</c> row. Warn, not info: the
     /// user-directory file is gone. <c>revertedToSystem</c> says whether a shipped blueprint took over
     /// (the library editor's revert, which only ever runs when one exists) or the blueprint left this host
     /// entirely — a distinction the summary makes rather than leaving a reader to assume the safer one.
@@ -484,7 +484,7 @@ public static class AuditMapping
             ("revertedToSystem", Tri(d.RevertedToSystem)));
 
     /// <summary>
-    /// Map a kgsm <c>library_added</c> event to a <c>library.add</c> row — the host gained somewhere to put
+    /// Map a kgsm <c>library.added</c> event to a <c>library.add</c> row — the host gained somewhere to put
     /// servers.
     /// </summary>
     /// <remarks>
@@ -496,7 +496,7 @@ public static class AuditMapping
             $"registered library {DisplayLibrary(d)}", ("path", d.Path));
 
     /// <summary>
-    /// Map a kgsm <c>library_removed</c> event to a <c>library.remove</c> row.
+    /// Map a kgsm <c>library.removed</c> event to a <c>library.remove</c> row.
     /// </summary>
     /// <remarks>
     /// Warn, not info, and the summary says so: deregistering touches no file, so the instances that
@@ -508,7 +508,7 @@ public static class AuditMapping
             $"deregistered library {DisplayLibrary(d)} — its files are untouched", ("path", d.Path));
 
     /// <summary>
-    /// Map a <c>library_renamed</c> event to a <c>library.rename</c> row.
+    /// Map a <c>library.renamed</c> event to a <c>library.rename</c> row.
     /// </summary>
     /// <remarks>
     /// The one library action this API writes rather than echoes: a rename touches the registry and the
@@ -522,7 +522,7 @@ public static class AuditMapping
             ("newName", d.NewName));
 
     /// <summary>
-    /// Map a <c>library_failed</c> event to a <c>library.failed</c> row — a mutation that did not happen.
+    /// Map a <c>library.failed</c> event to a <c>library.failed</c> row — a mutation that did not happen.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -822,7 +822,7 @@ public static class AuditMapping
     };
 
     /// <summary>
-    /// Map a kgsm-monitor <c>host_threshold_breached</c> event to a <c>host.threshold.breach</c> row.
+    /// Map a kgsm-monitor <c>host.threshold.breached</c> event to a <c>host.threshold.breach</c> row.
     /// </summary>
     /// <remarks>
     /// The monitor records the measurement; the wording, the severity and the target are applied here, at
@@ -865,7 +865,7 @@ public static class AuditMapping
     }
 
     /// <summary>
-    /// Map a kgsm-monitor <c>host_threshold_cleared</c> event to a <c>host.threshold.clear</c> row.
+    /// Map a kgsm-monitor <c>host.threshold.cleared</c> event to a <c>host.threshold.clear</c> row.
     /// </summary>
     /// <remarks>
     /// ⚠ <b>A clear is not always a recovery.</b> An episode that ended because its rule was retuned,
@@ -942,7 +942,7 @@ public static class AuditMapping
     // same as for any other producer's journal. Nothing about these mappers knows they are reading
     // this API's own writing.
 
-    /// <summary>Map an <c>auth_login</c> / <c>auth_logout</c> / <c>auth_cluster_session</c> event.</summary>
+    /// <summary>Map an <c>auth.signed_in</c> / <c>auth.signed_out</c> / <c>auth.cluster.vouched</c> event.</summary>
     /// <remarks>
     /// What separates "logged in" from "signed in with a password" is the identity PROVIDER, which is
     /// on the record — not which code path ran. A wording change here therefore applies to every row
@@ -978,7 +978,7 @@ public static class AuditMapping
         return ApiWrite(d, action, AuditSeverity.Info, target: null, hostId, summary, meta);
     }
 
-    /// <summary>Map an <c>auth_session_revoked</c> event to one of the three revocation actions.</summary>
+    /// <summary>Map an <c>auth.session.revoked</c> event to one of the three revocation actions.</summary>
     public static AuditWrite FromSessionRevokedEvent(AuthSessionRevokedData d, string hostId)
     {
         ArgumentNullException.ThrowIfNull(d);
@@ -1010,7 +1010,7 @@ public static class AuditMapping
         return ApiWrite(d, action, severity, target: null, hostId, summary, meta);
     }
 
-    /// <summary>Map one of the six <c>user_*</c> events to its account action.</summary>
+    /// <summary>Map one of the six <c>user.*</c> events to its account action.</summary>
     /// <remarks>
     /// ⚠ These are the trail's most sensitive rows: with the account store as this host's sole
     /// authority, a tier change here is the ONLY way anybody's permissions ever move.
@@ -1069,7 +1069,7 @@ public static class AuditMapping
         return ApiWrite(d, action, severity, target, hostId, summary, meta);
     }
 
-    /// <summary>Map an <c>identity_linked</c> / <c>identity_unlinked</c> event.</summary>
+    /// <summary>Map an <c>identity.linked</c> / <c>identity.unlinked</c> event.</summary>
     /// <remarks>
     /// A link is a privilege event: afterwards, whoever controls that provider account can sign in as
     /// this one.
@@ -1100,7 +1100,7 @@ public static class AuditMapping
             AuditSeverity.Warn, target, hostId, summary, meta);
     }
 
-    /// <summary>Map a <c>service_connected</c> / <c>service_disconnected</c> event.</summary>
+    /// <summary>Map a <c>service.connected</c> / <c>service.disconnected</c> event.</summary>
     public static AuditWrite FromServiceProvisioningEvent(
         ServiceProvisioningEventData d, string type, string hostId)
     {
@@ -1118,7 +1118,7 @@ public static class AuditMapping
             meta: null);
     }
 
-    /// <summary>Map a <c>service_config_changed</c> event.</summary>
+    /// <summary>Map a <c>service.config_changed</c> event.</summary>
     /// <remarks>⚠ Keys only. A leaf's configuration holds tokens and passwords.</remarks>
     public static AuditWrite FromServiceConfigEvent(ServiceConfigChangedEventData d, string hostId)
     {
@@ -1151,7 +1151,7 @@ public static class AuditMapping
             new AuditTarget(AuditTargetKind.Leaf, d.Leaf, display), hostId, summary, meta);
     }
 
-    /// <summary>Map a <c>service_restarted</c> event.</summary>
+    /// <summary>Map a <c>service.restarted</c> event.</summary>
     /// <remarks>
     /// A restart systemd refused gets a row too — it is exactly the case nobody was watching a screen
     /// for, and a trail that only recorded the successes would be silent about it.
@@ -1174,7 +1174,7 @@ public static class AuditMapping
             });
     }
 
-    /// <summary>Map a <c>file_written</c> event.</summary>
+    /// <summary>Map a <c>file.written</c> event.</summary>
     /// <remarks>⚠ Path, size and hash — never the content.</remarks>
     public static AuditWrite FromFileWrittenEvent(FileWrittenEventData d, string hostId)
     {
@@ -1192,7 +1192,7 @@ public static class AuditMapping
             hostId, $"edited file {d.Path} on {d.InstanceName}", meta, serverId: d.InstanceName);
     }
 
-    /// <summary>Map a <c>backup_downloaded</c> event.</summary>
+    /// <summary>Map a <c>backup.downloaded</c> event.</summary>
     public static AuditWrite FromBackupDownloadedEvent(BackupDownloadedEventData d, string hostId)
     {
         ArgumentNullException.ThrowIfNull(d);
@@ -1210,7 +1210,7 @@ public static class AuditMapping
     }
 
     /// <summary>
-    /// Map a <c>command_failed</c> / <c>command_refused</c> / <c>command_cancelled</c> event.
+    /// Map a <c>command.failed</c> / <c>command.refused</c> / <c>command.cancelled</c> event.
     /// </summary>
     /// <remarks>
     /// <para>

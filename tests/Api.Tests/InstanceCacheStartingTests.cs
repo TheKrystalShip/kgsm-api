@@ -9,8 +9,8 @@ namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
 /// The <c>starting</c> tri-state on <see cref="InstanceCache"/> — the "starting latch" that tracks the
-/// window between an <c>instance_started</c> event (process spawned) and the matching
-/// <c>instance_ready</c> event (the watchdog confirms the game finished booting). Both events observe
+/// window between a <c>server.started</c> event (process spawned) and the matching
+/// <c>server.ready</c> event (the watchdog confirms the game finished booting). Both events observe
 /// the process as "up" via the same boolean <see cref="Reading{T}"/>, so the latch is the ONLY thing
 /// that can tell them apart.
 /// <para>
@@ -18,7 +18,7 @@ namespace TheKrystalShip.Api.Tests;
 /// the background boolean reconcile (which re-derives run-state from kgsm every
 /// <c>Api__InstanceCacheTtlSeconds</c>) sees the same "process up" signal for both a starting AND
 /// a running instance, and must never be allowed to flip <c>starting -&gt; running</c> on its own; only
-/// <c>MarkReady</c> (the <c>instance_ready</c> event) may do that.
+/// <c>MarkReady</c> (the <c>server.ready</c> event) may do that.
 /// </para>
 /// </summary>
 public sealed class InstanceCacheStartingTests
@@ -57,7 +57,7 @@ public sealed class InstanceCacheStartingTests
     [Fact]
     public void MarkReady_WithNoPriorStarted_StillFlipsBooleanToRunning_DefensiveNeverStale()
     {
-        // A ready event with no observed instance_started (e.g. the consumer wasn't listening for it) is
+        // A ready event with no observed server.started (e.g. the consumer wasn't listening for it) is
         // still real evidence the process is up — must not leave a stale/unset boolean.
         InstanceCache cache = NewCache();
 
@@ -72,8 +72,8 @@ public sealed class InstanceCacheStartingTests
     [Fact]
     public void StartedThenReady_QuickSuccession_SettlesOnRunning()
     {
-        // The "empty-regex games" case (requirement #6): the watchdog emits instance_ready immediately
-        // after instance_started for a game with no readiness pattern. Two rapid events must resolve
+        // The "empty-regex games" case (requirement #6): the watchdog emits server.ready immediately
+        // after server.started for a game with no readiness pattern. Two rapid events must resolve
         // cleanly to running, not get stuck starting or double-apply.
         InstanceCache cache = NewCache();
 
@@ -134,7 +134,7 @@ public sealed class InstanceCacheStartingTests
         // The background boolean reconcile reads GetAllStatuses(fast:true) fresh from the engine. While an
         // instance is genuinely still starting, the process IS up, so the fresh read says Status:true —
         // IDENTICAL to a fully running instance. This must NOT be treated as "done starting"; only
-        // instance_ready (MarkReady) may close the latch. This is the main correctness trap the feature
+        // server.ready (MarkReady) may close the latch. This is the main correctness trap the feature
         // exists to avoid.
         InstanceCache cache = NewCache();
         cache.MarkStarting("factorio-1");
@@ -286,8 +286,8 @@ public sealed class InstanceCacheStartingTests
     [Fact]
     public void ReadyBeforeStarted_ResolvesToRunning_NeverStuckStarting()
     {
-        // The watchdog emits instance_ready as soon as it observes the run ready; kgsm emits
-        // instance_started from the command that asked for the start. A game that is ready as fast as
+        // The watchdog emits server.ready as soon as it observes the run ready; kgsm emits
+        // server.started from the command that asked for the start. A game that is ready as fast as
         // it spawns produces this order — and the naive handling (ready no-ops, started then opens a
         // window) pins the instance on "starting" until the safety timeout, with nothing left to close
         // it. That is a display bug an operator sees as a server that started but never went online.

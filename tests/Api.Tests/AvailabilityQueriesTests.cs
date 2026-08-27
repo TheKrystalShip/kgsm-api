@@ -28,7 +28,7 @@ public sealed class AvailabilityQueriesTests
     {
         // Started before the window and never touched again: the window opens on a known state.
         ServerAvailability a = Fold(TimeSpan.FromHours(1), TimeSpan.FromHours(3),
-            Ev("instance_started", TimeSpan.Zero));
+            Ev("server.started", TimeSpan.Zero));
 
         Assert.Equal(1.0, a.Availability);
         Assert.Equal((long)TimeSpan.FromHours(2).TotalSeconds, a.IntendedSeconds);
@@ -42,8 +42,8 @@ public sealed class AvailabilityQueriesTests
     {
         // Up for the first hour of a two-hour window, then stopped on purpose.
         ServerAvailability a = Fold(TimeSpan.FromHours(1), TimeSpan.FromHours(3),
-            Ev("instance_started", TimeSpan.Zero),
-            Ev("instance_stopped", TimeSpan.FromHours(2)));
+            Ev("server.started", TimeSpan.Zero),
+            Ev("server.stopped", TimeSpan.FromHours(2)));
 
         Assert.Equal(1.0, a.Availability);
         Assert.Equal((long)TimeSpan.FromHours(1).TotalSeconds, a.IntendedSeconds);
@@ -56,9 +56,9 @@ public sealed class AvailabilityQueriesTests
     {
         // Two-hour window, crashed for the middle 30 minutes.
         ServerAvailability a = Fold(TimeSpan.FromHours(1), TimeSpan.FromHours(3),
-            Ev("instance_started", TimeSpan.Zero),
-            Ev("instance_crashed", TimeSpan.FromHours(1.5)),
-            Ev("instance_started", TimeSpan.FromHours(2)));
+            Ev("server.started", TimeSpan.Zero),
+            Ev("server.crashed", TimeSpan.FromHours(1.5)),
+            Ev("server.started", TimeSpan.FromHours(2)));
 
         Assert.Equal((long)TimeSpan.FromHours(2).TotalSeconds, a.IntendedSeconds);
         Assert.Equal((long)TimeSpan.FromMinutes(30).TotalSeconds, a.DowntimeSeconds);
@@ -71,8 +71,8 @@ public sealed class AvailabilityQueriesTests
     public void StillDownAtTheEnd_AccruesToTheWindowClose()
     {
         ServerAvailability a = Fold(TimeSpan.FromHours(1), TimeSpan.FromHours(3),
-            Ev("instance_started", TimeSpan.Zero),
-            Ev("instance_crashed", TimeSpan.FromHours(2)));
+            Ev("server.started", TimeSpan.Zero),
+            Ev("server.crashed", TimeSpan.FromHours(2)));
 
         Assert.Equal((long)TimeSpan.FromHours(1).TotalSeconds, a.DowntimeSeconds);
         Assert.Equal(0.5, a.Availability);
@@ -83,7 +83,7 @@ public sealed class AvailabilityQueriesTests
     {
         // Stopped before the window and left alone. Not 100% — there is no denominator.
         ServerAvailability a = Fold(TimeSpan.FromHours(1), TimeSpan.FromHours(3),
-            Ev("instance_stopped", TimeSpan.Zero));
+            Ev("server.stopped", TimeSpan.Zero));
 
         Assert.Null(a.Availability);
         Assert.Equal(0, a.IntendedSeconds);
@@ -105,7 +105,7 @@ public sealed class AvailabilityQueriesTests
     {
         // A full day of uptime before the window must not leak into a two-hour window's denominator.
         ServerAvailability a = Fold(TimeSpan.FromHours(24), TimeSpan.FromHours(26),
-            Ev("instance_started", TimeSpan.Zero));
+            Ev("server.started", TimeSpan.Zero));
 
         Assert.Equal((long)TimeSpan.FromHours(2).TotalSeconds, a.IntendedSeconds);
     }
@@ -116,7 +116,7 @@ public sealed class AvailabilityQueriesTests
         // Nothing before the window says what the state was, so the span before the first event
         // accrues nothing rather than being assumed running.
         ServerAvailability a = Fold(TimeSpan.Zero, TimeSpan.FromHours(4),
-            Ev("instance_started", TimeSpan.FromHours(3)));
+            Ev("server.started", TimeSpan.FromHours(3)));
 
         Assert.Equal((long)TimeSpan.FromHours(1).TotalSeconds, a.IntendedSeconds);
         Assert.False(a.Seeded);
@@ -126,8 +126,8 @@ public sealed class AvailabilityQueriesTests
     public void Uninstalled_StopsAccruingEntirely()
     {
         ServerAvailability a = Fold(TimeSpan.FromHours(1), TimeSpan.FromHours(5),
-            Ev("instance_started", TimeSpan.Zero),
-            Ev("instance_uninstalled", TimeSpan.FromHours(2)));
+            Ev("server.started", TimeSpan.Zero),
+            Ev("server.uninstalled", TimeSpan.FromHours(2)));
 
         Assert.Equal((long)TimeSpan.FromHours(1).TotalSeconds, a.IntendedSeconds);
         Assert.Equal(0, a.DowntimeSeconds);
@@ -137,11 +137,11 @@ public sealed class AvailabilityQueriesTests
     public void RepeatedCrashes_CountAsSeparateOutages()
     {
         ServerAvailability a = Fold(TimeSpan.Zero, TimeSpan.FromHours(6),
-            Ev("instance_started", TimeSpan.FromHours(1)),
-            Ev("instance_crashed", TimeSpan.FromHours(2)),
-            Ev("instance_started", TimeSpan.FromHours(3)),
-            Ev("instance_crashed", TimeSpan.FromHours(4)),
-            Ev("instance_started", TimeSpan.FromHours(5)));
+            Ev("server.started", TimeSpan.FromHours(1)),
+            Ev("server.crashed", TimeSpan.FromHours(2)),
+            Ev("server.started", TimeSpan.FromHours(3)),
+            Ev("server.crashed", TimeSpan.FromHours(4)),
+            Ev("server.started", TimeSpan.FromHours(5)));
 
         Assert.Equal(2, a.Outages);
         Assert.Equal((long)TimeSpan.FromHours(2).TotalSeconds, a.DowntimeSeconds);
@@ -152,8 +152,8 @@ public sealed class AvailabilityQueriesTests
     {
         // The gap still costs availability; the outage itself began earlier and is not a new one.
         ServerAvailability a = Fold(TimeSpan.FromHours(2), TimeSpan.FromHours(4),
-            Ev("instance_started", TimeSpan.Zero),
-            Ev("instance_crashed", TimeSpan.FromHours(1)));
+            Ev("server.started", TimeSpan.Zero),
+            Ev("server.crashed", TimeSpan.FromHours(1)));
 
         Assert.Equal(0, a.Outages);
         Assert.Equal((long)TimeSpan.FromHours(2).TotalSeconds, a.DowntimeSeconds);
@@ -164,9 +164,9 @@ public sealed class AvailabilityQueriesTests
     public void ReadyAfterCrash_ClosesTheOutage()
     {
         ServerAvailability a = Fold(TimeSpan.Zero, TimeSpan.FromHours(4),
-            Ev("instance_started", TimeSpan.FromHours(1)),
-            Ev("instance_crashed", TimeSpan.FromHours(2)),
-            Ev("instance_ready", TimeSpan.FromHours(3)));
+            Ev("server.started", TimeSpan.FromHours(1)),
+            Ev("server.crashed", TimeSpan.FromHours(2)),
+            Ev("server.ready", TimeSpan.FromHours(3)));
 
         Assert.Equal((long)TimeSpan.FromHours(1).TotalSeconds, a.DowntimeSeconds);
         Assert.Equal(1, a.Outages);
@@ -177,9 +177,9 @@ public sealed class AvailabilityQueriesTests
     {
         // The shutdown half of a restart: unreachable for ten minutes, and nobody should be paged.
         ServerAvailability a = Fold(TimeSpan.Zero, TimeSpan.FromHours(2),
-            Ev("instance_started", TimeSpan.Zero),
-            Ev("instance_restart_stopped", TimeSpan.FromMinutes(30)),
-            Ev("instance_restarted", TimeSpan.FromMinutes(40)));
+            Ev("server.started", TimeSpan.Zero),
+            Ev("server.restart.stopped", TimeSpan.FromMinutes(30)),
+            Ev("server.restarted", TimeSpan.FromMinutes(40)));
 
         Assert.Equal((long)TimeSpan.FromMinutes(10).TotalSeconds, a.DowntimeSeconds);
         Assert.Equal(0, a.Outages);
@@ -190,11 +190,11 @@ public sealed class AvailabilityQueriesTests
     public void CrashDuringAPlannedRestartWindow_StillCountsAsAnOutage()
     {
         ServerAvailability a = Fold(TimeSpan.Zero, TimeSpan.FromHours(2),
-            Ev("instance_started", TimeSpan.Zero),
-            Ev("instance_restart_stopped", TimeSpan.FromMinutes(30)),
-            Ev("instance_restarted", TimeSpan.FromMinutes(31)),
-            Ev("instance_crashed", TimeSpan.FromMinutes(40)),
-            Ev("instance_started", TimeSpan.FromMinutes(50)));
+            Ev("server.started", TimeSpan.Zero),
+            Ev("server.restart.stopped", TimeSpan.FromMinutes(30)),
+            Ev("server.restarted", TimeSpan.FromMinutes(31)),
+            Ev("server.crashed", TimeSpan.FromMinutes(40)),
+            Ev("server.started", TimeSpan.FromMinutes(50)));
 
         Assert.Equal(1, a.Outages);
         Assert.Equal((long)TimeSpan.FromMinutes(11).TotalSeconds, a.DowntimeSeconds);
@@ -294,10 +294,10 @@ public sealed class UpdateLagIndexTests
         new($"evt_{instance}_{at.Ticks}", T0 + at, type, instance, null, null, null, null, null);
 
     private static EventHistoryEntry Notice(TimeSpan at, string instance = "srv") =>
-        Ev("instance_update_available", at, instance);
+        Ev("server.update.available", at, instance);
 
     private static EventHistoryEntry Updated(TimeSpan at, string instance = "srv") =>
-        Ev("instance_version_updated", at, instance);
+        Ev("server.updated", at, instance);
 
     [Fact]
     public void TakesTheOldestNotice_NotTheNewest()

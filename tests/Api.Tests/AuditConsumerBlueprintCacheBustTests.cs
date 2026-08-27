@@ -65,7 +65,7 @@ public sealed class AuditConsumerBlueprintCacheBustTests : IClassFixture<AuditCo
             "cache must not refresh on its own within the test window — TTL too short?");
         Assert.False(stillStale.ContainsKey(BustFactory.BlueprintB));
 
-        // The load-bearing structural assertion: a blueprint_updated envelope dispatched through the
+        // The load-bearing structural assertion: a blueprint.updated envelope dispatched through the
         // typed handler KgsmAuditConsumer.RegisterHandlers(events) registered for BlueprintUpdatedData
         // calls blueprintCache.TryRefresh() (KgsmAuditConsumer.cs:299-316). The captured handler is the
         // same lambda the live audit consumer would invoke — there is no faking of the consumer; the
@@ -92,7 +92,7 @@ public sealed class AuditConsumerBlueprintCacheBustTests : IClassFixture<AuditCo
         }
 
         Assert.True(refreshed.ContainsKey(BustFactory.BlueprintB),
-            "blueprint_updated event dispatched through KgsmAuditConsumer did NOT bust the BlueprintCache");
+            "blueprint.updated event dispatched through KgsmAuditConsumer did NOT bust the BlueprintCache");
         Assert.False(refreshed.ContainsKey(BustFactory.BlueprintA),
             "cache after bust should reflect catalog B exclusively, not a union — the prior contents were replaced, not appended");
     }

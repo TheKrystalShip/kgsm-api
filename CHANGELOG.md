@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the engine vocabulary is dotted (`0.142.0`)
+
+Every event type this API shapes, publishes or writes to its own journal is named in the ecosystem's
+dotted vocabulary — `server.started`, `backup.created`, `auth.signed_in`, `command.refused`. The
+availability reader, the update-lag index and the live consumer all match the same names, and an
+event with no mapper still reaches the feed through the generic fallback as `engine.<name>`.
+
 ### Fixed — a revocation names the account it cannot attribute (`0.141.1`)
 
 A revocation row names the account when it cannot name the actor, rather than the generic word. The

@@ -47,19 +47,19 @@ public static class AvailabilityQueries
     /// </summary>
     internal static readonly string[] LifecycleTypes =
     [
-        "instance_started",
-        "instance_ready",
-        "instance_stopped",
-        "instance_restarted",
-        "instance_crashed",
-        "instance_failed",
+        "server.started",
+        "server.ready",
+        "server.stopped",
+        "server.restarted",
+        "server.crashed",
+        "server.crash.exhausted",
         // The middle of a deliberate restart: the old run is down and the new one is not spawned yet.
         // Audit-silent (the catalog weighs it Phase, so no dotted action is shaped from it) and read
         // here anyway — a player could not connect during it, and downtime is measured from what
         // happened rather than from what the feed chose to print.
-        "instance_restart_stopped",
-        "instance_installed",
-        "instance_uninstalled",
+        "server.restart.stopped",
+        "server.installed",
+        "server.uninstalled",
     ];
 
     /// <summary>
@@ -201,30 +201,30 @@ public static class AvailabilityQueries
             bool unplanned = false;
             switch (e.Type)
             {
-                case "instance_started":
-                case "instance_restarted":
+                case "server.started":
+                case "server.restarted":
                     intendedUp = true; actuallyUp = true; gone = false; break;
                 // Ready is the moment people can connect. It cannot lower intent, and it implies it:
                 // nothing finishes loading that was not wanted up.
-                case "instance_ready":
+                case "server.ready":
                     intendedUp = true; actuallyUp = true; gone = false; break;
-                case "instance_stopped":
+                case "server.stopped":
                     intendedUp = false; actuallyUp = false; break;
                 // A crash and a give-up leave intent alone on purpose — the supervisor still wants this
                 // running, which is what makes the gap that follows an outage rather than idle time.
-                case "instance_crashed":
-                case "instance_failed":
+                case "server.crashed":
+                case "server.crash.exhausted":
                     actuallyUp = false; unplanned = true; break;
                 // The same shape, deliberately NOT flagged unplanned: intent never wavered and the gap
                 // is somebody pressing Restart. It costs availability, because the server really was
                 // unreachable, and it is not an incident.
-                case "instance_restart_stopped":
+                case "server.restart.stopped":
                     actuallyUp = false; break;
-                case "instance_installed":
+                case "server.installed":
                     intendedUp = false; actuallyUp = false; gone = false; break;
                 // An uninstalled instance stops having uptime at all. Accruing past this would charge a
                 // server for the time after it ceased to exist.
-                case "instance_uninstalled":
+                case "server.uninstalled":
                     intendedUp = false; actuallyUp = false; gone = true; break;
             }
 
@@ -310,7 +310,7 @@ public static class AvailabilityQueries
 
     /// <summary>
     /// How far back the ENGINE's journal reaches on this page. Every type read here is an
-    /// <c>instance_*</c> event, which only kgsm emits, so its journal is the only one whose retention
+    /// <c>server.*</c> event, which only kgsm emits, so its journal is the only one whose retention
     /// bounds the answer. Falls back to the page's collapsed floor when the reader named no producers
     /// (a single-journal reader), which is then the engine's by construction.
     /// </summary>

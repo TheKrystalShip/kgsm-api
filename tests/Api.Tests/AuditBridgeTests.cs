@@ -15,7 +15,7 @@ public sealed class AuditBridgeTests
 {
     // A restart is always a recovery (the autonomous crash-heal) — origin is irrelevant.
     [Theory]
-    [InlineData(AuditOrigin.System)]    // the watchdog's autonomous crash-restart (instance_restarted)
+    [InlineData(AuditOrigin.System)]    // the watchdog's autonomous crash-restart (server.restarted)
     [InlineData(AuditOrigin.Discord)]
     [InlineData(null)]
     public void Restart_IsAlwaysRecovery(string? origin)

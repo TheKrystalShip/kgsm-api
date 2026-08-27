@@ -21,7 +21,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// <c>.config.ini</c> (kgsm-lib's <c>InstanceNote</c> owns the encoding and the three keys), so it
 /// travels with the instance, is readable by any surface that speaks kgsm-lib, and dies with the
 /// instance on uninstall. This controller holds no state.</para>
-/// <para><b>Echo-path audit — no double-write.</b> Each key write emits <c>instance_config_changed</c>
+/// <para><b>Echo-path audit — no double-write.</b> Each key write emits <c>config.changed</c>
 /// carrying the actor+origin this stamps onto the call, so the audit row is the engine's echo. The two
 /// attribution keys are filtered out of the audit surface (<c>AuditQueries</c>) so one save reads as
 /// one line rather than three.</para>

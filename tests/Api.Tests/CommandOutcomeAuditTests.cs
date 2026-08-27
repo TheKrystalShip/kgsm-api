@@ -181,7 +181,7 @@ public sealed class CommandOutcomeAuditTests
     [Fact]
     public void The_two_verbs_the_engine_reports_itself_are_left_to_it()
     {
-        // ⚠ The no-double-write line. kgsm emits instance_update_failed and instance_uninstall_failed,
+        // ⚠ The no-double-write line. kgsm emits server.update.failed and server.uninstall.failed,
         // and both already become rows carrying the provenance the command stamped onto the call.
         Assert.True(CommandRunner.EngineRecordsItsOwnFailure(CommandVerb.Update));
         Assert.True(CommandRunner.EngineRecordsItsOwnFailure(CommandVerb.Uninstall));
@@ -200,7 +200,7 @@ public sealed class CommandOutcomeAuditTests
     [Fact]
     public void A_refused_move_names_both_libraries()
     {
-        // The successful move is the engine's own instance_moved, which carries the same pair. This is
+        // The successful move is the engine's own server.moved, which carries the same pair. This is
         // the half no producer records — the disk somebody was trying to empty, and the one it could not
         // be emptied onto — and it is what they come back to afterwards.
         CommandOutcomeEventData d = Outcome(

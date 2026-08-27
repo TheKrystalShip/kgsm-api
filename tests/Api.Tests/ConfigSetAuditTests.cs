@@ -6,7 +6,7 @@ using TheKrystalShip.KGSM.Events;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// G2 — the <c>config.set</c> audit row sourced from kgsm's <c>instance_config_changed</c> event
+/// G2 — the <c>config.set</c> audit row sourced from kgsm's <c>config.changed</c> event
 /// (kgsm-lib 1.22.0). The PATCH <c>/servers/{id}/config</c> path stamps actor+origin onto
 /// <c>SetInstanceConfigValue</c>, so this is an echo-path mapping (no double-write).
 /// <para>The load-bearing assertion is the <strong>secret-hygiene regression guard</strong>: the event

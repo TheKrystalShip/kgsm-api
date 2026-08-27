@@ -48,8 +48,8 @@ public sealed class NotificationMappingTests
         Assert.Equal(expected, NotificationCatalog.CatalogIdForAction(action));
 
     [Theory]
-    [InlineData(AuditSeverity.Warn, "crash")]        // instance_crashed — the watchdog is restarting it
-    [InlineData(AuditSeverity.Danger, "crash_loop")] // instance_failed — it has given up
+    [InlineData(AuditSeverity.Warn, "crash")]        // server.crashed — the watchdog is restarting it
+    [InlineData(AuditSeverity.Danger, "crash_loop")] // server.crash.exhausted — it has given up
     [InlineData(null, "crash")]                      // unstated reads as the restarting kind, never the escalation
     public void The_severity_is_what_separates_a_crash_from_a_give_up(string? severity, string expected) =>
         Assert.Equal(expected, NotificationCatalog.CatalogIdForAction(AuditAction.ServerCrash, severity));

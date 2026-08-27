@@ -15,8 +15,8 @@ the `jobs` SSE topic (`job.patch`) → verify (`server.patch` on settle)**. The 
 - **`move` has a dedicated route, and it is admin.** `POST /servers/{id}/move { library }` reuses the job
   machinery (the install/`backup_restore` pattern — the plain verbs are param-less) and takes the
   library-CRUD authority rather than operator, because placement shapes the host. ⚠ **The engine starts
-  the instance once on the new path to confirm it runs there**, so an `instance_started` and an
-  `instance_stopped` land partway through with no bracket around them — a surface reading run-state alone
+  the instance once on the new path to confirm it runs there**, so a `server.started` and a
+  `server.stopped` land partway through with no bracket around them — a surface reading run-state alone
   flickers "running" mid-move, and the job holding the in-flight slot is the span it should trust instead.
   The controller answers the four refusals it can make from what it already holds (unknown server, a
   library this host does not carry, an offline target, the instance's own library, a running instance);
@@ -42,15 +42,15 @@ the `jobs` SSE topic (`job.patch`) → verify (`server.patch` on settle)**. The 
   `system` rejected). Don't add an `AuditService` call here **for lifecycle verbs**.
 - **The outcome with no echo IS recorded, to the API's own journal.** A verb that fails or is refused
   exits non-zero and emits nothing, and a batch member cancelled in the queue never reaches the engine —
-  so `CommandRunner`'s `finally` writes `command_failed`/`command_refused` through `ApiJournal`, and the
-  batch cancel path writes `command_cancelled` per member. Refused vs failed is keyed on
+  so `CommandRunner`'s `finally` writes `command.failed`/`command.refused` through `ApiJournal`, and the
+  batch cancel path writes `command.cancelled` per member. Refused vs failed is keyed on
   `EngineExit.InsufficientMemory` (51), the same constant `BatchWorker` uses. ⚠ **Never through
   `AuditService`** (it announces, it has no append path) and **never published from the write site** —
   the API tails its own journal and that tail is what announces the row. ⚠ `update` and `uninstall` are
-  excluded (`CommandRunner.EngineRecordsItsOwnFailure`): kgsm emits `instance_update_failed`/
-  `instance_uninstall_failed`, and a second row for a fact a producer already emits is undedupable. A
+  excluded (`CommandRunner.EngineRecordsItsOwnFailure`): kgsm emits `server.update.failed`/
+  `server.uninstall.failed`, and a second row for a fact a producer already emits is undedupable. A
   refused `move` carries `fromLibrary`/`toLibrary` on that row: the successful move is the engine's own
-  `instance_moved`, which names the same pair, and the disk somebody could not empty is exactly what they
+  `server.moved`, which names the same pair, and the disk somebody could not empty is exactly what they
   come back to.
 - **`open_ports` is the audit EXCEPTION — a DIRECT write.** It goes through `IFirewallService`
   (`EnsureOpenAsync`), which runs no kgsm command and emits **no event**, so there is no echo to read — the
@@ -60,7 +60,7 @@ the `jobs` SSE topic (`job.patch`) → verify (`server.patch` on settle)**. The 
   with the CLI echo, which only fires on a confirmed open). `AppliedInactive` (the rule was staged but ufw is
   inactive) is a real config change, so it IS audited — with `enforced:false`, and
   the summary says "staged" not "opened". This is **not** a double-write: kgsm never echoes an api firewall
-  call, and the CLI echo path (`instance_ports_opened`) is disjoint. The `meta` carries `{jobId, ports}` —
+  call, and the CLI echo path (`network.ports.opened`) is disjoint. The `meta` carries `{jobId, ports}` —
   `jobId` is the job↔audit correlation, populatable because the api owns both the job and the append
   (an echo-sourced row cannot name one). Don't extend this direct-write to the lifecycle verbs.
 

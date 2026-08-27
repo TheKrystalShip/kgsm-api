@@ -97,8 +97,8 @@ public sealed record BlueprintRevertResult(
 /// blueprints directory; the shipped file is structurally unreachable from here. That is surfaced rather
 /// than hidden — <see cref="BlueprintSaveResult.CreatedOverride"/> says when a save has just started
 /// shadowing a shipped blueprint, and <see cref="Revert"/> undoes it.</para>
-/// <para><b>No audit row is written here.</b> kgsm emits <c>blueprint_created</c>/<c>_updated</c>/
-/// <c>_removed</c> for these writes, so the trail arrives as an event echo like every other engine action
+/// <para><b>No audit row is written here.</b> kgsm emits <c>blueprint.created</c>/<c>.updated</c>/
+/// <c>.removed</c> for these writes, so the trail arrives as an event echo like every other engine action
 /// (<c>Services/Audit/CLAUDE.md</c> — never a second writer for something kgsm already emits). The actor
 /// and origin are threaded down into the emit instead, so the echoed row carries them.</para>
 /// </remarks>

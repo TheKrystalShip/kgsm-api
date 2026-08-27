@@ -517,7 +517,7 @@ public sealed class ServersController(
     /// Move a server's files into another library — <c>POST /servers/{id}/move</c>. Async like install:
     /// <c>202</c> + a job, the copy runs off-request, and a fresh <c>server.patch</c> lands on settle
     /// with the instance reporting its new library. A <c>server.move</c> audit entry naming both
-    /// libraries comes from kgsm's <c>instance_moved</c> echo.
+    /// libraries comes from kgsm's <c>server.moved</c> echo.
     /// <list type="bullet">
     /// <item><c>400</c> — no <c>library</c>, a bad origin, or a library this host does not carry.</item>
     /// <item><c>404</c> — unknown server id.</item>

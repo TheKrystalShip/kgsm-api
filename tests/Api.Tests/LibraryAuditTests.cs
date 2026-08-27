@@ -108,7 +108,7 @@ public sealed class LibraryAuditTests
         var item = new EventHistoryEntry(
             Id: "evt_kgsm_0001_0042",
             Ts: Ts,
-            Type: "library_added",
+            Type: "library.added",
             Instance: null,
             Blueprint: null,
             Actor: "discord:haru",

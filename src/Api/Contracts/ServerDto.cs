@@ -17,8 +17,8 @@ namespace TheKrystalShip.Api.Contracts;
 ///     <c>running|starting|maintenance|stopped|unknown</c> vocabulary — never the aspirational
 ///     <c>online|offline|updating|crashed|installing</c>. <c>running</c>/<c>stopped</c>/<c>unknown</c>
 ///     derive from kgsm-lib's <c>Reading&lt;InstanceRuntimeStatus&gt;</c>.
-///     <c>starting</c> is a REAL run-state, not a job state: the window between an <c>instance_started</c>
-///     event (the process spawned) and the matching <c>instance_ready</c> event (the watchdog's log-scrape
+///     <c>starting</c> is a REAL run-state, not a job state: the window between a <c>server.started</c>
+///     event (the process spawned) and the matching <c>server.ready</c> event (the watchdog's log-scrape
 ///     confirms the game finished booting) — the boolean status reading alone can't tell these apart (the
 ///     process is genuinely "up" for both), so <see cref="Services.Aggregation.InstanceCache"/> tracks the
 ///     window explicitly (a "starting latch") and <c>ServerAggregator.BuildServer</c> is the one place that
@@ -104,7 +104,7 @@ public sealed record Server(
     // read back off the engine's record. Lets the SPA surface "checked N min ago" so freshness is visible.
     DateTimeOffset? UpdateCheckedAt = null,
     // When this instance was FIRST seen to be behind — the engine's oldest still-standing
-    // instance_update_available notice, read from the journal (Services/Availability/UpdateLagIndex).
+    // server.update.available notice, read from the journal (Services/Availability/UpdateLagIndex).
     // Distinct from UpdateCheckedAt, which says when the last check ran: this says how long the gap has
     // been open, which is what makes an update overdue rather than merely pending. Null whenever there is
     // nothing to date it by — no update outstanding, an engine that emits no such event, or a notice
@@ -177,7 +177,7 @@ public sealed record Server(
     // that reason, and DomainPump diffs it, so start and finish reach every open panel within a tick.
     //
     // Two sources, both measured, never fabricated: a job this API issued, and — via
-    // instance_update_started/finished — an update kgsm is running for some OTHER entrypoint (the CLI, the
+    // server.update.started/finished — an update kgsm is running for some OTHER entrypoint (the CLI, the
     // assistant, the bot). They share one slot, so this is at most one record whoever started it.
     //
     // It is NOT a status. Status stays the run-state vocabulary above; a surface that wants to render
@@ -344,8 +344,8 @@ public sealed record ServerMetricsRoster(IReadOnlyList<ServerMetricsRow> Servers
 /// status was not readable, distinct from a confident "stopped".
 /// <para>
 /// <see cref="Starting"/> is layered on top of a measured "up" (<c>Status: true</c>) reading: the
-/// process has spawned (<c>instance_started</c>) but the watchdog hasn't yet confirmed the game
-/// finished booting (<c>instance_ready</c>). The boolean reading alone cannot distinguish this from
+/// process has spawned (<c>server.started</c>) but the watchdog hasn't yet confirmed the game
+/// finished booting (<c>server.ready</c>). The boolean reading alone cannot distinguish this from
 /// <see cref="Running"/> — both observe the process as up — so it is tracked out-of-band by
 /// <see cref="Services.Aggregation.InstanceCache"/>'s starting latch, not derivable from the reading
 /// by itself. See <c>InstanceCache</c> for the latch design and its reconcile-hazard guard.

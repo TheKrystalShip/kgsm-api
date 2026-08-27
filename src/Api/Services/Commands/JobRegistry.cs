@@ -14,7 +14,7 @@ public sealed class JobRegistry
 {
     /// <summary>
     /// How long an engine-observed job may hold a server's in-flight slot without its matching
-    /// finish event. kgsm emits <c>instance_update_finished</c> on every outcome, so the only way
+    /// finish event. kgsm emits <c>server.update.finished</c> on every outcome, so the only way
     /// the settle never arrives is the engine being killed mid-run — and a slot held forever would
     /// both freeze the surface on "updating" and make the gate refuse every later command for that
     /// server. Generous enough to cover a genuinely long download-and-deploy, bounded so a killed
@@ -56,7 +56,7 @@ public sealed class JobRegistry
     /// <summary>
     /// Records a long-running operation this API did <em>not</em> issue but observed the engine
     /// start (a kgsm update run from the CLI, the assistant or the bot — its
-    /// <c>instance_update_started</c> event). It claims the same one-per-server slot as an issued
+    /// <c>server.update.started</c> event). It claims the same one-per-server slot as an issued
     /// job, so every surface reads one in-flight record whoever started it, and the gate refuses to
     /// stack a command on an instance kgsm is already busy with. Returns <c>null</c> when the slot
     /// is already taken — normally because this API issued the very command the event echoes, in

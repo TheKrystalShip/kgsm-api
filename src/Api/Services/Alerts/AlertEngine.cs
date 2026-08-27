@@ -44,7 +44,7 @@ namespace TheKrystalShip.Api.Services.Alerts;
 /// resolves because an OPERATOR/api start|restart brought the server back, that id becomes the
 /// resolution's <c>actionId</c> — the one-way link to the fix. The poll can't learn an audit id on its
 /// own, so this is the sole event integration; it is lock-free (a <see cref="ConcurrentDictionary{TKey,TValue}"/>
-/// read by the poll thread). The watchdog's autonomous crash-restart now emits <c>instance_restarted</c>
+/// read by the poll thread). The watchdog's autonomous crash-restart now emits <c>server.restarted</c>
 /// (<c>system</c>/<c>system</c>, kgsm-watchdog <c>d4b453f</c>) → a <c>server.restart</c> row, so a pure
 /// auto-heal bridges its <c>actionId</c> once that row is consumed (within the resolve probation). The
 /// bridge is <b>episode-scoped</b>: a stashed action stamps a resolution only if it post-dates that crash's
@@ -153,7 +153,7 @@ public sealed class AlertEngine : BackgroundService
     /// wins. The stash is <b>episode-scoped at read time</b>: <see cref="BuildResolution"/> honors it only
     /// if it post-dates the firing record's raise, so a stale action from a PRIOR crash episode (or a fast
     /// auto-heal blip that never fired) can never stamp a later resolution — honest null over a stale link.
-    /// The watchdog's autonomous crash-restart emits <c>instance_restarted</c> (system/system) → a
+    /// The watchdog's autonomous crash-restart emits <c>server.restarted</c> (system/system) → a
     /// <c>server.restart</c> row that lands here too, so a real auto-heal still bridges its recovery.</summary>
     public void NoteRecoveryAction(string serverId, string actionId, DateTimeOffset at)
     {

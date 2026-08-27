@@ -6,7 +6,7 @@ namespace TheKrystalShip.Api.Tests;
 /// <summary>
 /// <c>JobRegistry</c>'s OBSERVED jobs — the record of a long-running engine operation this API did not
 /// issue but saw kgsm start (an update run from the CLI, the assistant or the bot, via its
-/// <c>instance_update_started</c> event). They share the one-in-flight-per-server slot with issued jobs,
+/// <c>server.update.started</c> event). They share the one-in-flight-per-server slot with issued jobs,
 /// which is what makes "this instance is busy updating" one fact whoever started it.
 /// </summary>
 public sealed class JobRegistryObservedTests

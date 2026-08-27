@@ -161,7 +161,7 @@ public sealed class AlertEngineTests
         // The watchdog auto-restarts but its recovery event was NOT audited (dropped best-effort, or the API
         // wasn't listening), so the engine never gets a NoteRecoveryAction. The condition still clears
         // (Phase=running) and resolves after probation, but with actionId NULL: no audited action to link, so
-        // we never fabricate one. (When the instance_restarted event IS audited it bridges — see below.)
+        // we never fabricate one. (When the server.restarted event IS audited it bridges — see below.)
         engine.Tick([Crashing("mc")], T0);
         DateTimeOffset tClear = T0 + TimeSpan.FromSeconds(5);
         engine.Tick([Running("mc")], tClear);
@@ -244,7 +244,7 @@ public sealed class AlertEngineTests
     {
         AlertEngine engine = Engine();
 
-        // The watchdog's autonomous crash-restart (d4b453f) emits instance_restarted → a server.restart
+        // The watchdog's autonomous crash-restart (d4b453f) emits server.restarted → a server.restart
         // audit row, stamped at its COMPLETION time (after the crash was observed). Under episode-scoping
         // that still bridges, because the recovery post-dates the raise — the auto-heal link is preserved.
         engine.Tick([Crashing("mc")], T0);

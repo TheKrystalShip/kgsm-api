@@ -457,7 +457,7 @@ public sealed class NotificationActionsController(
         if (failure == ModerationTargetResolver.Failure.NoSuchIdentity)
             return Refuse($"This game moderates by {kind.ToString().ToLowerInvariant()}, which {Name(player)} has none of.");
 
-        // Stamped, not written — kgsm emits instance_player_kicked/_banned and the audit row comes off that
+        // Stamped, not written — kgsm emits player.kicked/.banned and the audit row comes off that
         // echo, exactly as the panel's own moderation route leaves it.
         KgsmResult result = moderation == Contracts.ModerationAction.Kick
             ? engine.Kick(action.Target, target, identity.ActorString, AuditOrigin.Notification)

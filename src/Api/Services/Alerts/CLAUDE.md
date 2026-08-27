@@ -56,11 +56,11 @@ resolved condition to the audit action that fixed it.
   (so the id exists); the poll stashes it and, when a crash later resolves because the server recovered,
   stamps it as `resolution.actionId`. The poll can't learn an audit id on its own — this is the sole reason
   the engine touches the event path, and it's lock-free (a `ConcurrentDictionary`, not shared alert state).
-  **The bridge and its limit:** the watchdog's autonomous crash-restart emits `instance_restarted`
+  **The bridge and its limit:** the watchdog's autonomous crash-restart emits `server.restarted`
   (`system`/`system`) → a `server.restart` row through the same `WriteServerAndBridge`
   handler, so a **pure auto-heal bridges** `resolution.actionId` once that row is consumed (within the resolve
   probation) — alongside an **operator/api** start|restart recovery. The watchdog's **boot-autostart** also
-  emits (`instance_started`, `system`/`system`) → it is **audited** as a `server.start` row but **NOT bridged**:
+  emits (`server.started`, `system`/`system`) → it is **audited** as a `server.start` row but **NOT bridged**:
   `KgsmAuditConsumer.IsRecoveryAction` excludes the system-origin start, because a fresh boot bring-up is not a
   crash recovery — letting it bridge could stamp a stale id on a later crash whose own recovery event dropped
   (honest-null over a plausible-but-wrong link). **Still

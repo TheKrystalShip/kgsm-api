@@ -44,7 +44,7 @@ public sealed class AuthServiceGraphTests
                     ["Api:UsersDbPath"] = usersDbPath
                         ?? Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-users-{Guid.NewGuid():N}.db"),
                     // ⚠ Never the default. This factory is deliberately fake-free, so everything it does
-                    // not override is the real host's — and booting the app now writes a leaf_ready to
+                    // not override is the real host's — and booting the app now writes a leaf.ready to
                     // whatever journal it resolves. Measured: a test run put twenty-five ready/stopping
                     // pairs into this machine's live API journal, which reads as an API that restarted
                     // twenty-five times when systemd shows two.

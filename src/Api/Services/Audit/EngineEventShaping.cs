@@ -86,8 +86,8 @@ public static class EngineEventShaping
             // attributed to the person who asked. These are the turn that did NOT act, which leaves the
             // engine's record empty because from its side nothing happened.
             //
-            // assistant_blueprint_authoring_started is absent on purpose — it is classified Phase, so
-            // IsPhase already drops it, exactly like instance_installation_started. The bracket's open
+            // assistant.blueprint.authoring_started is absent on purpose — it is classified Phase, so
+            // IsPhase already drops it, exactly like server.install.started. The bracket's open
             // half is not news; its close is.
             AssistantEvents.ActionDeclined => Map<AssistantActionDeclinedEventData>(item,
                 d => Assistant(item, AuditAction.AssistantActionDeclined, AuditSeverity.Warn,
@@ -127,78 +127,78 @@ public static class EngineEventShaping
                     Meta(("outcome", d.AuthoringOutcome), ("probe", d.Probe),
                          ("durationSec", d.DurationSec?.ToString(CultureInfo.InvariantCulture))))),
 
-            "instance_started" => Map<InstanceStartedData>(item,
+            "server.started" => Map<InstanceStartedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerStart, AuditSeverity.Info, "started", hostId)),
             // The moment players can actually connect, which server.start does not report — that one
             // says the process spawned. Two facts about two different moments, and the second is the
             // one somebody asking "when could people get in" is looking for.
-            "instance_ready" => Map<InstanceReadyData>(item,
+            "server.ready" => Map<InstanceReadyData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerReady, AuditSeverity.Info, "finished loading", hostId)),
-            "instance_stopped" => Map<InstanceStoppedData>(item,
+            "server.stopped" => Map<InstanceStoppedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerStop, AuditSeverity.Info, "stopped", hostId)),
-            "instance_restarted" => Map<InstanceRestartedData>(item,
+            "server.restarted" => Map<InstanceRestartedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerRestart, AuditSeverity.Info, "restarted", hostId)),
-            "instance_uninstalled" => Map<InstanceUninstalledData>(item,
+            "server.uninstalled" => Map<InstanceUninstalledData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerUninstall, AuditSeverity.Warn, "uninstalled", hostId)),
-            "instance_version_updated" => Map<InstanceVersionUpdatedData>(item,
+            "server.updated" => Map<InstanceVersionUpdatedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerUpdate, AuditSeverity.Info, "updated", hostId,
                     Meta(("oldVersion", d.OldVersion), ("newVersion", d.NewVersion)))),
             // The update run that ended without the version moving, for a reason. Same action as the
             // successful one with the severity carrying the outcome — the server.crash shape, rather
             // than an invented action for every way a thing can fail.
-            "instance_update_failed" => Map<InstanceUpdateFailedData>(item,
+            "server.update.failed" => Map<InstanceUpdateFailedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerUpdate, AuditSeverity.Danger, "could not update", hostId)),
-            "instance_uninstall_failed" => Map<InstanceUninstallFailedData>(item,
+            "server.uninstall.failed" => Map<InstanceUninstallFailedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerUninstall, AuditSeverity.Danger, "could not uninstall", hostId)),
-            "instance_update_available" => Map<InstanceUpdateAvailableData>(item,
+            "server.update.available" => Map<InstanceUpdateAvailableData>(item,
                 d => AuditMapping.FromUpdateAvailableEvent(d, hostId)),
-            "instance_installed" => Map<InstanceInstalledData>(item,
+            "server.installed" => Map<InstanceInstalledData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerInstall, AuditSeverity.Success, "installed", hostId,
                     // The library is where it landed. On a host with several disks that is the half of
                     // an install record its operator most needs, and nothing else records it.
                     Meta(("blueprint", d.Blueprint), ("library", d.Library)))),
             // Info, not Success: moving a server between two roots on the same host changes nothing about
             // the server, and the news is which library gave up the space and which took it.
-            "instance_moved" => Map<InstanceMovedData>(item,
+            "server.moved" => Map<InstanceMovedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.ServerMove, AuditSeverity.Info, "moved", hostId,
                     Meta(("fromLibrary", d.FromLibrary), ("toLibrary", d.ToLibrary)))),
-            "instance_backup_created" => Map<InstanceBackupCreatedData>(item,
+            "backup.created" => Map<InstanceBackupCreatedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.BackupCreate, AuditSeverity.Success, "backed up", hostId,
                     Meta(("source", d.Source), ("version", d.Version)))),
-            "instance_backup_restored" => Map<InstanceBackupRestoredData>(item,
+            "backup.restored" => Map<InstanceBackupRestoredData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.BackupRestore, AuditSeverity.Success, "restored backup for", hostId,
                     Meta(("source", d.Source), ("version", d.Version)))),
             // Warn, not Success: destroying a backup is the one backup operation with no undo, and it
             // succeeding is exactly what makes it worth surfacing.
-            "instance_backup_deleted" => Map<InstanceBackupDeletedData>(item,
+            "backup.deleted" => Map<InstanceBackupDeletedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.BackupDelete, AuditSeverity.Warn, "deleted a backup for", hostId,
                     Meta(("source", d.Source)))),
-            "instance_backups_pruned" => Map<InstanceBackupsPrunedData>(item,
+            "backup.pruned" => Map<InstanceBackupsPrunedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.BackupPrune, AuditSeverity.Info, "pruned backups for", hostId,
                     // `pinned` is what the sweep protected. Without it a sweep that removed nothing
                     // because everything was pinned reads exactly like one that found nothing to remove.
                     Meta(("deleted", d.Deleted.ToString(CultureInfo.InvariantCulture)),
                          ("kept", d.Kept.ToString(CultureInfo.InvariantCulture)),
                          ("pinned", d.Pinned.ToString(CultureInfo.InvariantCulture))))),
-            "instance_backup_pinned" => Map<InstanceBackupPinnedData>(item,
+            "backup.pinned" => Map<InstanceBackupPinnedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.BackupPin, AuditSeverity.Info, "pinned a backup for", hostId,
                     Meta(("source", d.Source)))),
             // Warn, like a delete: unpinning is what lets the next sweep take an archive somebody
             // deliberately protected, and it succeeding is exactly what makes it worth surfacing.
-            "instance_backup_unpinned" => Map<InstanceBackupUnpinnedData>(item,
+            "backup.unpinned" => Map<InstanceBackupUnpinnedData>(item,
                 d => AuditMapping.FromServerEvent(d, AuditAction.BackupUnpin, AuditSeverity.Warn, "unpinned a backup for", hostId,
                     Meta(("source", d.Source)))),
-            "instance_crashed" => Map<InstanceCrashedData>(item, d => AuditMapping.FromCrashEvent(d, hostId)),
-            "instance_failed" => Map<InstanceFailedData>(item, d => AuditMapping.FromFailedEvent(d, hostId)),
-            "instance_ports_opened" => Map<InstancePortsOpenedData>(item, d => AuditMapping.FromPortsOpenedEvent(d, hostId)),
-            "instance_ports_closed" => Map<InstancePortsClosedData>(item, d => AuditMapping.FromPortsClosedEvent(d, hostId)),
-            "instance_upnp_opened" => Map<InstanceUpnpOpenedData>(item, d => AuditMapping.FromUpnpOpenedEvent(d, hostId)),
-            "instance_upnp_closed" => Map<InstanceUpnpClosedData>(item, d => AuditMapping.FromUpnpClosedEvent(d, hostId)),
-            "instance_upnp_reasserted" => Map<InstanceUpnpReassertedData>(item, d => AuditMapping.FromUpnpReassertedEvent(d, hostId)),
+            "server.crashed" => Map<InstanceCrashedData>(item, d => AuditMapping.FromCrashEvent(d, hostId)),
+            "server.crash.exhausted" => Map<InstanceFailedData>(item, d => AuditMapping.FromFailedEvent(d, hostId)),
+            "network.ports.opened" => Map<InstancePortsOpenedData>(item, d => AuditMapping.FromPortsOpenedEvent(d, hostId)),
+            "network.ports.closed" => Map<InstancePortsClosedData>(item, d => AuditMapping.FromPortsClosedEvent(d, hostId)),
+            "network.upnp.opened" => Map<InstanceUpnpOpenedData>(item, d => AuditMapping.FromUpnpOpenedEvent(d, hostId)),
+            "network.upnp.closed" => Map<InstanceUpnpClosedData>(item, d => AuditMapping.FromUpnpClosedEvent(d, hostId)),
+            "network.upnp.reasserted" => Map<InstanceUpnpReassertedData>(item, d => AuditMapping.FromUpnpReassertedEvent(d, hostId)),
             // kgsm-monitor's own journal: the host's measurements, shaped into rows here rather than
             // polled out of its database and transcribed.
-            "host_threshold_breached" => Map<HostThresholdBreachedData>(item, d => AuditMapping.FromThresholdBreachedEvent(d, hostId)),
-            "host_threshold_cleared" => Map<HostThresholdClearedData>(item, d => AuditMapping.FromThresholdClearedEvent(d, hostId)),
+            "host.threshold.breached" => Map<HostThresholdBreachedData>(item, d => AuditMapping.FromThresholdBreachedEvent(d, hostId)),
+            "host.threshold.cleared" => Map<HostThresholdClearedData>(item, d => AuditMapping.FromThresholdClearedEvent(d, hostId)),
 
             // kgsm-api's own journal: what the Control Panel did itself. Shaped here like any other
             // producer's — nothing about these mappers knows the API is reading its own writing, which
@@ -234,33 +234,33 @@ public static class EngineEventShaping
             ApiJournal.CommandFailedEvent or ApiJournal.CommandRefusedEvent
                 or ApiJournal.CommandCancelledEvent =>
                 Map<CommandOutcomeEventData>(item, d => AuditMapping.FromCommandOutcomeEvent(d, item.Type, hostId)),
-            "instance_player_joined" => Map<InstancePlayerJoinedData>(item, d => AuditMapping.FromPlayerJoinedEvent(d, hostId)),
-            "instance_player_left" => Map<InstancePlayerLeftData>(item, d => AuditMapping.FromPlayerLeftEvent(d, hostId)),
-            "instance_player_kicked" => Map<InstancePlayerKickedData>(item,
+            "player.joined" => Map<InstancePlayerJoinedData>(item, d => AuditMapping.FromPlayerJoinedEvent(d, hostId)),
+            "player.left" => Map<InstancePlayerLeftData>(item, d => AuditMapping.FromPlayerLeftEvent(d, hostId)),
+            "player.kicked" => Map<InstancePlayerKickedData>(item,
                 d => AuditMapping.FromPlayerModerationEvent(d, hostId, AuditAction.PlayerKick, "kicked")),
-            "instance_player_banned" => Map<InstancePlayerBannedData>(item,
+            "player.banned" => Map<InstancePlayerBannedData>(item,
                 d => AuditMapping.FromPlayerModerationEvent(d, hostId, AuditAction.PlayerBan, "banned")),
-            "instance_player_unbanned" => Map<InstancePlayerUnbannedData>(item,
+            "player.unbanned" => Map<InstancePlayerUnbannedData>(item,
                 d => AuditMapping.FromPlayerModerationEvent(d, hostId, AuditAction.PlayerUnban, "unbanned")),
-            "instance_display_name_changed" => Map<InstanceDisplayNameChangedData>(item,
+            "server.renamed" => Map<InstanceDisplayNameChangedData>(item,
                 d => AuditMapping.FromDisplayNameChangedEvent(d, hostId)),
-            "instance_config_changed" => Map<InstanceConfigChangedData>(item, d => AuditMapping.FromConfigChangedEvent(d, hostId)),
-            "instance_input_sent" => Map<InstanceInputSentData>(item, d => AuditMapping.FromInputSentEvent(d, hostId)),
+            "config.changed" => Map<InstanceConfigChangedData>(item, d => AuditMapping.FromConfigChangedEvent(d, hostId)),
+            "console.input.sent" => Map<InstanceInputSentData>(item, d => AuditMapping.FromInputSentEvent(d, hostId)),
             // The blueprint events are the first whose subject is NOT an instance, so they go through
             // MapBlueprint rather than Map — see that helper for why the two cannot share one.
-            "blueprint_created" => MapBlueprint<BlueprintCreatedData>(item,
+            "blueprint.created" => MapBlueprint<BlueprintCreatedData>(item,
                 d => AuditMapping.FromBlueprintCreatedEvent(d, hostId)),
-            "blueprint_updated" => MapBlueprint<BlueprintUpdatedData>(item,
+            "blueprint.updated" => MapBlueprint<BlueprintUpdatedData>(item,
                 d => AuditMapping.FromBlueprintUpdatedEvent(d, hostId)),
-            "blueprint_removed" => MapBlueprint<BlueprintRemovedData>(item,
+            "blueprint.removed" => MapBlueprint<BlueprintRemovedData>(item,
                 d => AuditMapping.FromBlueprintRemovedEvent(d, hostId)),
             // library.* — the engine's two, then the two this API writes because kgsm emits nothing for
             // them. A library-subject payload carries LibraryName rather than InstanceName, so Map's
             // instance backfill never fires for it (the envelope's `instance` field is empty here, and
             // copying it anywhere would invent a server relationship that does not exist).
-            "library_added" => Map<LibraryAddedData>(item,
+            "library.added" => Map<LibraryAddedData>(item,
                 d => AuditMapping.FromLibraryAddedEvent(d, hostId)),
-            "library_removed" => Map<LibraryRemovedData>(item,
+            "library.removed" => Map<LibraryRemovedData>(item,
                 d => AuditMapping.FromLibraryRemovedEvent(d, hostId)),
             ApiJournal.LibraryRenamedEvent => Map<LibraryOutcomeEventData>(item,
                 d => AuditMapping.FromLibraryRenamedEvent(d, hostId)),
@@ -321,13 +321,13 @@ public static class EngineEventShaping
 
     // Two operator actions each write more config keys than they are worth rows. A server note spans
     // three (body + who + when), so its two attribution keys are dropped and only the body's event is
-    // surfaced. A rename writes display_name, and the engine emits instance_display_name_changed for the
+    // surfaced. A rename writes display_name, and the engine emits server.renamed for the
     // same write — that one names both labels, so the bare key event is dropped in its favour.
     // Nothing is destroyed — the raw events remain in the journal, which is the record.
     // The live path (KgsmAuditConsumer) applies the same rules, so both halves of the merge agree.
     private static bool IsSupersededConfigChange(EventHistoryEntry item)
     {
-        if (!string.Equals(item.Type, "instance_config_changed", StringComparison.Ordinal)) return false;
+        if (!string.Equals(item.Type, "config.changed", StringComparison.Ordinal)) return false;
         if (item.Data is not { ValueKind: JsonValueKind.Object } data) return false;
 
         // kgsm emits the payload PascalCased ("Key"); JsonElement lookup is case-sensitive, so accept

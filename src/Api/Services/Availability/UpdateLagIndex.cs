@@ -9,7 +9,7 @@ namespace TheKrystalShip.Api.Services.Availability;
 /// </summary>
 /// <remarks>
 /// <para><b>Why this is not a column.</b> The engine already records the moment it noticed
-/// (<c>instance_update_available</c>) and the moment the version moved (<c>instance_version_updated</c>).
+/// (<c>server.update.available</c>) and the moment the version moved (<c>server.updated</c>).
 /// A stored "first seen out of date" would be a second copy of a fact the journal already holds, free to
 /// disagree with it after any restart, wipe or manual update. This reads the journal instead.</para>
 /// <para><b>Why it is cached.</b> The roster is rebuilt on every read and on a 60s pump; walking the
@@ -80,8 +80,8 @@ public sealed class UpdateLagIndex(
     }
 
     /// <summary>
-    /// Rebuild the map: for each instance, the OLDEST <c>instance_update_available</c> that no
-    /// <c>instance_version_updated</c> has since cleared.
+    /// Rebuild the map: for each instance, the OLDEST <c>server.update.available</c> that no
+    /// <c>server.updated</c> has since cleared.
     /// </summary>
     /// <remarks>
     /// Oldest rather than newest because the scheduler re-emits the notice on every sweep that still
@@ -100,9 +100,9 @@ public sealed class UpdateLagIndex(
         DateTimeOffset from = DateTimeOffset.UtcNow - Lookback;
         long fromMs = from.ToUnixTimeMilliseconds();
 
-        List<EventHistoryEntry> notices = await ReadAllAsync(journal, "instance_update_available", fromMs, ct)
+        List<EventHistoryEntry> notices = await ReadAllAsync(journal, "server.update.available", fromMs, ct)
             .ConfigureAwait(false);
-        List<EventHistoryEntry> updates = await ReadAllAsync(journal, "instance_version_updated", fromMs, ct)
+        List<EventHistoryEntry> updates = await ReadAllAsync(journal, "server.updated", fromMs, ct)
             .ConfigureAwait(false);
 
         _since = Select(notices, updates);

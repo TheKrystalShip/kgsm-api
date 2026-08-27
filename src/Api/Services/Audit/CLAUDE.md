@@ -21,7 +21,7 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
   whole of the write path, and `KgsmAuditConsumer.PublishOwnEventAsync` shapes and announces off the raw
   hook. ⚠ Announcing from the write site as well would emit every one of these rows **twice**. The raw
   hook rather than `RegisterHandler<T>` because kgsm-lib keys typed handlers on the payload CLASS, and
-  several of these types deliberately share one (`auth_login`/`auth_logout` are the same shape).
+  several of these types deliberately share one (`auth.signed_in`/`auth.signed_out` are the same shape).
 - **The API's journal is NAMED to the federation, not left to the scan** (`namedJournals:` in `Startup`).
   Its path is configurable, and the scan only finds a producer at its default state directory — so a host
   pointing it elsewhere would have this API writing a record it could not read back.
@@ -39,8 +39,8 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
   change; see the api `CLAUDE.md` gotcha).
 - **Closed `action` vocabulary** (`Contracts/AuditAction`). Clients/the model can't invent one. Add an
   action only when its producer has landed, never speculatively. `server.crash` covers the watchdog's
-  `instance_crashed`→warn / `instance_failed`→danger (both `system`-stamped); `network.ports.open`/
-  `network.ports.close` are the `instance_ports_opened`/`_closed` echoes. `network.ports.close` is a
+  `server.crashed`→warn / `server.crash.exhausted`→danger (both `system`-stamped); `network.ports.open`/
+  `network.ports.close` are the `network.ports.opened`/`network.ports.closed` echoes. `network.ports.close` is a
   deliberate **server-side additive** action beyond the doc's `ports.open`-only `network` set — it is
   honestly sourceable and keeps the trail symmetric (a standalone `files firewall disable` would otherwise
   leave an opened-never-closed gap); the frontend accepts unknown actions forward-compat.
@@ -65,7 +65,7 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
   `KgsmAuditConsumer` publishes only for the types it maps, and the phase types it registers publish
   nothing.
 - **`server.ready` is its own action, not a refinement of `server.start`.** The engine emits both:
-  `instance_started` says the process spawned, `instance_ready` says the watchdog's log-scrape confirms
+  `server.started` says the process spawned, `server.ready` says the watchdog's log-scrape confirms
   the game will accept a connection. On a big world the two are minutes apart, and the second is what
   somebody asking "when could people actually get in" is looking for. Both halves write it — the read
   path maps it, the live handler publishes it beside closing the starting latch.
@@ -87,7 +87,7 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
   and somebody calling off queued work are three different questions, and a refusal filed beside a
   failure blames the instance for the fleet being out of room. `command.refused` is keyed on kgsm's
   `EC_INSUFFICIENT_MEMORY` (51) via `EngineExit`, never on the engine's message. ⚠ **`update` and
-  `uninstall` write nothing here** — kgsm emits `instance_update_failed`/`instance_uninstall_failed`,
+  `uninstall` write nothing here** — kgsm emits `server.update.failed`/`server.uninstall.failed`,
   which are already mapped, and the exclusion lives in `CommandRunner.EngineRecordsItsOwnFailure`.
   ⚠ The meta key is **`verb`, never `command`**: `AuditRedaction` strips by field NAME across every
   event, and the engine classifies `Command` as privileged for the console-input event.

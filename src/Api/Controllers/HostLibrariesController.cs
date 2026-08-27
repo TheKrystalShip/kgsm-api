@@ -91,7 +91,7 @@ public sealed class HostLibrariesController(
             return await FailedAsync(
                 "add", name ?? path, path, newName: null, result, actor, origin, ct).ConfigureAwait(false);
 
-        // No audit row here — kgsm emits library_added, carrying the actor and origin stamped onto the
+        // No audit row here — kgsm emits library.added, carrying the actor and origin stamped onto the
         // call above, and the journal tail turns that into the library.add row. A second write for the
         // same fact could not be deduplicated against the echo.
         logger.LogInformation("registered library at {Path} (name={Name}, actor={Actor})",
@@ -197,7 +197,7 @@ public sealed class HostLibrariesController(
                 // wrong thing" from "you cannot do that yet".
                 StatusCodes.Status409Conflict, "conflict").ConfigureAwait(false);
 
-        // No audit row here — kgsm emits library_removed. See Add.
+        // No audit row here — kgsm emits library.removed. See Add.
         logger.LogInformation("deregistered library {Name} (actor={Actor})", name, actor ?? "(none)");
 
         return await CurrentAsync(name: null, path: null, ct).ConfigureAwait(false);

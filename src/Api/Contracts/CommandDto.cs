@@ -43,7 +43,7 @@ public sealed record CommandRequest(string? Verb, string? Origin = null, bool Fo
 ///     leaving it out is what a human-facing form does, and the backend assigns one (see below).
 ///     <see cref="Origin"/>
 ///     (the driving surface, like <see cref="CommandRequest.Origin"/>) is stamped onto the engine call so
-///     the resulting <c>instance_installed</c> event — and its <c>server.install</c> audit row — records it.
+///     the resulting <c>server.installed</c> event — and its <c>server.install</c> audit row — records it.
 ///     <see cref="Port"/> — the install form's Game Port; validated 1-65535 and passed to kgsm as
 ///     <c>install --port</c>, overriding the blueprint's primary game port for the new instance (null keeps
 ///     the blueprint default). <see cref="Autostart"/> — when <c>true</c>, starts the server
@@ -130,7 +130,7 @@ public static class CommandVerb
     /// <c>ILifecycleService</c> — kgsm exposes update on <c>IInstanceService.Update</c> — so the runner has
     /// a dedicated case (mirroring install/uninstall). kgsm refuses an update on a RUNNING instance, surfaced
     /// synchronously by <see cref="CommandGate"/> as a <c>409</c> (the engine refusal is the backstop).
-    /// Audited via the echo path (kgsm's <c>instance_version_updated</c> → <c>server.update</c>), NOT a
+    /// Audited via the echo path (kgsm's <c>server.updated</c> → <c>server.update</c>), NOT a
     /// direct write.
     /// </summary>
     public const string Update = "update";
@@ -149,8 +149,8 @@ public static class CommandVerb
     /// </summary>
     /// <remarks>
     /// ⚠ <b>Its job is what a surface renders "moving" from.</b> The engine starts the instance once on
-    /// the new path to confirm it runs there, so an <c>instance_started</c> and an
-    /// <c>instance_stopped</c> land partway through with no bracket around them — a card reading
+    /// the new path to confirm it runs there, so a <c>server.started</c> and a
+    /// <c>server.stopped</c> land partway through with no bracket around them — a card reading
     /// run-state alone flickers "running" mid-move. The job holds the server's in-flight slot for the
     /// whole operation, which is the span a surface should trust instead.
     /// </remarks>

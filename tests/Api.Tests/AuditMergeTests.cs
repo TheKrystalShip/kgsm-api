@@ -46,7 +46,7 @@ public sealed class AuditMergeTests : IDisposable
         await _db.SaveChangesAsync();
     }
 
-    private static EventHistoryEntry EngineEvent(string id, DateTimeOffset ts, string type = "instance_started", string instance = "mc") =>
+    private static EventHistoryEntry EngineEvent(string id, DateTimeOffset ts, string type = "server.started", string instance = "mc") =>
         new(id, ts, type, instance, null, null, null, null,
             System.Text.Json.JsonSerializer.SerializeToElement(new { InstanceName = instance }));
 
@@ -197,8 +197,8 @@ public sealed class AuditMergeTests : IDisposable
     public async Task PageMergedAsync_CategoryFilter_APIsToMonitorShapedRecordsToo()
     {
         var fake = new FakeEventJournal(_ => FakeEventJournal.Page(
-            EngineEvent("evt_started", DateTimeOffset.UtcNow, "instance_started"),                 // -> server.start
-            EngineEvent("evt_crashed", DateTimeOffset.UtcNow.AddSeconds(1), "instance_crashed"))); // -> server.crash
+            EngineEvent("evt_started", DateTimeOffset.UtcNow, "server.started"),                 // -> server.start
+            EngineEvent("evt_crashed", DateTimeOffset.UtcNow.AddSeconds(1), "server.crashed"))); // -> server.crash
 
         AuditPage page = await AuditQueries.PageMergedAsync(
             _db, fake, HostId, cursor: null, limit: 10,
@@ -283,9 +283,9 @@ public sealed class AuditMergeTests : IDisposable
         // Newest 8 engine events are all silent; the real ones sit behind them.
         var engine = new List<EventHistoryEntry>();
         for (int i = 0; i < 8; i++)
-            engine.Add(EngineEvent($"evt_2026-08-04_{100 + i:D12}", t0.AddMinutes(100 + i), "instance_stop_started"));
+            engine.Add(EngineEvent($"evt_2026-08-04_{100 + i:D12}", t0.AddMinutes(100 + i), "server.stop.started"));
         for (int i = 0; i < 8; i++)
-            engine.Add(EngineEvent($"evt_2026-08-04_{i:D12}", t0.AddMinutes(i), "instance_started"));
+            engine.Add(EngineEvent($"evt_2026-08-04_{i:D12}", t0.AddMinutes(i), "server.started"));
 
         // Local rows older than every engine event, so they are what fills a starved page.
         for (int i = 0; i < 8; i++)

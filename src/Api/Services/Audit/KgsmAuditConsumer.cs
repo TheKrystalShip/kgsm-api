@@ -139,7 +139,7 @@ public sealed class KgsmAuditConsumer(
     /// A download or a deploy is a step of an install <em>or</em> of an update, and nothing in the
     /// payload says which — so labelling one <c>server.install</c> would name a parent operation this
     /// API is guessing at. Which run it belonged to is answered by the run's own outcome fact beside it
-    /// (<c>instance_update_failed</c>, or the absence of <c>instance_installed</c>).
+    /// (<c>server.update.failed</c>, or the absence of <c>server.installed</c>).
     /// <para>
     /// What they were missing was not a label but a reader: nothing published them, so a failure — the
     /// event an operator most needs pushed — reached a surface only when somebody happened to refresh.
@@ -147,7 +147,7 @@ public sealed class KgsmAuditConsumer(
     /// </remarks>
     private static readonly HashSet<string> UnattributedFailureTypes = new(StringComparer.Ordinal)
     {
-        "instance_download_failed", "instance_deploy_failed",
+        "server.download.failed", "server.deploy.failed",
     };
 
     /// <summary>
@@ -220,7 +220,7 @@ public sealed class KgsmAuditConsumer(
 
         // This API's OWN events, published live. They cannot go through RegisterHandler<T> like the
         // engine's: kgsm-lib keys a typed handler on the payload CLASS, and several of these types
-        // deliberately share one — auth_login and auth_logout are the same shape, told apart by which
+        // deliberately share one — auth.signed_in and auth.signed_out are the same shape, told apart by which
         // type fired. A typed handler would get one registration for both and no way to know which
         // arrived. The raw hook carries the type and the position, which is exactly what is missing.
         events.RegisterRawHandler(PublishOwnEventAsync);
@@ -230,9 +230,9 @@ public sealed class KgsmAuditConsumer(
         // written we hand its evt_ id to the AlertEngine (only when IsRecoveryAction), so a crash that
         // clears because a start|restart brought the server back links to that action as
         // resolution.actionId. The hand-off (not a second event-socket binding) is why the consumer owns
-        // it. The watchdog's autonomous crash-restart emits instance_restarted (system/system,
+        // it. The watchdog's autonomous crash-restart emits server.restarted (system/system,
         // kgsm-watchdog d4b453f) → a server.restart row through this same handler, so a pure auto-heal
-        // bridges too. The watchdog's BOOT-AUTOSTART emits instance_started (system/system) → audited as a
+        // bridges too. The watchdog's BOOT-AUTOSTART emits server.started (system/system) → audited as a
         // server.start row but NOT bridged (a boot bring-up is not a crash recovery — IsRecoveryAction
         // excludes the system-origin start). A stop-cleared crash links null. Honest, never fabricated.
         // See Services/Alerts/CLAUDE.md.
@@ -251,7 +251,7 @@ public sealed class KgsmAuditConsumer(
             // MarkStarting (not UpdateStatus) — the process has only just spawned, not finished booting.
             // It still flips the boolean run-state to "up" (same as before), but ALSO opens the
             // InstanceCache starting latch, so ServerAggregator.BuildServer reports `starting`, not
-            // `running`, until the matching instance_ready arrives below (or a stop/crash closes it).
+            // `running`, until the matching server.ready arrives below (or a stop/crash closes it).
             instanceCache.MarkStarting(d.InstanceName);
             roster.Reset(d.InstanceName);
             history.Reset(d.InstanceName);
@@ -259,8 +259,8 @@ public sealed class KgsmAuditConsumer(
             domainPump.Nudge();
             return WriteServerAndBridge(d, AuditAction.ServerStart, "started");
         });
-        // instance_ready — the watchdog's readiness signal: its log-scrape confirms the game finished
-        // booting, distinct from instance_started (the process merely spawned). It is a fact of its own
+        // server.ready — the watchdog's readiness signal: its log-scrape confirms the game finished
+        // booting, distinct from server.started (the process merely spawned). It is a fact of its own
         // (server.ready), not a refinement of server.start: on a big world the gap between the two is
         // minutes, and it is the moment somebody asking "when could people actually get in" wants.
         // It also closes the starting latch (InstanceCache.MarkReady) so status flips starting ->
@@ -289,11 +289,11 @@ public sealed class KgsmAuditConsumer(
             // entirely: the instance reads `running` from the moment its process exists, which is the
             // whole of the boot early (40s for a Project Zomboid world, minutes for a big one), and the
             // operator who just pressed Restart is told the server is up while nobody can connect to it.
-            // The window closes on the watchdog's instance_ready, exactly as it does for a start.
+            // The window closes on the watchdog's server.ready, exactly as it does for a start.
             //
             // This is the start half of a restart whoever performed it: kgsm's restart command, the
             // watchdog's own scheduled one and its autonomous crash-recovery respawn all end here, and
-            // the down phase before it is instance_restart_stopped (or instance_crashed). One meaning,
+            // the down phase before it is server.restart.stopped (or server.crashed). One meaning,
             // one handler — a new run is up and booting.
             instanceCache.MarkStarting(d.InstanceName);
             roster.Reset(d.InstanceName);
@@ -316,7 +316,7 @@ public sealed class KgsmAuditConsumer(
             WriteUpdateAvailable(d));
 
         // server.update — sourced from the version-changed event (it carries the meaningful old→new
-        // detail). A plain instance_updated with no version change produces no row (nothing material
+        // detail). A plain server.update.completed with no version change produces no row (nothing material
         // changed) — an honest boundary, documented in PLAN §8.
         // The handler also re-reads the roster, because an applied update makes the engine's own
         // "update available" answer go false: the state lives beside the instance, and refreshing is
@@ -331,10 +331,10 @@ public sealed class KgsmAuditConsumer(
                 Meta(("oldVersion", d.OldVersion), ("newVersion", d.NewVersion)));
         });
 
-        // instance_update_started / instance_update_finished — kgsm brackets an update run with these
+        // server.update.started / server.update.finished — kgsm brackets an update run with these
         // whoever drove it, which is what lets a surface show an instance as busy for the whole
         // minutes-long download-and-deploy instead of only learning the version moved at the end.
-        // AUDIT-SILENT by design, like instance_ready: server.update (written from the version event
+        // AUDIT-SILENT by design, like server.ready: server.update (written from the version event
         // above) is the fact worth an append-only row; "a run is in progress" is live state, not history.
         //
         // What they do is claim and release this instance's ONE in-flight job slot, so an update run from
@@ -352,7 +352,7 @@ public sealed class KgsmAuditConsumer(
             SettleObserved(d.InstanceName);
             return Task.CompletedTask;
         });
-        // instance_update_failed — the run ended and the version did not move, for a reason. It arrives
+        // server.update.failed — the run ended and the version did not move, for a reason. It arrives
         // BEFORE the bracket's finish, so it is what settles the job, and it settles it as FAILED: the
         // other way an update leaves the version alone is finding nothing to do, and without this fact
         // the two were the same two lines. An engine-driven update that kgsm refused reported itself to
@@ -368,15 +368,15 @@ public sealed class KgsmAuditConsumer(
             return WriteServer(d, AuditAction.ServerUpdate, AuditSeverity.Danger, "could not update");
         });
 
-        // instance_stop_started / instance_stop_finished — the same bracket for a shutdown (kgsm
+        // server.stop.started / server.stop.finished — the same bracket for a shutdown (kgsm
         // 3.7.3-rc1). A stop is not instant either: the supervisor asks the game to stop and waits for it
         // to drain, which is seconds to a minute for a game that saves its world and the whole stop
         // timeout for one that ignores its stop command. Same discipline as the update pair — audit-silent
-        // (server.stop, written from instance_stopped, is the fact), claims and releases the one in-flight
+        // (server.stop, written from server.stopped, is the fact), claims and releases the one in-flight
         // slot, and mints nothing when this API issued the stop itself.
         //
-        // The finish is BOTH events: instance_stop_finished ends the run whatever its outcome, and
-        // instance_stopped (handled above, on success only) settles it too — either is honest evidence
+        // The finish is BOTH events: server.stop.finished ends the run whatever its outcome, and
+        // server.stopped (handled above, on success only) settles it too — either is honest evidence
         // the run is over, and whichever lands first releases the slot.
         events.RegisterHandler<InstanceStopStartedData>(d =>
         {
@@ -389,19 +389,19 @@ public sealed class KgsmAuditConsumer(
             return Task.CompletedTask;
         });
 
-        // instance_restart_started / instance_restart_finished — the bracket for the longest lifecycle
+        // server.restart.started / server.restart.finished — the bracket for the longest lifecycle
         // verb (kgsm 3.7.4-rc1): a stop's drain plus the game's whole boot. kgsm runs both halves through
         // its pure logic rather than the stop and start commands, so NOTHING else is emitted in between —
-        // without this pair the first and only word is instance_restarted at the very end, and until then
+        // without this pair the first and only word is server.restarted at the very end, and until then
         // the instance still reads as running normally. Same discipline as the other two brackets:
-        // audit-silent (server.restart, written from instance_restarted, is the fact), claims and releases
+        // audit-silent (server.restart, written from server.restarted, is the fact), claims and releases
         // the one in-flight slot, and mints nothing when this API issued the restart itself.
         events.RegisterHandler<InstanceRestartStartedData>(d =>
         {
             ObserveStarted(d.InstanceName, CommandVerb.Restart);
             return Task.CompletedTask;
         });
-        // instance_restart_stopped — the middle of that bracket: the old run is down and the new one has
+        // server.restart.stopped — the middle of that bracket: the old run is down and the new one has
         // not been spawned. This is the engine reporting the state rather than this API inferring it, and
         // it is the only word anything gets for the whole shutdown — seconds to a minute, and the full
         // drain of a game that saves its world on the way out. Without it the instance reads as running
@@ -427,7 +427,7 @@ public sealed class KgsmAuditConsumer(
             return Task.CompletedTask;
         });
 
-        // instance_uninstall_started / _finished — the bracket around a removal. An uninstall stops the
+        // server.uninstall.started / _finished — the bracket around a removal. An uninstall stops the
         // game, tears down its integrations and deletes its files, which is not instant for a large one,
         // and until this was registered an engine-driven uninstall claimed no job slot: the panel showed
         // nothing at all while a server was being destroyed, and only an uninstall this API issued was
@@ -442,7 +442,7 @@ public sealed class KgsmAuditConsumer(
             SettleObserved(d.InstanceName);
             return Task.CompletedTask;
         });
-        // instance_uninstall_failed — the removal did not happen. Settles the run as failed and writes a
+        // server.uninstall.failed — the removal did not happen. Settles the run as failed and writes a
         // row, on the same reasoning as the update's: the instance is still there, and a surface told the
         // run merely "ended" would leave an operator believing the server is gone.
         events.RegisterHandler<InstanceUninstallFailedData>(d =>
@@ -559,7 +559,7 @@ public sealed class KgsmAuditConsumer(
         // lives in the pure AuditMapping mappers so it is unit-tested without a live socket (M6·0).
         // Both reset the roster for the same reason the stop handler above does, and the reason is
         // starker here: the process died, so every session it held ended, and a crash emits no
-        // per-player "left" line to end them one at a time. instance_failed is the branch nothing else
+        // per-player "left" line to end them one at a time. server.crash.exhausted is the branch nothing else
         // covers — the supervisor has given up, so no restart is coming and no later event will clear
         // these entries.
         events.RegisterHandler<InstanceCrashedData>(d =>

@@ -3,13 +3,13 @@ using TheKrystalShip.KGSM.Events;
 namespace TheKrystalShip.Api.Services.Audit;
 
 /// <summary>
-/// Data for <c>library_renamed</c> / <c>library_failed</c> — a library mutation this API issued that the
+/// Data for <c>library.renamed</c> / <c>library.failed</c> — a library mutation this API issued that the
 /// engine itself records nothing about.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Only the half kgsm is silent on.</b> Registering and deregistering a root emit
-/// <c>library_added</c>/<c>library_removed</c>, so those rows ride the engine's own events and nothing is
+/// <c>library.added</c>/<c>library.removed</c>, so those rows ride the engine's own events and nothing is
 /// written here for them. A rename touches the registry and the marker and emits nothing, and a mutation
 /// the engine refuses exits non-zero and emits nothing — for both, this is the only record there can be.
 /// </para>

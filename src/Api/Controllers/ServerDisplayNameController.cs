@@ -26,7 +26,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// normalization), so it travels with the instance, is readable by every surface that speaks kgsm-lib,
 /// and dies with the instance on uninstall. This controller holds no state.</para>
 /// <para><b>Echo-path audit — no double-write.</b> The write stamps actor+origin onto the engine call and
-/// kgsm emits <c>instance_display_name_changed</c>, which <c>KgsmAuditConsumer</c> shapes into the
+/// kgsm emits <c>server.renamed</c>, which <c>KgsmAuditConsumer</c> shapes into the
 /// <c>server.rename</c> row. A rename typed at the CLI is audited by the identical path, so the trail
 /// does not depend on which surface drove it.</para>
 /// </remarks>
@@ -112,7 +112,7 @@ public sealed class ServerDisplayNameController(
         if (!servers.Any(s => string.Equals(s.Id, id, StringComparison.Ordinal)))
             return NotFound();
 
-        // actor = the bearer identity, stamped onto the engine call so the instance_display_name_changed
+        // actor = the bearer identity, stamped onto the engine call so the server.renamed
         // event — and the server.rename row shaped from it — names who did this.
         string? actor = AuditPrincipal.ActorString(User);
 

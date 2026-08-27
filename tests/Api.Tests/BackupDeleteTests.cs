@@ -42,7 +42,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         HttpResponseMessage resp = await Delete(KgsmTier.Operator, Server, Backup, origin: "ui");
         Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
 
-        // The row this produces is kgsm's (instance_backup_deleted → backup.delete), so the actor and
+        // The row this produces is kgsm's (backup.deleted → backup.delete), so the actor and
         // surface have to reach the engine — they are stamped onto the command, not onto a row here.
         Assert.Equal(1, engine.Calls);
         Assert.Equal(Server, engine.LastInstance);

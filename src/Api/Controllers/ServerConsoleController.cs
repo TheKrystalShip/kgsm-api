@@ -156,7 +156,7 @@ public sealed class ServerConsoleController(ILogger<ServerConsoleController> log
     /// to the process's stdin); its effect, if any, streams back on the live <c>servers/{id}/console</c> WS
     /// topic. <b>Fire-and-forget:</b> a <c>202</c> means the command was DELIVERED to the input channel, not
     /// that the game accepted it. The path stamps actor+origin onto <c>SendInput</c>, so the resulting kgsm
-    /// <c>instance_input_sent</c> event — and the <c>console.input</c> audit row written from it — records
+    /// <c>console.input.sent</c> event — and the <c>console.input</c> audit row written from it — records
     /// who/through-what (echo-path audit, no direct write, no double-write).
     /// <list type="bullet">
     /// <item><c>202</c> — accepted: the command was delivered to the console input.</item>
@@ -200,7 +200,7 @@ public sealed class ServerConsoleController(ILogger<ServerConsoleController> log
                 "console input is only supported on native instances (containers are managed by Docker)");
 
         // actor = the bearer identity (discord:<username>) or null → kgsm's own OS-user fallback. STAMP
-        // actor+origin so the kgsm instance_input_sent event carries provenance; the audit row is written
+        // actor+origin so the kgsm console.input.sent event carries provenance; the audit row is written
         // from that echo (KgsmAuditConsumer.FromInputSentEvent), never here — no double-write.
         string? actor = AuditPrincipal.ActorString(User);
         KgsmResult result = instances.SendInput(id, input, actor, origin);

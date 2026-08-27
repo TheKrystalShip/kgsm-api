@@ -96,8 +96,8 @@ public sealed class InstanceIdentityTests
     [Fact]
     public void ConfigChange_ForTheLabelKey_IsDroppedInFavourOfTheRenameRow()
     {
-        // The engine writes display_name and emits BOTH an instance_config_changed naming the key and the
-        // richer instance_display_name_changed. Shaping the first as well would file one rename as two
+        // The engine writes display_name and emits BOTH a config.changed naming the key and the
+        // richer server.renamed. Shaping the first as well would file one rename as two
         // rows, one of which cannot say what changed.
         Assert.Null(EngineEventShaping.Shape(ConfigChange("display_name"), "hotrod"));
 
@@ -108,7 +108,7 @@ public sealed class InstanceIdentityTests
     private static EventHistoryEntry ConfigChange(string key) => new(
         Id: $"evt_test_0_{key}",
         Ts: DateTimeOffset.UtcNow,
-        Type: "instance_config_changed",
+        Type: "config.changed",
         Instance: "factorio-42",
         Blueprint: null,
         Actor: "discord:haru",

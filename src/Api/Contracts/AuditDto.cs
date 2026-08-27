@@ -136,7 +136,7 @@ public static class AuditAction
     // and after, and every earlier row about this server still joins to it. That is exactly why the
     // action exists — a feed showing only the current label would silently rewrite its own history, and
     // a reader who remembers "Sunday Server" needs the line that says what it is called now. The row
-    // carries both labels in `meta`; kgsm emits its own instance_config_changed for the same write, and
+    // carries both labels in `meta`; kgsm emits its own config.changed for the same write, and
     // that one is dropped so a rename reads as one line rather than two.
     public const string ServerRename = "server.rename";
 
@@ -178,7 +178,7 @@ public static class AuditAction
 
     // network.upnp.* — the ROUTER door, distinct from the firewall (host) door above. The kgsm-watchdog
     // forwards/removes each native instance's ports on the local IGD via upnpc on bring-up/stop and emits
-    // instance_upnp_opened/_closed (kgsm-lib 1.21.0), stamped system/system (an autonomous daemon action).
+    // network.upnp.opened/.closed (kgsm-lib 1.21.0), stamped system/system (an autonomous daemon action).
     // A separate action pair (not reusing network.ports.*) because a router NAT forward is a different
     // fact from a ufw rule — a host can have one without the other, and conflating them would erase that.
     // Watchdog-echo-only (no api-issued UPnP command); the frontend accepts unknown actions forward-compat.
@@ -193,7 +193,7 @@ public static class AuditAction
     // and how often, which is exactly what a reader filtering this action wants to count.
     public const string NetworkUpnpReassert = "network.upnp.reassert";
 
-    // player.* — presence echoes. kgsm raises instance_player_joined/_left (kgsm-lib 1.19.0); for our
+    // player.* — presence echoes. kgsm raises player.joined/.left (kgsm-lib 1.19.0); for our
     // container images the kgsm-watchdog forwards them from the in-image detection shim, stamped
     // system/system. Distinct join/leave actions mirror server.start/server.stop. Engine-owned (no API
     // double-write); the player identity (id/name, either nullable) rides in meta, the action is scoped
@@ -202,8 +202,8 @@ public static class AuditAction
     public const string PlayerJoin = "player.join";
     public const string PlayerLeave = "player.leave";
 
-    // player.kick/ban/unban — moderation echoes, sourced from kgsm's instance_player_kicked/_banned/
-    // _unbanned (kgsm-lib 2.1.0). Distinct from player.leave: a leave is an observation, these are
+    // player.kick/ban/unban — moderation echoes, sourced from kgsm's player.kicked/.banned/
+    // .unbanned (kgsm-lib 2.1.0). Distinct from player.leave: a leave is an observation, these are
     // deliberate operator actions, and a reader asking "who was banned here" must not have to infer
     // intent from a disconnect reason. Engine-owned echo (no API double-write — the moderation
     // endpoints stamp actor+origin onto the kgsm call so this echo carries who did it). The target
@@ -212,12 +212,12 @@ public static class AuditAction
     public const string PlayerBan = "player.ban";
     public const string PlayerUnban = "player.unban";
 
-    // config.set — sourced from instance_config_changed (kgsm-lib 1.22.0). KEY ONLY in meta; the value is
+    // config.set — sourced from config.changed (kgsm-lib 1.22.0). KEY ONLY in meta; the value is
     // never carried (secret hygiene). Engine-owned echo (no double-write — the PATCH /servers/{id}/config
     // path already stamps actor+origin onto SetInstanceConfigValue).
     public const string ConfigSet = "config.set";
 
-    // console.input — sourced from instance_input_sent (kgsm-lib 1.24.0): an arbitrary console command was
+    // console.input — sourced from console.input.sent (kgsm-lib 1.24.0): an arbitrary console command was
     // delivered to a running NATIVE instance. Engine-owned echo (no double-write — the POST /servers/{id}/
     // console path stamps actor+origin onto SendInput so the echoed event carries provenance). Unlike
     // config.set's key-only rule, the FULL command text rides in meta on purpose — the trail's value is
@@ -231,7 +231,7 @@ public static class AuditAction
     public const string FileWrite = "file.write";
 
     // blueprint.* — a game's blueprint file was written or reverted. ENGINE-OWNED echo, unlike file.write
-    // above: kgsm emits blueprint_created/_updated/_removed for these, so the row arrives through the event
+    // above: kgsm emits blueprint.created/.updated/.removed for these, so the row arrives through the event
     // path and the API never direct-writes one. The distinction matters because a write to a SHIPPED
     // blueprint is impossible — it always lands as a user-directory override — so blueprint.write records
     // "this host's copy of <game> was edited" and blueprint.revert records that copy being dropped in favor
@@ -244,7 +244,7 @@ public static class AuditAction
     // library, never a server: a root is registered before anything lives in it and survives every
     // instance leaving it, so these rows carry no serverId.
     //
-    // Split by who can honestly say it happened. kgsm emits library_added/library_removed, so add and
+    // Split by who can honestly say it happened. kgsm emits library.added/library.removed, so add and
     // remove arrive as engine echoes and this API writes neither. A RENAME touches only the registry and
     // the marker and the engine emits nothing for it, so library.rename is a direct write — the only
     // record it can have. library.failed is the same case as command.failed: a refused or broken
@@ -353,7 +353,7 @@ public static class AuditAction
     //
     // ⚠ The SUCCESS path stays untouched: a verb that works is kgsm's event, audited from the echo
     // with the provenance the command stamped onto it. And the two verbs whose failure the engine
-    // reports itself — update (instance_update_failed) and uninstall (instance_uninstall_failed) —
+    // reports itself — update (server.update.failed) and uninstall (server.uninstall.failed) —
     // write nothing here, because a second row for a fact a producer already emits is undedupable.
     public const string CommandFailed = "command.failed";
     public const string CommandRefused = "command.refused";

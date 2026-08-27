@@ -28,8 +28,8 @@ namespace TheKrystalShip.Api.Controllers;
 /// live on their own routes rather than as <c>/commands</c> verbs because they name a backup and the command
 /// verbs are param-less; create is symmetric with them.
 /// </para>
-/// Every mutation is audited via the kgsm event echo (<c>instance_backup_created</c> → <c>backup.create</c>,
-/// <c>instance_backup_restored</c> → <c>backup.restore</c>, <c>instance_backup_deleted</c> →
+/// Every mutation is audited via the kgsm event echo (<c>backup.created</c> → <c>backup.create</c>,
+/// <c>backup.restored</c> → <c>backup.restore</c>, <c>backup.deleted</c> →
 /// <c>backup.delete</c>) — no direct audit write (the no-double-write contract). The one exception is
 /// <c>backup.download</c>, which no engine command produces: nothing happens on the host when an archive is
 /// served, so the API is the only witness and writes that row itself.
@@ -171,7 +171,7 @@ public sealed class ServerBackupsController(
     /// <summary>
     /// Delete one backup (operator). Synchronous — removing a backup is an unlink, not a transfer, so it
     /// answers within the request and the caller can re-list immediately; there is no job to await and
-    /// nothing to show progress for. Audited via the kgsm event echo (<c>instance_backup_deleted</c> →
+    /// nothing to show progress for. Audited via the kgsm event echo (<c>backup.deleted</c> →
     /// <c>backup.delete</c>, at warn) — no direct write here.
     /// <list type="bullet">
     /// <item><c>400</c> — a bad origin.</item>
@@ -260,8 +260,8 @@ public sealed class ServerBackupsController(
     /// the old document or the new one and never a partial one. Holding the slot would refuse a metadata
     /// edit for the whole of a backup run that has nothing to do with it.
     /// <para>
-    /// Audited through the kgsm echo (<c>instance_backup_pinned</c> → <c>backup.pin</c>,
-    /// <c>instance_backup_unpinned</c> → <c>backup.unpin</c>) — no direct write here.
+    /// Audited through the kgsm echo (<c>backup.pinned</c> → <c>backup.pin</c>,
+    /// <c>backup.unpinned</c> → <c>backup.unpin</c>) — no direct write here.
     /// </para>
     /// </remarks>
     [HttpPost("{backupId}/pin")]

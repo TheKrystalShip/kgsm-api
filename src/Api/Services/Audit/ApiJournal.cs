@@ -41,35 +41,35 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
 {
     // ---- the types this producer owns ----------------------------------------------------------
 
-    public const string LoginEvent = "auth_login";
-    public const string LogoutEvent = "auth_logout";
-    public const string ClusterSessionEvent = "auth_cluster_session";
-    public const string SessionRevokedEvent = "auth_session_revoked";
+    public const string LoginEvent = "auth.signed_in";
+    public const string LogoutEvent = "auth.signed_out";
+    public const string ClusterSessionEvent = "auth.cluster.vouched";
+    public const string SessionRevokedEvent = "auth.session.revoked";
 
-    public const string UserProvisionedEvent = "user_provisioned";
-    public const string UserApprovedEvent = "user_approved";
-    public const string UserDisabledEvent = "user_disabled";
-    public const string UserTierChangedEvent = "user_tier_changed";
-    public const string UserDeletedEvent = "user_deleted";
-    public const string UserPasswordChangedEvent = "user_password_changed";
+    public const string UserProvisionedEvent = "user.provisioned";
+    public const string UserApprovedEvent = "user.approved";
+    public const string UserDisabledEvent = "user.disabled";
+    public const string UserTierChangedEvent = "user.tier_changed";
+    public const string UserDeletedEvent = "user.deleted";
+    public const string UserPasswordChangedEvent = "user.password_changed";
 
-    public const string IdentityLinkedEvent = "identity_linked";
-    public const string IdentityUnlinkedEvent = "identity_unlinked";
+    public const string IdentityLinkedEvent = "identity.linked";
+    public const string IdentityUnlinkedEvent = "identity.unlinked";
 
-    public const string ServiceConnectedEvent = "service_connected";
-    public const string ServiceDisconnectedEvent = "service_disconnected";
-    public const string ServiceConfigChangedEvent = "service_config_changed";
-    public const string ServiceRestartedEvent = "service_restarted";
+    public const string ServiceConnectedEvent = "service.connected";
+    public const string ServiceDisconnectedEvent = "service.disconnected";
+    public const string ServiceConfigChangedEvent = "service.config_changed";
+    public const string ServiceRestartedEvent = "service.restarted";
 
-    public const string FileWrittenEvent = "file_written";
-    public const string BackupDownloadedEvent = "backup_downloaded";
+    public const string FileWrittenEvent = "file.written";
+    public const string BackupDownloadedEvent = "backup.downloaded";
 
-    public const string CommandFailedEvent = "command_failed";
-    public const string CommandRefusedEvent = "command_refused";
-    public const string CommandCancelledEvent = "command_cancelled";
+    public const string CommandFailedEvent = "command.failed";
+    public const string CommandRefusedEvent = "command.refused";
+    public const string CommandCancelledEvent = "command.cancelled";
 
-    public const string LibraryRenamedEvent = "library_renamed";
-    public const string LibraryFailedEvent = "library_failed";
+    public const string LibraryRenamedEvent = "library.renamed";
+    public const string LibraryFailedEvent = "library.failed";
 
     /// <summary>
     /// Records a session beginning or ending.
@@ -260,7 +260,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     /// </para>
     /// <para>
     /// ⚠ <b>Never called for a verb whose failure the engine reports itself.</b> kgsm emits
-    /// <c>instance_update_failed</c> and <c>instance_uninstall_failed</c>, which already become rows —
+    /// <c>server.update.failed</c> and <c>server.uninstall.failed</c>, which already become rows —
     /// a second one for the same fact cannot be deduplicated against an echo, which is the whole
     /// reason provenance is stamped instead of written.
     /// </para>
@@ -286,7 +286,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
                 w.WriteNull("ExitCode");
 
             // A move names the two disks it was between; every other verb leaves both null. The
-            // successful move is the engine's own instance_moved, which carries the same pair — this is
+            // successful move is the engine's own server.moved, which carries the same pair — this is
             // the half no producer records, and the half somebody emptying a drive comes back to.
             WriteNullable(w, "FromLibrary", fromLibrary);
             WriteNullable(w, "ToLibrary", toLibrary);
@@ -296,8 +296,8 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     /// Records a library mutation the engine says nothing about — a rename, or an attempt that failed.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Never called for a successful add or remove.</b> kgsm emits <c>library_added</c> and
-    /// <c>library_removed</c> for those, which already become rows; a second one for the same fact cannot
+    /// ⚠ <b>Never called for a successful add or remove.</b> kgsm emits <c>library.added</c> and
+    /// <c>library.removed</c> for those, which already become rows; a second one for the same fact cannot
     /// be deduplicated against an echo, which is the whole reason provenance is stamped instead of
     /// written.
     /// </remarks>

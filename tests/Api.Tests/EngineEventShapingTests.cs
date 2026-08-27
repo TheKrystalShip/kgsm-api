@@ -29,7 +29,7 @@ public sealed class EngineEventShapingTests
         var item = new EventHistoryEntry(
             Id: "evt_deadbeefcafe1234",
             Ts: Ts,
-            Type: "instance_crashed",
+            Type: "server.crashed",
             Instance: "factorio-test",
             Blueprint: null,
             Actor: "system",
@@ -58,7 +58,7 @@ public sealed class EngineEventShapingTests
     public void Shape_ServerStarted_ProducesServerStartAction_WithProvenanceFromTheEnvelope()
     {
         var item = new EventHistoryEntry(
-            "evt_abc123", Ts, "instance_started", "mc", null, "discord:haru", "ui", null,
+            "evt_abc123", Ts, "server.started", "mc", null, "discord:haru", "ui", null,
             Data(new { InstanceName = "mc" }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
@@ -81,7 +81,7 @@ public sealed class EngineEventShapingTests
     public void Shape_PortsOpened_ShapesToNetworkPortsOpen()
     {
         var item = new EventHistoryEntry(
-            "evt_ports1", Ts, "instance_ports_opened", "mc", null, null, null, null,
+            "evt_ports1", Ts, "network.ports.opened", "mc", null, null, null, null,
             Data(new { InstanceName = "mc", Ports = Array.Empty<object>() }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
@@ -95,7 +95,7 @@ public sealed class EngineEventShapingTests
     public void Shape_BackupDeleted_ShapesToBackupDelete_CarryingTheBackupId()
     {
         var item = new EventHistoryEntry(
-            "evt_del1", Ts, "instance_backup_deleted", "mc", null, "discord:haru", "ui", null,
+            "evt_del1", Ts, "backup.deleted", "mc", null, "discord:haru", "ui", null,
             Data(new { InstanceName = "mc", Source = "mc-20260731T142233Z-a3f9c1" }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
@@ -110,13 +110,13 @@ public sealed class EngineEventShapingTests
 
     // The read-back half of the update-available echo. Both paths that turn this event into a row — the
     // live push and this one — have to name the same action, or the row a client saw over SSE and the row
-    // it finds in GET /audit are two different facts. Shaping it generically (engine.instance_*) is what
+    // it finds in GET /audit are two different facts. Shaping it generically (engine.server.*) is what
     // that looks like when only one of the two is wired.
     [Fact]
     public void Shape_UpdateAvailable_ShapesToServerUpdateAvailable_CarryingBothVersions()
     {
         var item = new EventHistoryEntry(
-            "evt_upd1", Ts, "instance_update_available", "starbound", null, "system:scheduler", "system", null,
+            "evt_upd1", Ts, "server.update.available", "starbound", null, "system:scheduler", "system", null,
             Data(new { InstanceName = "starbound", CurrentVersion = "16000000", LatestVersion = "16302742" }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
@@ -134,7 +134,7 @@ public sealed class EngineEventShapingTests
     public void Shape_BackupsPruned_ShapesToBackupPrune_CarryingTheCounts()
     {
         var item = new EventHistoryEntry(
-            "evt_prune1", Ts, "instance_backups_pruned", "mc", null, "system:scheduler", "system", null,
+            "evt_prune1", Ts, "backup.pruned", "mc", null, "system:scheduler", "system", null,
             Data(new { InstanceName = "mc", Deleted = 3, Kept = 5 }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
@@ -152,22 +152,22 @@ public sealed class EngineEventShapingTests
 
     // --- a step inside a larger operation never surfaces; the engine decides which those are --------
     [Theory]
-    [InlineData("instance_installation_started")]
-    [InlineData("instance_download_started")]
-    [InlineData("instance_deploy_started")]
-    [InlineData("instance_update_started")]
-    [InlineData("instance_update_finished")]
-    [InlineData("instance_stop_started")]
-    [InlineData("instance_stop_finished")]
-    [InlineData("instance_restart_started")]
-    [InlineData("instance_restart_finished")]
+    [InlineData("server.install.started")]
+    [InlineData("server.download.started")]
+    [InlineData("server.deploy.started")]
+    [InlineData("server.update.started")]
+    [InlineData("server.update.finished")]
+    [InlineData("server.stop.started")]
+    [InlineData("server.stop.finished")]
+    [InlineData("server.restart.started")]
+    [InlineData("server.restart.finished")]
     // The install brackets, which the local skip-list never named and the generic fallback shaped into
-    // rows nobody wanted: an install produced a dozen "engine.instance_files_created" lines beside it.
-    [InlineData("instance_created")]
-    [InlineData("instance_files_created")]
-    [InlineData("instance_directories_created")]
-    [InlineData("instance_downloaded")]
-    [InlineData("instance_deployed")]
+    // rows nobody wanted: an install produced a dozen "engine.server.install.files_created" lines beside it.
+    [InlineData("server.install.created")]
+    [InlineData("server.install.files_created")]
+    [InlineData("server.install.directories_created")]
+    [InlineData("server.download.completed")]
+    [InlineData("server.deploy.completed")]
     public void Shape_AStepInsideAnOperation_ReturnsNull(string type)
     {
         var item = new EventHistoryEntry("evt_x", Ts, type, "mc", null, null, null, null, Data(new { InstanceName = "mc" }));
@@ -370,7 +370,7 @@ public sealed class EngineEventShapingTests
     /// ⚠ The bracket's opening half produces no row.
     /// </summary>
     /// <remarks>
-    /// It is classified <c>Phase</c>, exactly like <c>instance_installation_started</c>: a step inside a
+    /// It is classified <c>Phase</c>, exactly like <c>server.install.started</c>: a step inside a
     /// larger operation that has its own fact event. A feed showing both would report every authoring
     /// run twice.
     /// </remarks>
@@ -385,7 +385,7 @@ public sealed class EngineEventShapingTests
     }
 
     /// <summary>
-    /// <c>instance_ready</c> is a fact, not a refinement of <c>server.start</c>: that one says the
+    /// <c>server.ready</c> is a fact, not a refinement of <c>server.start</c>: that one says the
     /// process spawned, this one says the game will accept a connection, and on a big world the gap is
     /// minutes. It gets its own action rather than being folded into the start it followed.
     /// </summary>
@@ -393,7 +393,7 @@ public sealed class EngineEventShapingTests
     public void Shape_Ready_IsItsOwnFactAndNotSilent()
     {
         var item = new EventHistoryEntry(
-            "evt_ready", Ts, "instance_ready", "mc", null, null, null, null, Data(new { InstanceName = "mc" }));
+            "evt_ready", Ts, "server.ready", "mc", null, null, null, null, Data(new { InstanceName = "mc" }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
@@ -408,14 +408,14 @@ public sealed class EngineEventShapingTests
     public void Shape_UnmappedType_GenericFallback_NeverDropsIt()
     {
         var item = new EventHistoryEntry(
-            "evt_unknown1", Ts, "instance_some_future_thing", "mc", null, "discord:haru", "ui", null,
+            "evt_unknown1", Ts, "server.some_future_thing", "mc", null, "discord:haru", "ui", null,
             Data(new { InstanceName = "mc", Blueprint = "factorio" }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
         Assert.Equal("evt_unknown1", shaped!.Id);
-        Assert.Equal("engine.instance_some_future_thing", shaped.Action);
+        Assert.Equal("engine.server.some_future_thing", shaped.Action);
         Assert.Equal(AuditSeverity.Info, shaped.Severity);
         Assert.Equal("mc", shaped.ServerId);
         Assert.Equal("ui", shaped.Origin);
@@ -423,7 +423,7 @@ public sealed class EngineEventShapingTests
         Assert.NotNull(shaped.Target);
         Assert.Equal("mc", shaped.Target!.Id);
         // literal fact only, nothing fabricated
-        Assert.Equal("instance_some_future_thing", shaped.Meta!["eventType"]);
+        Assert.Equal("server.some_future_thing", shaped.Meta!["eventType"]);
     }
 
     [Fact]
@@ -444,7 +444,7 @@ public sealed class EngineEventShapingTests
     [Fact]
     public void Shape_NullData_MappedType_DoesNotThrow_UsesEnvelopeInstance()
     {
-        var item = new EventHistoryEntry("evt_nodata", Ts, "instance_stopped", "mc", null, null, null, null, Data: null);
+        var item = new EventHistoryEntry("evt_nodata", Ts, "server.stopped", "mc", null, null, null, null, Data: null);
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
@@ -471,7 +471,7 @@ public sealed class BlueprintEventShapingTests
     public void Created_ShapesToABlueprintWriteRow_TargetingTheBlueprint()
     {
         var item = new EventHistoryEntry(
-            Id: "evt_bp1", Ts: Ts, Type: "blueprint_created", Instance: null,
+            Id: "evt_bp1", Ts: Ts, Type: "blueprint.created", Instance: null,
             Blueprint: "factorio",
             Actor: "discord:haru", Origin: "ui", Hostname: null,
             Data: Data(new { BlueprintName = "factorio", Tier = "user", OverridesSystem = true, Runtime = "native" }));
@@ -497,7 +497,7 @@ public sealed class BlueprintEventShapingTests
     public void Updated_IsTheSameActionAtInfo()
     {
         var item = new EventHistoryEntry(
-            Id: "evt_bp2", Ts: Ts, Type: "blueprint_updated", Instance: null, Blueprint: "palworld", Actor: "discord:haru", Origin: "ui", Hostname: null,
+            Id: "evt_bp2", Ts: Ts, Type: "blueprint.updated", Instance: null, Blueprint: "palworld", Actor: "discord:haru", Origin: "ui", Hostname: null,
             Data: Data(new { BlueprintName = "palworld", Tier = "user", OverridesSystem = false, Runtime = "native" }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
@@ -511,7 +511,7 @@ public sealed class BlueprintEventShapingTests
     public void Removed_IsARevertWhenTheShippedBlueprintTookOver()
     {
         var item = new EventHistoryEntry(
-            Id: "evt_bp3", Ts: Ts, Type: "blueprint_removed", Instance: null, Blueprint: "palworld", Actor: "discord:haru", Origin: "ui", Hostname: null,
+            Id: "evt_bp3", Ts: Ts, Type: "blueprint.removed", Instance: null, Blueprint: "palworld", Actor: "discord:haru", Origin: "ui", Hostname: null,
             Data: Data(new { BlueprintName = "palworld", Tier = "user", RevertedToSystem = true }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
@@ -526,7 +526,7 @@ public sealed class BlueprintEventShapingTests
     public void Removed_WithNoShippedOriginal_SaysRemovedNotReverted()
     {
         var item = new EventHistoryEntry(
-            Id: "evt_bp4", Ts: Ts, Type: "blueprint_removed", Instance: null, Blueprint: "teamfortress2", Actor: "discord:haru", Origin: "ui", Hostname: null,
+            Id: "evt_bp4", Ts: Ts, Type: "blueprint.removed", Instance: null, Blueprint: "teamfortress2", Actor: "discord:haru", Origin: "ui", Hostname: null,
             Data: Data(new { BlueprintName = "teamfortress2", Tier = "user", RevertedToSystem = false }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
@@ -542,7 +542,7 @@ public sealed class BlueprintEventShapingTests
         // The emitter could not determine whether this shadows a shipped blueprint. "Unknown" is not "no",
         // so the key is absent rather than answered.
         var item = new EventHistoryEntry(
-            Id: "evt_bp5", Ts: Ts, Type: "blueprint_updated", Instance: null, Blueprint: "factorio", Actor: "discord:haru", Origin: "ui", Hostname: null,
+            Id: "evt_bp5", Ts: Ts, Type: "blueprint.updated", Instance: null, Blueprint: "factorio", Actor: "discord:haru", Origin: "ui", Hostname: null,
             Data: Data(new { BlueprintName = "factorio", Tier = "user" }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
@@ -559,7 +559,7 @@ public sealed class BlueprintEventShapingTests
         // On a host with several disks this is the half of an install record its operator most needs,
         // and nothing else on the host records it.
         var item = new EventHistoryEntry(
-            Id: "evt_inst1", Ts: Ts, Type: "instance_installed", Instance: "fac-1", Blueprint: null,
+            Id: "evt_inst1", Ts: Ts, Type: "server.installed", Instance: "fac-1", Blueprint: null,
             Actor: "user:heisen", Origin: "ui", Hostname: null,
             Data: Data(new { InstanceName = "fac-1", Blueprint = "factorio", Library = "ssd" }));
 
@@ -576,7 +576,7 @@ public sealed class BlueprintEventShapingTests
         // Both, not just the destination: a reader that learns only where the files went cannot tell
         // which disk just got its space back, and that is the question a drain is asked.
         var item = new EventHistoryEntry(
-            Id: "evt_mv1", Ts: Ts, Type: "instance_moved", Instance: "fac-1", Blueprint: null,
+            Id: "evt_mv1", Ts: Ts, Type: "server.moved", Instance: "fac-1", Blueprint: null,
             Actor: "user:heisen", Origin: "ui", Hostname: null,
             Data: Data(new { InstanceName = "fac-1", FromLibrary = "ssd", ToLibrary = "archive" }));
 
@@ -596,7 +596,7 @@ public sealed class BlueprintEventShapingTests
         // "unregistered" is a measurement — the files were under a root this host holds no entry for —
         // and it has to survive to the row rather than becoming a blank.
         var item = new EventHistoryEntry(
-            Id: "evt_mv2", Ts: Ts, Type: "instance_moved", Instance: "fac-1", Blueprint: null,
+            Id: "evt_mv2", Ts: Ts, Type: "server.moved", Instance: "fac-1", Blueprint: null,
             Actor: "user:heisen", Origin: "api", Hostname: null,
             Data: Data(new { InstanceName = "fac-1", FromLibrary = "unregistered", ToLibrary = "ssd" }));
 

@@ -36,8 +36,8 @@ namespace TheKrystalShip.Api.Services.Aggregation;
 /// <para>
 /// <b>The "starting" latch (tri-state run-state) and the reconcile hazard.</b> kgsm's boolean
 /// run-state (<see cref="Reading{T}"/>'s <c>Status</c>) can only say "process up" or "process down" —
-/// it cannot distinguish a process that just spawned (<c>instance_started</c>) from one the watchdog
-/// has confirmed finished booting (<c>instance_ready</c>), because both observe the process as up. So
+/// it cannot distinguish a process that just spawned (<c>server.started</c>) from one the watchdog
+/// has confirmed finished booting (<c>server.ready</c>), because both observe the process as up. So
 /// that distinction is tracked <em>separately</em> here, as a small set of instance names currently
 /// inside their post-start "booting" window (<see cref="MarkStarting"/> opens it,
 /// <see cref="MarkReady"/> or a stop/crash/fail closes it — see <see cref="UpdateStatus"/>).
@@ -45,8 +45,8 @@ namespace TheKrystalShip.Api.Services.Aggregation;
 /// the DTO's <c>starting</c> status.
 /// </para>
 /// <para>
-/// <b>The pair can arrive in either order.</b> <c>instance_ready</c> is emitted by the watchdog the
-/// moment it observes the run become ready, while <c>instance_started</c> is emitted by the kgsm
+/// <b>The pair can arrive in either order.</b> <c>server.ready</c> is emitted by the watchdog the
+/// moment it observes the run become ready, while <c>server.started</c> is emitted by the kgsm
 /// command that asked for the start — so a game that is ready as fast as it spawns produces a ready
 /// that reaches this consumer FIRST. Handling only the ordered case would open a window nothing is
 /// left to close, pinning the instance on "starting" until the safety timeout. A ready with no open
@@ -59,12 +59,12 @@ namespace TheKrystalShip.Api.Services.Aggregation;
 /// hazard: while an instance is genuinely still starting, the process IS up, so
 /// <c>GetAllStatuses(fast:true)</c> reports <c>Status:true</c> — identical to a fully running instance.
 /// The reconcile must NOT be allowed to treat that as evidence the instance is done starting (it would
-/// silently flip <c>starting → running</c> before <c>instance_ready</c> ever arrives, defeating the
+/// silently flip <c>starting → running</c> before <c>server.ready</c> ever arrives, defeating the
 /// whole feature). <see cref="ReconcileStartingLatch"/> is therefore called on every refresh and only
 /// ever <em>closes</em> the latch on genuinely new evidence: the fresh read shows the process is DOWN
 /// (a silent death with no crash/stop event), the instance vanished from the roster, or the window has
 /// run past a safety timeout (<see cref="StartingTimeout"/>, 5 minutes — generous for a slow modpack
-/// boot, but bounded so a dropped/never-emitted <c>instance_ready</c> can't wedge an instance in
+/// boot, but bounded so a dropped/never-emitted <c>server.ready</c> can't wedge an instance in
 /// "starting" forever; on timeout it resolves honestly to <c>running</c>, since that IS what the same
 /// reconcile pass just measured — never a fabricated state). It never flips <c>starting → running</c>
 /// on a still-up, still-within-timeout read; only <see cref="MarkReady"/> does that.
@@ -75,15 +75,15 @@ public sealed class InstanceCache : IHostedService, IDisposable
     /// <summary>
     /// Safety bound on the "starting" window (see the class remarks). Chosen generously — most games
     /// boot in seconds, but a large modpack/world-gen can take minutes — while still bounding how long
-    /// a dropped <c>instance_ready</c> can leave a server display-stuck on "starting". On expiry the
+    /// a dropped <c>server.ready</c> can leave a server display-stuck on "starting". On expiry the
     /// instance resolves to <c>running</c> (the process is observed up in that same reconcile pass),
     /// never to <c>unknown</c> — the process state IS known, only the "finished booting" signal is late.
     /// </summary>
     internal static readonly TimeSpan StartingTimeout = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// How long a <c>instance_ready</c> that arrived with no open window stays able to answer the
-    /// <c>instance_started</c> it raced (see the class remarks). The two events describe the same
+    /// How long a <c>server.ready</c> that arrived with no open window stays able to answer the
+    /// <c>server.started</c> it raced (see the class remarks). The two events describe the same
     /// spawn and reach this consumer milliseconds apart, so this only has to cover event-delivery
     /// skew — short enough that it can never suppress a genuine later boot window.
     /// </summary>
@@ -200,7 +200,7 @@ public sealed class InstanceCache : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// Event-driven: <c>instance_started</c>. The process has spawned — flips the boolean status to
+    /// Event-driven: <c>server.started</c>. The process has spawned — flips the boolean status to
     /// running (same as before) AND opens the "starting" window, so <c>ServerAggregator.BuildServer</c>
     /// reports <c>starting</c>, not <c>running</c>, until <see cref="MarkReady"/> (or a stop/crash/fail)
     /// closes it. See the class remarks for the full tri-state design + the reconcile hazard.
@@ -240,9 +240,9 @@ public sealed class InstanceCache : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// Event-driven: <c>instance_ready</c> — the watchdog confirms the game finished booting. Closes the
+    /// Event-driven: <c>server.ready</c> — the watchdog confirms the game finished booting. Closes the
     /// starting window, so the next read reports <c>running</c>. Defensive: if no window was open (e.g.
-    /// this consumer wasn't listening for the earlier <c>instance_started</c>, or the instance was never
+    /// this consumer wasn't listening for the earlier <c>server.started</c>, or the instance was never
     /// marked starting), a ready event is still real evidence the process is up, so the boolean status is
     /// flipped to running too — never left stale.
     /// </summary>
@@ -325,7 +325,7 @@ public sealed class InstanceCache : IHostedService, IDisposable
                     _logger.LogInformation(
                         "Instance cache: {Instance} exceeded the {Timeout} starting-window safety bound "
                         + "with the process still observed up — resolving to running honestly (never "
-                        + "stuck 'starting' forever; instance_ready may simply not have been delivered).",
+                        + "stuck 'starting' forever; server.ready may simply not have been delivered).",
                         id, StartingTimeout);
             }
 

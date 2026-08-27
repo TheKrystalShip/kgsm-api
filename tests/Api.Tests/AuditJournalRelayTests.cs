@@ -59,7 +59,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         DateTime deadline = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < deadline && frame is null)
         {
-            _factory.AppendEvent("instance_started", instance,
+            _factory.AppendEvent("server.started", instance,
                 actor: "discord:relaytest", origin: AuditOrigin.Ui);
             frame = await frames.WaitForFrame(
                 f => f.GetProperty("type").GetString() == "audit.append"
@@ -93,7 +93,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         DateTime deadline = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < deadline && frame is null)
         {
-            _factory.AppendEvent("instance_stopped", instance, actor: "system:watchdog", origin: AuditOrigin.System);
+            _factory.AppendEvent("server.stopped", instance, actor: "system:watchdog", origin: AuditOrigin.System);
             frame = await frames.WaitForFrame(
                 f => f.GetProperty("type").GetString() == "audit.append"
                      && f.GetProperty("data").TryGetProperty("serverId", out JsonElement s)
@@ -150,7 +150,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         DateTime deadline = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < deadline && frame is null)
         {
-            _factory.AppendEvent("instance_ready", instance, actor: "system:watchdog", origin: AuditOrigin.System);
+            _factory.AppendEvent("server.ready", instance, actor: "system:watchdog", origin: AuditOrigin.System);
             frame = await frames.WaitForFrame(
                 f => f.GetProperty("type").GetString() == "audit.append"
                      && f.GetProperty("data").TryGetProperty("serverId", out JsonElement s)
@@ -180,19 +180,19 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
 
         // The bracket opens the run. Appended once and not waited on — it claims the in-flight job slot
         // and says nothing about run-state, which is exactly the gap the events below close.
-        _factory.AppendEvent("instance_restart_started", instance, actor: "discord:haru", origin: AuditOrigin.Ui);
+        _factory.AppendEvent("server.restart.started", instance, actor: "discord:haru", origin: AuditOrigin.Ui);
 
         // The stop half landed: the process does not exist, and the API says so rather than carrying the
         // state from before the restart.
-        await Feed("instance_restart_stopped", instance, until: () => Down(cache, instance));
+        await Feed("server.restart.stopped", instance, until: () => Down(cache, instance));
         Assert.False(cache.IsStarting(instance));
 
         // The start half: spawned, booting — not yet a server anyone can join.
-        await Feed("instance_restarted", instance, until: () => cache.IsStarting(instance));
+        await Feed("server.restarted", instance, until: () => cache.IsStarting(instance));
         Assert.True(cache.Statuses[instance].Value!.Status);
 
         // Ready closes it, exactly as it closes a plain start's window.
-        await Feed("instance_ready", instance, until: () => !cache.IsStarting(instance));
+        await Feed("server.ready", instance, until: () => !cache.IsStarting(instance));
         Assert.True(cache.Statuses[instance].Value!.Status);
     }
 
@@ -208,12 +208,12 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         JobRegistry jobs = _factory.Services.GetRequiredService<JobRegistry>();
 
         string instance = $"updfail-{Guid.NewGuid():N}";
-        await Feed("instance_update_started", instance, until: () => jobs.InFlightFor(instance) is not null);
+        await Feed("server.update.started", instance, until: () => jobs.InFlightFor(instance) is not null);
 
         Job running = jobs.InFlightFor(instance)!;
         Assert.Equal(CommandVerb.Update, running.Verb);
 
-        await Feed("instance_update_failed", instance,
+        await Feed("server.update.failed", instance,
             until: () => jobs.Get(running.Id)?.State == JobState.Failed);
 
         Job settled = jobs.Get(running.Id)!;
@@ -233,10 +233,10 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         JobRegistry jobs = _factory.Services.GetRequiredService<JobRegistry>();
 
         string instance = $"uninst-{Guid.NewGuid():N}";
-        await Feed("instance_uninstall_started", instance, until: () => jobs.InFlightFor(instance) is not null);
+        await Feed("server.uninstall.started", instance, until: () => jobs.InFlightFor(instance) is not null);
         Assert.Equal(CommandVerb.Uninstall, jobs.InFlightFor(instance)!.Verb);
 
-        await Feed("instance_uninstall_finished", instance, until: () => jobs.InFlightFor(instance) is null);
+        await Feed("server.uninstall.finished", instance, until: () => jobs.InFlightFor(instance) is null);
     }
 
     /// <summary>The instance is known and observed down — measured, never merely unread.</summary>
@@ -271,7 +271,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
     {
         string instance = $"addr-{Guid.NewGuid():N}";
         _factory.AppendEvent(
-            "instance_player_joined",
+            "player.joined",
             new { InstanceName = instance, PlayerName = "bob", PlayerAddr = "95.49.44.91" },
             actor: "system:watchdog", origin: AuditOrigin.System);
 
@@ -298,7 +298,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
     {
         string instance = $"cmd-{Guid.NewGuid():N}";
         _factory.AppendEvent(
-            "instance_input_sent",
+            "console.input.sent",
             new { InstanceName = instance, Command = "op somebody" },
             actor: "discord:haru", origin: AuditOrigin.Ui);
 
@@ -336,7 +336,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         // before the host starts, so the tail is attached to it and a single line is enough.
         string instance = $"cmdfail-{Guid.NewGuid():N}";
         _factory.AppendEvent(
-            "command_failed",
+            "command.failed",
             new { InstanceName = instance, Verb = "start", JobId = "job_once", ExitCode = 1, Error = "kgsm said no" },
             actor: "discord:haru", origin: AuditOrigin.Ui);
 

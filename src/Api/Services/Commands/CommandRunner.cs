@@ -31,8 +31,8 @@ namespace TheKrystalShip.Api.Services.Commands;
 /// nothing, so it exists in no record on the host. Those the runner records itself, to this API's own
 /// journal (<see cref="ApiJournal.CommandOutcomeAsync"/>) — the <c>auth.*</c>/<c>file.write</c> case, a
 /// producer recording what it observed and nobody else did. ⚠ Two verbs are excluded because the engine
-/// reports their failure itself: <c>update</c> and <c>uninstall</c> emit <c>instance_update_failed</c> /
-/// <c>instance_uninstall_failed</c>, which already become rows (see
+/// reports their failure itself: <c>update</c> and <c>uninstall</c> emit <c>server.update.failed</c> /
+/// <c>server.uninstall.failed</c>, which already become rows (see
 /// <see cref="EngineRecordsItsOwnFailure"/>).</para>
 /// <para><b>Always settles:</b> the verb runs inside try/finally so a started job always reaches a terminal
 /// state — releasing the registry's in-flight slot even if the verb throws.</para>
@@ -74,7 +74,7 @@ public sealed class CommandRunner(
     /// free-text label the new server is read by, or null to leave it reading as its id.
     /// <paramref name="port"/> is the
     /// optional Game Port override from the install form (validated 1-65535 by the controller; null keeps the
-    /// blueprint default). No audit row is written here — kgsm's <c>instance_installed</c> echo carries the
+    /// blueprint default). No audit row is written here — kgsm's <c>server.installed</c> echo carries the
     /// stamped provenance (the lifecycle case).
     /// </summary>
     public void StartInstall(Job job, string blueprint, int? port = null, string? actor = null, string? origin = null, bool? autostart = null, string? library = null, string? displayName = null)
@@ -96,7 +96,7 @@ public sealed class CommandRunner(
 
     /// <summary>
     /// Fire-and-forget a <c>backup_create</c> job (Tier-1 ops — <c>POST /servers/{id}/backups</c>). Same
-    /// echo-path discipline as the lifecycle verbs: kgsm's <c>instance_backup_created</c> echo carries the
+    /// echo-path discipline as the lifecycle verbs: kgsm's <c>backup.created</c> echo carries the
     /// stamped provenance, so no audit row is written here. The verify pushes a fresh <c>server.patch</c>.
     /// </summary>
     public void StartBackupCreate(Job job, string? actor = null, string? origin = null) =>
@@ -106,7 +106,7 @@ public sealed class CommandRunner(
     /// Fire-and-forget a <c>backup_restore</c> job (Tier-1 ops — <c>POST /servers/{id}/backups/restore</c>).
     /// <paramref name="backupName"/> is the snapshot to restore (carried into the closure, the
     /// <see cref="StartInstall"/> pattern for a param-bearing job since <see cref="Job"/> has no slot for it).
-    /// Echo-path audited via kgsm's <c>instance_backup_restored</c> → <c>backup.restore</c>; no write here.
+    /// Echo-path audited via kgsm's <c>backup.restored</c> → <c>backup.restore</c>; no write here.
     /// </summary>
     public void StartBackupRestore(Job job, string backupName, string? actor = null, string? origin = null) =>
         _ = Task.Run(() => ExecuteAsync(job, actor, origin, blueprint: null, backupName));
@@ -119,9 +119,9 @@ public sealed class CommandRunner(
     /// <remarks>
     /// Minutes of copying, and it holds the server's in-flight slot for the whole of it — which is what a
     /// surface renders "moving" from. ⚠ The engine starts the instance once on the new path to confirm it
-    /// runs there, so an <c>instance_started</c> and an <c>instance_stopped</c> land partway through; a
+    /// runs there, so a <c>server.started</c> and a <c>server.stopped</c> land partway through; a
     /// card reading run-state alone flickers "running" mid-move, and this job's span is the answer.
-    /// Echo-path audited via kgsm's <c>instance_moved</c> → <c>server.move</c>; no write here for a
+    /// Echo-path audited via kgsm's <c>server.moved</c> → <c>server.move</c>; no write here for a
     /// success.
     /// </remarks>
     public void StartMove(
@@ -242,10 +242,10 @@ public sealed class CommandRunner(
 
     // install (M8·b) — create a new instance from `blueprint`. The job's ServerId is the backend-assigned
     // id the controller resolved via GenerateId, and it is passed as the install `--id` so the instance
-    // lands exactly there: the verify target, the job's key and the instance_installed event's name are
+    // lands exactly there: the verify target, the job's key and the server.installed event's name are
     // then the same string by construction, not by the engine happening to echo a name back. displayName
     // is the separate free-text label. version stays null — reserved/inert per §3·h. NO audit row here:
-    // kgsm emits instance_installed → KgsmAuditConsumer writes the server.install echo with the stamped
+    // kgsm emits server.installed → KgsmAuditConsumer writes the server.install echo with the stamped
     // provenance.
     private (bool ok, string? error, int? exitCode) RunInstall(
         IServiceScope scope, Job job, string blueprint, int? port, string? actor, string? origin, bool? autostart = null,
@@ -266,7 +266,7 @@ public sealed class CommandRunner(
         return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
 
-    // uninstall (M8·b) — remove the instance. Same echo-path discipline: kgsm emits instance_uninstalled →
+    // uninstall (M8·b) — remove the instance. Same echo-path discipline: kgsm emits server.uninstalled →
     // KgsmAuditConsumer writes the server.uninstall row. No audit write here.
     private (bool ok, string? error, int? exitCode) RunUninstall(IServiceScope scope, Job job, string? actor, string? origin)
     {
@@ -291,7 +291,7 @@ public sealed class CommandRunner(
     }
 
     // update (Tier-1 ops) — update the instance to the latest version. On IInstanceService (NOT lifecycle),
-    // so it needs its own case. Provenance rides the engine call → kgsm's instance_version_updated echo →
+    // so it needs its own case. Provenance rides the engine call → kgsm's server.updated echo →
     // the server.update audit row (KgsmAuditConsumer). NO audit row here (the echo path, like install). The
     // controller already 409s an update-on-running synchronously; a subtler engine refusal lands as a failed
     // job + the real stderr.
@@ -304,14 +304,14 @@ public sealed class CommandRunner(
         KgsmResult result = instances.Update(job.ServerId, actor, origin);
         // Nothing to clear here: whether an update is available is the engine's own answer, read from
         // the record beside the instance, and an applied update makes it false at the source. The
-        // instance_version_updated echo re-reads the roster (KgsmAuditConsumer) for an update driven
+        // server.updated echo re-reads the roster (KgsmAuditConsumer) for an update driven
         // from anywhere — this API, the CLI, the assistant — so one path keeps it true rather than
         // this one holding a local copy it has to remember to void.
         return result.IsSuccess ? (true, null, null) : (false, Detail(result), result.ExitCode);
     }
 
     // backup_create (Tier-1 ops) — snapshot the instance. Echo-path discipline: kgsm emits
-    // instance_backup_created → KgsmAuditConsumer writes the backup.create row with the stamped provenance.
+    // backup.created → KgsmAuditConsumer writes the backup.create row with the stamped provenance.
     // No audit write here.
     private (bool ok, string? error, int? exitCode) RunBackupCreate(IServiceScope scope, Job job, string? actor, string? origin)
     {
@@ -324,7 +324,7 @@ public sealed class CommandRunner(
     }
 
     // backup_restore (Tier-1 ops) — restore from a named snapshot (backupName threaded through the closure;
-    // Job has no slot for it). Echo-path: kgsm emits instance_backup_restored → the backup.restore row. No
+    // Job has no slot for it). Echo-path: kgsm emits backup.restored → the backup.restore row. No
     // audit write here. An unknown backup name surfaces as kgsm's real stderr on a failed job.
     private (bool ok, string? error, int? exitCode) RunBackupRestore(
         IServiceScope scope, Job job, string backupName, string? actor, string? origin)
@@ -342,7 +342,7 @@ public sealed class CommandRunner(
     // hold, one whose root is away, the instance's current library, a running instance); a subtler
     // refusal — the target has less free space than the instance occupies, or somebody started the
     // server between the check and the run — is the engine's to make, and lands as a failed job carrying
-    // its words. Echo-path audited via instance_moved → server.move; no audit row here.
+    // its words. Echo-path audited via server.moved → server.move; no audit row here.
     //
     // skipSpaceCheck is deliberately NOT exposed: it is the escape hatch for an operator who has looked
     // at the disk, and a panel button that overrides a measurement is how a drive gets filled.
@@ -404,8 +404,8 @@ public sealed class CommandRunner(
     /// Whether the engine already emits an event for this verb failing.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>The no-double-write line.</b> kgsm emits <c>instance_update_failed</c> and
-    /// <c>instance_uninstall_failed</c>, and both are mapped to a row carrying the provenance the command
+    /// ⚠ <b>The no-double-write line.</b> kgsm emits <c>server.update.failed</c> and
+    /// <c>server.uninstall.failed</c>, and both are mapped to a row carrying the provenance the command
     /// stamped onto the call — so a row written here for the same command would be a second, undedupable
     /// record of one fact. Every other verb fails silently as far as the journals are concerned: a start,
     /// a stop, a restart, an install and both backup verbs exit non-zero and emit nothing.

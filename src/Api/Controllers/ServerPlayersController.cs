@@ -122,8 +122,8 @@ public sealed class ServerPlayersController(
     /// to be present.
     /// </para>
     /// <para>
-    /// <b>No audit row is written here.</b> kgsm emits <c>instance_player_kicked</c>/<c>_banned</c>/
-    /// <c>_unbanned</c> and the M5 consumer writes the row from that echo; this path stamps
+    /// <b>No audit row is written here.</b> kgsm emits <c>player.kicked</c>/<c>.banned</c>/
+    /// <c>.unbanned</c> and the M5 consumer writes the row from that echo; this path stamps
     /// <c>actor</c>+<c>origin</c> so the echo carries who did it. Writing one here too would double it.
     /// </para>
     /// <list type="bullet">

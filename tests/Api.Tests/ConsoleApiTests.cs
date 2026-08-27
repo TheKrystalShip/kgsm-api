@@ -21,7 +21,7 @@ namespace TheKrystalShip.Api.Tests;
 /// codes (unknown id <c>404</c>, engine-absent <c>503</c>), input validation (<c>400</c>), and the
 /// fire-and-forget success (<c>202</c>) vs the engine "not running" failure surfaced honestly (<c>409</c>
 /// with kgsm's own message). The console.input audit row itself is the engine ECHO (kgsm emits
-/// instance_input_sent; <see cref="Services.Audit.AuditMapping.FromInputSentEvent"/> maps it) — covered by
+/// console.input.sent; <see cref="Services.Audit.AuditMapping.FromInputSentEvent"/> maps it) — covered by
 /// the mapper unit tests, not written by this controller, so there is nothing to assert here for it.
 /// </summary>
 public sealed class ConsoleApiTests

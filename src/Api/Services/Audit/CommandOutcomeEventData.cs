@@ -3,7 +3,7 @@ using TheKrystalShip.KGSM.Events;
 namespace TheKrystalShip.Api.Services.Audit;
 
 /// <summary>
-/// Data for <c>command_failed</c> / <c>command_refused</c> / <c>command_cancelled</c> — a command this
+/// Data for <c>command.failed</c> / <c>command.refused</c> / <c>command.cancelled</c> — a command this
 /// API issued that ended without doing the thing.
 /// </summary>
 /// <remarks>
@@ -49,7 +49,7 @@ public sealed class CommandOutcomeEventData : EventDataBase
     /// </summary>
     /// <remarks>
     /// Only a move names either library; every other verb leaves both null. They are here because the
-    /// engine's <c>instance_moved</c> carries them for a move that WORKED, and a refused one — the disk
+    /// engine's <c>server.moved</c> carries them for a move that WORKED, and a refused one — the disk
     /// somebody was trying to empty, and the disk it could not be emptied onto — is exactly the record
     /// they go looking for afterwards. Null when the roster could not say where the instance was, which
     /// is a real unknown rather than a blank to fill.

@@ -88,7 +88,7 @@ public sealed class LibraryController(
     //
     // Every path resolution, jail check, engine validation and byte write lives in kgsm-lib's
     // IBlueprintFiles behind IBlueprintFileService — this controller only maps outcomes to status codes
-    // and shapes DTOs. No audit row is written here: kgsm emits blueprint_created/_updated/_removed for
+    // and shapes DTOs. No audit row is written here: kgsm emits blueprint.created/.updated/.removed for
     // these writes, so the trail arrives as an event echo like every other engine action. What the
     // controller must do instead is thread actor+origin down into the emit, which is what keeps the
     // echoed row attributed to the real admin rather than the service account.
@@ -119,7 +119,7 @@ public sealed class LibraryController(
     /// <c>POST /library</c> — create a new blueprint from editor text. <strong>Admin only</strong>, matching
     /// the save path: authoring a blueprint defines how a game server is installed and launched. The file
     /// lands in kgsm's USER blueprints directory and the ENGINE validates it before anything is committed;
-    /// the audit trail arrives as the echo of the <c>blueprint_created</c> kgsm emits.
+    /// the audit trail arrives as the echo of the <c>blueprint.created</c> kgsm emits.
     /// <list type="bullet">
     /// <item><c>200</c> — created (<see cref="SaveBlueprintResultDto"/>).</item>
     /// <item><c>400</c> — missing <c>name</c>/<c>content</c> or bad origin (<c>bad_request</c>), or the
