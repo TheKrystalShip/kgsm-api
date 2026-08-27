@@ -195,6 +195,7 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Api:AuthDisabled"] = "true",
+                    ["Api:DisabledAuthActor"] = "local:claude",
                     ["Api:DbPath"] = AuthTestFactory.NewDbPath("kgsm-api-tests-open"),
                 })));
 

@@ -228,6 +228,14 @@ public sealed class ApiSettings
     [LeafField("authDisabled", "Disable authentication", Group = "auth", Risk = LeafRisk.Destructive)]
     public bool? AuthDisabled { get; set; }
 
+    /// <summary>The principal every request is attributed to while authentication is off.</summary>
+    /// <panel>Who the audit log names for work done while authentication is disabled, written
+    /// <c>provider:name</c> (for example <c>local:claude</c>). Required whenever authentication is off:
+    /// without it the host refuses to start, because every action taken through an open door would
+    /// otherwise land in the record under a name nobody chose.</panel>
+    [LeafField("disabledAuthActor", "Actor while auth is disabled", Group = "auth", NoDefault = true)]
+    public string? DisabledAuthActor { get; set; }
+
     /// <summary>HMAC signing key for session JWTs. Blank means the host generates and keeps its own.</summary>
     /// <panel>Secret every session token is signed with. Leave it blank and this host generates one for
     /// itself on first start and reuses it forever after. Changing it signs everyone out at once, which

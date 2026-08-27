@@ -37,7 +37,7 @@ public sealed class ClusterTokenServiceTests
         LeafOverridesDir = "/tmp/kgsm-api-test-overrides", LeafApplyCanaryMs = 15000,
         LeafDescriptorDir = "/tmp/kgsm-api-test-descriptors", LeafDropInDir = "/tmp/kgsm-api-test-dropins",
         DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000,
-        AuthDisabled = false, SigningKey = "", OAuth = new KgsmAuthOptions(),
+        AuthDisabled = false, DisabledAuthActor = "local:test", SigningKey = "", OAuth = new KgsmAuthOptions(),
         DiscordRedirectUri = "", AuthFrontendUrl = "",
         SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
         ClusterSecret = secret, ClusterSecretPrevious = previousSecret, NodeId = nodeId,

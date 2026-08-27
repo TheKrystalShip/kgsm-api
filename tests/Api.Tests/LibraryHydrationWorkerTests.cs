@@ -333,7 +333,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
         DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000,
 
 
-        AuthDisabled = true, SigningKey = "", OAuth = new KgsmAuthOptions(),
+        AuthDisabled = true, DisabledAuthActor = "local:test", SigningKey = "", OAuth = new KgsmAuthOptions(),
         DiscordRedirectUri = "", AuthFrontendUrl = "",
         SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
         ClusterSecret = "", ClusterSecretPrevious = "", NodeId = "test",

@@ -613,6 +613,14 @@ public sealed class ApiOptions
     /// </summary>
     public bool AuthDisabled { get; init; }
 
+    /// <summary>
+    /// The principal to attribute every request to while <see cref="AuthDisabled"/> is set, written
+    /// <c>provider:name</c> (<c>KgsmActor</c>). Required in that case and validated at startup: an open
+    /// door still writes audit rows, and a host that cannot say who came through it should not open one.
+    /// Empty whenever auth is on, where the caller's own token names them.
+    /// </summary>
+    public required string DisabledAuthActor { get; init; }
+
     /// <summary>HMAC signing key for the host-scoped session JWTs (<c>Api__SigningKey</c>).
     /// Blank means this host generates one for itself and keeps it in <see cref="SigningKeyPath"/>,
     /// so sessions survive a restart with nothing configured; a value here always wins.</summary>
@@ -1048,6 +1056,7 @@ public sealed class ApiOptions
 
             // Auth. On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = s.AuthDisabled ?? false,
+            DisabledAuthActor = Defaulted(s.DisabledAuthActor, ""),
             SigningKey = Defaulted(s.SigningKey, ""),
             OAuth = auth,
             DiscordRedirectUri = Defaulted(s.DiscordRedirectUri, ""),

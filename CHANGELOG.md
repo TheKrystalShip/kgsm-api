@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — an auth-disabled host is told whose name to write (`0.140.0`)
+
+`Api__DisabledAuthActor` names the principal every request is attributed to while
+`Api__AuthDisabled` is set, written `provider:name`. It has no default and the host refuses to start
+without a usable one, naming the setting in the error.
+
+Turning auth off does not turn the audit log off: every request still lands in the record under
+whatever name the handler presents. A name compiled into the handler is a principal nobody chose,
+and one claiming a provider it never authenticated against is indistinguishable in the record from a
+person who logged in through that provider. Failing at startup rather than at the first request is
+the point — the failure being prevented is a host that runs perfectly well while mis-attributing
+everything it does. The provider half is never checked against this host's configured applications:
+nothing about an open-door request was verified against a provider in the first place.
+
 ### Changed — one maintenance window, replacing two cadences (`0.139.0`)
 
 A server's settings carry a list of **maintenance windows** — one appointment plus an ordered set of

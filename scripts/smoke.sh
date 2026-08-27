@@ -70,6 +70,9 @@ KGSM_SOCK="${SMOKE_KGSM_SOCKET:-/tmp/kgsm-api-smoke-events.sock}"; rm -f "$KGSM_
 # so they exercise the domain contracts unchanged; the auth boundary itself gets its own ENABLED
 # instance + no-token sweep at the end (and the full tier matrix lives in tests/Api.Tests).
 export Api__AuthDisabled=true
+# Auth is off for these checks, so nothing authenticates a caller. This names who the audit log
+# attributes the run to; the API refuses to start without it.
+export Api__DisabledAuthActor="local:claude"
 # Steam covers are keyless + ON by default, so without this the worker would fetch real Steam capsules over
 # the network and the offline "cover null (no RAWG key)" assertions below would flake. Disable it here so the
 # smoke stays offline + deterministic; the Steam-primary/RAWG-fallback logic is unit-tested with fakes.
@@ -1447,12 +1450,12 @@ if start_api_assistant "$ASSIST_URL" "$REL_SECRET"; then
     if [[ "$CODE" == 200 ]] \
        && grep -q 'event: text.delta' <<<"$BODY" \
        && grep -q 'event: done' <<<"$BODY" \
-       && grep -q '"relayUser":"dev"' <<<"$BODY" \
+       && grep -q '"relayUser":"claude"' <<<"$BODY" \
        && grep -q 'event: tool.result' <<<"$BODY" \
        && grep -q '"result":{' <<<"$BODY" \
        && grep -q '"overall":"warn"' <<<"$BODY" \
        && grep -q '"confidence":"confirmed"' <<<"$BODY"; then
-      ok "relay 200 SSE: stub gated on the secret (200 ⇒ correct X-Relay-Secret forwarded), X-Relay-User=dev echoed, §5·a frames verbatim INCL. a Phase-2 tool.result card (result/overall/confidence survive the byte relay)"
+      ok "relay 200 SSE: stub gated on the secret (200 ⇒ correct X-Relay-Secret forwarded), X-Relay-User=claude echoed, frames verbatim INCL. a tool.result card (result/overall/confidence survive the byte relay)"
     else
       bad "M7 stub relay (code=$CODE body=$BODY; stub log: $(cat /tmp/kgsm-api-smoke-stub-assistant.log 2>/dev/null))"
     fi
@@ -1489,7 +1492,7 @@ if start_api_assistant "$ASSIST_URL" "$REL_SECRET"; then
     # title → proves the identity reached the leaf).
     req GET /api/v1/assistant/conversations
     { [[ "$CODE" == 200 ]] && grep -q '"id":"chatA"' <<<"$BODY" && grep -q '"dev asked about factorio"' <<<"$BODY"; } \
-      && ok "reverse path: GET /assistant/conversations → 200, summary list relayed verbatim (X-Relay-User=dev forwarded on the read)" \
+      && ok "reverse path: GET /assistant/conversations → 200, summary list relayed verbatim (X-Relay-User=claude forwarded on the read)" \
       || bad "conversations list (code=$CODE body=$BODY)"
 
     # Reverse path: load one chat's transcript. The {id} is forwarded in the path; the stub echoes it +

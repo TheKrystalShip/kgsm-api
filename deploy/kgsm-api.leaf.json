@@ -397,6 +397,15 @@
       "risk": "destructive"
     },
     {
+      "key": "disabledAuthActor",
+      "env": "Api__DisabledAuthActor",
+      "label": "Actor while auth is disabled",
+      "description": "Who the audit log names for work done while authentication is disabled, written provider:name (for example local:claude). Required whenever authentication is off: without it the host refuses to start, because every action taken through an open door would otherwise land in the record under a name nobody chose.",
+      "group": "auth",
+      "type": "string",
+      "risk": "safe"
+    },
+    {
       "key": "signingKey",
       "env": "Api__SigningKey",
       "label": "Token signing key",

@@ -17,8 +17,8 @@ public static class AuditPrincipal
     /// <summary>
     /// <c>&lt;provider&gt;:&lt;username&gt;</c> for an authenticated identity (the human-readable handle,
     /// falling back to the provider's subject), or <see langword="null"/> when there is no resolvable principal —
-    /// in which case the command is sent with no actor and kgsm applies its own honest OS-user fallback
-    /// rather than the API fabricating an identity.
+    /// in which case the command is sent with no actor and the event records unclaimed, rather than the
+    /// API fabricating an identity.
     /// </summary>
     public static string? ActorString(ClaimsPrincipal? user)
     {

@@ -740,6 +740,18 @@ public class Startup(IConfiguration configuration)
         // JwtBearer scheme validates the session JWTs with the SAME parameters the token service mints under
         // (shared via the post-configure below). SSE streams carry the bearer as an Authorization header;
         // a refresh token is never accepted as an access bearer.
+        // Opening the door is allowed; opening it anonymously is not. Every request that comes through
+        // it is attributed to Api__DisabledAuthActor and lands in the audit log under that name, so the
+        // host refuses to start until it has been told a real one. Failing here rather than at the first
+        // request is deliberate: the alternative is a host that runs fine and mis-attributes everything.
+        if (apiOptions.AuthDisabled && !KgsmActor.TryParse(apiOptions.DisabledAuthActor, out _, out _))
+        {
+            throw new InvalidOperationException(
+                "Api__AuthDisabled is set but Api__DisabledAuthActor is not a 'provider:name' actor "
+                + $"(got '{apiOptions.DisabledAuthActor}'). Every request on an auth-disabled host is "
+                + "attributed to it, so it must name somebody — e.g. 'local:claude'.");
+        }
+
         string defaultScheme = apiOptions.AuthEnabled
             ? JwtBearerDefaults.AuthenticationScheme
             : DisabledAuthHandler.SchemeName;
@@ -946,8 +958,9 @@ public class Startup(IConfiguration configuration)
         ILogger startupLog = loggerFactory.CreateLogger("TheKrystalShip.Api.Startup");
         if (options.AuthDisabled)
             startupLog.LogWarning(
-                "AUTH DISABLED (Api__AuthDisabled) — every request is authenticated as admin. "
-                + "This is the pre-M4 open trust window; never enable it on an exposed host.");
+                "AUTH DISABLED (Api__AuthDisabled) — every request is authenticated as admin and "
+                + "attributed to {Actor}. Never enable this on an exposed host.",
+                options.DisabledAuthActor);
         else if (app.ApplicationServices.GetRequiredService<IAuthProviderCatalog>().Configured is { Count: 0 })
             startupLog.LogWarning(
                 "Auth is ON but this host is wired to no identity provider — the /auth/{{provider}}/* "

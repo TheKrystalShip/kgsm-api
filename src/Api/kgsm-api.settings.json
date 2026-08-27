@@ -85,6 +85,9 @@
       // ── Authentication ──
       // Dev escape hatch: authenticate every request as a synthetic admin.
       "AuthDisabled": false,
+      // Who every request is attributed to while auth is off, as 'provider:name'.
+      // Required whenever AuthDisabled is set; the host refuses to start without it.
+      "DisabledAuthActor": "",
       // HMAC signing key for session JWTs. Blank generates an ephemeral per-process key.
       "SigningKey": "",
       // This host's OAuth redirect URI; must match the app registry.
