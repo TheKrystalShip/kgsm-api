@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
@@ -381,10 +383,17 @@ public sealed class ServicesController(
     /// <remarks>
     /// <para>
     /// Verbatim like <c>monitor/stats</c> and <c>bot/status</c>: the reactor owns this contract and already
-    /// resolves the parts a reader would otherwise get wrong — a rule named in two mode lists is reported
-    /// at the safest of them, and a rule with no window of its own is reported at the host-wide one. Both
-    /// are arithmetic this API would have to duplicate to reshape the payload, and duplicating it is how
-    /// the panel and the leaf come to disagree about what a rule is permitted to do.
+    /// resolves the parts a reader would otherwise get wrong — a rule asking for an authority the build
+    /// cannot honour is reported at the one in force, with what it asked for beside it, and a rule with no
+    /// window of its own is reported at the host-wide one. Both are arithmetic this API would have to
+    /// duplicate to reshape the payload, and duplicating it is how the panel and the leaf come to disagree
+    /// about what a rule is permitted to do.
+    /// </para>
+    /// <para>
+    /// Each rule carries its whole definition — its steps in evaluation order, its bindings, and who last
+    /// shaped it — beside <c>problems</c>, which names every rule in the file that could not be honoured.
+    /// ⚠ <b>Order is the semantics</b>: the first step whose clauses all hold decides, so a panel that
+    /// re-sorted them would show a rule that behaves differently from the one running.
     /// </para>
     /// <para>
     /// ⚠ The counters are since the reactor's own process started, not since the beginning. They are named
@@ -406,6 +415,138 @@ public sealed class ServicesController(
         if (json is null)
             return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
                 "the reactor didn't answer for its own status");
+
+        return Content(json, "application/json");
+    }
+
+    /// <summary>
+    /// <c>GET /hosts/{id}/services/reactor/catalog</c> → what a rule may be made of on the build this
+    /// host is running, relayed verbatim: every signal with its kind, unit, arguments and prose; every
+    /// subject source and the rule shape it produces; every action and whether it changes the server;
+    /// the operators and outcomes in the spellings the rules file uses; and how much authority the build
+    /// will honour. <b>404 when this host runs no reactor</b>; <b>503</b> when it runs one that would not
+    /// answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// What the panel renders its rule editor from. Relayed rather than reshaped and never cached against
+    /// a build: the leaf is the only thing that knows what it can measure, and a copy held here would go
+    /// on offering a signal after the build that measured it was replaced, and refuse one after a build
+    /// that added it was deployed.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>Reference material, so it sits at operator with the rest of this controller.</b> It names no
+    /// instance, reports no measurement and reveals nothing about what this host is doing — it describes
+    /// what the software can do.
+    /// </para>
+    /// </remarks>
+    [HttpGet("reactor/catalog")]
+    public async Task<IActionResult> GetReactorCatalog(string id, CancellationToken ct)
+    {
+        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
+            return NotFound();
+
+        if (HttpContext.RequestServices.GetService(typeof(ReactorClient)) is not ReactorClient reactor
+            || !reactor.IsProvisioned)
+            return NotFound();
+
+        string? json = await reactor.GetCatalogJsonAsync(ct).ConfigureAwait(false);
+        if (json is null)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the reactor didn't answer for its rule catalog");
+
+        return Content(json, "application/json");
+    }
+
+    /// <summary>
+    /// <c>GET /hosts/{id}/services/reactor/rules</c> → the rules this API has stored for the reactor,
+    /// verbatim, for editing. <b>404 when this host runs no reactor.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⚠ <b>What is stored and what is running are different questions.</b> This is the first; the
+    /// second is <c>reactor/status</c>, which reports the rules the leaf could honour and names in
+    /// <c>problems</c> the ones it could not. An editor built only on the status would silently drop the
+    /// rule somebody is halfway through fixing, because a rule the leaf refuses appears in neither of
+    /// its lists.
+    /// </para>
+    /// <para>
+    /// <c>managed:false</c> is the ordinary answer on a host nobody has edited: the leaf runs the rules
+    /// it ships, its status reports them, and there is nothing here yet. It is not an empty rule set.
+    /// </para>
+    /// </remarks>
+    [HttpGet("reactor/rules")]
+    public async Task<IActionResult> GetReactorRules(
+        string id, [FromServices] ReactorRulesService rules, CancellationToken ct)
+    {
+        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
+            return NotFound();
+
+        if (HttpContext.RequestServices.GetService(typeof(ReactorClient)) is not ReactorClient reactor
+            || !reactor.IsProvisioned)
+            return NotFound();
+
+        string? stored = await rules.ReadAsync(ct).ConfigureAwait(false);
+
+        if (stored is null)
+            return Ok(new StoredReactorRules(false, rules.Path, null));
+
+        try
+        {
+            using JsonDocument parsed = JsonDocument.Parse(stored);
+            return Ok(new StoredReactorRules(true, rules.Path, parsed.RootElement.Clone()));
+        }
+        catch (JsonException)
+        {
+            // Stored and unreadable is a real state — somebody edited the file by hand — and reporting
+            // it as "nothing stored" would invite an editor to overwrite what they were trying to fix.
+            return Error(StatusCodes.Status409Conflict, "conflict",
+                "the stored rules file could not be parsed; fix or replace it");
+        }
+    }
+
+    /// <summary>
+    /// <c>POST /hosts/{id}/services/reactor/preview</c> → what a proposed rule would decide about this
+    /// host right now, relayed verbatim. <b>404 when this host runs no reactor</b>; <b>503</b> when it
+    /// runs one that would not answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The thing that makes composing a rule safe. A rule assembled from a catalog reads plausibly and
+    /// can still fire on nothing — a gate set where no instance clears it, a step ordered after one that
+    /// always matches first — and none of that is visible in an editor. The leaf evaluates it against the
+    /// live world and returns the verdict and the exact sentence it would record.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>A read expressed as a POST, because the rule is the question.</b> Nothing is stored and
+    /// nothing is dispatched: the rule does not become one of the host's rules, no decision reaches the
+    /// ledger or the journal, and the gate is not run. That is why it sits at operator with the other
+    /// reads rather than behind the admin write gate.
+    /// </para>
+    /// </remarks>
+    [HttpPost("reactor/preview")]
+    public async Task<IActionResult> PreviewReactorRule(
+        string id, [FromServices] ReactorRulesService rules, CancellationToken ct)
+    {
+        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
+            return NotFound();
+
+        if (HttpContext.RequestServices.GetService(typeof(ReactorClient)) is not ReactorClient reactor
+            || !reactor.IsProvisioned)
+            return NotFound();
+
+        using var reader = new StreamReader(Request.Body);
+        string body = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+
+        (string? json, int status) = await reactor.PreviewJsonAsync(body, ct).ConfigureAwait(false);
+
+        if (status == StatusCodes.Status400BadRequest)
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                json ?? "the reactor could not read that rule");
+
+        if (json is null)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the reactor didn't answer for the preview");
 
         return Content(json, "application/json");
     }

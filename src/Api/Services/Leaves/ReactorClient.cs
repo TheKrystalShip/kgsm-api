@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Sockets;
 
 namespace TheKrystalShip.Api.Services.Leaves;
@@ -36,6 +37,11 @@ public sealed class ReactorClient : IDisposable
     // disk, so a slow reply means a sick daemon. Bound it so one can never stall the health poll.
     private static readonly TimeSpan AnswerWithin = TimeSpan.FromSeconds(2);
 
+    // ⚠ A preview is the one call here that does real work: it reads the supervisor and the monitor once
+    // per subject, across as much of the fleet as the rule enumerates. Holding it to the probe's budget
+    // would report a healthy leaf as unreachable to somebody who is only composing a rule.
+    private static readonly TimeSpan PreviewWithin = TimeSpan.FromSeconds(30);
+
     private readonly LeafRegistry _registry;
     private readonly ILogger<ReactorClient> _logger;
     private readonly HttpClient _http;
@@ -72,8 +78,25 @@ public sealed class ReactorClient : IDisposable
         _http = new HttpClient(handler, disposeHandler: true)
         {
             BaseAddress = new Uri("http://localhost"),
-            Timeout = AnswerWithin,
+            // Bounded per call rather than on the client: the probe's budget is what makes a slow reply
+            // mean a sick daemon, and applying it to every call would cap the one that legitimately does
+            // work. Each method links its own deadline below.
+            Timeout = Timeout.InfiniteTimeSpan,
         };
+    }
+
+    /// <summary>
+    /// A token that cancels when the caller does, or when this call has taken long enough.
+    /// </summary>
+    /// <remarks>
+    /// The two are told apart at the catch site by asking whether the caller's token fired, which is what
+    /// lets a timeout be logged as one rather than as a request somebody abandoned.
+    /// </remarks>
+    private static CancellationTokenSource Bounded(CancellationToken ct, TimeSpan budget)
+    {
+        var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        linked.CancelAfter(budget);
+        return linked;
     }
 
     /// <summary>
@@ -98,7 +121,8 @@ public sealed class ReactorClient : IDisposable
 
         try
         {
-            using HttpResponseMessage resp = await _http.GetAsync("/health", ct).ConfigureAwait(false);
+            using CancellationTokenSource bound = Bounded(ct, AnswerWithin);
+            using HttpResponseMessage resp = await _http.GetAsync("/health", bound.Token).ConfigureAwait(false);
             return resp.IsSuccessStatusCode;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -125,13 +149,14 @@ public sealed class ReactorClient : IDisposable
 
         try
         {
-            using HttpResponseMessage resp = await _http.GetAsync("/status", ct).ConfigureAwait(false);
+            using CancellationTokenSource bound = Bounded(ct, AnswerWithin);
+            using HttpResponseMessage resp = await _http.GetAsync("/status", bound.Token).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogDebug("reactor /status returned {Status}", (int)resp.StatusCode);
                 return null;
             }
-            return await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return await resp.Content.ReadAsStringAsync(bound.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -142,6 +167,103 @@ public sealed class ReactorClient : IDisposable
         {
             _logger.LogDebug(ex, "reactor /status failed");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// What a rule may be made of on the running build (<c>GET /catalog</c>), verbatim. Null on the same
+    /// terms as the status read.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The signals, subject sources, actions, operators and outcomes the panel renders its rule editor
+    /// from. Relayed rather than reshaped, and never cached against a build: the leaf is the only thing
+    /// that knows what it can measure, and a copy held here would go on offering a signal after the
+    /// build that measures it was replaced.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>Read-only, and the boundary is deliberate.</b> Publishing what a rule may be made of is not
+    /// the same as the leaf accepting one over a socket. Composing and storing a rule is this API's
+    /// half — it writes the file and restarts the unit through the grant it already holds — so nothing
+    /// off the host acquires the ability to tell a leaf what to think.
+    /// </para>
+    /// </remarks>
+    public async Task<string?> GetCatalogJsonAsync(CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
+            return null; // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            using CancellationTokenSource bound = Bounded(ct, AnswerWithin);
+            using HttpResponseMessage resp = await _http.GetAsync("/catalog", bound.Token).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("reactor /catalog returned {Status}", (int)resp.StatusCode);
+                return null;
+            }
+            return await resp.Content.ReadAsStringAsync(bound.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("reactor /catalog timed out after {Timeout}", AnswerWithin);
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "reactor /catalog failed");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// What a proposed rule would decide about this host right now (<c>POST /preview</c>), verbatim.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⚠ <b>A read expressed as a POST, because the rule is the question.</b> The leaf stores nothing,
+    /// dispatches nothing, and writes no decision — so this does not cross the boundary the read-only
+    /// socket draws.
+    /// </para>
+    /// <para>
+    /// The status is returned beside the body because a rule the leaf could not read is a caller error
+    /// that has to reach the person composing, where every other failure here is the leaf being absent.
+    /// Collapsing the two would report "the reactor didn't answer" for a misplaced comma.
+    /// </para>
+    /// </remarks>
+    /// <returns>The body and the leaf's status code, or <c>(null, 0)</c> when it could not be reached.</returns>
+    public async Task<(string? Body, int Status)> PreviewJsonAsync(string rule, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
+            return (null, 0); // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            using var content = new StringContent(rule, System.Text.Encoding.UTF8, "application/json");
+            using CancellationTokenSource bound = Bounded(ct, PreviewWithin);
+            using HttpResponseMessage resp =
+                await _http.PostAsync("/preview", content, bound.Token).ConfigureAwait(false);
+
+            string body = await resp.Content.ReadAsStringAsync(bound.Token).ConfigureAwait(false);
+
+            if (resp.IsSuccessStatusCode)
+                return (body, (int)resp.StatusCode);
+
+            if (resp.StatusCode == HttpStatusCode.BadRequest)
+                return (body, StatusCodes.Status400BadRequest);
+
+            _logger.LogDebug("reactor /preview returned {Status}", (int)resp.StatusCode);
+            return (null, (int)resp.StatusCode);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("reactor /preview timed out after {Timeout}", AnswerWithin);
+            return (null, 0);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "reactor /preview failed");
+            return (null, 0);
         }
     }
 
@@ -173,13 +295,14 @@ public sealed class ReactorClient : IDisposable
             // caller meant "whatever you default to" — which is the week the review gate is stated over.
             string path = days > 0 ? $"/decisions?days={days}" : "/decisions";
 
-            using HttpResponseMessage resp = await _http.GetAsync(path, ct).ConfigureAwait(false);
+            using CancellationTokenSource bound = Bounded(ct, AnswerWithin);
+            using HttpResponseMessage resp = await _http.GetAsync(path, bound.Token).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogDebug("reactor /decisions returned {Status}", (int)resp.StatusCode);
                 return null;
             }
-            return await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return await resp.Content.ReadAsStringAsync(bound.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {

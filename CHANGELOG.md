@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the reactor's rules, read and written (`0.145.0`)
+
+Four surfaces behind `/hosts/{id}/services/reactor`, which together are what a rule editor is built
+from.
+
+`GET reactor/catalog` relays what a rule may be made of on the build this host is running: every
+signal with its kind, unit, arguments and prose; every subject source and the rule shape it produces;
+every action and whether it changes the server; the operators and outcomes in the spellings the rules
+file uses; and how much authority the build will honour. Relayed rather than reshaped and never
+cached against a build — the leaf is the only thing that knows what it can measure.
+
+`POST reactor/preview` relays a proposed rule to the leaf and returns what it would decide about this
+host right now, with the exact sentence it would record. It sits at operator with the other reads
+because nothing is stored and nothing is dispatched: the rule does not become one of the host's rules
+and no decision is written. ⚠ It carries its own 30-second budget rather than the capability probe's
+two seconds — a preview reads the supervisor and the monitor once per subject, and holding it to the
+probe's budget would report a healthy leaf as unreachable to somebody who is only composing.
+
+`GET reactor/rules` serves the rules this API has stored, verbatim, for editing. ⚠ **What is stored
+and what is running are different questions**: a rule the leaf refuses is in the file and in neither
+of the leaf's lists, so an editor built only on the status would silently drop the rule somebody is
+halfway through fixing. `managed:false` is the ordinary answer on a host nobody has edited — the leaf
+runs the rules it ships — and is not an empty rule set.
+
+`PUT reactor/rules` (admin) writes the file, points `Reactor__RulesPath` at it through the ordinary
+leaf-config channel, restarts the unit and reports what the leaf made of it. The reactor's socket is
+read-only, so storing a rule is this API's half of the arrangement — it uses the grant it already
+holds for every other leaf setting, and nothing off this host acquires the ability to tell a leaf what
+to think. What a rule *means* stays the leaf's judgement: the body is checked for being a rules
+document and nothing more, and the leaf's verdict is read back and returned. ⚠ **Problems are not an
+error** — a file with one bad rule in it stores and the rest runs, so this answers `200` with the
+leaf's complaints rather than refusing the whole write, which would make a partly-good file impossible
+to save and therefore impossible to fix.
+
+The read-back is polled rather than assumed: a restart returns as soon as systemd has started the
+process, which is before the reactor has read anything, and reporting at that moment would return the
+previous run's verdict on a file it never saw. A leaf that never answers is reported as not having
+answered, never as having nothing to complain about.
+
 ### Fixed — a row pushed live says what the producer said (`0.144.0`)
 
 A typed engine handler receives the payload and nothing else, so the severity, outcome and summary

@@ -91,6 +91,58 @@ public sealed class ServicesProvisioningController(
         return Ok(resp.Result);
     }
 
+    /// <summary>
+    /// <c>PUT .../services/reactor/rules</c> — store the rules this host's reactor runs, point the leaf
+    /// at them and restart it onto them, then report what it made of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The write half of the rule editor. The reactor's socket is read-only — it publishes what a rule
+    /// may be made of and what one would decide, and never accepts one — so storing is this API's half:
+    /// it writes a file and restarts the unit through the grant it already holds for every other leaf
+    /// setting. Nothing off this host acquires the ability to tell a leaf what to think.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>What a rule means is the leaf's judgement, not this API's.</b> The body is checked for being
+    /// a rules document and nothing more: which signals, operators and actions exist belongs to the
+    /// running build, and a second copy of that here is how the panel and the leaf come to disagree
+    /// about which rules are valid. The leaf's verdict is read back and returned as <c>problems</c>.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>Problems are not an error.</b> A file with one bad rule in it stores, and the rest runs — so
+    /// this answers <c>200</c> with the leaf's complaints rather than refusing the whole write, which
+    /// would make a partly-good file impossible to save and therefore impossible to fix.
+    /// </para>
+    /// <para>
+    /// <b>409, not 400, when this host is not wired to deliver it</b> — the request is fine and the host
+    /// is missing the leaf's override drop-in, the same distinction the config path makes.
+    /// </para>
+    /// </remarks>
+    [HttpPut("reactor/rules")]
+    public async Task<IActionResult> PutReactorRules(
+        string id, [FromServices] ReactorRulesService rules, CancellationToken ct)
+    {
+        if (!IsThisHost(id) || !catalog.IsConfigTarget("reactor"))
+            return NotFound();
+
+        using var reader = new StreamReader(Request.Body);
+        string body = await reader.ReadToEndAsync(ct);
+
+        string? actor = AuditPrincipal.ActorString(User);
+        ReactorRulesResult result = await rules.WriteAsync(body, actor, AuditOrigin.Api, ct);
+
+        if (!result.Ok)
+        {
+            return result.IsConflict
+                ? StatusCode(StatusCodes.Status409Conflict,
+                    new ErrorEnvelope(new ErrorBody("conflict", result.ErrorMessage!)))
+                : StatusCode(StatusCodes.Status400BadRequest,
+                    new ErrorEnvelope(new ErrorBody("bad_request", result.ErrorMessage!)));
+        }
+
+        return Ok(new ReactorRulesApplied(result.Path!, result.Problems, result.Live));
+    }
+
     private bool IsThisHost(string id) =>
         string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase);
 
