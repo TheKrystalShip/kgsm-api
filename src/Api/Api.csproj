@@ -149,7 +149,7 @@
          it. Built by kgsm-llm (which validates them on the other side) and packed to the local feed,
          so this API and kgsm-bot forward identity and authority through one implementation rather
          than two that can come to disagree about who someone is. -->
-    <PackageReference Include="TheKrystalShip.Kgsm.Assistant.Relay" Version="1.0.0" />
+    <PackageReference Include="TheKrystalShip.Kgsm.Assistant.Relay" Version="1.1.0" />
     <PackageReference Include="TheKrystalShip.KGSM.Auth" Version="3.0.0" />
     <PackageReference Include="TheKrystalShip.KGSM.Auth.Discord" Version="4.0.0" />
     <PackageReference Include="TheKrystalShip.KGSM.Auth.Sessions" Version="2.0.0" />
