@@ -13,17 +13,20 @@ namespace TheKrystalShip.Api.Contracts;
 /// kgsm-api). So this DTO deliberately diverges, and that divergence is the contract:
 /// </para>
 /// <list type="bullet">
-///   <item><description><c>status</c> is the honest, closed <c>running|starting|stopped|unknown</c>
-///     vocabulary — never the aspirational <c>online|offline|updating|crashed|installing</c> (the other
-///     transitional states still need the M3 job tracker and crash detection). <c>running</c>/<c>stopped</c>/
-///     <c>unknown</c> derive from kgsm-lib's <c>Reading&lt;InstanceRuntimeStatus&gt;</c> as before.
+///   <item><description><c>status</c> is the honest, closed
+///     <c>running|starting|maintenance|stopped|unknown</c> vocabulary — never the aspirational
+///     <c>online|offline|updating|crashed|installing</c>. <c>running</c>/<c>stopped</c>/<c>unknown</c>
+///     derive from kgsm-lib's <c>Reading&lt;InstanceRuntimeStatus&gt;</c>.
 ///     <c>starting</c> is a REAL run-state, not a job state: the window between an <c>instance_started</c>
 ///     event (the process spawned) and the matching <c>instance_ready</c> event (the watchdog's log-scrape
 ///     confirms the game finished booting) — the boolean status reading alone can't tell these apart (the
 ///     process is genuinely "up" for both), so <see cref="Services.Aggregation.InstanceCache"/> tracks the
 ///     window explicitly (a "starting latch") and <c>ServerAggregator.BuildServer</c> is the one place that
 ///     folds it into <c>status</c>. See <c>InstanceCache</c>'s remarks for why the periodic boolean
-///     reconcile must never be allowed to promote <c>starting</c> back to <c>running</c> on its own.</description></item>
+///     reconcile must never be allowed to promote <c>starting</c> back to <c>running</c> on its own.
+///     <c>maintenance</c> is the other real run-state the boolean cannot carry: the watchdog holds a parked
+///     instance stopped with its intent still set to running, so the reading is false while nothing is
+///     wrong and nobody asked for it to be down (see <c>Services.Availability.SupervisionPhaseIndex</c>).</description></item>
 ///   <item><description><c>metrics</c> preserves the monitor's native units: <c>cpuPctCore</c>
 ///     (% of <em>one</em> core, can exceed 100 — NOT the host's 0–100), <c>memBytes</c>, nullable
 ///     <c>io*</c>. The whole block is <c>null</c> when no per-server sample is available.</description></item>
@@ -54,9 +57,10 @@ public sealed record Server(
     string Name,
     // Blueprint id this instance was installed from (the honest analog of the aspirational `game`).
     string Blueprint,
-    // running | starting | stopped | unknown — see ServerStatus. running/stopped/unknown come from
-    // Reading<InstanceRuntimeStatus>; starting is the InstanceCache starting-latch window layered on top
-    // by ServerAggregator.BuildServer (see the class remarks above).
+    // running | starting | maintenance | stopped | unknown — see ServerStatus. running/stopped/unknown come
+    // from Reading<InstanceRuntimeStatus>; starting is the InstanceCache starting-latch window and
+    // maintenance is the watchdog's park, both layered on top by ServerAggregator.BuildServer (see the
+    // class remarks above).
     string Status,
     // Installed version (InstanceRuntimeStatus.Version.Current). Null when the status is unknown
     // or kgsm reports no version. This is what IS installed; whether something newer exists is the
@@ -367,6 +371,20 @@ public static class ServerStatus
 {
     public const string Running = "running";
     public const string Starting = "starting";
+
+    /// <summary>
+    /// The watchdog is holding this instance out of service for a span somebody asked for: the process is
+    /// down, its desired state is still running, and crash-restart is suppressed for the duration.
+    /// </summary>
+    /// <remarks>
+    /// Its own word rather than <see cref="Stopped"/>, because the two are different facts about a server
+    /// and a surface answers them differently: nobody asked for a parked server to be down, nothing went
+    /// wrong, and it comes back on its own. Reading it as stopped would report an outage that is not one,
+    /// and reading it as <see cref="Unknown"/> would report an absence of measurement where there is a
+    /// precise one.
+    /// </remarks>
+    public const string Maintenance = "maintenance";
+
     public const string Stopped = "stopped";
     public const string Unknown = "unknown";
 }

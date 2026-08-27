@@ -87,37 +87,73 @@ public sealed class ServerSettingsTests
         Assert.Equal(JsonValueKind.Null, cpuEl.ValueKind);
         Assert.True(doc.RootElement.TryGetProperty("memoryCapMb", out var memEl));
         Assert.Equal(JsonValueKind.Null, memEl.ValueKind);
-        // Phase 3 — no schedule config on the fake instance + no scheduler leaf → all honest null.
-        foreach (string field in new[] { "scheduledRestart", "restartTime", "restartDay", "timezone", "nextFireUtc" })
+        // No maintenance written on the fake instance → an empty list, which is "no maintenance". The
+        // timezone it would be read in is honestly null, never this host's own.
+        Assert.Empty(doc.RootElement.GetProperty("maintenanceWindows").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("timezone").ValueKind);
+    }
+
+    [Fact]
+    public async Task Get_returns_every_maintenance_window_in_the_order_it_is_written()
+    {
+        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-backup");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        JsonElement[] windows = [.. doc.RootElement.GetProperty("maintenanceWindows").EnumerateArray()];
+        Assert.Equal(2, windows.Length);
+
+        Assert.Equal("daily@05:00", windows[0].GetProperty("id").GetString());
+        Assert.Equal("appointment", windows[0].GetProperty("kind").GetString());
+        Assert.Equal(["backup"], windows[0].GetProperty("tasks").EnumerateArray().Select(e => e.GetString()));
+        Assert.True(windows[0].GetProperty("valid").GetBoolean());
+
+        Assert.Equal("weekly.sun@04:00", windows[1].GetProperty("id").GetString());
+        Assert.Equal("weekly.sun@04:00/backup,restart", windows[1].GetProperty("expression").GetString());
+        Assert.Equal(["backup", "restart"], windows[1].GetProperty("tasks").EnumerateArray().Select(e => e.GetString()));
+    }
+
+    [Fact]
+    public async Task Get_leaves_the_next_fire_null_with_no_scheduler_leaf()
+    {
+        // The arithmetic is the leaf's. With none provisioned there is nothing to relay, and computing it
+        // here would be a second opinion that drifts from the daemon's across a DST boundary.
+        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-backup");
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+
+        foreach (JsonElement window in doc.RootElement.GetProperty("maintenanceWindows").EnumerateArray())
         {
-            Assert.True(doc.RootElement.TryGetProperty(field, out var el), $"missing field: {field}");
-            Assert.Equal(JsonValueKind.Null, el.ValueKind);
+            Assert.Equal(JsonValueKind.Null, window.GetProperty("nextFireUtc").ValueKind);
+            Assert.Equal(JsonValueKind.Null, window.GetProperty("lastRun").ValueKind);
         }
     }
 
     [Fact]
-    public async Task Get_returns_the_backup_schedule_from_instance_config()
+    public async Task Get_reports_an_unreadable_window_as_invalid_beside_the_ones_that_read()
     {
-        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-backup");
+        // Validity is per window: one that cannot be read disables itself and leaves the rest standing.
+        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-broken");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-        Assert.Equal("6h", doc.RootElement.GetProperty("backupSchedule").GetString());
-        Assert.Equal("05:00", doc.RootElement.GetProperty("backupTime").GetString());
-        Assert.Equal("wed", doc.RootElement.GetProperty("backupDay").GetString());
+        JsonElement[] windows = [.. doc.RootElement.GetProperty("maintenanceWindows").EnumerateArray()];
+        Assert.Equal(2, windows.Length);
+
+        Assert.True(windows[0].GetProperty("valid").GetBoolean());
+        Assert.False(windows[1].GetProperty("valid").GetBoolean());
+        // The error names the offending text, which is the whole reason it is worth carrying verbatim.
+        Assert.Contains("funday", windows[1].GetProperty("error").GetString());
     }
 
     [Fact]
-    public async Task Get_returns_BackupRetention_from_instance_config()
+    public async Task Get_returns_Timezone_and_BackupRetention_from_instance_config()
     {
         HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-backup");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.Equal("Europe/Madrid", doc.RootElement.GetProperty("timezone").GetString());
         Assert.Equal(10, doc.RootElement.GetProperty("backupRetention").GetInt32());
-        // No scheduler leaf on the EngineTestFactory → last-backup status is honest null (never fabricated).
-        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("lastBackupUtc").ValueKind);
-        Assert.Equal(JsonValueKind.Null, doc.RootElement.GetProperty("lastBackupOk").ValueKind);
     }
 
     // --- PATCH /servers/{id}/settings --------------------------------------------------------------
@@ -192,52 +228,116 @@ public sealed class ServerSettingsTests
         Assert.Equal("factorio-1", doc.RootElement.GetProperty("settings").GetProperty("serverId").GetString());
     }
 
-    // --- Scheduled backups (backupSchedule / backupTime / backupDay / backupRetention) -------------
+    // --- Maintenance windows (the whole-list replace) ---------------------------------------------
 
     [Fact]
-    public async Task Patch_BackupSchedule_writes_config_keys()
+    public async Task Patch_MaintenanceWindows_applies_the_one_packed_key()
     {
         HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
-            "{\"backupSchedule\":\"daily\",\"backupTime\":\"05:30\",\"backupDay\":\"fri\"}");
+            "{\"maintenanceWindows\":[\"daily@05:00/backup\",\"weekly.sun@04:00/backup,restart\"]}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-        var applied = doc.RootElement.GetProperty("applied").EnumerateArray().Select(e => e.GetString()).ToList();
-        Assert.Contains("backupSchedule", applied);
-        Assert.Contains("backupTime", applied);
-        Assert.Contains("backupDay", applied);
+        string? only = Assert.Single(doc.RootElement.GetProperty("applied").EnumerateArray()).GetString();
+        Assert.Equal("maintenanceWindows", only);
     }
 
     [Fact]
-    public async Task Patch_BackupSchedule_needs_no_restart_schedule()
+    public async Task Patch_MaintenanceWindows_empty_list_is_no_maintenance()
     {
-        // factorio-1 has no scheduled_restart at all. A backup is taken against the instance as it is,
-        // so it needs no restart window to run in and must not be gated on one.
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
-            "{\"backupSchedule\":\"6h\"}");
+        // The only way to express deleting a window, which a sparse field-by-field patch cannot.
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-backup",
+            "{\"maintenanceWindows\":[]}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-        var applied = doc.RootElement.GetProperty("applied").EnumerateArray().Select(e => e.GetString()).ToList();
-        Assert.Contains("backupSchedule", applied);
+        Assert.Contains("maintenanceWindows",
+            doc.RootElement.GetProperty("applied").EnumerateArray().Select(e => e.GetString()));
     }
 
     [Fact]
-    public async Task Patch_BackupSchedule_invalid_cadence_returns_400()
+    public async Task Patch_MaintenanceWindows_unreadable_expression_400s_naming_the_offending_text()
     {
         HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
-            "{\"backupSchedule\":\"hourly\"}");
+            "{\"maintenanceWindows\":[\"weekly.funday@04:00/restart\"]}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+
+        string body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("\"code\":\"bad_request\"", body);
+        Assert.Contains("funday", body);
+    }
+
+    [Fact]
+    public async Task Patch_MaintenanceWindows_unknown_task_400s()
+    {
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+            "{\"maintenanceWindows\":[\"daily@05:00/defrag\"]}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("defrag", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Patch_MaintenanceWindows_interval_below_the_floor_400s()
+    {
+        // The poll resolution is a minute, so anything under ten is below the useful range above it.
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+            "{\"maintenanceWindows\":[\"5m/restart\"]}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
 
     [Fact]
-    public async Task Patch_BackupTime_invalid_returns_400()
+    public async Task Patch_MaintenanceWindows_interval_above_the_ceiling_400s()
     {
         HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
-            "{\"backupTime\":\"25:00\"}");
+            "{\"maintenanceWindows\":[\"60d/backup\"]}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Patch_MaintenanceWindows_two_windows_on_one_schedule_400s()
+    {
+        // The id IS the schedule, so a second window on it is the first written twice — the answer is to
+        // merge their task sets rather than to pick one.
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+            "{\"maintenanceWindows\":[\"daily@05:00/backup\",\"daily@5:00/restart\"]}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("merge", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Patch_MaintenanceWindows_refuses_a_restart_on_a_container()
+    {
+        // Every disruptive task is issued through the watchdog, and the watchdog supervises native
+        // instances alone — so this can only ever record a skipped task, every week, silently.
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "terraria-box",
+            "{\"maintenanceWindows\":[\"weekly.sun@04:00/backup,restart\"]}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+
+        string body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("restart", body);
+        Assert.Contains("native", body);
+    }
+
+    [Fact]
+    public async Task Patch_MaintenanceWindows_allows_a_backup_on_a_container()
+    {
+        // The archive beside the refused restart is the half a container CAN have, and it still fires.
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "terraria-box",
+            "{\"maintenanceWindows\":[\"daily@05:00/backup\"]}");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Patch_MaintenanceWindows_one_bad_expression_applies_nothing()
+    {
+        // The list is read before any key is written, so a rejected window leaves the instance exactly as
+        // it was rather than half-applied beside a field that did land.
+        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+            "{\"autoUpdate\":true,\"maintenanceWindows\":[\"never@nowhere/restart\"]}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.DoesNotContain("applied", await resp.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -343,47 +443,68 @@ public sealed class ServerSettingsTests
     }
 
     /// <summary>
-    /// Switch-on-input fake (the project convention): the roster carries one instance ("factorio-1",
-    /// AutoUpdate=false) so the gate has something to admit; info returns it by id; config-set accepts only
-    /// "auto_update". No mutable per-call state.
+    /// Switch-on-input fake (the project convention), with no mutable per-call state. The roster carries
+    /// four instances so every branch of the settings path has something to read: a bare native one, one
+    /// carrying a two-window maintenance list, one whose window cannot be read, and a container (whose
+    /// disruptive tasks the watchdog cannot perform).
     /// </summary>
-    private sealed class FakeInstanceService : IInstanceService
+    internal sealed class FakeInstanceService : IInstanceService
     {
         private static Instance Factorio1() =>
-            new() { Name = "factorio-1", BlueprintFile = "factorio.bp.yaml", AutoUpdate = false };
+            new() { Name = "factorio-1", BlueprintFile = "factorio.bp.yaml", AutoUpdate = false,
+                    Runtime = InstanceRuntime.Native };
 
-        // Phase 4 — a second instance carrying auto-backup config, so the GET path has something to surface.
         private static Instance FactorioBackup() =>
             new()
             {
                 Name = "factorio-backup",
                 BlueprintFile = "factorio.bp.yaml",
                 AutoUpdate = false,
-                ScheduledRestart = "daily",
-                BackupSchedule = "6h",
-                BackupTime = "05:00",
-                BackupDay = "wed",
+                Runtime = InstanceRuntime.Native,
+                MaintenanceWindows = "daily@05:00/backup;weekly.sun@04:00/backup,restart",
+                Timezone = "Europe/Madrid",
                 BackupRetention = 10,
                 CrashRestart = true,
                 CrashMaxRestarts = 5,
             };
 
+        private static Instance FactorioBroken() =>
+            new()
+            {
+                Name = "factorio-broken",
+                BlueprintFile = "factorio.bp.yaml",
+                AutoUpdate = false,
+                Runtime = InstanceRuntime.Native,
+                MaintenanceWindows = "daily@05:00/backup;weekly.funday@04:00/restart",
+            };
+
+        private static Instance TerrariaContainer() =>
+            new() { Name = "terraria-box", BlueprintFile = "terraria.bp.yaml", AutoUpdate = false,
+                    Runtime = InstanceRuntime.Container };
+
         public Dictionary<string, Instance>? GetAllOrNull() => GetAll();
         public Dictionary<string, Instance> GetAll() =>
-            new() { ["factorio-1"] = Factorio1(), ["factorio-backup"] = FactorioBackup() };
+            new()
+            {
+                ["factorio-1"] = Factorio1(),
+                ["factorio-backup"] = FactorioBackup(),
+                ["factorio-broken"] = FactorioBroken(),
+                ["terraria-box"] = TerrariaContainer(),
+            };
 
         public Instance? GetInstanceInfo(string instanceName) => instanceName switch
         {
             "factorio-1" => Factorio1(),
             "factorio-backup" => FactorioBackup(),
+            "factorio-broken" => FactorioBroken(),
+            "terraria-box" => TerrariaContainer(),
             _ => null,
         };
 
         public KgsmResult SetInstanceConfigValue(string instanceName, string key, string value,
             string? actor = null, string? origin = null) =>
             key is "auto_update" or "cpu_priority" or "memory_cap_mb"
-                or "scheduled_restart" or "restart_time" or "restart_day" or "timezone"
-                or "backup_schedule" or "backup_time" or "backup_day" or "backup_retention"
+                or "maintenance_windows" or "timezone" or "backup_retention"
                 or "crash_restart" or "crash_max_restarts"
                 ? new KgsmResult(0)
                 : new KgsmResult(1, "", $"the engine refused '{key}'");
@@ -420,6 +541,7 @@ public sealed class ServerSettingsTests
         public KgsmResult DeleteBackup(string instanceName, string backupName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult PruneBackups(string instanceName, int keepN, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult Save(string instanceName) => throw new NotImplementedException();
+        public KgsmResult Announce(string instanceName, string message, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult SendInput(string instanceName, string command, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult Kick(string instanceName, string target, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult Ban(string instanceName, string target, string? actor = null, string? origin = null) => throw new NotImplementedException();
@@ -483,8 +605,10 @@ public sealed class ServerSettingsTests
 
         // --- unused by the settings path: honest NotImplemented (never silently fabricate) ---
         public Task<WatchdogReadyState?> GetReadyAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<WatchdogActionResult> StartAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
-        public Task<WatchdogActionResult> StopAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogActionResult> StartAsync(string instanceName, string origin = "scheduler", CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogActionResult> StopAsync(string instanceName, string origin = "scheduler", CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogActionResult> BeginMaintenanceAsync(string instanceName, string origin = "scheduler", CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<WatchdogActionResult> EndMaintenanceAsync(string instanceName, string origin = "scheduler", CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<WatchdogActionResult> ForgetAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<WatchdogInstanceState?> GetStatusAsync(string instanceName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<WatchdogInstanceState>> ListAsync(CancellationToken cancellationToken = default) => throw new NotImplementedException();
@@ -614,52 +738,136 @@ public sealed class ServerSettingsWithWatchdogTests
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
 
-    // --- Phase 3 — schedule (scheduledRestart / restartTime / restartDay / timezone) ---------------
+    // --- Maintenance windows + the timezone they are read in --------------------------------------
 
     [Fact]
-    public async Task Patch_ScheduledRestart_Operator_200_AppliesField()
+    public async Task Patch_MaintenanceWindows_Operator_200_AppliesField()
     {
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1", "{\"scheduledRestart\":\"daily\"}");
+        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1",
+            "{\"maintenanceWindows\":[\"weekly.sun@04:00/restart\"]}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         JsonElement applied = doc.RootElement.GetProperty("applied");
-        Assert.Equal("scheduledRestart", Assert.Single(applied.EnumerateArray()).GetString());
-        // No scheduler leaf provisioned in the test host → nextFireUtc is honest null (never fabricated).
-        Assert.Equal(JsonValueKind.Null,
-            doc.RootElement.GetProperty("settings").GetProperty("nextFireUtc").ValueKind);
-    }
-
-    [Fact]
-    public async Task Patch_ScheduledRestart_Invalid_400()
-    {
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1", "{\"scheduledRestart\":\"hourly\"}");
-        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
-        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
-    }
-
-    [Fact]
-    public async Task Patch_RestartTime_Invalid_400()
-    {
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1", "{\"restartTime\":\"25:00\"}");
-        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
-        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+        Assert.Equal("maintenanceWindows", Assert.Single(applied.EnumerateArray()).GetString());
     }
 
     [Fact]
     public async Task Patch_Timezone_Invalid_400()
     {
+        // The clock resolves an unrecognized zone to this host's local one, so an unchecked typo would
+        // silently move every appointment on the instance to a zone nobody chose.
         HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1", "{\"timezone\":\"Mars/Olympus\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
 
+    // --- The preview: what a window would do, before anybody saves it -----------------------------
+
     [Fact]
-    public async Task Patch_RestartDay_Invalid_400()
+    public async Task Preview_Viewer_403()
     {
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1", "{\"restartDay\":\"funday\"}");
+        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Viewer, "factorio-1",
+            "{\"expression\":\"daily@05:00/backup\"}");
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Preview_NoExpression_400()
+    {
+        // A malformed request, as distinct from a badly written window — which is an answer, below.
+        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1", "{}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Preview_returns_ascending_fires_a_day_apart()
+    {
+        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1",
+            "{\"expression\":\"daily@05:00/backup\",\"count\":3,\"timezone\":\"UTC\"}");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.True(doc.RootElement.GetProperty("valid").GetBoolean());
+        Assert.Equal("daily@05:00", doc.RootElement.GetProperty("id").GetString());
+        Assert.Equal("appointment", doc.RootElement.GetProperty("kind").GetString());
+        Assert.Equal("UTC", doc.RootElement.GetProperty("timezone").GetString());
+
+        DateTimeOffset[] fires =
+            [.. doc.RootElement.GetProperty("fires").EnumerateArray().Select(e => e.GetDateTimeOffset())];
+        Assert.Equal(3, fires.Length);
+        Assert.All(fires, f => Assert.Equal(new TimeSpan(5, 0, 0), f.UtcDateTime.TimeOfDay));
+        Assert.Equal(TimeSpan.FromDays(1), fires[1] - fires[0]);
+        Assert.Equal(TimeSpan.FromDays(1), fires[2] - fires[1]);
+    }
+
+    [Fact]
+    public async Task Preview_an_interval_lands_on_whole_boundaries_from_the_epoch()
+    {
+        // An interval carries no time of day and no timezone by construction, so every host answers
+        // identically and nothing has to be anchored at install time.
+        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1",
+            "{\"expression\":\"6h/backup\",\"count\":2}");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.Equal("interval", doc.RootElement.GetProperty("kind").GetString());
+
+        foreach (JsonElement fire in doc.RootElement.GetProperty("fires").EnumerateArray())
+        {
+            DateTimeOffset f = fire.GetDateTimeOffset();
+            Assert.Equal(0, f.UtcDateTime.Hour % 6);
+            Assert.Equal(0, f.UtcDateTime.Minute);
+        }
+    }
+
+    [Fact]
+    public async Task Preview_reads_an_unreadable_expression_as_an_answer()
+    {
+        // The endpoint's question is "what does this mean", and "it cannot be read" answers it — which is
+        // exactly what an editor renders where the next fire would have gone.
+        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1",
+            "{\"expression\":\"weekly.funday@04:00/restart\"}");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.False(doc.RootElement.GetProperty("valid").GetBoolean());
+        Assert.Contains("funday", doc.RootElement.GetProperty("error").GetString());
+        Assert.Empty(doc.RootElement.GetProperty("fires").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Preview_BadTimezone_400()
+    {
+        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1",
+            "{\"expression\":\"daily@05:00/backup\",\"timezone\":\"Mars/Olympus\"}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Preview_clamps_an_outsized_count()
+    {
+        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1",
+            "{\"expression\":\"daily@05:00/backup\",\"count\":500}");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.Equal(20, doc.RootElement.GetProperty("fires").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task Preview_writes_nothing()
+    {
+        // Pure: it is the editor's companion, and an editor that saved on every keystroke would be a
+        // different feature. The instance's windows are untouched afterwards.
+        await Preview(_watchdog, KgsmTier.Operator, "factorio-backup",
+            "{\"expression\":\"30d/backup\"}");
+
+        HttpResponseMessage after = await Get(_watchdog, KgsmTier.Viewer, "factorio-backup");
+        using JsonDocument doc = JsonDocument.Parse(await after.Content.ReadAsStringAsync());
+        Assert.Equal(2, doc.RootElement.GetProperty("maintenanceWindows").GetArrayLength());
     }
 
     // --- helpers (mirror ServerSettingsTests) ------------------------------------------------------
@@ -677,5 +885,9 @@ public sealed class ServerSettingsWithWatchdogTests
 
     private static Task<HttpResponseMessage> Patch(AuthTestFactory factory, KgsmTier? tier, string id, string json) =>
         Client(factory, tier).PatchAsync($"/api/v1/servers/{id}/settings",
+            new StringContent(json, Encoding.UTF8, "application/json"));
+
+    private static Task<HttpResponseMessage> Preview(AuthTestFactory factory, KgsmTier? tier, string id, string json) =>
+        Client(factory, tier).PostAsync($"/api/v1/servers/{id}/settings/maintenance/preview",
             new StringContent(json, Encoding.UTF8, "application/json"));
 }

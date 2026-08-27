@@ -283,6 +283,12 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<Services.Availability.RunTimesIndex>();
         services.AddHostedService(sp => sp.GetRequiredService<Services.Availability.RunTimesIndex>());
 
+        // The watchdog's supervision phase, for the one state a run-state boolean cannot carry: an
+        // instance parked for a maintenance window is stopped on purpose, and reading that as an outage
+        // would report a server as down when nothing is wrong.
+        services.AddSingleton<Services.Availability.SupervisionPhaseIndex>();
+        services.AddHostedService(sp => sp.GetRequiredService<Services.Availability.SupervisionPhaseIndex>());
+
         services.AddSingleton<ServerAggregator>();
 
         // Instance in-memory cache: sits between consumers (ServerAggregator, DomainPump,

@@ -36,6 +36,7 @@ public sealed class ServerAggregator
     private readonly PlayerObservability _observability;
     private readonly Availability.UpdateLagIndex _updateLag;
     private readonly Availability.RunTimesIndex _runTimes;
+    private readonly Availability.SupervisionPhaseIndex _phases;
     private readonly Library.BlueprintCache _blueprints;
     private readonly ILogger<ServerAggregator> _logger;
 
@@ -51,6 +52,7 @@ public sealed class ServerAggregator
         PlayerObservability observability,
         Availability.UpdateLagIndex updateLag,
         Availability.RunTimesIndex runTimes,
+        Availability.SupervisionPhaseIndex phases,
         Library.BlueprintCache blueprints,
         ILogger<ServerAggregator> logger)
     {
@@ -65,6 +67,7 @@ public sealed class ServerAggregator
         _observability = observability;
         _updateLag = updateLag;
         _runTimes = runTimes;
+        _phases = phases;
         _blueprints = blueprints;
         _logger = logger;
     }
@@ -158,7 +161,7 @@ public sealed class ServerAggregator
         Server server = BuildServer(id, instance, _cache.Statuses, _backups.Readings,
             metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
             IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability), _updateLag.Lookup,
-            _runTimes.Lookup, BlueprintMinRamOf(_blueprints));
+            _runTimes.Lookup, BlueprintMinRamOf(_blueprints), _phases.ParkedLookup);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -217,7 +220,7 @@ public sealed class ServerAggregator
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
                 _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById,
                 OnlinePlayersOf(_players, _observability), _updateLag.Lookup, _runTimes.Lookup,
-                BlueprintMinRamOf(_blueprints)));
+                BlueprintMinRamOf(_blueprints), _phases.ParkedLookup));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -262,6 +265,9 @@ public sealed class ServerAggregator
     // presence this host cannot see. Passing it as a function keeps this method free of the two services
     // behind that answer (the roster projection and the supervisor reading), exactly as `activeJob` does;
     // omitting it leaves the count honestly unknown rather than zero.
+    // `isParked` is SupervisionPhaseIndex.IsParked — whether the watchdog is holding the instance out of
+    // service. Like the starting latch, it is a real run-state the boolean reading cannot carry, and it is
+    // only ever consulted when that reading is already "down".
     internal static Server BuildServer(
         string id,
         Instance instance,
@@ -275,7 +281,8 @@ public sealed class ServerAggregator
         Func<string, int?>? onlinePlayers = null,
         Func<string, DateTimeOffset?>? updateAvailableSince = null,
         Func<string, Availability.RunTimes>? runTimes = null,
-        Func<string, int?>? blueprintMinRamMb = null)
+        Func<string, int?>? blueprintMinRamMb = null,
+        Func<string, bool>? isParked = null)
     {
         string? libraryState = LibraryStateOf(instance);
 
@@ -294,10 +301,15 @@ public sealed class ServerAggregator
             // and an unreadable instance is not a stopped one. Nothing else in this block needs a guard:
             // the version, the update triple and the start time are read from the same absent directory
             // and arrive honestly null on their own.
+            // ⚠ A parked instance reads false here and is not stopped. The watchdog drains the process for
+            // the span of a maintenance window while its desired state stays running and crash-restart
+            // stays suppressed — so the reading is an honest "no process", and the phase beside it is what
+            // says why. Only consulted on a down reading: a park the daemon has already released shows a
+            // live process, and the process is the stronger fact.
             status = runtimeStatus.Status switch
             {
                 true => isStarting(id) ? ServerStatus.Starting : ServerStatus.Running,
-                false => ServerStatus.Stopped,
+                false => isParked is not null && isParked(id) ? ServerStatus.Maintenance : ServerStatus.Stopped,
                 null => ServerStatus.Unknown,
             };
             version = string.IsNullOrWhiteSpace(runtimeStatus.Version.Current)

@@ -22,7 +22,8 @@ namespace TheKrystalShip.Api.Services.Alerts;
 /// state, polled via kgsm-lib's <see cref="IWatchdogClient"/> (the C#↔engine chokepoint — never a raw
 /// socket). A <c>Desired="running"</c> instance whose <c>Phase</c> is <c>restart-pending</c> is a firing
 /// <c>warn</c> crash; <c>Phase="failed"</c> (the supervisor exhausted its retries and gave up) is an
-/// <c>escalated</c> <c>danger</c> that never auto-resolves. Every field is measured from the kernel
+/// <c>escalated</c> <c>danger</c> that never auto-resolves. <c>Phase="maintenance"</c> is neither: the
+/// daemon drained the instance for a window somebody scheduled, so nothing failed and nothing is owed. Every field is measured from the kernel
 /// (<c>cgroup.events</c>) — never fabricated. <b>Honest boundary:</b> the watchdog supervises NATIVE
 /// instances only, so container-instance crashes are out of scope until a Docker event source exists;
 /// metric thresholds, leaf-down, and port-unreachable are deferred (no honest source at M6·a).</para>
@@ -95,6 +96,19 @@ public sealed class AlertEngine : BackgroundService
     private const string PhaseRestartPending = "restart-pending";
     private const string PhaseFailed = "failed";
     private const string PhaseRunning = "running";
+
+    /// <summary>
+    /// The daemon is holding this instance out of service for a maintenance window: drained on purpose,
+    /// desired state still running, crash detection suppressed for the duration.
+    /// </summary>
+    /// <remarks>
+    /// <b>Never a crash condition.</b> The pairing this pass raises on is a desired-running instance in a
+    /// restart-pending or failed phase, and a park is neither — but it is a desired-running instance that
+    /// is measurably down, which is exactly the shape a future producer would be tempted to read as an
+    /// outage. Naming it here is what makes "somebody asked for this" a fact this file states rather than
+    /// one it happens not to trip over.
+    /// </remarks>
+    private const string PhaseMaintenance = "maintenance";
 
     private readonly ApiOptions _options;
     private readonly IServiceProvider _services;
@@ -244,8 +258,9 @@ public sealed class AlertEngine : BackgroundService
             present.Add(ws.Name);
 
             bool desiredRunning = string.Equals(ws.Desired, DesiredRunning, StringComparison.OrdinalIgnoreCase);
-            bool crashing = string.Equals(ws.Phase, PhaseRestartPending, StringComparison.OrdinalIgnoreCase);
-            bool failed = string.Equals(ws.Phase, PhaseFailed, StringComparison.OrdinalIgnoreCase);
+            bool parked = string.Equals(ws.Phase, PhaseMaintenance, StringComparison.OrdinalIgnoreCase);
+            bool crashing = !parked && string.Equals(ws.Phase, PhaseRestartPending, StringComparison.OrdinalIgnoreCase);
+            bool failed = !parked && string.Equals(ws.Phase, PhaseFailed, StringComparison.OrdinalIgnoreCase);
             if (desiredRunning && (crashing || failed))
                 firingNow[ws.Name] = new Observed(failed, ws.Restarts, ws.Reason ?? "");
         }
@@ -596,8 +611,13 @@ public sealed class AlertEngine : BackgroundService
         WatchdogInstanceState? ws = states.FirstOrDefault(s => string.Equals(s.Name, serverId, StringComparison.Ordinal));
         bool running = ws is not null && string.Equals(ws.Phase, PhaseRunning, StringComparison.OrdinalIgnoreCase);
         bool stopped = ws is not null && !string.Equals(ws.Desired, DesiredRunning, StringComparison.OrdinalIgnoreCase);
+        bool parked = ws is not null && string.Equals(ws.Phase, PhaseMaintenance, StringComparison.OrdinalIgnoreCase);
 
+        // A park says why the crash condition stopped being true without claiming the server is back:
+        // it is down, deliberately, and it will come back on its own. "Recovered" would be a claim about
+        // a process nobody has seen yet.
         string reason = running ? "Recovered — running and stable."
+            : parked ? "Held out of service for maintenance."
             : stopped ? "Server was stopped — no longer supervised as running."
             : "No longer in a crash state.";
 

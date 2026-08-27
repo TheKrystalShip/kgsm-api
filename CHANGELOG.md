@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — one maintenance window, replacing two cadences (`0.139.0`)
+
+A server's settings carry a list of **maintenance windows** — one appointment plus an ordered set of
+tasks — instead of a restart cadence beside a backup cadence. `GET /servers/{id}/settings` returns
+`maintenanceWindows` with one entry per window: its id (which is its schedule expression), the whole
+expression, `appointment` or `interval`, the tasks in canonical run order, whether it will fire, the
+next fire, and the last run. `timezone` and `backupRetention` stay beside the list; the two cadences
+and their four `restart*`/`backup*` keys are one packed kgsm config key.
+
+The last run carries the outcome per task in the vocabulary the scheduler records it in —
+`ok｜failed｜skipped｜aborted`. Four words rather than a boolean, because "did the maintenance work"
+has four genuinely different answers, and a `skipped` task did not apply where a `failed` one was
+owed. An outcome this build does not recognise reads `unknown` rather than `ok`.
+
+`PATCH` replaces the whole list at once, as a list of expressions. That is the only way to express
+deleting a window, which a sparse field-by-field patch cannot; an empty list is no maintenance. Each
+expression is read with kgsm-lib's parser — the ecosystem's one implementation of the grammar and its
+one validator — so an expression that will not fire is a **400 carrying the parse error, which names
+the offending text**, instead of a window that silently never runs. A container carrying `update` or
+`restart` is refused with the reason: every disruptive task is issued through the watchdog, and the
+watchdog supervises native instances alone. The whole list is read before any key is written, so a
+rejected window leaves the instance exactly as it was.
+
+### Added — the maintenance preview (`0.139.0`)
+
+`POST /servers/{id}/settings/maintenance/preview` (Operator) answers when a candidate window would
+fire, before anybody saves it. It computes the fires with `ScheduleClock` — the same arithmetic the
+scheduler fires on — so an editor and the daemon cannot disagree about what an expression means, or
+drift apart across a daylight-saving transition. Pure: nothing is written and nothing is pushed at the
+leaf. An expression that cannot be read comes back `valid:false` with the error and no fires, which is
+the answer to the question rather than a failure; a request carrying no expression is a 400.
+
+### Added — telling a parked server apart from a stopped one (`0.139.0`)
+
+A server the watchdog is holding out of service for a maintenance window reads `status: "maintenance"`
+rather than `stopped`. The process is gone, so the engine's run-state boolean is an honest "no
+process" — but its desired state is still running, crash-restart is suppressed for the duration, and
+it comes back on its own. Nobody asked for it to be down and nothing went wrong, so reporting an
+outage would be reporting something that is not happening. `SupervisionPhaseIndex` polls the daemon's
+supervision table for the phase, and it is only consulted where the run-state reading is already down.
+The alert feed says the same: a parked instance is never a crash, and a crash that clears into a park
+resolves saying so rather than claiming the server recovered.
+
+### Changed — the maintenance warning names its window (`0.139.0`)
+
+The push warning ahead of disruptive maintenance is keyed `(instance, window)`, because one instance
+can hold several windows counting down at once. **Postpone 1h** carries the window it moves — the
+scheduler's verbs each name one, and moving the wrong appointment is worse than refusing — and a
+warning that cannot name one offers no button. Two windows are never warned about: one carrying only a
+backup interrupts nobody, and one that comes round at or inside the fifteen-minute lead would be
+announced every cycle with a sentence that is false.
+
+### Added — the scheduler's window verbs (`0.139.0`)
+
+`POST /hosts/{id}/services/scheduler/windows/{postpone|skip|run-now}` (Operator) moves one instance's
+one window. None of them edits a schedule: each moves a target the daemon holds in memory, so the fire
+after the one acted on lands where it always would have, kgsm config is untouched, and a restart of the
+daemon brings the deferred fire back. The scheduler's control socket carries no identity, so the tier
+check here is the only one there is.
+
 ### Added — a tier change reaches the person it is about, live (`0.138.0`)
 
 The `me` stream topic carries the caller's own standing — `me.patch` with the `tier` and `status`

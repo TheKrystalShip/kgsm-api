@@ -163,6 +163,7 @@ public sealed class ConsoleApiTests
 
         // Switch-on-input (parallel-safe, no mutable capture): the sentinel fails like a stopped server;
         // everything else succeeds (exit 0).
+        public KgsmResult Announce(string instanceName, string message, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult SendInput(string instanceName, string command, string? actor = null, string? origin = null) =>
             command == "/trigger-fail"
                 ? new KgsmResult(1, "", "Input failed: No active server found.")

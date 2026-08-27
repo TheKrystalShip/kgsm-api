@@ -8,13 +8,23 @@ namespace TheKrystalShip.Api.Contracts;
 /// snapshot; this serves it entire, because "what is due next across this host" is a question no
 /// per-server view can answer.
 /// <para>
-/// Relayed as the leaf reports it. Every computed field (<c>nextFireUtc</c>, <c>nextBackupUtc</c>) is the
+/// Relayed as the leaf reports it. Every computed field (each window's <c>nextFireUtc</c>) is the
 /// scheduler's own arithmetic over its own clock — this API re-derives nothing, so the panel and the leaf
 /// can never disagree about when something fires. A null is the leaf's honest "not scheduled" or "hasn't
 /// run yet", never a gap this API filled in.
 /// </para>
 /// </summary>
 public sealed record SchedulerBoard(IReadOnlyList<Services.Leaves.SchedulerInstanceStatus> Data);
+
+/// <summary>
+/// One instruction for <c>POST /hosts/{id}/services/scheduler/windows/{action}</c>.
+/// </summary>
+/// <param name="Instance">The kgsm instance the window belongs to.</param>
+/// <param name="Window">The window's schedule expression, which is its id — <c>weekly.sun@04:00</c>. One
+/// instance holds several appointments, so an instruction that names none is refused rather than guessed at.</param>
+/// <param name="Minutes">How far a <c>postpone</c> moves the window, 1–720. Ignored by the other verbs;
+/// an hour when it is absent.</param>
+public sealed record SchedulerWindowAction(string? Instance, string? Window, int? Minutes = null);
 
 /// <summary>
 /// The watchdog leaf's supervision table: what it intends for each instance, what the kernel says is
@@ -41,7 +51,9 @@ public sealed record WatchdogSupervision(
 /// </summary>
 /// <param name="Name">The instance name.</param>
 /// <param name="Desired">Runtime intent — <c>running</c> or <c>stopped</c>.</param>
-/// <param name="Phase">Supervision phase — <c>running｜restart-pending｜stopped｜failed｜unknown</c>.</param>
+/// <param name="Phase">Supervision phase — <c>running｜restart-pending｜maintenance｜stopped｜failed｜unknown</c>.
+/// <c>maintenance</c> is a leaf holding the instance out of service for a window: drained on purpose, with
+/// <see cref="Desired"/> still <c>running</c> and crash-restart suppressed until it is released.</param>
 /// <param name="Populated">Measured liveness from the cgroup, never inferred from the phase.</param>
 /// <param name="Enabled">In the persisted boot-autostart set. Orthogonal to whether it is running now.</param>
 /// <param name="Pid">The spawned leader pid, when known; null when not running or unknown.</param>

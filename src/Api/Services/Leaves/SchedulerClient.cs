@@ -5,17 +5,18 @@ using System.Text.Json;
 namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>
-/// The kgsm-scheduler leaf client (Settings Phase 3). Unlike the monitor/assistant, the scheduler speaks
-/// <strong>NDJSON-over-unix-socket</strong>, not HTTP: on connect it writes exactly one JSON line — the
-/// status snapshot (per-instance <c>nextFireUtc</c> + last-run) — then closes. This client dials that socket,
+/// The kgsm-scheduler leaf client. Unlike the monitor/assistant, the scheduler speaks
+/// <strong>NDJSON-over-unix-socket</strong>, not HTTP: on connect to the status socket it writes exactly one
+/// JSON line — the per-instance maintenance-window snapshot — then closes. This client dials that socket,
 /// reads the single line, and parses it. It is registered ONLY when the socket is configured
 /// (<c>Api__SchedulerSocketPath</c>); consumers resolve it optionally and degrade to <c>absent</c>/null when
 /// it is missing.
 /// </summary>
 /// <remarks>
 /// Honesty: an unreachable/timed-out/malformed snapshot yields <c>null</c> — the caller then reports the
-/// scheduler capability down and nulls <c>nextFireUtc</c> (never a fabricated schedule). kgsm-api is JIT, so
-/// plain reflection-based <see cref="JsonSerializer"/> (camelCase) is fine here — no source-gen needed.
+/// scheduler capability down and nulls every window's next fire and last run (never a fabricated schedule).
+/// kgsm-api is JIT, so plain reflection-based <see cref="JsonSerializer"/> (camelCase) is fine here — no
+/// source-gen needed.
 /// </remarks>
 public sealed class SchedulerClient
 {
@@ -81,7 +82,25 @@ public sealed class SchedulerClient
     public bool CanControl => !string.IsNullOrWhiteSpace(_controlSocketPath);
 
     /// <summary>
-    /// Ask the scheduler to push an instance's next restart back.
+    /// Push one window's next run back by <paramref name="minutes"/>. The schedule is untouched, so the fire
+    /// after this one lands where it always would have.
+    /// </summary>
+    public Task<SchedulerControlResponse> PostponeAsync(
+        string instance, string window, int minutes, CancellationToken ct = default) =>
+        SendAsync(new SchedulerControlRequest(SchedulerVerb.Postpone, instance, window, minutes), ct);
+
+    /// <summary>Drop this occurrence of one window. The one after it is unaffected.</summary>
+    public Task<SchedulerControlResponse> SkipAsync(
+        string instance, string window, CancellationToken ct = default) =>
+        SendAsync(new SchedulerControlRequest(SchedulerVerb.Skip, instance, window), ct);
+
+    /// <summary>Bring one window forward to the scheduler's next poll — the same run a due one would get.</summary>
+    public Task<SchedulerControlResponse> RunNowAsync(
+        string instance, string window, CancellationToken ct = default) =>
+        SendAsync(new SchedulerControlRequest(SchedulerVerb.RunNow, instance, window), ct);
+
+    /// <summary>
+    /// One instruction to the scheduler: write a line, read the reply.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -89,13 +108,16 @@ public sealed class SchedulerClient
     /// contract is that a client only ever reads. This writes one NDJSON line and reads one back.
     /// </para>
     /// <para>
+    /// <b>Every verb names its window.</b> One instance holds several appointments, and moving the wrong
+    /// one is worse than refusing — the daemon refuses an instruction that names none.
+    /// </para>
+    /// <para>
     /// <b>Every failure is reported, never swallowed into a success.</b> The caller is about to tell a
     /// person what happened to their evening, so "we could not reach the scheduler" has to be
     /// distinguishable from "it said no" and from "it is deferred".
     /// </para>
     /// </remarks>
-    public async Task<SchedulerControlResponse> PostponeAsync(
-        string instance, int minutes, CancellationToken ct = default)
+    private async Task<SchedulerControlResponse> SendAsync(SchedulerControlRequest request, CancellationToken ct)
     {
         if (!CanControl)
             return new SchedulerControlResponse(false, "this host is not wired to the scheduler's control socket");
@@ -109,18 +131,16 @@ public sealed class SchedulerClient
                 .ConfigureAwait(false);
 
             await using var stream = new NetworkStream(socket, ownsSocket: false);
-            byte[] request = Encoding.UTF8.GetBytes(
-                JsonSerializer.Serialize(
-                    new SchedulerControlRequest("postpone", instance, minutes), Json) + "\n");
-            await stream.WriteAsync(request, timed.Token).ConfigureAwait(false);
+            byte[] line = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request, Json) + "\n");
+            await stream.WriteAsync(line, timed.Token).ConfigureAwait(false);
             await stream.FlushAsync(timed.Token).ConfigureAwait(false);
 
             using var reader = new StreamReader(stream, Encoding.UTF8);
-            string? line = await reader.ReadLineAsync(timed.Token).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(line))
+            string? reply = await reader.ReadLineAsync(timed.Token).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(reply))
                 return new SchedulerControlResponse(false, "the scheduler answered nothing");
 
-            return JsonSerializer.Deserialize<SchedulerControlResponse>(line, Json)
+            return JsonSerializer.Deserialize<SchedulerControlResponse>(reply, Json)
                 ?? new SchedulerControlResponse(false, "the scheduler's answer could not be read");
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -137,35 +157,102 @@ public sealed class SchedulerClient
     }
 }
 
-/// <summary>One instruction to the scheduler, as its control socket takes it.</summary>
-public sealed record SchedulerControlRequest(string Command, string Instance, int Minutes);
+/// <summary>The control socket's verbs, spelled the way the daemon reads them.</summary>
+public static class SchedulerVerb
+{
+    /// <summary>Push a window's next run back. Takes <c>minutes</c>, which the daemon caps at 720.</summary>
+    public const string Postpone = "postpone";
 
-/// <summary>What the scheduler said. <see cref="NextFireUtc"/> is the schedule as it now stands.</summary>
+    /// <summary>Drop this occurrence of a window.</summary>
+    public const string Skip = "skip";
+
+    /// <summary>Bring a window forward to the next poll.</summary>
+    public const string RunNow = "run-now";
+
+    /// <summary>Whether <paramref name="verb"/> is one the scheduler takes.</summary>
+    public static bool IsKnown(string? verb) => verb is Postpone or Skip or RunNow;
+}
+
+/// <summary>
+/// One instruction to the scheduler, as its control socket takes it. <see cref="Window"/> is the window's
+/// schedule expression — its id — and <see cref="Minutes"/> is carried only by <see cref="SchedulerVerb.Postpone"/>.
+/// </summary>
+public sealed record SchedulerControlRequest(string Command, string Instance, string Window, int? Minutes = null);
+
+/// <summary>What the scheduler said. <see cref="NextFireUtc"/> is the window's target as it now stands.</summary>
 public sealed record SchedulerControlResponse(bool Ok, string Message, DateTimeOffset? NextFireUtc = null);
 
-/// <summary>The scheduler's one-line status snapshot: the per-instance schedule state it supervises.</summary>
-public sealed record SchedulerStatusResponse(IReadOnlyList<SchedulerInstanceStatus> Instances);
+/// <summary>The scheduler's one-line status snapshot: the maintenance state of every instance it reads.</summary>
+public sealed record SchedulerStatusResponse(IReadOnlyList<SchedulerInstanceStatus>? Instances);
 
-/// <summary>One instance's scheduler state — the configured cadence (echoed from kgsm config) plus the
-/// computed <see cref="NextFireUtc"/> and the last-run outcome. All nullable — honest unknown, never guessed.</summary>
+/// <summary>
+/// One instance's maintenance state — its windows, plus the update sweep's own three fields.
+/// </summary>
+/// <param name="Name">The kgsm instance id.</param>
+/// <param name="Timezone">The instance's IANA timezone, as kgsm holds it. Blank when it declares none.</param>
+/// <param name="Windows">Every window written on the instance, valid or not.</param>
+/// <param name="LastUpdateCheckUtc">When the update sweep last <em>attempted</em> this instance. ⚠ Not when
+/// the upstream was last fetched: a server skipped as recently-checked is null here while the engine holds a
+/// real check time for it. These three answer "is the sweep working, and what failed".</param>
+/// <param name="LastUpdateCheckOk">Whether that attempt succeeded.</param>
+/// <param name="LastUpdateCheckMessage">What went wrong, when something did.</param>
 public sealed record SchedulerInstanceStatus(
     string Name,
-    string? ScheduledRestart,
-    string? RestartTime,
-    string? RestartDay,
     string? Timezone,
+    IReadOnlyList<SchedulerWindowStatus>? Windows,
+    DateTimeOffset? LastUpdateCheckUtc = null,
+    bool? LastUpdateCheckOk = null,
+    string? LastUpdateCheckMessage = null);
+
+/// <summary>
+/// One maintenance window as the daemon holds it.
+/// </summary>
+/// <param name="Id">The window's schedule expression, which is its identity (<c>weekly.sun@04:00</c>).</param>
+/// <param name="Kind"><c>appointment</c> or <c>interval</c>.</param>
+/// <param name="Tasks">The tasks it runs, in canonical order.</param>
+/// <param name="Valid">Whether this host will fire it.</param>
+/// <param name="Error">Why it will not, when it will not — naming the offending text.</param>
+/// <param name="NextFireUtc">The next fire. Null on an invalid window: the pair is what tells an
+/// unreadable window apart from one that is simply not due.</param>
+/// <param name="LastRun">The last run since the daemon started, or null when it has not run in that time
+/// (the record lives in the daemon's memory, not on disk).</param>
+public sealed record SchedulerWindowStatus(
+    string Id,
+    string? Kind,
+    IReadOnlyList<string>? Tasks,
+    bool Valid,
+    string? Error,
     DateTimeOffset? NextFireUtc,
-    DateTimeOffset? LastRunUtc,
-    bool? LastRunOk,
-    string? LastRunMessage,
-    // Auto-backup last-run outcome (all nullable: null when the scheduler hasn't run a backup yet
-    // or predates the feature). Honest unknown, never guessed.
-    DateTimeOffset? LastBackupUtc = null,
-    bool? LastBackupOk = null,
-    string? LastBackupMessage = null,
-    // The backup schedule, independent of the restart schedule — a backup is taken against the
-    // instance as it is, so it needs no restart window to run in.
-    string? BackupSchedule = null,
-    string? BackupTime = null,
-    string? BackupDay = null,
-    DateTimeOffset? NextBackupUtc = null);
+    SchedulerWindowRun? LastRun);
+
+/// <summary>
+/// One window run: when it started and finished, how it ended, and a row per task it got to.
+/// </summary>
+/// <param name="Outcome">The window's own outcome, in the <see cref="MaintenanceOutcome"/> vocabulary.</param>
+public sealed record SchedulerWindowRun(
+    DateTimeOffset? StartedUtc,
+    DateTimeOffset? FinishedUtc,
+    string? Outcome,
+    IReadOnlyList<SchedulerTaskRun>? Tasks);
+
+/// <summary>One task inside a run — what it was, how it ended, and the daemon's words for why.</summary>
+public sealed record SchedulerTaskRun(string Name, string? Outcome, string? Message);
+
+/// <summary>
+/// How a window or one of its tasks ended. Four words rather than a boolean, because "did the maintenance
+/// work" has four genuinely different answers, and collapsing them loses the one a surface should raise.
+/// </summary>
+public static class MaintenanceOutcome
+{
+    /// <summary>It was owed and it happened.</summary>
+    public const string Ok = "ok";
+
+    /// <summary>It was owed and it did not happen. The one a surface raises.</summary>
+    public const string Failed = "failed";
+
+    /// <summary>It did not apply to the instance as it stood — recorded with its reason, never raised.</summary>
+    public const string Skipped = "skipped";
+
+    /// <summary>An earlier task in the same window failed, so this one never got its turn.</summary>
+    public const string Aborted = "aborted";
+}

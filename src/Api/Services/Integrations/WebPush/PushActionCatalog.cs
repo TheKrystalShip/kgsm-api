@@ -70,8 +70,13 @@ public static class PushActionCatalog
             if (ev.CatalogId == "leaf_down" && Leaves.LeafCatalog.IsRestartable(subject))
                 return [new PushActionOffer(PushActionKind.LeafRestart, subject, "Restart")];
 
+            // The scheduler moves one window, so the button carries which: an instruction naming none is
+            // refused by the daemon, and on a server holding two appointments, moving the wrong one is
+            // worse than refusing. A warning that could not name its window offers nothing.
             if (ev.CatalogId == "restart_soon")
-                return [new PushActionOffer(PushActionKind.SchedulePostpone, subject, "Postpone 1h")];
+                return ev.ActionQualifier is { Length: > 0 } window
+                    ? [new PushActionOffer(PushActionKind.SchedulePostpone, subject, "Postpone 1h", window)]
+                    : [];
 
             if (ev.CatalogId == "awaiting_approval")
                 return [new PushActionOffer(PushActionKind.UserApprove, subject, "Approve")];

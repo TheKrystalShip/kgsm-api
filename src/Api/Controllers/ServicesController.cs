@@ -31,6 +31,10 @@ public sealed class ServicesController(
     LeafCommandStore commands,
     ApiOptions options) : ControllerBase
 {
+    /// <summary>How far a postponement moves a window when the caller names no span. An hour is long
+    /// enough to finish what you are in the middle of without turning "not now" into a reschedule.</summary>
+    private const int DefaultPostponeMinutes = 60;
+
     /// <summary><c>GET /hosts/{id}/services</c> → <c>{ data:[LeafService] }</c> in catalog order. Per-host
     /// api: the only valid <c>{id}</c> is this host (unknown ⇒ 404, mirroring the other host surfaces).</summary>
     [HttpGet]
@@ -89,6 +93,79 @@ public sealed class ServicesController(
                 "the scheduler didn't answer for its schedule board");
 
         return Ok(new SchedulerBoard(status.Instances ?? []));
+    }
+
+    /// <summary>
+    /// <c>POST /hosts/{id}/services/scheduler/windows/{action}</c> → tell the scheduler to move one
+    /// instance's one window: <c>postpone</c>, <c>skip</c> or <c>run-now</c>.
+    /// <b>404 when this host runs no scheduler</b>; <b>503</b> when it is there and would not answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Operator, and this is the only gate there is.</b> The scheduler's control socket carries no
+    /// identity and its own manifest says so — a unix socket has nobody to check — so the tier check runs
+    /// here, before the socket is dialled, rather than being left to a daemon with no way to apply it.
+    /// </para>
+    /// <para>
+    /// <b>None of these edits a schedule.</b> Each moves a target the daemon holds in memory, so the fire
+    /// after the one acted on lands exactly where it always would have, kgsm config is untouched, and a
+    /// restart of the daemon brings the deferred fire back. That is what makes them "not tonight" and
+    /// "just this once" rather than reschedules — and why there is no audit row: a row claiming a durable
+    /// change would be recording something that is not there.
+    /// </para>
+    /// <para>
+    /// <b>The window is required.</b> One instance holds several appointments; the daemon refuses an
+    /// instruction naming none rather than guessing, and so does this.
+    /// </para>
+    /// </remarks>
+    // ⚠ The route token is `verb`, never `action`: MVC reserves that name for the action method, so a
+    // segment spelled `{action}` binds to the method's own name and the route never matches a request.
+    [HttpPost("scheduler/windows/{verb}")]
+    public async Task<IActionResult> ControlWindow(
+        string id, string verb, [FromBody] SchedulerWindowAction? body, CancellationToken ct)
+    {
+        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
+            return NotFound();
+
+        string requested = verb.Trim().ToLowerInvariant();
+        if (!SchedulerVerb.IsKnown(requested))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                $"unknown scheduler action '{verb}'; expected one of: "
+                + $"{SchedulerVerb.Postpone}, {SchedulerVerb.Skip}, {SchedulerVerb.RunNow}");
+
+        if (body?.Instance is not { Length: > 0 } instance || string.IsNullOrWhiteSpace(instance))
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "an instance is required");
+
+        if (body.Window is not { Length: > 0 } window || string.IsNullOrWhiteSpace(window))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "a window is required — a schedule expression, e.g. 'weekly.sun@04:00'");
+
+        if (requested == SchedulerVerb.Postpone && body.Minutes is { } m && m is < 1 or > 720)
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "minutes must be between 1 and 720; past that it is a schedule change, "
+                + "which belongs in the instance's own config where it survives a restart of the daemon");
+
+        if (HttpContext.RequestServices.GetService(typeof(SchedulerClient)) is not SchedulerClient scheduler)
+            return NotFound();
+
+        if (!scheduler.CanControl)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "this host is not wired to the scheduler's control socket");
+
+        SchedulerControlResponse result = requested switch
+        {
+            SchedulerVerb.Postpone => await scheduler
+                .PostponeAsync(instance.Trim(), window.Trim(), body.Minutes ?? DefaultPostponeMinutes, ct)
+                .ConfigureAwait(false),
+            SchedulerVerb.Skip => await scheduler.SkipAsync(instance.Trim(), window.Trim(), ct).ConfigureAwait(false),
+            _ => await scheduler.RunNowAsync(instance.Trim(), window.Trim(), ct).ConfigureAwait(false),
+        };
+
+        // The daemon's own words, either way. A refusal is a 400 carrying them rather than a 200 with an
+        // ok:false a caller has to remember to read.
+        return result.Ok
+            ? Ok(result)
+            : Error(StatusCodes.Status400BadRequest, "bad_request", result.Message);
     }
 
     /// <summary>

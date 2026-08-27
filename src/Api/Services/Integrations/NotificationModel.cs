@@ -167,6 +167,11 @@ public sealed record NotificationTestResult(bool Ok, string? Posted, string? Cha
 /// operand, and it is carried rather than re-derived because the rule that produces it (the roster's
 /// identity precedence, say) lives in exactly one place, and a second opinion about who somebody is would
 /// eventually act on the wrong one.</param>
+/// <param name="ActionQualifier">Which part of <paramref name="ActionSubject"/> the button acts on, where
+/// the operand is not the whole of it — the maintenance window a countdown is about, on a server that holds
+/// several. Carried rather than re-derived at the tap for the same reason as the subject: the fact was true
+/// when the notification was written, and re-reading the schedule an hour later could name a different
+/// window than the one the person was warned about.</param>
 public sealed record NotificationEvent(
     string CatalogId,
     string Action,
@@ -176,7 +181,8 @@ public sealed record NotificationEvent(
     DateTimeOffset Ts,
     string AuditId,
     string? SubjectKey = null,
-    string? ActionSubject = null);
+    string? ActionSubject = null,
+    string? ActionQualifier = null);
 
 /// <summary>
 /// The <see cref="NotificationEvent.Action"/> values for facts <b>this API observes itself</b>, which are
@@ -201,8 +207,8 @@ public static class DerivedNotificationAction
     /// <summary>A leaf that had been reported down is answering again.</summary>
     public const string LeafUp = "leaf.up";
 
-    /// <summary>A running server is inside the warning window before its scheduled restart
-    /// (<c>ScheduledRestartWatcher</c>).</summary>
+    /// <summary>A running server is inside the warning window before a maintenance window that will
+    /// interrupt the people on it (<c>ScheduledRestartWatcher</c>).</summary>
     public const string RestartSoon = "restart.soon";
 }
 

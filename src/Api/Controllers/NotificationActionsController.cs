@@ -156,7 +156,7 @@ public sealed class NotificationActionsController(
     }
 
     /// <summary>
-    /// Push a server's next scheduled restart back an hour.
+    /// Push one of a server's maintenance windows back an hour.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -174,6 +174,11 @@ public sealed class NotificationActionsController(
     /// scheduler holds the moved target in memory, and it is gone if the daemon restarts. A row claiming
     /// a durable change would be recording something that is not there.
     /// </para>
+    /// <para>
+    /// <b>It names the window it moves.</b> An instance can hold several appointments, and the daemon
+    /// refuses an instruction naming none rather than guessing at one — so a row staged without a window
+    /// is refused here instead of being sent to be refused there.
+    /// </para>
     /// </remarks>
     private async Task<IActionResult> PostponeAsync(
         PushActionEntity action, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
@@ -185,11 +190,14 @@ public sealed class NotificationActionsController(
             || !scheduler.CanControl)
             return Unavailable("This host is not wired to the scheduler.");
 
-        SchedulerControlResponse result = await scheduler
-            .PostponeAsync(action.Target, PushActionCatalog.PostponeBy, ct).ConfigureAwait(false);
+        if (action.Subject is not { Length: > 0 } window)
+            return Refuse("That notification does not say which maintenance window to move.");
 
-        logger.LogInformation("notification action: postpone {Server} — {Message} (actor={Actor}, via push)",
-            action.Target, result.Message, identity.ActorString);
+        SchedulerControlResponse result = await scheduler
+            .PostponeAsync(action.Target, window, PushActionCatalog.PostponeBy, ct).ConfigureAwait(false);
+
+        logger.LogInformation("notification action: postpone {Window} on {Server} — {Message} (actor={Actor}, via push)",
+            window, action.Target, result.Message, identity.ActorString);
 
         if (!result.Ok)
             return Refuse(Capitalize(result.Message) + ".");
@@ -197,10 +205,10 @@ public sealed class NotificationActionsController(
         // The new time, in the words the person will read it in. The scheduler answers with it precisely
         // so a caller never has to ask again to find out what it just did.
         string when = result.NextFireUtc is { } next
-            ? $" It will restart at {next.ToLocalTime():HH:mm} instead."
+            ? $" It runs at {next.ToLocalTime():HH:mm} instead."
             : "";
 
-        return Ok(new PushActionResult(true, $"{action.Target}'s restart is pushed back an hour.{when}"));
+        return Ok(new PushActionResult(true, $"{action.Target}'s {window} maintenance is pushed back an hour.{when}"));
     }
 
     /// <summary>

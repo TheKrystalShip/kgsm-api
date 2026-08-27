@@ -31,8 +31,9 @@ public sealed class PushActionEntity
     public string Target { get; set; } = "";
 
     /// <summary>
-    /// Who inside <see cref="Target"/> it acts on, for the kinds that need one — the roster key of the
-    /// player a kick or a ban names. Null for everything else.
+    /// Who or what inside <see cref="Target"/> it acts on, for the kinds that need one — the roster key of
+    /// the player a kick or a ban names, the maintenance window a postponement moves. Null for everything
+    /// else.
     /// </summary>
     /// <remarks>
     /// Its own column rather than a separator inside <see cref="Target"/>: a player identity can be a
@@ -139,7 +140,7 @@ public static class PushActionKind
     public const string ServerUpdateAll = "server.update_all";
 
     /// <summary>
-    /// Push <c>Target</c>'s next scheduled restart back an hour. It changes nothing about the schedule —
+    /// Push <c>Target</c>'s <c>Subject</c> window back an hour. It changes nothing about the schedule —
     /// the fire after this one lands where it always would have — which is what makes it the one
     /// scheduling verb a single tap can mean unambiguously.
     /// </summary>

@@ -6,18 +6,24 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Leaves;
+using TheKrystalShip.Api.Services.Scheduling;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
+using TheKrystalShip.KGSM.Core.Models.Enums;
+using TheKrystalShip.KGSM.Core.Scheduling;
 
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// Per-server high-level settings — <c>GET /servers/{id}/settings</c> (Viewer) and
-/// <c>PATCH /servers/{id}/settings</c> (Operator). Typed façade over kgsm primitives:
-/// Phase 0 = <c>autoUpdate</c> (kgsm config), Phase 1 adds <c>autostart</c> (watchdog
-/// desired-state). Reads degrade gracefully (null) when a backing authority is absent/down;
-/// writes return 503 when the required authority is unavailable. Echo-path audit — no double-write.
+/// Per-server high-level settings — <c>GET /servers/{id}/settings</c> (Viewer),
+/// <c>PATCH /servers/{id}/settings</c> (Operator) and the maintenance-window preview (Operator). A typed
+/// façade over kgsm config, watchdog desired-state and the scheduler leaf's reading of the windows.
 /// </summary>
+/// <remarks>
+/// Reads degrade gracefully (null) when a backing authority is absent or down; writes 503 when the
+/// authority a field needs is unavailable. Every config write stamps actor+origin so the engine's own
+/// event carries the provenance and the audit row is written from that echo — never here.
+/// </remarks>
 [ApiController]
 [Route("api/v1/servers/{id}/settings")]
 [Authorize(Policy = AuthPolicy.Viewer)]
@@ -26,6 +32,15 @@ public sealed class ServerSettingsController(
     LeafRegistry registry,
     ILogger<ServerSettingsController> logger) : ControllerBase
 {
+    /// <summary>The kgsm config key the whole window list is packed into.</summary>
+    private const string MaintenanceWindowsKey = "maintenance_windows";
+
+    /// <summary>How many fires the preview returns when the caller names no count.</summary>
+    private const int DefaultPreviewCount = 5;
+
+    /// <summary>The most fires one preview will compute. An editor shows the next few.</summary>
+    private const int MaxPreviewCount = 20;
+
     [HttpGet]
     public async Task<IActionResult> Get(string id, CancellationToken ct)
     {
@@ -43,14 +58,7 @@ public sealed class ServerSettingsController(
         bool? autostart = await ReadAutostartAsync(id, ct).ConfigureAwait(false);
         SchedulerInstanceStatus? schedStatus = await ReadSchedulerStatusAsync(id, ct).ConfigureAwait(false);
 
-        return Ok(new ServerSettings(
-            id, instance.AutoUpdate, autostart, instance.CpuPriority, instance.MemoryCapMb,
-            instance.ScheduledRestart, instance.RestartTime, instance.RestartDay, instance.Timezone,
-            schedStatus?.NextFireUtc,
-            instance.BackupSchedule, instance.BackupTime, instance.BackupDay,
-            schedStatus?.NextBackupUtc, instance.BackupRetention,
-            schedStatus?.LastBackupUtc, schedStatus?.LastBackupOk,
-            instance.CrashRestart, instance.CrashMaxRestarts));
+        return Ok(Compose(id, instance, autostart, schedStatus));
     }
 
     [HttpPatch]
@@ -67,10 +75,8 @@ public sealed class ServerSettingsController(
 
         if (body.AutoUpdate is null && body.Autostart is null
             && body.CpuPriority is null && body.MemoryCapMb is null
-            && body.ScheduledRestart is null && body.RestartTime is null
-            && body.RestartDay is null && body.Timezone is null
-            && body.BackupSchedule is null && body.BackupTime is null
-            && body.BackupDay is null && body.BackupRetention is null
+            && body.MaintenanceWindows is null && body.Timezone is null
+            && body.BackupRetention is null
             && body.CrashRestart is null && body.CrashMaxRestarts is null)
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "no recognized settings fields in body");
@@ -88,49 +94,17 @@ public sealed class ServerSettingsController(
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "memoryCapMb must be >= 0 (0 = uncapped)");
 
-        // Phase 3 — validate the schedule fields up front, so a bad value 400s BEFORE any config write
-        // (no partial apply). Non-null non-empty cadence/time/day/timezone are checked; an empty string is
-        // an allowed "clear" for day/timezone (falls through to the config write verbatim).
-        if (body.ScheduledRestart is { } cadence
-            && cadence.Trim().ToLowerInvariant() is not ("off" or "daily" or "weekly" or "6h"))
-            return Error(StatusCodes.Status400BadRequest, "bad_request",
-                "scheduledRestart must be one of: off, daily, weekly, 6h");
-
-        if (body.RestartTime is { Length: > 0 } rtime && !IsValidHhMm(rtime))
-            return Error(StatusCodes.Status400BadRequest, "bad_request",
-                "restartTime must be HH:MM (24h)");
-
-        if (body.RestartDay is { Length: > 0 } rday
-            && rday.Trim().ToLowerInvariant() is not ("sun" or "mon" or "tue" or "wed" or "thu" or "fri" or "sat"))
-            return Error(StatusCodes.Status400BadRequest, "bad_request",
-                "restartDay must be one of: sun, mon, tue, wed, thu, fri, sat");
-
+        // The timezone is checked here rather than left to the clock: ScheduleClock falls back to this
+        // host's local zone for a name it does not recognize, so an unchecked typo would silently move
+        // every appointment on the instance to a zone nobody chose.
         if (body.Timezone is { Length: > 0 } tz && !IsValidTimezone(tz))
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 $"timezone '{tz}' is not a recognized IANA timezone");
-
-        // Scheduled-backup value validation (pure, no instance needed). The cadence mirrors the restart
-        // cadence's vocabulary but is validated separately: the two schedules are independent, and a
-        // backup is valid with no restart schedule at all.
-        if (body.BackupSchedule is { } backupCadence
-            && backupCadence.Trim().ToLowerInvariant() is not ("off" or "daily" or "weekly" or "6h"))
-            return Error(StatusCodes.Status400BadRequest, "bad_request",
-                "backupSchedule must be one of: off, daily, weekly, 6h");
-
-        if (body.BackupTime is { Length: > 0 } btime && !IsValidHhMm(btime))
-            return Error(StatusCodes.Status400BadRequest, "bad_request",
-                "backupTime must be HH:MM (24h)");
-
-        if (body.BackupDay is { Length: > 0 } bday
-            && bday.Trim().ToLowerInvariant() is not ("sun" or "mon" or "tue" or "wed" or "thu" or "fri" or "sat"))
-            return Error(StatusCodes.Status400BadRequest, "bad_request",
-                "backupDay must be one of: sun, mon, tue, wed, thu, fri, sat");
 
         if (body.BackupRetention is { } retentionCheck && retentionCheck is < 1 or > 100)
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "backupRetention must be between 1 and 100");
 
-        // Phase 6 — crash-restart policy value validation (bounded, matches the UI select: 1/2/3/5/10).
         if (body.CrashMaxRestarts is { } cmr && cmr is < 1 or > 10)
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "crashMaxRestarts must be between 1 and 10");
@@ -142,10 +116,23 @@ public sealed class ServerSettingsController(
         if (!await ExistsAsync(id, ct).ConfigureAwait(false))
             return NotFound();
 
+        Instance? current = instances.GetInstanceInfo(id);
+        if (current is null)
+            return NotFound();
+
+        // The windows are read, refused or packed BEFORE any key is written, so a list carrying one bad
+        // expression leaves the instance exactly as it was rather than half-applied.
+        string? packedWindows = null;
+        if (body.MaintenanceWindows is { } candidates)
+        {
+            if (!TryPackWindows(candidates, current.Runtime == InstanceRuntime.Container,
+                    out packedWindows, out string? windowError))
+                return Error(StatusCodes.Status400BadRequest, "bad_request", windowError!);
+        }
+
         string? actor = AuditPrincipal.ActorString(User);
         var applied = new List<string>(4);
 
-        // Phase 0 — auto_update config key
         if (body.AutoUpdate is { } autoUpdate)
         {
             KgsmResult result = instances.SetInstanceConfigValue(
@@ -158,7 +145,6 @@ public sealed class ServerSettingsController(
             applied.Add("autoUpdate");
         }
 
-        // Phase 1 — autostart via watchdog boot-enable set
         if (body.Autostart is { } autostart)
         {
             // The watchdog client is always registered (lazy, configured-or-default socket); provisioning is
@@ -189,7 +175,6 @@ public sealed class ServerSettingsController(
             }
         }
 
-        // Phase 2 — cpu_priority config key + best-effort live-apply via the watchdog (cpu.weight)
         if (normalizedPriority is { } priority)
         {
             KgsmResult result = instances.SetInstanceConfigValue(
@@ -217,7 +202,7 @@ public sealed class ServerSettingsController(
             applied.Add("cpuPriority");
         }
 
-        // Phase 2 — memory_cap_mb config key (no live-apply; memory.max takes effect at next restart)
+        // memory.max takes effect at the next spawn, so there is nothing to live-apply.
         if (body.MemoryCapMb is { } memoryCapMb)
         {
             KgsmResult result = instances.SetInstanceConfigValue(
@@ -231,46 +216,23 @@ public sealed class ServerSettingsController(
             applied.Add("memoryCapMb");
         }
 
-        // Phase 3 — schedule config keys (echo-path audit via the kgsm config event, no double-write). The
-        // scheduler leaf re-reads kgsm config as its source of truth, so persisting the key is the whole
-        // apply — the API never pushes to the scheduler. Cadence/day are lowercased; time/timezone verbatim.
-        if (body.ScheduledRestart is { } sched && !TryApplyConfig(
-                instances, id, "scheduled_restart", sched.Trim().ToLowerInvariant(), actor, origin,
-                applied, "scheduledRestart", out IActionResult? schedErr))
-            return schedErr!;
-        if (body.RestartTime is { } rt && !TryApplyConfig(
-                instances, id, "restart_time", rt.Trim(), actor, origin,
-                applied, "restartTime", out IActionResult? rtErr))
-            return rtErr!;
-        if (body.RestartDay is { } rd && !TryApplyConfig(
-                instances, id, "restart_day", rd.Trim().ToLowerInvariant(), actor, origin,
-                applied, "restartDay", out IActionResult? rdErr))
-            return rdErr!;
+        // The whole window list is one key, replaced wholesale. The scheduler leaf re-reads kgsm config as
+        // its source of truth, so persisting the key is the whole apply — nothing is pushed at the daemon.
+        if (packedWindows is not null && !TryApplyConfig(
+                instances, id, MaintenanceWindowsKey, packedWindows, actor, origin,
+                applied, "maintenanceWindows", out IActionResult? mwErr))
+            return mwErr!;
+
         if (body.Timezone is { } tzPatch && !TryApplyConfig(
                 instances, id, "timezone", tzPatch.Trim(), actor, origin,
                 applied, "timezone", out IActionResult? tzErr))
             return tzErr!;
 
-        // Scheduled-backup config keys (echo-path audit, same as the schedule keys — the scheduler leaf
-        // re-reads kgsm config as its source of truth, so persisting the key is the whole apply).
-        if (body.BackupSchedule is { } bsched && !TryApplyConfig(
-                instances, id, "backup_schedule", bsched.Trim().ToLowerInvariant(), actor, origin,
-                applied, "backupSchedule", out IActionResult? bsErr))
-            return bsErr!;
-        if (body.BackupTime is { } bt && !TryApplyConfig(
-                instances, id, "backup_time", bt.Trim(), actor, origin,
-                applied, "backupTime", out IActionResult? btErr))
-            return btErr!;
-        if (body.BackupDay is { } bd && !TryApplyConfig(
-                instances, id, "backup_day", bd.Trim().ToLowerInvariant(), actor, origin,
-                applied, "backupDay", out IActionResult? bdErr))
-            return bdErr!;
         if (body.BackupRetention is { } retention && !TryApplyConfig(
                 instances, id, "backup_retention", retention.ToString(), actor, origin,
                 applied, "backupRetention", out IActionResult? brErr))
             return brErr!;
 
-        // Phase 6 — crash-restart policy config keys (echo-path audit, same as the schedule keys).
         if (body.CrashRestart is { } crashRestart && !TryApplyConfig(
                 instances, id, "crash_restart", crashRestart ? "true" : "false", actor, origin,
                 applied, "crashRestart", out IActionResult? crErr))
@@ -282,19 +244,145 @@ public sealed class ServerSettingsController(
 
         // Re-read all fields for the authoritative post-write settings.
         Instance? fresh = instances.GetInstanceInfo(id);
-        bool freshAutoUpdate = fresh?.AutoUpdate ?? (body.AutoUpdate ?? false);
         bool? freshAutostart = await ReadAutostartAsync(id, ct).ConfigureAwait(false);
         SchedulerInstanceStatus? freshSchedStatus = await ReadSchedulerStatusAsync(id, ct).ConfigureAwait(false);
 
-        var settings = new ServerSettings(
-            id, freshAutoUpdate, freshAutostart, fresh?.CpuPriority, fresh?.MemoryCapMb,
-            fresh?.ScheduledRestart, fresh?.RestartTime, fresh?.RestartDay, fresh?.Timezone,
-            freshSchedStatus?.NextFireUtc,
-            fresh?.BackupSchedule, fresh?.BackupTime, fresh?.BackupDay,
-            freshSchedStatus?.NextBackupUtc, fresh?.BackupRetention,
-            freshSchedStatus?.LastBackupUtc, freshSchedStatus?.LastBackupOk,
-            fresh?.CrashRestart, fresh?.CrashMaxRestarts);
+        ServerSettings settings = fresh is not null
+            ? Compose(id, fresh, freshAutostart, freshSchedStatus)
+            : new ServerSettings(id, body.AutoUpdate ?? false, freshAutostart, null, null, [], null, null, null, null);
+
         return Ok(new ServerSettingsApplied(applied, settings));
+    }
+
+    /// <summary>
+    /// <c>POST /servers/{id}/settings/maintenance/preview</c> → when a candidate window would fire, before
+    /// anybody saves it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Pure.</b> Nothing is written, nothing is pushed at the scheduler, and the instance is read only
+    /// for the timezone the caller did not supply. Operator all the same: it is the editor's companion, and
+    /// the editor is the writer.
+    /// </para>
+    /// <para>
+    /// <b>An expression that cannot be read is an answer, not a failure.</b> The result carries
+    /// <c>valid:false</c> with the parse error naming the offending text and no fires, which is exactly
+    /// what an editor renders where the next fire would have gone. A missing expression is a 400 — that is
+    /// a malformed request rather than a badly written window.
+    /// </para>
+    /// </remarks>
+    [HttpPost("maintenance/preview")]
+    [Authorize(Policy = AuthPolicy.Operator)]
+    public async Task<IActionResult> PreviewMaintenance(
+        string id, [FromBody] MaintenancePreviewRequest? body, CancellationToken ct)
+    {
+        if (body?.Expression is not { Length: > 0 } expression || string.IsNullOrWhiteSpace(expression))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "an expression is required, e.g. 'weekly.sun@04:00/backup,restart'");
+
+        if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the kgsm engine is not provisioned on this host");
+
+        if (!await ExistsAsync(id, ct).ConfigureAwait(false))
+            return NotFound();
+
+        Instance? instance = instances.GetInstanceInfo(id);
+        if (instance is null)
+            return NotFound();
+
+        // A zone the clock does not recognize resolves to this host's local one, which would silently
+        // preview a schedule nobody asked for — so an unrecognized name is refused instead.
+        string? requested = string.IsNullOrWhiteSpace(body.Timezone) ? instance.Timezone : body.Timezone.Trim();
+        if (requested is { Length: > 0 } && !IsValidTimezone(requested))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                $"timezone '{requested}' is not a recognized IANA timezone");
+
+        TimeZoneInfo zone = ScheduleClock.ResolveTimezone(requested);
+        int count = Math.Clamp(body.Count ?? DefaultPreviewCount, 1, MaxPreviewCount);
+
+        MaintenanceWindow window = MaintenanceWindowParser.ParseWindow(expression);
+        IReadOnlyList<DateTimeOffset> fires =
+        [
+            .. ScheduleClock.NextFires(window, zone, DateTime.UtcNow, count)
+                .Select(f => new DateTimeOffset(DateTime.SpecifyKind(f, DateTimeKind.Utc)))
+        ];
+
+        return Ok(new MaintenancePreviewResult(
+            Id: window.Id,
+            Expression: window.ToExpression(),
+            Kind: MaintenanceWindows.KindToken(window.Kind),
+            Tasks: MaintenanceWindows.TaskTokens(window),
+            Valid: window.IsValid,
+            Error: window.Error,
+            Timezone: zone.Id,
+            Fires: fires));
+    }
+
+    // The settings body, composed from the three authorities. Kept in one place so the GET and the
+    // post-write read of the PATCH cannot drift into describing the same instance differently.
+    private static ServerSettings Compose(
+        string id, Instance instance, bool? autostart, SchedulerInstanceStatus? leaf) =>
+        new(id,
+            instance.AutoUpdate,
+            autostart,
+            instance.CpuPriority,
+            instance.MemoryCapMb,
+            MaintenanceWindows.Project(instance.MaintenanceWindows, leaf),
+            instance.Timezone,
+            instance.BackupRetention,
+            instance.CrashRestart,
+            instance.CrashMaxRestarts);
+
+    /// <summary>
+    /// Reads a submitted window list into the one packed value kgsm stores, or says why it will not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The parser is the validator.</b> Its error names the offending text, which is the whole reason
+    /// it is worth carrying through to the caller verbatim rather than restating it as a vocabulary list.
+    /// </para>
+    /// <para>
+    /// Two windows sharing a schedule are one appointment written twice: the id is the schedule, so the
+    /// second would be indistinguishable from the first for postpone, skip and every announcement — the
+    /// answer is to merge their task sets, and saying so is more use than picking one.
+    /// </para>
+    /// </remarks>
+    private static bool TryPackWindows(
+        IReadOnlyList<string> candidates, bool isContainer, out string? packed, out string? error)
+    {
+        packed = null;
+        error = null;
+
+        var windows = new List<MaintenanceWindow>(candidates.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                error = "a maintenance window cannot be blank; send an empty list to clear them all";
+                return false;
+            }
+
+            MaintenanceWindow window = MaintenanceWindowParser.ParseWindow(candidate);
+            if (MaintenanceWindows.Refusal(window, isContainer) is { } refusal)
+            {
+                error = refusal;
+                return false;
+            }
+
+            if (!seen.Add(window.Id))
+            {
+                error = $"two windows share the schedule '{window.Id}'; merge their task sets into one window";
+                return false;
+            }
+
+            windows.Add(window);
+        }
+
+        packed = MaintenanceWindowParser.Format(windows);
+        return true;
     }
 
     // Query the watchdog's boot-autostart set. Returns null when the watchdog is absent or unreachable —
@@ -320,7 +408,7 @@ public sealed class ServerSettingsController(
     }
 
     // Persist one kgsm config key (echo-path audit — the write stamps actor+origin, kgsm emits the config
-    // event, the M5 consumer writes the row; no direct audit here). Adds to `applied` on success; on an
+    // event, the consumer writes the row; no direct audit here). Adds to `applied` on success; on an
     // engine refusal sets `error` to a 400 and returns false so the caller short-circuits (no partial apply
     // past the failing key).
     private bool TryApplyConfig(
@@ -341,7 +429,7 @@ public sealed class ServerSettingsController(
         return true;
     }
 
-    // This instance's scheduler-computed state (nextFireUtc + last-backup outcome) comes ONLY from the
+    // This instance's scheduler-computed state (each window's next fire and last run) comes ONLY from the
     // scheduler leaf's status socket. Null when the scheduler is not provisioned (client unregistered) or
     // unreachable, or when the leaf reports no row for this instance — honest unknown, never fabricated.
     // GetStatusAsync never throws (returns null on failure).
@@ -351,16 +439,8 @@ public sealed class ServerSettingsController(
             return null;
 
         SchedulerStatusResponse? status = await scheduler.GetStatusAsync(ct).ConfigureAwait(false);
-        return status?.Instances
+        return status?.Instances?
             .FirstOrDefault(i => string.Equals(i.Name, id, StringComparison.Ordinal));
-    }
-
-    private static bool IsValidHhMm(string value)
-    {
-        string[] parts = value.Trim().Split(':');
-        return parts.Length == 2
-            && int.TryParse(parts[0], out int h) && int.TryParse(parts[1], out int m)
-            && h is >= 0 and <= 23 && m is >= 0 and <= 59;
     }
 
     private static bool IsValidTimezone(string value)
