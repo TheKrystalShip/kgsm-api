@@ -2,6 +2,8 @@ using System.Text.Json;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Services;
 
+using TheKrystalShip.KGSM.Events;
+
 namespace TheKrystalShip.Api.Services.Audit;
 
 /// <summary>
@@ -344,11 +346,21 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     private async Task WriteAsync(
         string type, string actor, string? origin, Action<Utf8JsonWriter> payload, CancellationToken ct)
     {
-        if (!await RecordAsync(type, payload, actor, origin, ct).ConfigureAwait(false))
+        // Parsed at this boundary because several of these names are chosen at run time from the
+        // constants above — which of the user.* events an admin action is, which of the command.*
+        // outcomes a run ended in. A name that is not a name is dropped loudly rather than written:
+        // a line no consumer matches fails silently everywhere downstream.
+        if (!EventName.TryParse(type, out EventName name))
+        {
+            logger.LogError("audit '{Event}' is not a valid event name; the row was not written", type);
+            return;
+        }
+
+        if (!await RecordAsync(name, payload, actor, origin, ct: ct).ConfigureAwait(false))
         {
             logger.LogWarning(
                 "audit {Event} was not recorded — the action happened, the row did not",
-                NormalizeType(type));
+                NormalizeType(name));
         }
     }
 }

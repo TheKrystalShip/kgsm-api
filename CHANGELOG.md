@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a row's weight comes from its producer (`0.141.0`)
+
+An audit row takes its severity, outcome and summary from the producer that raised the event, over
+anything derived from the event's type. A producer is the only thing that knows how much its own
+event matters — the scheduler knows a retention sweep is routine and the engine knows an uninstall is
+not — so a line that says is the authority, and the read-time shaping is the fallback for a producer
+that has not started saying.
+
+This is what lets a row render for an event nothing here has a mapper for. A spelling outside the
+defined vocabulary is dropped rather than forwarded: putting it on the wire would make every client
+guess, where the type-derived answer is a real one.
+
+`outcome` is a new field on the audit record — `success`, `failure` or `neutral`, null when the
+producer did not say. It answers a different question from severity: a backup created and a config key
+set are both routine and differ in outcome, where an uninstall that worked and one that failed differ
+in weight.
+
 ### Changed — an auth-disabled host is told whose name to write (`0.140.0`)
 
 `Api__DisabledAuthActor` names the principal every request is attributed to while

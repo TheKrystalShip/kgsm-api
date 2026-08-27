@@ -30,6 +30,12 @@ public sealed record AuditTarget(string Kind, string Id, string? Name);
 /// <param name="HostId">Denormalized scope key (this host) for host scoping.</param>
 /// <param name="Summary">Human one-line.</param>
 /// <param name="Meta">Free-form, action-specific detail (string-valued for now), or null.</param>
+/// <param name="Outcome">
+/// How it went (<see cref="AuditOutcome"/>), or <see langword="null"/> when the producer did not say.
+/// Separate from <see cref="Severity"/> and answering a different question: a backup created and a
+/// config key set are both routine and differ here, where an uninstall that worked and one that
+/// failed differ in weight. Additive, so a client that does not read it is unaffected.
+/// </param>
 public sealed record AuditRecord(
     string Id,
     DateTimeOffset Ts,
@@ -41,7 +47,8 @@ public sealed record AuditRecord(
     string? ServerId,
     string? HostId,
     string Summary,
-    IReadOnlyDictionary<string, string>? Meta);
+    IReadOnlyDictionary<string, string>? Meta,
+    string? Outcome = null);
 
 /// <summary>
 /// A keyset page of audit records (architecture.html §6 cursor pagination): <c>{ data, nextCursor }</c>,
@@ -373,6 +380,48 @@ public static class AuditSeverity
     public const string Warn = "warn";
     public const string Danger = "danger";
 }
+
+/// <summary>Every severity spelling this API will pass on, so an unknown one can be dropped.</summary>
+/// <remarks>
+/// A producer's line is the authority for its own weight, but only for a value this vocabulary
+/// defines. A spelling nothing here knows is dropped rather than forwarded: putting it on the wire
+/// would make every client guess, where the type-derived fallback is a real answer.
+/// </remarks>
+public static class AuditSeverities
+{
+    /// <summary>The defined spellings.</summary>
+    public static readonly IReadOnlyCollection<string> All =
+        [AuditSeverity.Info, AuditSeverity.Success, AuditSeverity.Warn, AuditSeverity.Danger];
+}
+
+/// <summary>
+/// How an event went, separately from how much it matters.
+/// </summary>
+/// <remarks>
+/// Stamped by the producer that raised the event and passed through untouched. Absent means the
+/// producer did not say, which is not the same as <see cref="Neutral"/> — a reader distinguishes
+/// "reports nothing either way" from "was not asked".
+/// </remarks>
+public static class AuditOutcome
+{
+    /// <summary>Reports neither a success nor a failure — it reports a fact.</summary>
+    public const string Neutral = "neutral";
+
+    /// <summary>Something completed, and completing was the good result.</summary>
+    public const string Success = "success";
+
+    /// <summary>Something did not do what it set out to do.</summary>
+    public const string Failure = "failure";
+}
+
+/// <summary>Every outcome spelling this API will pass on.</summary>
+public static class AuditOutcomes
+{
+    /// <summary>The defined spellings.</summary>
+    public static readonly IReadOnlyCollection<string> All =
+        [AuditOutcome.Neutral, AuditOutcome.Success, AuditOutcome.Failure];
+}
+
 
 /// <summary>Actor kinds (architecture.html §3·d <c>actor.kind</c>).</summary>
 public static class ActorKind
