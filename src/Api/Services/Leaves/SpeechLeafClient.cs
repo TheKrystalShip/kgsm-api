@@ -63,7 +63,7 @@ public sealed class SpeechLeafClient : IDisposable
     /// What the daemon is doing right now, or null when it would not answer.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Asking starts the daemon</b> (it loads no model, so what starts is a small process), and
+    /// <b>Asking starts the daemon</b> (it loads no model, so what starts is a small process), and
     /// deliberately does not push its idle deadline out — the leaf excludes this message from what
     /// counts as being used, so watching it never keeps it resident.
     /// </remarks>

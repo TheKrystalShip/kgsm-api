@@ -83,7 +83,7 @@ public sealed class HostAggregator(
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ⚠ <b>Measured on every read, never cached.</b> Whether a library is online and how much room it
+    /// <b>Measured on every read, never cached.</b> Whether a library is online and how much room it
     /// has left are facts about a disk that can be unplugged between two page loads. A cached answer here
     /// would report a mounted drive that is gone, and a free-space figure from an hour ago is a number
     /// somebody would place an install against.
@@ -116,7 +116,7 @@ public sealed class HostAggregator(
     /// Join each library to the mount it sits on, so the storage card can name the device.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Status from the engine, metrics from the monitor, and neither is inferred from the other —
+    /// <b>Status from the engine, metrics from the monitor, and neither is inferred from the other —
     /// in both directions.</b> The join adds the mount point and the backing disk model and nothing else,
     /// so a library the monitor has no row for stays exactly as online as the engine measured it, and a
     /// library the monitor can see is not thereby online. The mirror of that rule is what bounds the join:

@@ -144,14 +144,14 @@ public sealed record DiskCapacity(string Mount, double Used, double Total, strin
 /// </summary>
 /// <remarks>
 /// <para>
-/// ⚠ <b>Two sources, never inferred from one another.</b> <see cref="Online"/>, <see cref="FreeBytes"/>
+/// <b>Two sources, never inferred from one another.</b> <see cref="Online"/>, <see cref="FreeBytes"/>
 /// and <see cref="TotalBytes"/> come from the engine's own per-invocation check (the root exists and
 /// carries its marker; <c>df</c> on that root). <see cref="Mount"/> and <see cref="Device"/> come from
 /// the monitor's capacity snapshot, joined by longest-prefix match on the mount point. A library with
 /// no monitor row is still online; a library the monitor can see is not thereby online.
 /// </para>
 /// <para>
-/// ⚠ <see cref="FreeBytes"/>/<see cref="TotalBytes"/> are <see langword="null"/> for an offline library
+/// <see cref="FreeBytes"/>/<see cref="TotalBytes"/> are <see langword="null"/> for an offline library
 /// — nothing measured an unplugged disk. A client must render that as unknown: a <c>0</c> reads as a
 /// full disk, which is the opposite fact. <see cref="Mount"/>/<see cref="Device"/> are null there on the
 /// same grounds: they are the same class of fact, and naming a device beside an unmeasurable capacity
@@ -261,11 +261,11 @@ public sealed record KgsmSliceSample(double? CpuPctCore, long? MemBytes, int? Pi
 /// names nobody, so it needs no gating — unlike <see cref="GpuProcessSample"/>.
 /// </summary>
 /// <remarks>
-/// ⚠ <see cref="MemUsed"/> is the <em>device's</em> figure and is larger than the sum of the processes on it:
+/// <see cref="MemUsed"/> is the <em>device's</em> figure and is larger than the sum of the processes on it:
 /// driver and CUDA context overhead occupies memory while belonging to no process. Never reconcile the two by
 /// adjusting either.
 /// <para>
-/// ⚠ Video memory does not pool. A client showing several devices renders them separately and never sums
+/// Video memory does not pool. A client showing several devices renders them separately and never sums
 /// <see cref="MemTotal"/> or <see cref="MemUsed"/> across them — a total would imply a model could use it, and
 /// a model that does not fit on one card fails to load rather than spilling onto another.
 /// </para>
@@ -301,7 +301,7 @@ public sealed record GpuSample(
 /// unit are collapsed into a single unnamed row by <c>GpuRedaction</c>.
 /// </para>
 /// <para>
-/// ⚠ That collapse <b>keeps the memory figure</b>. Dropping the rows would leave the per-process figures
+/// That collapse <b>keeps the memory figure</b>. Dropping the rows would leave the per-process figures
 /// failing to sum to the device's, which reports a quieter falsehood than the one it avoids.
 /// </para>
 /// </remarks>
@@ -330,7 +330,7 @@ public sealed record GpuProcessSample(
 /// when the figures come from units it drives but does not own. A client renders <see cref="Units"/> either
 /// way, so the reader sees where the number came from.
 /// <para>
-/// ⚠ A <c>backend</c> figure can be present while the leaf itself is stopped — a socket-activated model stays
+/// A <c>backend</c> figure can be present while the leaf itself is stopped — a socket-activated model stays
 /// resident after the service that asked for it exits. Never render this as the leaf's own footprint.
 /// </para>
 /// </remarks>

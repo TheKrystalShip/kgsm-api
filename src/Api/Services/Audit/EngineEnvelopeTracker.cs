@@ -46,7 +46,7 @@ public sealed class EngineEnvelopeTracker
     {
         ArgumentNullException.ThrowIfNull(wrapper);
 
-        // ⚠ Derived exactly the way the history read derives it, through the one shared helper. A
+        // Derived exactly the way the history read derives it, through the one shared helper. A
         // line's own name when it has one, the position when it does not — and the producer riding
         // into the positional form, because a byte offset alone names a different event in every
         // journal. Getting any of that out of step is invisible until a client reconciles a

@@ -761,7 +761,7 @@ public sealed class AuthController(
         // revoked / jti mismatch (stale/old/stolen refresh — reuse detection). The 401 here is the
         // SPA's signal to re-authenticate via Discord OAuth; an attacker with an old refresh token
         // keeps getting 401s while the legit user's NEW token (from their previous refresh) succeeds.
-        // ⚠ No grace period — a tab race resolves to ONE tab 401ing (re-auth on reload); acceptable
+        // No grace period — a tab race resolves to ONE tab 401ing (re-auth on reload); acceptable
         // for a small panel (the alternative — grace-period jti tracking — needs another column).
         DateTimeOffset newExpires = now + TimeSpan.FromDays(options.SessionsRefreshAbsoluteDays);
         bool rotated = await sessions.UpdateForRefreshAsync(

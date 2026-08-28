@@ -82,7 +82,7 @@ public static class PushActionCatalog
                 return [new PushActionOffer(PushActionKind.UserApprove, subject, "Approve")];
         }
 
-        // ⚠ A reactor offer deliberately gets no button, and the absence is the design rather than an
+        // A reactor offer deliberately gets no button, and the absence is the design rather than an
         // omission. Confirming one re-derives the condition on the leaf and shows the person what it
         // found — sometimes that the thing is no longer applicable — and a lock-screen tap would skip
         // exactly that reading. The push exists to get somebody to OPEN the offer before it expires,

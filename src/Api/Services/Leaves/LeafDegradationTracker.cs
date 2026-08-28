@@ -10,7 +10,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ⚠ <b>The half a probe cannot see.</b> <see cref="LeafHealthMonitor"/> asks each leaf's
+/// <b>The half a probe cannot see.</b> <see cref="LeafHealthMonitor"/> asks each leaf's
 /// <c>/health</c> and gets a yes or a no, so a leaf that is answering perfectly while unable to do
 /// part of its job reads as operational — an assistant with a dead backend, a monitor serving a frozen
 /// frame, a scheduler that cannot reach the watchdog. And the two socket-activated leaves cannot be
@@ -61,7 +61,7 @@ public sealed class LeafDegradationTracker(
     /// What <paramref name="leaf"/> reports broken, by the Control Panel's unprefixed leaf id.
     /// </summary>
     /// <remarks>
-    /// ⚠ The two vocabularies differ: a producer is <c>kgsm-monitor</c> and the capability model calls
+    /// The two vocabularies differ: a producer is <c>kgsm-monitor</c> and the capability model calls
     /// the same leaf <c>monitor</c>. Translated here rather than at each call site, so one place owns
     /// the mapping.
     /// </remarks>

@@ -120,7 +120,7 @@ public sealed class ServicesController(
     /// instruction naming none rather than guessing, and so does this.
     /// </para>
     /// </remarks>
-    // ⚠ The route token is `verb`, never `action`: MVC reserves that name for the action method, so a
+    // The route token is `verb`, never `action`: MVC reserves that name for the action method, so a
     // segment spelled `{action}` binds to the method's own name and the route never matches a request.
     [HttpPost("scheduler/windows/{verb}")]
     public async Task<IActionResult> ControlWindow(
@@ -273,7 +273,7 @@ public sealed class ServicesController(
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ⚠ <b>An inactive unit is answered without connecting.</b> The leaf is socket-activated and idle-exits
+    /// <b>An inactive unit is answered without connecting.</b> The leaf is socket-activated and idle-exits
     /// to give back the ~1.6GB its models cost, and connecting to its socket is precisely what starts it —
     /// so a resting daemon is reported as resting rather than woken up to be asked how it is. What can still
     /// be known without asking is: the unit's state, the model files on disk, and the configured voice.
@@ -392,11 +392,11 @@ public sealed class ServicesController(
     /// <para>
     /// Each rule carries its whole definition — its steps in evaluation order, its bindings, and who last
     /// shaped it — beside <c>problems</c>, which names every rule in the file that could not be honoured.
-    /// ⚠ <b>Order is the semantics</b>: the first step whose clauses all hold decides, so a panel that
+    /// <b>Order is the semantics</b>: the first step whose clauses all hold decides, so a panel that
     /// re-sorted them would show a rule that behaves differently from the one running.
     /// </para>
     /// <para>
-    /// ⚠ The counters are since the reactor's own process started, not since the beginning. They are named
+    /// The counters are since the reactor's own process started, not since the beginning. They are named
     /// that way on the wire and the panel must keep saying so — a zero after a deploy is a restart, not a
     /// quiet host.
     /// </para>
@@ -435,7 +435,7 @@ public sealed class ServicesController(
     /// that added it was deployed.
     /// </para>
     /// <para>
-    /// ⚠ <b>Reference material, so it sits at operator with the rest of this controller.</b> It names no
+    /// <b>Reference material, so it sits at operator with the rest of this controller.</b> It names no
     /// instance, reports no measurement and reveals nothing about what this host is doing — it describes
     /// what the software can do.
     /// </para>
@@ -467,13 +467,13 @@ public sealed class ServicesController(
     /// <remarks>
     /// <para>
     /// Derived from the leaf's ledger rather than from any list held here, so a producer that joins
-    /// this host becomes available to build rules on the day it starts writing. ⚠ <b>The rate is what
+    /// this host becomes available to build rules on the day it starts writing. <b>The rate is what
     /// makes it useful</b>: a rule built on something that fires two hundred times a week is a
     /// different proposition from one built on something that fires twice, and a person should see
     /// that before they build it.
     /// </para>
     /// <para>
-    /// ⚠ <b>The window is bounded by the leaf</b>, which clamps <c>days</c> to its own ledger
+    /// <b>The window is bounded by the leaf</b>, which clamps <c>days</c> to its own ledger
     /// retention — the only place that figure is known.
     /// </para>
     /// </remarks>
@@ -512,7 +512,7 @@ public sealed class ServicesController(
     /// live world and returns the verdict and the exact sentence it would record.
     /// </para>
     /// <para>
-    /// ⚠ <b>A read expressed as a POST, because the rule is the question.</b> Nothing is stored and
+    /// <b>A read expressed as a POST, because the rule is the question.</b> Nothing is stored and
     /// nothing is dispatched: the rule does not become one of the host's rules, no decision reaches the
     /// ledger or the journal, and the gate is not run. That is why it sits at operator with the other
     /// reads rather than behind the admin write gate.
@@ -557,7 +557,7 @@ public sealed class ServicesController(
     /// actually decides on — a confirm dialog without it asks somebody to authorise an action on trust.
     /// </para>
     /// <para>
-    /// ⚠ <b>The body carries redemption handles, and a handle is the capability.</b> Operator, with the
+    /// <b>The body carries redemption handles, and a handle is the capability.</b> Operator, with the
     /// rest of this controller, and that is the floor rather than a convenience: anything holding a
     /// handle can ask for the action it names.
     /// </para>
@@ -594,7 +594,7 @@ public sealed class ServicesController(
     /// route to either — so the floor is the action's own, neither lower nor invented for proposals.
     /// </para>
     /// <para>
-    /// ⚠ <b>The identity is taken from the authenticated principal and never from the body.</b> An
+    /// <b>The identity is taken from the authenticated principal and never from the body.</b> An
     /// action a person authorised has to name the person who actually authorised it, and the leaf
     /// cannot tell a caller-supplied name from a real one — it checks the shape and trusts whoever
     /// authenticated them.
@@ -633,7 +633,7 @@ public sealed class ServicesController(
             || !reactor.IsProvisioned)
             return NotFound();
 
-        // ⚠ Refused rather than relayed with a placeholder. The leaf would take any provider:name it
+        // Refused rather than relayed with a placeholder. The leaf would take any provider:name it
         // was handed, so a request that cannot name its caller has to stop here — an unattributable
         // confirmation is an action on this host that nobody can be shown to have asked for.
         string? by = AuditPrincipal.ActorString(User);
@@ -648,7 +648,7 @@ public sealed class ServicesController(
 
         if (body is null)
         {
-            // ⚠ Not "nothing happened". The leaf claims a proposal before it performs, so this can be a
+            // Not "nothing happened". The leaf claims a proposal before it performs, so this can be a
             // slow action rather than a refused one — which is why the message sends the caller back to
             // the list instead of inviting a retry.
             return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
@@ -680,7 +680,7 @@ public sealed class ServicesController(
     /// as text on the host until now, which made the gate something declared rather than performed.
     /// </para>
     /// <para>
-    /// ⚠ <b>The window is bounded by the leaf, not here.</b> It clamps <c>days</c> to its own ledger
+    /// <b>The window is bounded by the leaf, not here.</b> It clamps <c>days</c> to its own ledger
     /// retention, which is the only place that figure is known. This API passes the request through and
     /// reads the window back off the answer.
     /// </para>

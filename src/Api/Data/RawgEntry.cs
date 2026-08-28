@@ -13,7 +13,7 @@ namespace TheKrystalShip.Api.Data;
 /// description, tags) lives here, in the consumer (kgsm-api). The engine never calls RAWG, never holds this cache.
 /// </para>
 /// <para>
-/// ⚠ <b>EnsureCreated, NOT a migration</b> (the project's dev authority — see <see cref="AppDbContext"/>):
+/// <b>EnsureCreated, NOT a migration</b> (the project's dev authority — see <see cref="AppDbContext"/>):
 /// because <c>EnsureCreated</c> no-ops on an existing DB, adding this table means the dev DB file must be
 /// deleted once. Smoke <c>rm -f</c>s its own DB and tests use a fresh temp DB; the deployed
 /// <c>/var/lib/kgsm-api/kgsm-api.db</c> needs the one-time wipe.

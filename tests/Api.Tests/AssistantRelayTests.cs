@@ -383,7 +383,7 @@ public sealed class AssistantRelayTests(AuthTestFactory factory) : IClassFixture
     [Fact]
     public async Task MemoryLimits_Viewer_AssistantAbsent_404()
     {
-        // ⚠ `limits` is a literal segment sharing a template shape with `{key}`. Routing must send this
+        // `limits` is a literal segment sharing a template shape with `{key}`. Routing must send this
         // to the limits action rather than reading it as somebody's memory named "limits" — an absent
         // assistant answers 404 either way, so the claim worth holding is that the GET resolves at all.
         HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer))

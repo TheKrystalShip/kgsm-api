@@ -31,11 +31,11 @@ operator with the rest of the services controller, and confirming is operator **
 performing the action directly requires** — a proposal must not be a cheaper route to a backup or a
 restore than asking for one.
 
-⚠ **Who is confirming comes from the authenticated principal and never from the request body.** The
+**Who is confirming comes from the authenticated principal and never from the request body.** The
 leaf takes any `provider:name` it is handed and cannot tell a real one from a supplied one, so a request
 this API cannot attribute to an account is refused here with 403 rather than relayed with a placeholder.
 
-⚠ **The body carries redemption handles, and a handle is the capability** — anything holding one can ask
+**The body carries redemption handles, and a handle is the capability** — anything holding one can ask
 for the action it names. That is why the read is operator-gated rather than viewer.
 
 The leaf's status codes are carried rather than re-derived: 404 for a handle nothing carries, 409 for one
@@ -43,7 +43,7 @@ already answered or expired, 503 for a world that would not answer, and 200 for 
 including `no_longer_applicable`, which is the condition having resolved itself before anybody answered
 and is the safety property working rather than a failure. A caller renders the body's `outcome`.
 
-⚠ **A redemption that times out does not mean nothing happened.** The leaf claims a proposal before it
+**A redemption that times out does not mean nothing happened.** The leaf claims a proposal before it
 performs, so a slow backup and a refused one look the same from here; the 503 message sends the caller
 back to the list rather than inviting a retry.
 
@@ -54,7 +54,7 @@ own tap back to them. It is also the one whose whole point is reaching somebody 
 because an unanswered offer expires. It arrives by default, like everything else the fleet does on its
 own.
 
-⚠ **An offer gets no lock-screen button, and the absence is the design.** Confirming re-derives the
+**An offer gets no lock-screen button, and the absence is the design.** Confirming re-derives the
 condition on the leaf and shows the person what it found — sometimes that the thing is no longer
 applicable, which is the whole safety argument — and a tap that authorised it from a lock screen would
 skip exactly that reading. The push exists to get somebody to *open* the offer before it expires, which
@@ -74,7 +74,7 @@ account avatar that renders initials for a rule id.
 and losing its provider, so every local sign-in read as an identity from nowhere beside the Discord
 ones that keep theirs.
 
-⚠ **An unrecognized prefix no longer claims a person.** The one thing known about it is that nothing
+**An unrecognized prefix no longer claims a person.** The one thing known about it is that nothing
 here can say who it is, which is `system`, not `user`: a prefix nobody has taught this build about is
 exactly the case where guessing "a human" is least defensible.
 
@@ -98,11 +98,11 @@ cached against a build — the leaf is the only thing that knows what it can mea
 `POST reactor/preview` relays a proposed rule to the leaf and returns what it would decide about this
 host right now, with the exact sentence it would record. It sits at operator with the other reads
 because nothing is stored and nothing is dispatched: the rule does not become one of the host's rules
-and no decision is written. ⚠ It carries its own 30-second budget rather than the capability probe's
+and no decision is written. It carries its own 30-second budget rather than the capability probe's
 two seconds — a preview reads the supervisor and the monitor once per subject, and holding it to the
 probe's budget would report a healthy leaf as unreachable to somebody who is only composing.
 
-`GET reactor/rules` serves the rules this API has stored, verbatim, for editing. ⚠ **What is stored
+`GET reactor/rules` serves the rules this API has stored, verbatim, for editing. **What is stored
 and what is running are different questions**: a rule the leaf refuses is in the file and in neither
 of the leaf's lists, so an editor built only on the status would silently drop the rule somebody is
 halfway through fixing. `managed:false` is the ordinary answer on a host nobody has edited — the leaf
@@ -113,7 +113,7 @@ leaf-config channel, restarts the unit and reports what the leaf made of it. The
 read-only, so storing a rule is this API's half of the arrangement — it uses the grant it already
 holds for every other leaf setting, and nothing off this host acquires the ability to tell a leaf what
 to think. What a rule *means* stays the leaf's judgement: the body is checked for being a rules
-document and nothing more, and the leaf's verdict is read back and returned. ⚠ **Problems are not an
+document and nothing more, and the leaf's verdict is read back and returned. **Problems are not an
 error** — a file with one bad rule in it stores and the rest runs, so this answers `200` with the
 leaf's complaints rather than refusing the whole write, which would make a partly-good file impossible
 to save and therefore impossible to fix.
@@ -409,7 +409,7 @@ the CLI.
 The node's post-transaction hook starts what is enabled, stopped and configured. `post_upgrade` does
 not preset: an administrator's `disable` survives every later version.
 
-⚠ The hook refuses to START this one until `Api__SigningKey` is set in
+The hook refuses to START this one until `Api__SigningKey` is set in
 `/etc/kgsm-api/kgsm-api.env`: a blank key means a per-process key, so every session and refresh token
 dies on each restart. `kgsm-node-status` names that key, and only that key.
 
@@ -498,7 +498,7 @@ is `move`, the copy runs off-request, and a fresh `server.patch` lands on settle
 reporting its new library. The audit row is kgsm's `instance_moved` echo, naming **both** libraries:
 a reader that learns only where the files went cannot tell which disk just got its space back.
 
-⚠ **The job's span is the operation, and run-state is not.** The engine starts the instance once on
+**The job's span is the operation, and run-state is not.** The engine starts the instance once on
 the new path to confirm it runs there, so an `instance_started` and an `instance_stopped` land
 partway through with no bracket around them — a surface watching `status` alone sees the server come
 up and go down mid-move. The job holds the server's in-flight slot from accept to settle, and that
@@ -516,7 +516,7 @@ disk, and a panel button that overrides a measurement is how a drive gets filled
 `DELETE /hosts/{id}/libraries/{name}?drain=<target>` moves every resident instance into the target
 and deregisters once the last has landed — the way a disk is emptied before it goes. Every resident
 has to be stopped first; the engine lists the running ones and moves nothing rather than stopping
-servers on the caller's behalf, and that refusal comes through verbatim. ⚠ There is still **no
+servers on the caller's behalf, and that refusal comes through verbatim. There is still **no
 force**, and the drain blocks for the whole copy: nothing in the engine brackets it, so there is no
 per-instance progress to stream.
 
@@ -542,7 +542,7 @@ for such an instance too — the name comes out of the instance registry rather 
 `blueprint_file` path on the absent disk — which closes the gap `0.127.0` recorded as needing the
 library.
 
-⚠ An instance with no reported runtime is dated by neither supervisor. Which one to ask is exactly
+An instance with no reported runtime is dated by neither supervisor. Which one to ask is exactly
 what an unreadable instance does not say, and the watchdog's ledger can still hold a row from before
 its disk went.
 
@@ -568,7 +568,7 @@ time — is read out of the same unreachable directory and is skipped with it. A
 untouched: the guard is scoped to the case where nothing can be read, not a blanket downgrade of
 every instance that carries a library.
 
-⚠ `runtime` being nullable is a divergence from the frozen `native｜container` pair, taken on the
+`runtime` being nullable is a divergence from the frozen `native｜container` pair, taken on the
 rule that outranks it: honest unknown over a plausible default. `blueprint` stays empty for such an
 instance — the engine reports it, but kgsm-lib derives `Instance.Blueprint` from `BlueprintFile`,
 which the offline payload omits, and maps nothing to the `blueprint` field it does carry.
@@ -663,7 +663,7 @@ The summary says what did not happen and never quotes the engine, so a reworded 
 what a reader can dig into and not how the feed reads. `jobId` is populatable here where an echo's is
 not — no id round-trips the stateless engine, and this row is written by the process that owns the job.
 
-⚠ **The success path is untouched**, and two verbs are excluded from the failure path on the same
+**The success path is untouched**, and two verbs are excluded from the failure path on the same
 grounds: kgsm emits `instance_update_failed` and `instance_uninstall_failed`, which already become
 `server.update` / `server.uninstall` rows carrying the provenance the command stamped onto the call. A
 second row for a fact a producer already emits cannot be deduplicated against an echo.
@@ -692,7 +692,7 @@ answer meant to be read by a program; the engine's message is prose written for 
 be reworded. `RunAsync` returns the exit code for that purpose and nothing else — the job's own
 verdict still comes from the registry.
 
-⚠ Only the CLI's own gate reports 51 today. A refusal from `kgsm-watchdog`'s reservation ledger
+Only the CLI's own gate reports 51 today. A refusal from `kgsm-watchdog`'s reservation ledger
 arrives as a generic error, because its start endpoint answers `409` for every failure and kgsm maps
 any non-200 to `EC_ERROR`. Those refusals record as `failed` until that distinction is carried
 through; the rule here needs no change when it is.
@@ -769,7 +769,7 @@ watches its layout revert with no error anywhere.
 Gated at `[Authorize]` rather than a tier. These are a person's own settings, so somebody still waiting
 on an admin arranges their own panel, and there is no endpoint that reads or writes anybody else's.
 
-⚠ Two new tables (`user_preferences`, `user_sync`). They are created by the store's idempotent
+Two new tables (`user_preferences`, `user_sync`). They are created by the store's idempotent
 `CREATE TABLE IF NOT EXISTS` beside `EnsureCreated`, so a deployed database gains them without a wipe.
 
 ### Added — a server DTO dates its run (`0.120.0`)
@@ -804,10 +804,10 @@ the denominator instead of the score, and a server nothing wanted running all wi
 `availability: null` rather than a flattering 100%. The fleet rollup sums seconds before dividing, so a
 server that ran for ten minutes cannot weigh as much as one that ran all week.
 
-⚠ **Downtime and outages are different counts.** The shutdown half of a deliberate restart is downtime
+**Downtime and outages are different counts.** The shutdown half of a deliberate restart is downtime
 — nobody could connect — and is not an incident. Only crashes and give-ups raise `outages`.
 
-⚠ **`coverageFrom` is the engine journal's, not the merged page's.** The reader collapses every
+**`coverageFrom` is the engine journal's, not the merged page's.** The reader collapses every
 producer it read into one conservative floor, and the newer leaves carry no `instance_*` events; taking
 that floor would report a fleet as unmeasured over days kgsm has full history for.
 
@@ -818,7 +818,7 @@ notice, read from the journal on a slow loop (`Services/Availability/UpdateLagIn
 `updateCheckedAt`, which says when the last check ran — this says how long the server has been behind,
 which is what makes an update overdue rather than merely pending.
 
-⚠ **Oldest notice, not newest.** The scheduler re-emits on every sweep that still finds the instance
+**Oldest notice, not newest.** The scheduler re-emits on every sweep that still finds the instance
 behind; taking the newest would reset the age every few minutes and report a week-old gap as fresh.
 
 Null whenever nothing dates it — no update outstanding, an engine that emits no such event, or a notice
@@ -832,10 +832,10 @@ temperature and power per device, keyed by a UUID that survives a reboot reorder
 when the host has no readable card — an ordinary host, not a degraded one, so a client renders no GPU
 section rather than reporting a fault. Needs Monitor.Contracts 1.7.0.
 
-⚠ **Never sum memory across devices.** Video memory does not pool; a total would imply a model could
+**Never sum memory across devices.** Video memory does not pool; a total would imply a model could
 use it, when a model that does not fit on one card fails to load rather than spilling onto another.
 
-⚠ **A device's used figure exceeds the sum of the processes on it** — driver and CUDA context overhead
+**A device's used figure exceeds the sum of the processes on it** — driver and CUDA context overhead
 occupies memory while belonging to no process. Both figures are honest; do not reconcile them.
 
 ### Added — the per-process breakdown, operator-gated
@@ -844,7 +844,7 @@ occupies memory while belonging to no process. Both figures are honest; do not r
 context on the card, including processes that have nothing to do with KGSM — somebody's training run,
 a CUDA experiment. Below operator, a context belonging to no known unit loses its pid and name.
 
-⚠ **The withheld rows are aggregated, not dropped.** Their memory is kept as one unnamed row per
+**The withheld rows are aggregated, not dropped.** Their memory is kept as one unnamed row per
 device, so a viewer still sees a full card and something they cannot identify holding it. Dropping
 them would leave the per-process figures failing to sum to the device's — which is a quieter falsehood
 than the one the gate exists to prevent. What is withheld is an identity, never a quantity.
@@ -861,7 +861,7 @@ with no rows is an honest empty series, not a 404. Per-leaf GPU rides the existi
 whatever the monitor publishes. The alert reads "GPU memory at 96%", named for the device rather than
 as plain "memory", so it is tellable at a glance from the host RAM card beside it.
 
-⚠ It carries **no suggested actions**, which is deliberate rather than missing. The catalog already
+It carries **no suggested actions**, which is deliberate rather than missing. The catalog already
 offers nothing for a host-scope threshold, and that is the right answer here: the memory is held by a
 model backend, so every verb that acts on the leaf which reported the condition would act on the wrong
 process.
@@ -888,7 +888,7 @@ with the journal position each was derived from.
 This is the review the reactor's plan gates propose and act mode behind — it existed only as text on
 the host, which made the gate something declared rather than performed.
 
-⚠ **The window is the leaf's to bound, not this API's.** It clamps `days` to its own ledger
+**The window is the leaf's to bound, not this API's.** It clamps `days` to its own ledger
 retention, which is the only place that figure is known; re-clamping here against a guess would refuse
 windows the leaf can in fact answer. An absent or zero `days` is forwarded as no parameter at all, so
 the leaf applies its own default — the week the review is stated over — rather than the one-day
@@ -929,7 +929,7 @@ disconnecting it arms and disarms the probe live, the same as the monitor and th
 Its logs have a source, since `ApiOptions.LogSources` derives from the same catalog.
 
 And it is a restart target: `deploy/setup-leaf-config.sh` installs its override drop-in and the polkit
-grant now names `kgsm-reactor.service`, which is what lets a settings change be applied. ⚠ **Re-run
+grant now names `kgsm-reactor.service`, which is what lets a settings change be applied. **Re-run
 `deploy/setup-leaf-config.sh`** on an already-provisioned host — until it runs, the reactor's
 configuration page stays read-only with that reason.
 
@@ -945,7 +945,7 @@ same condition described on a lock screen and on a card cannot name different ve
 crash button would ask for exactly what is already happening. Wording stays per-surface ("Update now" on
 a phone, "Update" on a card), so no label rides the DTO.
 
-⚠ An offer is a **policy, not a permission**. It says the condition is the kind of thing that verb
+An offer is a **policy, not a permission**. It says the condition is the kind of thing that verb
 answers — not that the caller may run it, or that the target accepts it now. Every gate still applies at
 the click, and `update` on a running server is still a `409`. A resolved record carries `actions: null`.
 
@@ -956,7 +956,7 @@ same roster `GET /servers/{id}/players` serves, so a per-server card and a fleet
 read one number and cannot disagree. `DomainPump` diffs it and the player join/leave handlers nudge a
 pass, so a total is live without every card fetching its own roster.
 
-⚠ It is **null**, never `0`, for a server whose presence this host cannot see — a game with no
+It is **null**, never `0`, for a server whose presence this host cannot see — a game with no
 detection, or a supervisor that cannot be asked. A surface that renders that null as zero puts an
 invented figure in a fleet total. `0` is the measured "nobody is here".
 
@@ -976,7 +976,7 @@ summary, an over-long body, the per-owner cap — is relayed **verbatim**: the l
 and a second copy of them here is how two surfaces come to promise different things. No audit row; it
 is neither an engine action nor a host mutation.
 
-⚠ `memories/limits` is a literal segment sharing a shape with `memories/{key}`. Routing sends the GET
+`memories/limits` is a literal segment sharing a shape with `memories/{key}`. Routing sends the GET
 to the limits action, so a memory named `limits` is still addressed by `PUT`/`DELETE` and only the
 read is claimed by the literal.
 
@@ -987,12 +987,12 @@ written from the journal echo (`KgsmAuditConsumer`) — now go through `AuditId.
 the producer's minted id (`evt_<uuidv7>`) and falls back to the position for a line that carries none.
 The history read in kgsm-lib makes the same choice through the same helper.
 
-⚠ **All three had to move together.** One event served two ways — pushed live and found in `/audit` —
+**All three had to move together.** One event served two ways — pushed live and found in `/audit` —
 must come back with one id, or a client reconciling them reports two facts. `ForLine` takes the id as
 an argument so no caller can quietly opt out, and a theory pins the tracker's answer to the helper
 itself rather than to a literal.
 
-⚠ **Audit row ids change** for lines written since producers began minting ids. Nothing persists one —
+**Audit row ids change** for lines written since producers began minting ids. Nothing persists one —
 no entity holds it, and the alert↔audit recovery bridge is an in-memory record — so there is no stored
 migration. The `/audit` cursor stays opaque and its encoding is unchanged.
 
@@ -1013,7 +1013,7 @@ rewrite **detectable** — a reference carrying both finds the line by position 
 right one by id, where before a shifted offset resolved to a real, parseable event of the wrong kind
 with nothing to notice.
 
-⚠ Optional and optional forever: lines written before this are on disk for as long as retention holds
+Optional and optional forever: lines written before this are on disk for as long as retention holds
 them, and **absent means unknown, never a mismatch**. Authority: `journal-entry-id-plan.md`.
 
 ### Added — a backup's reason and retention, and the two verbs that change one
@@ -1048,7 +1048,7 @@ plus one `manage-units` call on this project's own service — `start` when the 
 is not running). Both are dispatched as the same `manage-units` action, so a host without the grant is
 refused either way and the probe measures the grant rather than the unit.
 
-⚠ Measured in the positive direction only. The deploying user on the development host is in
+Measured in the positive direction only. The deploying user on the development host is in
 `wheel`, and two pre-existing polkit rules there grant that group every
 `org.freedesktop.systemd1.*` action outright, so no systemctl call by that user can be refused
 and the negative path cannot be exercised on it. That `try-restart` consults polkit before it
@@ -1070,10 +1070,10 @@ kgsm-llm now journals its own conduct, and four of those events become audit row
 nowhere on the host at all), `assistant.action.proposed`, `assistant.claim.corrected`, and
 `assistant.blueprint.authored`.
 
-- ⚠ **A corrected claim carries no target.** It is about the assistant's own honesty, not about a
+- **A corrected claim carries no target.** It is about the assistant's own honesty, not about a
   machine; naming a server would surface the model's fabrication on that server's timeline as though
   something had happened to it.
-- ⚠ **An authoring run targets the blueprint and carries no `serverId`.** Its probe was a disposable
+- **An authoring run targets the blueprint and carries no `serverId`.** Its probe was a disposable
   instance that no longer exists — it rides in `meta`, which is what ties the row to the ~25
   install/uninstall rows the engine wrote for the same run.
 - **The two refusal reasons read differently on purpose.** A host with actions switched off refuses
@@ -1130,7 +1130,7 @@ The 12-character rule moves into `TheKrystalShip.KGSM.Auth.Users` (1.3.0) where 
 the hash is. `POST /auth/users` accepted a password of any length while the two dedicated password
 endpoints enforced 12 — the door with the least scrutiny admitted the weakest password on the host.
 
-⚠ **`Auth.Users` 1.3.0 also changes what the pending sweep removes**: provenance, not whether a
+**`Auth.Users` 1.3.0 also changes what the pending sweep removes**: provenance, not whether a
 password is set. A host running with self-registration open should size `Api__PendingUserTtlDays` to
 how long approving somebody may realistically take, because past it they are gone and must sign up
 again. See that repo's `CHANGELOG`.
@@ -1142,7 +1142,7 @@ aggregator is a producer like any other, and while its absence is the most obvio
 Control Panel that will not load says so by not loading — a `database` it cannot reach refuses every
 audit read and every session check while the SPA is served perfectly from the same process.
 
-⚠ **A leaf reporting on itself is excluded from the audit rows.** The audit answers who did what and
+**A leaf reporting on itself is excluded from the audit rows.** The audit answers who did what and
 nobody did these: a leaf coming up, losing a component or going away is a fact about a service, and
 its actor is the leaf. They already have a surface in the capability block. Rendering them here would
 also mean every deploy writing a row per leaf into the record of what people did. The generic fallback
@@ -1156,7 +1156,7 @@ being weakened.
 `LeafHealthMonitor` folds that into the capability block. `CapabilityStatus.Degraded` has been in the
 contract since M2 and nothing produced it.
 
-⚠ **The half a probe cannot see.** `/health` answers yes or no, so a leaf answering perfectly while
+**The half a probe cannot see.** `/health` answers yes or no, so a leaf answering perfectly while
 unable to do part of its job read as `operational` — an assistant with a dead backend, a monitor
 serving a frozen frame, a scheduler that cannot reach the watchdog. And the two socket-activated
 leaves cannot be probed at all, because connecting to the socket is what starts them.
@@ -1190,7 +1190,7 @@ non-blank wins, so the endpoint still tracks the current connection while a name
 survives every later event that happens not to mention it. Applied to the cache, the published
 `players.*` frame, and the durable row alike.
 
-⚠ An existing row that already lost its name stays nameless until the next event that carries one —
+An existing row that already lost its name stays nameless until the next event that carries one —
 the merge does not backfill history it never saw.
 
 
@@ -1201,7 +1201,7 @@ its group access, and warns when it does not. A directory cannot be entered with
 directory above it, so a state directory closed to the group hides the journal inside it however
 permissive the journal's own mode is.
 
-⚠ **That failure is silent.** A reader that cannot traverse in gets `Directory.Exists == false`, not a
+**That failure is silent.** A reader that cannot traverse in gets `Directory.Exists == false`, not a
 permission error — so discovery concludes this producer has recorded nothing, which is exactly what a
 genuinely idle leaf looks like. This unit declares `0750` and names the shared `kgsm` group, so the
 check stays quiet here; it exists for the leaf that ships `0700` and disappears.
@@ -1210,7 +1210,7 @@ check stays quiet here; it exists for the leaf that ships `0700` and disappears.
 ### Added — this producer prunes its own journal
 
 Segments older than **90 days** are removed, matching the engine's own retention window
-(`TheKrystalShip.KGSM.Journal` 1.4.0). ⚠ **Before this, only the engine pruned anything** — its daily
+(`TheKrystalShip.KGSM.Journal` 1.4.0). **Before this, only the engine pruned anything** — its daily
 timer covers its own directory alone, and every leaf journal grew without bound.
 
 Pruning runs at startup and again when the segment date rolls over, so a resident daemon prunes daily
@@ -1224,7 +1224,7 @@ which a restore or a backup tool moves without any event moving.
 ### Fixed — federation cannot be registered in the wrong order
 
 kgsm-lib 4.30.0 makes `AddKgsmServices` and `AddKgsmJournalFederation` register the same resolution
-rule, so either call order yields a federated reader. ⚠ **The bug it removes had no symptom**: a
+rule, so either call order yields a federated reader. **The bug it removes had no symptom**: a
 consumer that federated too early kept reading the engine's journal *successfully* — healthy journal,
 quiet host, nothing to catch — while every other producer's events sat in files it never opened.
 `JournalDiscovery` also scans once per process now, instead of once for the history reader and again
@@ -1241,7 +1241,7 @@ beside three other spellings of the same function, and its own version resolutio
   form no release is numbered with — while this project *already* stamps a git SHA onto
   `AssemblyInformationalVersion` for `GET /api/v1`'s `build` and the Host DTO's `identity.build`.
   The journal was throwing that away and now uses it, so "which build wrote this row" is answered
-  the same way everywhere. ⚠ Rows already on disk keep the old spelling.
+  the same way everywhere. Rows already on disk keep the old spelling.
 - **`DefaultActor` and `DefaultOrigin` are explicitly null.** Every row here records something a
   *person* did, so a default of `system:api` would put the server's own name on somebody's sign-in.
 - **`Api__EventJournalDir` defaults from the state root, not from the database path.** It was
@@ -1262,7 +1262,7 @@ said. `Api__SpeechSocketPath` carries the standard path as its default rather th
 socket is bound by systemd whether or not the daemon runs, so the file's presence is itself the
 provisioning check and a host with no speech leaf 404s.
 
-⚠ **An inactive unit is answered without connecting.** The leaf is socket-activated and idle-exits to
+**An inactive unit is answered without connecting.** The leaf is socket-activated and idle-exits to
 give back the ~1.6GB its models cost, and connecting to its socket is precisely what starts it — so a
 resting daemon is reported as `resting:true` with the live half of the payload absent, plus what can
 still be known without asking: the unit's state, the model files measured on disk, and the configured
@@ -1280,7 +1280,7 @@ engine resident.
 with `audio.delta` frames — one sentence at a time, while the text is still streaming — and this
 relay passes them through with every other frame, unchanged.
 
-⚠ The relayed body is composed field by field rather than forwarded whole, so a turn field the SPA
+The relayed body is composed field by field rather than forwarded whole, so a turn field the SPA
 sends and this controller does not name is dropped silently. Both places, or neither.
 
 ### Added — the Speech leaf is on the board
@@ -1457,7 +1457,7 @@ rather than only the ones written afterwards. A password sign-in and a provider 
 the recorded provider, not by which endpoint ran; a disable and a return-to-awaiting-approval by where the
 account landed. What is deliberately never recorded: a password, a config value, a file's contents.
 
-⚠ `Identity`, `Handle` and `UserAgent` are classified `Personal` upstream, so `AuditRedaction` withholds
+`Identity`, `Handle` and `UserAgent` are classified `Personal` upstream, so `AuditRedaction` withholds
 them below operator. `userAgent` was previously visible to every reader of the feed.
 
 **Fixed while proving it: `GET /audit?actor=` never filtered the journal half.** The local query narrowed
@@ -1489,7 +1489,7 @@ deriving the keys from the subscription's private half the way a browser does, r
 sender's own idea of the format. An encoding mistake produces bytes of the right length and the wrong
 message, and only a receiver catches that.
 
-⚠ The VAPID key pair is untouched by this: it lives in the integration row, so every device already
+The VAPID key pair is untouched by this: it lives in the integration row, so every device already
 registered stays registered.
 
 ### Added — a scheduled restart can be pushed back from the notification about it
@@ -1517,7 +1517,7 @@ warning is not re-sent — and it re-arms honestly if the new time comes round w
 playing. The subject key carries the fire instant, so a warning about a postponed-to time is its own
 fact rather than a repeat the coalesce window would swallow.
 
-⚠ **This host needs one line added to `/etc/kgsm-api/kgsm-api.env`** —
+**This host needs one line added to `/etc/kgsm-api/kgsm-api.env`** —
 `Api__SchedulerControlSocketPath=/run/kgsm-scheduler/control.sock` — before the button appears. That
 file is root-owned; until then the warning arrives with nothing to press.
 
@@ -1558,7 +1558,7 @@ subset and a device left with nothing gets no push. Quiet hours deliberately do 
 already the delayed, batched form, and holding back the thing somebody chose so that things stop
 interrupting would be holding back the wrong thing.
 
-⚠ Cadence is set through `PATCH /api/v1/integrations/{provider}`. The panel has no integrations admin
+Cadence is set through `PATCH /api/v1/integrations/{provider}`. The panel has no integrations admin
 screen, so this knob is API-only — as it was before, now that it does something.
 
 ### Added — quiet hours, and a floor for what still gets through
@@ -1702,7 +1702,7 @@ a phone, and the panel installed to a home screen stamps `ui` for everything don
 distinction is notification-versus-panel, never phone-versus-laptop.
 
 Reserved, like `system`: `IsCallerDeclarable` refuses it, because a request naming it would be claiming
-to be a redemption this API performed, which is the one claim it cannot check. ⚠ `AuditOrigin.IsKnown` is
+to be a redemption this API performed, which is the one claim it cannot check. `AuditOrigin.IsKnown` is
 a **gate, not a display list** — `AuditMapping` normalizes an unrecognised origin to `null`, so a value
 stamped on an engine call but missing from that set comes back off the echo having lost its whole
 provenance, silently and at runtime.
@@ -1820,7 +1820,7 @@ show an event as switched off by an admin rather than letting somebody enable it
 - Choices are per **account**, not per device: the answer to "do I want to hear about crashes" is
   about a person, not about which phone is in their hand.
 
-⚠ **Operational:** `push_preferences` reaches an already-deployed database the same way
+**Operational:** `push_preferences` reaches an already-deployed database the same way
 `push_subscriptions` did — an idempotent `CREATE TABLE IF NOT EXISTS` in its store, on the first
 call that touches it. Verified on the live host.
 
@@ -1858,7 +1858,7 @@ enable/rules.
 - **The VAPID pair is generated once and never rotated** — the public half is baked into every
   subscription a browser has already made, so regenerating it would silently orphan every device.
 
-⚠ **Operational:** `push_subscriptions` is created on an already-deployed database by
+**Operational:** `push_subscriptions` is created on an already-deployed database by
 `PushSubscriptionStore`'s idempotent `CREATE TABLE IF NOT EXISTS`, on the first call that touches
 the store — `EnsureCreated` no-ops against an existing DB and would never add it. Verified against
 the live host's database, with the audit log untouched.
@@ -2040,7 +2040,7 @@ describes, so `GET /players` stops reporting connections to a server that is not
   detaching one. Any Discord account can be attached to any KGSM account: guild membership means
   nothing here and is never consulted. `POST /auth/identities/discord/start` returns the authorize
   URL (the SPA follows it — a bearer does not survive a top-level navigation) and sets a one-time
-  ticket cookie; **⚠ the link callback is its own redirect URI and has to be registered on the
+  ticket cookie; **the link callback is its own redirect URI and has to be registered on the
   Discord application** alongside the login one (it is derived from `Api__DiscordRedirectUri`, so the
   two always name the same origin), or Discord refuses the bounce before it starts; the callback attaches the verified identity to the account that started the link,
   refusing one already attached elsewhere rather than re-pointing it. `DELETE

@@ -95,7 +95,7 @@ public sealed class ThresholdEventMappingTests
 
     [Theory]
     [InlineData("recovered", "back to normal")]
-    // ⚠ Neither of these recovered: the value was never observed to come down. Reporting them as a
+    // Neither of these recovered: the value was never observed to come down. Reporting them as a
     // return to normal would state a measurement nobody took.
     [InlineData("unwatched", "no longer watched")]
     [InlineData("interrupted", "still over its threshold when monitoring stopped")]

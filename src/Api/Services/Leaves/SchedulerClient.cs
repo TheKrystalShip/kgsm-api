@@ -191,7 +191,7 @@ public sealed record SchedulerStatusResponse(IReadOnlyList<SchedulerInstanceStat
 /// <param name="Name">The kgsm instance id.</param>
 /// <param name="Timezone">The instance's IANA timezone, as kgsm holds it. Blank when it declares none.</param>
 /// <param name="Windows">Every window written on the instance, valid or not.</param>
-/// <param name="LastUpdateCheckUtc">When the update sweep last <em>attempted</em> this instance. ⚠ Not when
+/// <param name="LastUpdateCheckUtc">When the update sweep last <em>attempted</em> this instance. Not when
 /// the upstream was last fetched: a server skipped as recently-checked is null here while the engine holds a
 /// real check time for it. These three answer "is the sweep working, and what failed".</param>
 /// <param name="LastUpdateCheckOk">Whether that attempt succeeded.</param>

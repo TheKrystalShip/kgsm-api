@@ -356,7 +356,7 @@ public sealed class LeafConfigService(
     // Coerce a string-encoded value to its canonical override form by the manifest field's type. Strips CR/LF
     // (a value can never span lines). An empty value is rejected — use `reset` to clear an override.
     //
-    // ⚠ EXCEPT for a list, where empty is a VALUE and not an absence. An empty allow-list is a real
+    // EXCEPT for a list, where empty is a VALUE and not an absence. An empty allow-list is a real
     // configuration and the only way to express it; clearing the override instead restores whatever the
     // leaf ships, which for a list that ships populated is every entry switched ON. Treating the two as
     // the same would make "turn the last one off" mean "turn them all on".

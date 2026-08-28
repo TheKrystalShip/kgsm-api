@@ -182,7 +182,7 @@ internal static class MetricsMapping
 /// operator the unresolved rows lose their pid and name.
 /// </para>
 /// <para>
-/// ⚠ <b>They are aggregated, not dropped.</b> The withheld memory stays, as one unnamed row per device. A
+/// <b>They are aggregated, not dropped.</b> The withheld memory stays, as one unnamed row per device. A
 /// reader can still see that the card is full and that something they cannot see is holding it — which is
 /// the true state — instead of being shown per-process figures that mysteriously fail to add up to the
 /// device's. Withholding a name and under-reporting a total are different acts, and only the first is honest.

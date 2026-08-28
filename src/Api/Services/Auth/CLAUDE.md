@@ -12,7 +12,7 @@ file is the local "what you must not break."
 - **Bearer = HMAC-SHA256 JWT.** Access ~15 min + refresh with a **30-day sliding window**: a session's
   `Expires` is `now + 30d` at login and slides to `now + 30d` on each successful refresh — a session used
   ≥once inside the window stays alive; an idle one dies 30d after its last use. The ~15-min access TTL bounds
-  privilege. ⚠ The multi-week refresh only survives a **stable** signing key. `Api__SigningKey` is one
+  privilege. The multi-week refresh only survives a **stable** signing key. `Api__SigningKey` is one
   when it is set; when it is blank, `HostSigningKey` generates 384 bits on the first start and keeps
   them in `/var/lib/kgsm-api/signing-key` (0600), so a host given no secret is still stable. Rotating
   either invalidates every token issued under the old one.
@@ -54,7 +54,7 @@ file is the local "what you must not break."
   do). A guild role is a fact about a chat server, not about this host, and nothing here reads one.
   The seam is what makes the whole 401/403/tier matrix testable in-process with a fake
   (`tests/Api.Tests`) and keeps two surfaces from resolving the same person differently.
-  ⚠ The Discord registrations stay **transient**, matching the typed `HttpClient` underneath. A
+  The Discord registrations stay **transient**, matching the typed `HttpClient` underneath. A
   singleton would pin one handler for the process lifetime and stop `HttpClientFactory` rotating it;
   `AuthServiceGraphTests.TheSignInGraphIsTransient` is what holds that line. The authority half
   resolves from the singleton `UserDirectory` — one file, one cache — through `DirectoryAuthority`,
@@ -68,9 +68,9 @@ file is the local "what you must not break."
   `SessionCleanupWorker`, `ISessionRegistry` and the claim readers come from
   `TheKrystalShip.KGSM.Auth.Sessions`. `SessionStore` stays here — it IS this API's `ISessionRegistry`
   (EF/SQLite, beside the audit log) and keeps a richer surface on top for the admin endpoints.
-  ⚠ **`Issuer` stays `"kgsm-api"`** (`ApiOptions.ToSessionTokenOptions`): it is validated, so adopting
+  **`Issuer` stays `"kgsm-api"`** (`ApiOptions.ToSessionTokenOptions`): it is validated, so adopting
   the package's neutral default would 401 every token already issued and log everyone out.
-  ⚠ **`SessionsRefreshAbsoluteDays` is the only session lifetime.** The token's expiry and the
+  **`SessionsRefreshAbsoluteDays` is the only session lifetime.** The token's expiry and the
   registry row's are both derived from it; never reintroduce a constant beside it.
 - **`Api__SessionsDisabled` is composed, not branched.** Startup registers `InertSessionValidator` and
   no GC worker instead of teaching the shared types about a flag only this surface has.
@@ -84,7 +84,7 @@ file is the local "what you must not break."
   and the next request reads the record. The claim stays on the token as a display hint the SPA can
   render before its first call. `Api__AuthorityCacheSeconds` (default 5) is the only staleness left
   in the model, and is therefore the demotion lag.
-  ⚠ Three outcomes, kept apart: a **disabled** account fails authentication (its live sessions end);
+  Three outcomes, kept apart: a **disabled** account fails authentication (its live sessions end);
   an identity with **no account** is a stranger holding `none` (a real answer — the session stands and
   every gate refuses it); an **unreadable store** answers `502 authority_unavailable` via
   `OnChallenge` — never a `401`, which would send a browser to a sign-in that reads the same file, and
@@ -95,7 +95,7 @@ file is the local "what you must not break."
   into the bot. The guild, the bot token and the role ids in that same shared file are kgsm-bot's:
   they bind to nothing here, and describing one on this leaf's configuration page would offer an
   operator a knob that changes nothing. The login endpoints `503` until the `Api__Discord*` settings
-  are configured. ⚠ Dev credentials ride `kgsm-api.settings.Development.json`, which is read only
+  are configured. Dev credentials ride `kgsm-api.settings.Development.json`, which is read only
   when `ASPNETCORE_ENVIRONMENT=Development` — under any other environment the login endpoints `503`
   as if unconfigured.
 - **Connecting a provider account is self-service, and both writes need the credential proved again**
@@ -107,7 +107,7 @@ file is the local "what you must not break."
   `LinkTicketStore`, because a cookie is a value the browser holds and the browser is not the
   authority on whose account this is. Detaching revokes the sessions that identity established, and
   the last credential is refused.
-  ⚠ **A link runs on its own redirect URI** (`ApiOptions.DiscordLinkRedirectUri`, derived from the
+  **A link runs on its own redirect URI** (`ApiOptions.DiscordLinkRedirectUri`, derived from the
   login one so the two cannot name different origins) and Discord accepts only registered URIs — so
   `/auth/identities/discord/callback` must be registered on the application beside the login
   callback. Both flows use the same `DiscordDirectory`, keyed apart at composition, because the
@@ -138,7 +138,7 @@ file is the local "what you must not break."
   `/var/lib/kgsm-api/initial-admin-password` (0600) and removed the first time that account signs in
   with it. `kgsm-api user bootstrap` is the same `FirstAdmin.CreateAsync` from a terminal, printing the
   password instead of writing it; whichever runs first wins, because both are gated on the same
-  emptiness check. ⚠ The bootstrap is scoped to an **empty** store and must stay that way — a
+  emptiness check. The bootstrap is scoped to an **empty** store and must stay that way — a
   re-creating admin account is a permanent back door, and a rewritten password file is a live
   credential sitting on disk forever.
 

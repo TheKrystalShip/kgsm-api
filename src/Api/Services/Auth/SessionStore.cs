@@ -109,7 +109,7 @@ public sealed class SessionStore(
     /// <item>The row doesn't exist (no sid match — pre-M4·c sid claim, or a malformed sid).</item>
     /// <item>The row is already <see cref="SessionEntry.Revoked"/> (logout / admin revoke happened).</item>
     /// <item>The presented jti DIFFERS from the stored <see cref="SessionEntry.CurrentJti"/> (stale
-    /// refresh token — reuse detection fires). ⚠ No grace period for tab races; a 401 here means the
+    /// refresh token — reuse detection fires). No grace period for tab races; a 401 here means the
     /// caller re-auths via Discord OAuth once. <b>Honest adoption boundary:</b> a row whose
     /// <see cref="SessionEntry.CurrentJti"/> is <see langword="null"/> (created before the rotation
     /// feature shipped — the one-shot ALTER TABLE on prod) accepts the FIRST non-null presented jti

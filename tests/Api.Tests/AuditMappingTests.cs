@@ -64,7 +64,7 @@ public sealed class AuditMappingTests
     }
 
     /// <summary>
-    /// ⚠ A rule is not a person, and reading it as one is the fabrication this path exists to prevent.
+    /// A rule is not a person, and reading it as one is the fabrication this path exists to prevent.
     /// </summary>
     /// <remarks>
     /// The reactor stamps <c>rule:&lt;id&gt;</c>. Nobody performed the act — a rule read a condition
@@ -82,7 +82,7 @@ public sealed class AuditMappingTests
     }
 
     /// <summary>
-    /// ⚠ An unrecognized prefix keeps the name and claims no person.
+    /// An unrecognized prefix keeps the name and claims no person.
     /// </summary>
     /// <remarks>
     /// The one thing known about it is that nothing here can say who it is, which is
@@ -115,7 +115,7 @@ public sealed class AuditMappingTests
     [InlineData("API", "api")]          // case-insensitive
     [InlineData("  discord ", "discord")]
     [InlineData("system", "system")]
-    // ⚠ Its own origin rather than "system", which is the scheduler and the engine's housekeeping:
+    // Its own origin rather than "system", which is the scheduler and the engine's housekeeping:
     // those run because somebody configured a time, this one because a rule read a condition. Left
     // out, it normalizes to null and every decision reads as having come from nowhere.
     [InlineData("reactor", "reactor")]

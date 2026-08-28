@@ -14,7 +14,7 @@ the `jobs` SSE topic (`job.patch`) → verify (`server.patch` on settle)**. The 
   one-in-flight slot.
 - **`move` has a dedicated route, and it is admin.** `POST /servers/{id}/move { library }` reuses the job
   machinery (the install/`backup_restore` pattern — the plain verbs are param-less) and takes the
-  library-CRUD authority rather than operator, because placement shapes the host. ⚠ **The engine starts
+  library-CRUD authority rather than operator, because placement shapes the host. **The engine starts
   the instance once on the new path to confirm it runs there**, so a `server.started` and a
   `server.stopped` land partway through with no bracket around them — a surface reading run-state alone
   flickers "running" mid-move, and the job holding the in-flight slot is the span it should trust instead.
@@ -44,9 +44,9 @@ the `jobs` SSE topic (`job.patch`) → verify (`server.patch` on settle)**. The 
   exits non-zero and emits nothing, and a batch member cancelled in the queue never reaches the engine —
   so `CommandRunner`'s `finally` writes `command.failed`/`command.refused` through `ApiJournal`, and the
   batch cancel path writes `command.cancelled` per member. Refused vs failed is keyed on
-  `EngineExit.InsufficientMemory` (51), the same constant `BatchWorker` uses. ⚠ **Never through
+  `EngineExit.InsufficientMemory` (51), the same constant `BatchWorker` uses. **Never through
   `AuditService`** (it announces, it has no append path) and **never published from the write site** —
-  the API tails its own journal and that tail is what announces the row. ⚠ `update` and `uninstall` are
+  the API tails its own journal and that tail is what announces the row. `update` and `uninstall` are
   excluded (`CommandRunner.EngineRecordsItsOwnFailure`): kgsm emits `server.update.failed`/
   `server.uninstall.failed`, and a second row for a fact a producer already emits is undedupable. A
   refused `move` carries `fromLibrary`/`toLibrary` on that row: the successful move is the engine's own

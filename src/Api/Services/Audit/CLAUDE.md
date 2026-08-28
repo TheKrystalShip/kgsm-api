@@ -19,7 +19,7 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
 - **This API tails its own journal, and that is what publishes its rows live.** `AddKgsmJournalFederation`
   reads every journal it discovers, and `/var/lib/kgsm-api` is one the scan matches — so writing is the
   whole of the write path, and `KgsmAuditConsumer.PublishOwnEventAsync` shapes and announces off the raw
-  hook. ⚠ Announcing from the write site as well would emit every one of these rows **twice**. The raw
+  hook. Announcing from the write site as well would emit every one of these rows **twice**. The raw
   hook rather than `RegisterHandler<T>` because kgsm-lib keys typed handlers on the payload CLASS, and
   several of these types deliberately share one (`auth.signed_in`/`auth.signed_out` are the same shape).
 - **The API's journal is NAMED to the federation, not left to the scan** (`namedJournals:` in `Startup`).
@@ -31,7 +31,7 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
   (`ui|assistant|discord|api`, default `api`); **two values are reserved and rejected at the controller**
   — `system` for autonomous engine actions, and `notification` for a push-notification button this API
   redeemed, since a caller naming either would be claiming to be something this API cannot check.
-  ⚠ `AuditOrigin.IsKnown` is a **gate, not a display list**: `AuditMapping` normalizes an unrecognised
+  `AuditOrigin.IsKnown` is a **gate, not a display list**: `AuditMapping` normalizes an unrecognised
   origin to `null`, so a value stamped on an engine call but missing from that set comes back off the
   echo having lost its whole provenance, silently and at runtime.
 - **Append-only & immutable.** Rows are never updated or deleted; a correction is a *new* row. Don't add
@@ -45,7 +45,7 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
   which is the point: an assertion written against the derivation would pass whatever the catalog said.
   The per-event *shaping* — target, scope, meta, and the fallback sentence for a producer that stamps
   no summary — lives in the **pure** `AuditMapping.From*Event` mappers, unit-tested without a socket.
-  ⚠ Two vocabularies nearby are **closed on purpose and are not this one**: `NotificationCatalog`
+  Two vocabularies nearby are **closed on purpose and are not this one**: `NotificationCatalog`
   (somebody's stored consent points into it — see `Integrations/NotificationModel.cs`) and
   `PushActionKind` (the operation a button performs, persisted behind a staged handle).
   **The whole `network.*` set is engine-echo-only** — an instance's ports and router forwards are
@@ -54,7 +54,7 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
 - **`StoredActionNames` resolves the local table on the way out.** Rows written before this API stopped
   keeping its own copy of engine history name their fact in the vocabulary of the build that wrote them.
   A record is never rewritten, so a reader asks one question in one vocabulary and reaches every row that
-  answers it. ⚠ `AuditQueries.EngineSourcedActions` is the one place that must use the **stored**
+  answers it. `AuditQueries.EngineSourcedActions` is the one place that must use the **stored**
   spellings: it filters in SQL, before the resolution, and the current names would match nothing.
 - **`network.upnp.reasserted` is the one `network.*` event at `warn`.** It records that the watchdog's
   sweep found the ROUTER had dropped a running instance's forwards and put them back — a fact about the
@@ -92,10 +92,10 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
   risk. **Three actions, not one with the outcome in `meta`**: a fault to chase, a node that is full,
   and somebody calling off queued work are three different questions, and a refusal filed beside a
   failure blames the instance for the fleet being out of room. `command.refused` is keyed on kgsm's
-  `EC_INSUFFICIENT_MEMORY` (51) via `EngineExit`, never on the engine's message. ⚠ **`update` and
+  `EC_INSUFFICIENT_MEMORY` (51) via `EngineExit`, never on the engine's message. **`update` and
   `uninstall` write nothing here** — kgsm emits `server.update.failed`/`server.uninstall.failed`,
   which are already mapped, and the exclusion lives in `CommandRunner.EngineRecordsItsOwnFailure`.
-  ⚠ The meta key is **`verb`, never `command`**: `AuditRedaction` strips by field NAME across every
+  The meta key is **`verb`, never `command`**: `AuditRedaction` strips by field NAME across every
   event, and the engine classifies `Command` as privileged for the console-input event.
 - **`origin` nullable** is a recorded §6 divergence, and so is **`meta.jobId`** on every echo-sourced row: no
   id round-trips the stateless engine, so a row shaped from another producer's event cannot name one.
@@ -114,7 +114,7 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
   came back full.
 - **Every filter must be applied to BOTH halves of the merge.** `severity`, `actor` and `category` have no
   journal-side equivalent, so they narrow the EF query in SQL and the shaped records in memory — and the
-  two must mean the same thing (`actor` matches the parsed actor NAME on both sides). ⚠ A filter
+  two must mean the same thing (`actor` matches the parsed actor NAME on both sides). A filter
   implemented on only one half does not return a short page; it returns *everybody's* rows from the other
   half, which reads as a working filter until somebody checks.
 - **Stream coalesce key = the unique event id** (`StreamProtocol.AuditEntityKey`), NOT a static `"audit"` key:

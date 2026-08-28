@@ -25,7 +25,7 @@ namespace TheKrystalShip.Api.Contracts;
 /// is one anyone who runs these servers day to day is in a position to make, and the tier that may
 /// start a server is the same tier that may decide it fits.
 /// </para>
-/// ⚠ It does not create memory. Forcing a start the node genuinely cannot fit invites the OOM killer,
+/// It does not create memory. Forcing a start the node genuinely cannot fit invites the OOM killer,
 /// which picks by its own heuristic and may take down a different server, or the watchdog supervising
 /// them all.
 /// </param>
@@ -148,7 +148,7 @@ public static class CommandVerb
     /// machinery (the install/backup_restore pattern — the plain verbs are param-less).
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Its job is what a surface renders "moving" from.</b> The engine starts the instance once on
+    /// <b>Its job is what a surface renders "moving" from.</b> The engine starts the instance once on
     /// the new path to confirm it runs there, so a <c>server.started</c> and a
     /// <c>server.stopped</c> land partway through with no bracket around them — a card reading
     /// run-state alone flickers "running" mid-move. The job holds the server's in-flight slot for the

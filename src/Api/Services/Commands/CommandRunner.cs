@@ -30,7 +30,7 @@ namespace TheKrystalShip.Api.Services.Commands;
 /// <para><b>The outcomes with no echo to ride:</b> a verb that fails or is refused exits non-zero and emits
 /// nothing, so it exists in no record on the host. Those the runner records itself, to this API's own
 /// journal (<see cref="ApiJournal.CommandOutcomeAsync"/>) — the <c>auth.*</c>/<c>file.write</c> case, a
-/// producer recording what it observed and nobody else did. ⚠ Two verbs are excluded because the engine
+/// producer recording what it observed and nobody else did. Two verbs are excluded because the engine
 /// reports their failure itself: <c>update</c> and <c>uninstall</c> emit <c>server.update.failed</c> /
 /// <c>server.uninstall.failed</c>, which already become rows (see
 /// <see cref="EngineRecordsItsOwnFailure"/>).</para>
@@ -118,7 +118,7 @@ public sealed class CommandRunner(
     /// </summary>
     /// <remarks>
     /// Minutes of copying, and it holds the server's in-flight slot for the whole of it — which is what a
-    /// surface renders "moving" from. ⚠ The engine starts the instance once on the new path to confirm it
+    /// surface renders "moving" from. The engine starts the instance once on the new path to confirm it
     /// runs there, so a <c>server.started</c> and a <c>server.stopped</c> land partway through; a
     /// card reading run-state alone flickers "running" mid-move, and this job's span is the answer.
     /// Echo-path audited via kgsm's <c>server.moved</c> → <c>server.move</c>; no write here for a
@@ -404,7 +404,7 @@ public sealed class CommandRunner(
     /// Whether the engine already emits an event for this verb failing.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>The no-double-write line.</b> kgsm emits <c>server.update.failed</c> and
+    /// <b>The no-double-write line.</b> kgsm emits <c>server.update.failed</c> and
     /// <c>server.uninstall.failed</c>, and both are mapped to a row carrying the provenance the command
     /// stamped onto the call — so a row written here for the same command would be a second, undedupable
     /// record of one fact. Every other verb fails silently as far as the journals are concerned: a start,

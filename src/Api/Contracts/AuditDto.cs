@@ -167,7 +167,7 @@ public static class ActorKind
     /// A rule that decided on its own — the reactor's actor.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Not <see cref="System"/>, and never <see cref="User"/>.</b> Nobody performed it and no
+    /// <b>Not <see cref="System"/>, and never <see cref="User"/>.</b> Nobody performed it and no
     /// standing configuration produced it: something judged a condition and concluded that this should
     /// happen. A reader has to be able to ask which rule, and reading it as a person would claim
     /// somebody acted at three in the morning. Who wrote the rule is a separate field on the event.
@@ -191,7 +191,7 @@ public static class ActorProvider
     /// A rule the reactor evaluated. The name after it is the rule's id.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Not an identity provider, and that is why it needs naming.</b> Every other value here
+    /// <b>Not an identity provider, and that is why it needs naming.</b> Every other value here
     /// answers "how do we know who this is"; this one answers "nobody — a rule concluded it". Left
     /// unrecognised, the prefix would be discarded and the rule id would read as a person's name.
     /// </remarks>
@@ -260,7 +260,7 @@ public static class AuditOrigin
     public const string Reactor = "reactor";
 
     /// <summary>True if <paramref name="origin"/> is one of the closed set (used to normalize an event's
-    /// origin; an unrecognized value is treated as null — never fabricated). ⚠ A value stamped on an
+    /// origin; an unrecognized value is treated as null — never fabricated). A value stamped on an
     /// engine call but missing here comes back off the echo as <see langword="null"/>: this is the gate
     /// the whole provenance passes through, not a display list.</summary>
     public static bool IsKnown(string? origin) =>

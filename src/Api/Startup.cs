@@ -198,7 +198,7 @@ public class Startup(IConfiguration configuration)
         // Which journals exist is discovered on disk, so no list is held here and a leaf that starts
         // writing one later needs no rebuild.
         //
-        // ⚠ Must stay AFTER AddKgsmServices: that call registers an IEventSource reading the engine's
+        // Must stay AFTER AddKgsmServices: that call registers an IEventSource reading the engine's
         // journal alone, and this one replaces it by being registered last. Moving this above it leaves
         // every consumer tailing one journal while believing it tails all of them.
         //
@@ -425,7 +425,7 @@ public class Startup(IConfiguration configuration)
         // instance exposed as both a singleton (the readable cache) and a hosted service (the poll loop).
         // What each leaf says is broken about ITSELF, read from its own journal.
         //
-        // ⚠ The half the capability probe cannot see. /health answers yes or no, so a leaf answering
+        // The half the capability probe cannot see. /health answers yes or no, so a leaf answering
         // perfectly while unable to do part of its job reads as operational — and the two
         // socket-activated leaves cannot be probed at all, because connecting to the socket is what
         // starts them. Registered before the monitor that consumes it.
@@ -779,7 +779,7 @@ public class Startup(IConfiguration configuration)
                         // registry key; the validator consults the SessionEntry row (≤5s cache) for
                         // `Id == sid && !Revoked && Expires > now`. The escape hatch
                         // (Api__SessionsDisabled) bypasses the whole block — the pre-M4·c stateless
-                        // posture, for debugging. ⚠ D10: a pre-M4·c token (no sid claim) is REJECTED here
+                        // posture, for debugging. D10: a pre-M4·c token (no sid claim) is REJECTED here
                         // → 401 → relogin. That's the clean break the milestone ships — only sid-bearing
                         // tokens pass. The check runs AFTER the access-kind gate (a refresh token never
                         // reaches here) and AFTER the signature/payload validation (JwtBearer has already

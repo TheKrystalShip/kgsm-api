@@ -17,7 +17,7 @@ namespace TheKrystalShip.Api.Tests;
 /// A factory with sign-up open, which the shipped default is not.
 /// </summary>
 /// <remarks>
-/// ⚠ Overridden through <c>ConfigureAppConfiguration</c> rather than <c>UseSetting</c>. A
+/// Overridden through <c>ConfigureAppConfiguration</c> rather than <c>UseSetting</c>. A
 /// <c>UseSetting</c> value is a host-builder setting, and <c>kgsm-api.settings.json</c> is a
 /// configuration source added after it — so the file's shipped <c>false</c> would win and every case
 /// here would read as a closed host. This appends a source after the base factory's, which is the

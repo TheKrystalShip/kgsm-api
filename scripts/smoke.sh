@@ -168,7 +168,7 @@ sys.exit(0 if d['capabilities']['metrics']['status']!='unknown' else 1)
 # the relay secret, so the M7 relay path can actually execute. Same monitor/watchdog/kgsm wiring as
 # start_api (the absent defaults); only the assistant is added.
 #
-# ⚠ Uses a DEDICATED, FRESH DB (not the shared $DB). The DB-backed LeafRegistry persists each leaf's
+# Uses a DEDICATED, FRESH DB (not the shared $DB). The DB-backed LeafRegistry persists each leaf's
 # provisioned flag and a PERSISTED row OVERRIDES the config seed on the next boot (leaf-runtime-config —
 # so a live connect/disconnect survives a restart). Every prior api instance in this run booted with NO
 # assistant configured, persisting assistant.provisioned=false into $DB; reusing $DB here would carry

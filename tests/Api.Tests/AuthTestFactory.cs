@@ -34,7 +34,7 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     /// A database in a state directory of its own, for one factory.
     /// </summary>
     /// <remarks>
-    /// ⚠ The directory matters as much as the file. <see cref="ApiOptions.StateDir"/> is the database's directory,
+    /// The directory matters as much as the file. <see cref="ApiOptions.StateDir"/> is the database's directory,
     /// and the API writes host secrets there — the signing key it generates for itself, the first
     /// administrator's password. A database sitting in a bare /tmp would hand every factory in the run
     /// the same two files.
@@ -84,7 +84,7 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 // holds would be reading THIS machine's real engine history.
                 ["Api:KgsmJournalDir"] =
                     Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-journal-{Guid.NewGuid():N}"),
-                // ⚠ Never the default. /var/lib/kgsm/auth/users.db is the HOST's real account store, shared
+                // Never the default. /var/lib/kgsm/auth/users.db is the HOST's real account store, shared
                 // with every KGSM service on the box, and opening it CREATES it — so an unpinned test
                 // run would hand the operator a live accounts file that nobody made. Same rule that
                 // keeps AuditJournalRelayTests off the engine's real journal.

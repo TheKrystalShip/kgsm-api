@@ -14,7 +14,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ⚠ Not the game catalog. <see cref="LibraryController"/> serves <c>/library</c>, the blueprints a server
+/// Not the game catalog. <see cref="LibraryController"/> serves <c>/library</c>, the blueprints a server
 /// can be installed <em>from</em>; this serves the disks a server is installed <em>onto</em>. They share a
 /// word and nothing else.
 /// </para>
@@ -156,13 +156,13 @@ public sealed class HostLibrariesController(
     /// nothing rather than stopping servers on the caller's behalf.
     /// </para>
     /// <para>
-    /// ⚠ <b>There is no force.</b> The engine refuses while instances still resolve to the library, naming
+    /// <b>There is no force.</b> The engine refuses while instances still resolve to the library, naming
     /// them, and that refusal is served through as a <c>409</c> with its own words. Adding a
     /// pass-through would let the panel produce, in one click, the state the engine exists to prevent;
     /// draining is the sanctioned path, and it is the one offered here.
     /// </para>
     /// <para>
-    /// ⚠ A drain is <b>minutes of copying per resident instance</b> and this request blocks for all of
+    /// A drain is <b>minutes of copying per resident instance</b> and this request blocks for all of
     /// it — unlike a server move, which runs as a job. Nothing in the engine brackets a drain, so there
     /// is no per-instance progress to stream; a caller needs a client timeout that matches.
     /// </para>

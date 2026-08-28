@@ -21,7 +21,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// board renders as "not applicable" rather than as "disconnected".
 /// </para>
 /// <para>
-/// ⚠ Socket activation is <b>not</b> the criterion, and reading it as one gets the firewall wrong: the
+/// Socket activation is <b>not</b> the criterion, and reading it as one gets the firewall wrong: the
 /// firewall and the speech engine are both socket-activated and idle-exiting, and both are unpolled for
 /// exactly that reason (<see cref="LeafHealthSource.None"/> — a 2s probe would defeat idle-exit, and
 /// probing speech would load a gigabyte of models to ask whether it is alive). That is the health axis.

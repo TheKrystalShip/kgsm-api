@@ -156,7 +156,7 @@ public sealed class CommandOutcomeAuditTests
     {
         // An engine failure message is diagnostic prose about this host's own operation, not about a
         // person and not a value the engine classifies as privileged — so the redactor has nothing to
-        // take off. ⚠ The meta key is `verb`, deliberately not `command`, which the engine classifies as
+        // take off. The meta key is `verb`, deliberately not `command`, which the engine classifies as
         // privileged for the console-input event and which a name-keyed redactor would strip here too.
         AuditWrite write = AuditMapping.FromCommandOutcomeEvent(
             Outcome(error: "/opt/kgsm did not answer", exitCode: 1), ApiJournal.CommandFailedEvent, HostId);
@@ -181,7 +181,7 @@ public sealed class CommandOutcomeAuditTests
     [Fact]
     public void The_two_verbs_the_engine_reports_itself_are_left_to_it()
     {
-        // ⚠ The no-double-write line. kgsm emits server.update.failed and server.uninstall.failed,
+        // The no-double-write line. kgsm emits server.update.failed and server.uninstall.failed,
         // and both already become rows carrying the provenance the command stamped onto the call.
         Assert.True(CommandRunner.EngineRecordsItsOwnFailure(CommandVerb.Update));
         Assert.True(CommandRunner.EngineRecordsItsOwnFailure(CommandVerb.Uninstall));

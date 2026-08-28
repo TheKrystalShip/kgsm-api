@@ -15,7 +15,7 @@ namespace TheKrystalShip.Api.Data;
 /// as the API's own operational metadata (the domain itself is live-scraped, never stored).
 /// </para>
 /// <para>
-/// ⚠ <b>EnsureCreated, NOT a migration</b> (project dev authority — see <see cref="AppDbContext"/>):
+/// <b>EnsureCreated, NOT a migration</b> (project dev authority — see <see cref="AppDbContext"/>):
 /// <c>EnsureCreated</c> includes this table automatically on a fresh DB (it is registered in
 /// <see cref="AppDbContext.OnModelCreating"/>). Because <c>EnsureCreated</c> no-ops on an existing
 /// DB, the already-deployed <c>/var/lib/kgsm-api/kgsm-api.db</c> is brought up to date with a
@@ -74,7 +74,7 @@ public sealed class SessionEntry
     /// <summary>
     /// The raw <c>User-Agent</c> string captured at login (per D5 — raw UA, no IP, for a
     /// "Chrome • Windows 10"-style display on the Settings page). Nullable when the header was
-    /// absent. ⚠ PII-ish (a UA can leak exact OS/version/build); only surfaced on the
+    /// absent. PII-ish (a UA can leak exact OS/version/build); only surfaced on the
     /// viewer-self/admin <c>GET /auth/sessions</c> display, never on a public surface.
     /// </summary>
     public string? UserAgent { get; set; }

@@ -69,7 +69,7 @@ public sealed class EngineEnvelopeTrackerTests
     }
 
     /// <summary>
-    /// ⚠ The live push and the history read must derive one event's id identically.
+    /// The live push and the history read must derive one event's id identically.
     /// </summary>
     /// <remarks>
     /// This is the failure the tracker exists to prevent, and the only one that cannot be caught by

@@ -154,7 +154,7 @@ public static class NotificationCatalog
         var a when a == KgsmEventCatalog.NameOf<HostThresholdBreachedData>() => "threshold_breach",
         var a when a == KgsmEventCatalog.NameOf<HostThresholdClearedData>() => "threshold_clear",
 
-        // ⚠ The offer, and never its resolution. `reactor.proposed` is the only one of the reactor's
+        // The offer, and never its resolution. `reactor.proposed` is the only one of the reactor's
         // four events with anything for a person to do: a decision is a judgment nobody has to answer,
         // an action taken alone is already done, and a resolution is somebody having answered — which
         // would announce their own tap back to them. This is also the one event on this host whose

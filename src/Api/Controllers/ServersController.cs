@@ -533,7 +533,7 @@ public sealed class ServersController(
     /// keeps its data, which is the same authority registering and deregistering a library takes.
     /// </para>
     /// <para>
-    /// ⚠ <b>The job is the operation's span, and run-state is not.</b> The engine starts the instance
+    /// <b>The job is the operation's span, and run-state is not.</b> The engine starts the instance
     /// once on the new path to confirm it runs there, so a surface watching <c>status</c> alone sees the
     /// server come up and go down again partway through. The move's job holds the server's in-flight
     /// slot from accept to settle, which is what a card should render "moving" from.

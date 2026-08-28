@@ -296,12 +296,12 @@ public sealed class ServerAggregator
         if (statuses.TryGetValue(id, out Reading<InstanceRuntimeStatus>? reading)
             && reading is { IsMeasured: true, Value: { } runtimeStatus })
         {
-            // ⚠ Three answers, not two. The engine reports `status: null` for an instance whose library
+            // Three answers, not two. The engine reports `status: null` for an instance whose library
             // is not mounted — every reading a status takes comes out of a directory that is not there,
             // and an unreadable instance is not a stopped one. Nothing else in this block needs a guard:
             // the version, the update triple and the start time are read from the same absent directory
             // and arrive honestly null on their own.
-            // ⚠ A parked instance reads false here and is not stopped. The watchdog drains the process for
+            // A parked instance reads false here and is not stopped. The watchdog drains the process for
             // the span of a maintenance window while its desired state stays running and crash-restart
             // stays suppressed — so the reading is an honest "no process", and the phase beside it is what
             // says why. Only consulted on a down reading: a park the daemon has already released shows a
@@ -339,7 +339,7 @@ public sealed class ServerAggregator
         // A container keeps the engine's reading (the daemon does not supervise one) and has no stop time
         // to report. Both stay honestly null when nothing dates them.
         //
-        // ⚠ An instance with no reported runtime takes neither branch. Which supervisor to ask is exactly
+        // An instance with no reported runtime takes neither branch. Which supervisor to ask is exactly
         // what an unreadable instance does not say, and the ledger can still hold a row from before its
         // disk went — dating a run off it would put a start time on a server nobody can see.
         if (runTimes is not null)
@@ -405,7 +405,7 @@ public sealed class ServerAggregator
             Blueprint: instance.Blueprint,
             Status: status,
             Version: version,
-            // ⚠ Null when the engine reported none — it omits `runtime` entirely for an instance whose
+            // Null when the engine reported none — it omits `runtime` entirely for an instance whose
             // library is not mounted, because the config naming it is on the disk that is gone. kgsm-lib
             // carries that as a null on its nullable enum, and the discard arm below is what keeps it one:
             // a supervision type nobody read has no name here. This IS a divergence from the frozen
@@ -457,7 +457,7 @@ public sealed class ServerAggregator
     /// It is the same answer a lifecycle verb's refusal will give, rather than a second opinion about it.
     /// </para>
     /// <para>
-    /// ⚠ Absent is <see langword="null"/>, never <c>offline</c>. Only an engine predating libraries
+    /// Absent is <see langword="null"/>, never <c>offline</c>. Only an engine predating libraries
     /// leaves it unstated, and reading that as a disk being gone would put every server on such a host
     /// behind a warning about hardware that is fine.
     /// </para>

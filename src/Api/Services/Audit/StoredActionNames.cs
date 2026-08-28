@@ -17,7 +17,7 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// event whose scope says how far it reached.
 /// </para>
 /// <para>
-/// ⚠ <b>Unlike a journal's, these rows never age out</b>, so this table has no end date: it lives as
+/// <b>Unlike a journal's, these rows never age out</b>, so this table has no end date: it lives as
 /// long as the oldest row does. Anything not listed is already current and passes through.
 /// </para>
 /// </remarks>

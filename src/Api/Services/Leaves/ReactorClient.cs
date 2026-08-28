@@ -6,7 +6,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>Who is answering a proposal, in the shape the leaf takes it.</summary>
 /// <remarks>
-/// ⚠ <b>Built here from the authenticated principal, never bound from the request.</b> A caller-supplied
+/// <b>Built here from the authenticated principal, never bound from the request.</b> A caller-supplied
 /// name would let anybody sign anybody else's confirmation, and the leaf has no way to tell the two
 /// apart — it checks the shape and trusts whoever authenticated the person.
 /// </remarks>
@@ -56,7 +56,7 @@ public sealed class ReactorClient : IDisposable
     // disk, so a slow reply means a sick daemon. Bound it so one can never stall the health poll.
     private static readonly TimeSpan AnswerWithin = TimeSpan.FromSeconds(2);
 
-    // ⚠ A preview is the one call here that does real work: it reads the supervisor and the monitor once
+    // A preview is the one call here that does real work: it reads the supervisor and the monitor once
     // per subject, across as much of the fleet as the rule enumerates. Holding it to the probe's budget
     // would report a healthy leaf as unreachable to somebody who is only composing a rule.
     private static readonly TimeSpan PreviewWithin = TimeSpan.FromSeconds(30);
@@ -201,7 +201,7 @@ public sealed class ReactorClient : IDisposable
     /// build that measures it was replaced.
     /// </para>
     /// <para>
-    /// ⚠ <b>Read-only, and the boundary is deliberate.</b> Publishing what a rule may be made of is not
+    /// <b>Read-only, and the boundary is deliberate.</b> Publishing what a rule may be made of is not
     /// the same as the leaf accepting one over a socket. Composing and storing a rule is this API's
     /// half — it writes the file and restarts the unit through the grant it already holds — so nothing
     /// off the host acquires the ability to tell a leaf what to think.
@@ -281,7 +281,7 @@ public sealed class ReactorClient : IDisposable
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ⚠ <b>A read expressed as a POST, because the rule is the question.</b> The leaf stores nothing,
+    /// <b>A read expressed as a POST, because the rule is the question.</b> The leaf stores nothing,
     /// dispatches nothing, and writes no decision — so this does not cross the boundary the read-only
     /// socket draws.
     /// </para>
@@ -332,7 +332,7 @@ public sealed class ReactorClient : IDisposable
     /// (<c>GET /proposals</c>), verbatim.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>The body carries redemption handles, so this is operator-gated on the way out.</b> A handle
+    /// <b>The body carries redemption handles, so this is operator-gated on the way out.</b> A handle
     /// is the capability: anything holding one can ask for the action it names. The leaf will not act on
     /// one without a named caller and the API will not hand one to a caller it has not authorised, and
     /// both halves are needed — the leaf cannot know who anybody is, and the API cannot re-derive the
@@ -373,14 +373,14 @@ public sealed class ReactorClient : IDisposable
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ⚠ <b>The one call here that changes the host, and the identity it carries is not the caller's to
+    /// <b>The one call here that changes the host, and the identity it carries is not the caller's to
     /// choose.</b> <paramref name="by"/> comes from the authenticated principal, never from the request
     /// body: an action a person authorised has to name the person who actually authorised it, and a
     /// caller-supplied name would let anybody sign anybody else's confirmation.
     /// </para>
     /// <para>
     /// Confirming can take as long as the action does — a backup of a large world is minutes — so it
-    /// gets the preview budget rather than the two seconds a question gets. ⚠ Timing out here does not
+    /// gets the preview budget rather than the two seconds a question gets. Timing out here does not
     /// mean nothing happened: the leaf claims the proposal before it performs, so the offer is spent
     /// and re-reading <c>/proposals</c> is what says how it went.
     /// </para>
@@ -397,7 +397,7 @@ public sealed class ReactorClient : IDisposable
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ⚠ <b>This API does not write rule files and does not judge rules.</b> Which signals, operators
+    /// <b>This API does not write rule files and does not judge rules.</b> Which signals, operators
     /// and actions exist belongs to the running build; a copy of that here is how the panel and the
     /// leaf come to disagree about which rules are valid. The leaf validates against what it can
     /// actually honour, stores only what passes, and answers with the verdict — which is relayed
@@ -449,7 +449,7 @@ public sealed class ReactorClient : IDisposable
     /// Remove a rule's file, by asking the leaf to.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Deleting is not retiring.</b> A retired rule keeps its file so the decisions it already made
+    /// <b>Deleting is not retiring.</b> A retired rule keeps its file so the decisions it already made
     /// still resolve to a rule that can be named; deleting one leaves those naming an id nothing can
     /// describe. The panel retires by storing the rule with <c>retired</c> set — this is for a rule that
     /// was never meant to exist.
@@ -504,7 +504,7 @@ public sealed class ReactorClient : IDisposable
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            // ⚠ Not "nothing happened". The leaf claims a proposal before performing, so a timeout here
+            // Not "nothing happened". The leaf claims a proposal before performing, so a timeout here
             // is a slow action rather than a refused one, and the caller has to re-read to find out.
             _logger.LogWarning(
                 "reactor proposal redemption timed out after {Timeout}; the offer may already be spent",
@@ -529,7 +529,7 @@ public sealed class ReactorClient : IDisposable
     /// decided nothing. The leaf computes all of it from its own ledger; this relays it.
     /// </para>
     /// <para>
-    /// ⚠ <b>The window is the leaf's to bound.</b> It clamps <c>days</c> to its own retention, because
+    /// <b>The window is the leaf's to bound.</b> It clamps <c>days</c> to its own retention, because
     /// only it knows how far its ledger goes back. Re-clamping here against a figure this API guessed
     /// would refuse windows the leaf can in fact answer.
     /// </para>

@@ -11,7 +11,7 @@ namespace TheKrystalShip.Api.Tests;
 /// Reading what each leaf says is broken about itself.
 /// </summary>
 /// <remarks>
-/// ⚠ The half a probe cannot see. <c>/health</c> answers yes or no, so a leaf answering perfectly
+/// The half a probe cannot see. <c>/health</c> answers yes or no, so a leaf answering perfectly
 /// while unable to do part of its job reads as operational — and the two socket-activated leaves
 /// cannot be probed at all, because connecting to the socket is what starts them.
 /// </remarks>
@@ -84,7 +84,7 @@ public sealed class LeafDegradationTrackerTests : IDisposable
     [Fact]
     public void The_producer_prefix_is_translated_to_the_leaf_id_the_capability_model_uses()
     {
-        // ⚠ Two vocabularies: a producer is kgsm-monitor and the capability model calls the same leaf
+        // Two vocabularies: a producer is kgsm-monitor and the capability model calls the same leaf
         // monitor. One place owns the mapping.
         Journal("kgsm-assistant", Degraded("llm-backend"));
 

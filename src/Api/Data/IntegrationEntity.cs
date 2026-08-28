@@ -6,7 +6,7 @@ namespace TheKrystalShip.Api.Data;
 /// later). This is the API's first non-audit persisted entity; it lives in the same
 /// <see cref="AppDbContext"/>, so the existing <c>EnsureCreated</c> at startup creates it too.
 /// <para>
-/// ⚠ <b>EnsureCreated, NOT a migration</b> (the project's dev authority — see <see cref="AppDbContext"/>):
+/// <b>EnsureCreated, NOT a migration</b> (the project's dev authority — see <see cref="AppDbContext"/>):
 /// because <c>EnsureCreated</c> no-ops on an existing DB, adding this table means the dev DB file must be
 /// deleted once. Smoke <c>rm -f</c>s its own DB each run; tests use a fresh temp DB.
 /// </para>

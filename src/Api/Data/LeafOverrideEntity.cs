@@ -14,7 +14,7 @@ namespace TheKrystalShip.Api.Data;
 /// last-4 fingerprint), and never logged.
 /// </para>
 /// <para>
-/// ⚠ <b>EnsureCreated, NOT a migration</b> — <see cref="Services.Leaves.LeafOverrideStore"/> issues an
+/// <b>EnsureCreated, NOT a migration</b> — <see cref="Services.Leaves.LeafOverrideStore"/> issues an
 /// idempotent <c>CREATE TABLE IF NOT EXISTS</c> so the table lands on an existing DB without a wipe.
 /// </para>
 /// </summary>

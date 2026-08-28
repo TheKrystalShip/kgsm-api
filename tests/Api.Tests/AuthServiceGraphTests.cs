@@ -24,7 +24,7 @@ public sealed class AuthServiceGraphTests
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ⚠ <c>Api:UsersDbPath</c> defaults to <c>/var/lib/kgsm/auth/users.db</c> — the HOST's real account
+    /// <c>Api:UsersDbPath</c> defaults to <c>/var/lib/kgsm/auth/users.db</c> — the HOST's real account
     /// store, shared with every KGSM service on the box — and resolving <c>UserDirectory</c> opens it,
     /// which creates it. A graph test must not hand the operator a live accounts file nobody made, so
     /// it is redirected.
@@ -43,7 +43,7 @@ public sealed class AuthServiceGraphTests
                 {
                     ["Api:UsersDbPath"] = usersDbPath
                         ?? Path.Combine(Path.GetTempPath(), $"kgsm-api-graph-users-{Guid.NewGuid():N}.db"),
-                    // ⚠ Never the default. This factory is deliberately fake-free, so everything it does
+                    // Never the default. This factory is deliberately fake-free, so everything it does
                     // not override is the real host's — and booting the app now writes a leaf.ready to
                     // whatever journal it resolves. Measured: a test run put twenty-five ready/stopping
                     // pairs into this machine's live API journal, which reads as an API that restarted

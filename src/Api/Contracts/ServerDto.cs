@@ -68,7 +68,7 @@ public sealed record Server(
     string? Version,
     // native | container — the supervision discriminator (Instance.Runtime), lower-cased.
     //
-    // ⚠ NULL when the instance's library is not mounted. The engine omits the field entirely from an
+    // NULL when the instance's library is not mounted. The engine omits the field entirely from an
     // offline instance's payload (its config is on the disk that is gone), and kgsm-lib models that as a
     // nullable enum, so "not reported" arrives as null and travels here as null. A honest unknown is the
     // divergence from the frozen native|container pair, on the same rule as every other field here:
@@ -240,7 +240,7 @@ public sealed record Server(
     // registry could not be read (honest unknown — NOT "offline", which would report a disk as gone
     // because one engine invocation failed).
     //
-    // ⚠ A SEPARATE AXIS FROM Status, and never folded into it. Status is run-state, measured by the
+    // A SEPARATE AXIS FROM Status, and never folded into it. Status is run-state, measured by the
     // supervisor; this is whether the files exist to run at all. An offline library makes the run-state
     // unknowable rather than false — nothing can be read through a dangling symlink — so a surface
     // joins the two and shows this one first, exactly as it joins status with metrics. The engine

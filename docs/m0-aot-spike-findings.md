@@ -35,10 +35,10 @@ stripped ELF — no .NET runtime on the box).
 
 | Area | How it was proven | Result |
 |---|---|---|
-| **Kestrel WebSockets** | `app.UseWebSockets()` + `/ws` echo, driven by a real `ClientWebSocket` | `101` upgrade + byte-exact echo ✅ |
-| **Microsoft.Data.Sqlite** | `Microsoft.Data.Sqlite.Core 10.0.5` + `SQLitePCLRaw.bundle_e_sqlite3 2.1.11`, `Batteries_V2.Init()`, file-backed CREATE/INSERT/SELECT | round-trip ✅ |
-| **OAuth bearer flow** | Discord-shaped token + `/users/@me` JSON via source-gen; `HttpClient` + `FormUrlEncodedContent`; live `discord.com/api/v10/gateway` GET | parse ✅ · `→ 200` ✅ |
-| **Opaque session bearer** | mint 32-byte random token → persist in `sessions` table → validate `Authorization: Bearer` | mint/validate/reject ✅ |
+| **Kestrel WebSockets** | `app.UseWebSockets()` + `/ws` echo, driven by a real `ClientWebSocket` | `101` upgrade + byte-exact echo |
+| **Microsoft.Data.Sqlite** | `Microsoft.Data.Sqlite.Core 10.0.5` + `SQLitePCLRaw.bundle_e_sqlite3 2.1.11`, `Batteries_V2.Init()`, file-backed CREATE/INSERT/SELECT | round-trip |
+| **OAuth bearer flow** | Discord-shaped token + `/users/@me` JSON via source-gen; `HttpClient` + `FormUrlEncodedContent`; live `discord.com/api/v10/gateway` GET | parse ✓ · `→ 200` ✓ |
+| **Opaque session bearer** | mint 32-byte random token → persist in `sessions` table → validate `Authorization: Bearer` | mint/validate/reject |
 
 ## Decisions this retires (load-bearing for M2/M4/M5)
 

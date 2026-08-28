@@ -124,7 +124,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     /// password changed.
     /// </summary>
     /// <remarks>
-    /// ⚠ Takes no password parameter and never will. What is recorded is that a credential was set
+    /// Takes no password parameter and never will. What is recorded is that a credential was set
     /// and by whom — the only signal an account takeover leaves — and the credential is not part of
     /// that fact.
     /// </remarks>
@@ -173,7 +173,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     /// Records a configuration change applied to a leaf.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Keys only.</b> A leaf's configuration holds API keys, bot tokens and webhook URLs; what a
+    /// <b>Keys only.</b> A leaf's configuration holds API keys, bot tokens and webhook URLs; what a
     /// key was set to is not part of the fact that it changed.
     /// </remarks>
     public Task ServiceConfigAsync(
@@ -214,7 +214,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     /// Records an instance file being edited through the file browser.
     /// </summary>
     /// <remarks>
-    /// ⚠ The hash identifies the bytes; the bytes are never written here. An instance's configuration
+    /// The hash identifies the bytes; the bytes are never written here. An instance's configuration
     /// files hold rcon passwords, tokens and webhook URLs.
     /// </remarks>
     public Task FileWrittenAsync(
@@ -259,7 +259,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     /// there is no echo to ride and this is the only record either can have.
     /// </para>
     /// <para>
-    /// ⚠ <b>Never called for a verb whose failure the engine reports itself.</b> kgsm emits
+    /// <b>Never called for a verb whose failure the engine reports itself.</b> kgsm emits
     /// <c>server.update.failed</c> and <c>server.uninstall.failed</c>, which already become rows —
     /// a second one for the same fact cannot be deduplicated against an echo, which is the whole
     /// reason provenance is stamped instead of written.
@@ -296,7 +296,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     /// Records a library mutation the engine says nothing about — a rename, or an attempt that failed.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Never called for a successful add or remove.</b> kgsm emits <c>library.added</c> and
+    /// <b>Never called for a successful add or remove.</b> kgsm emits <c>library.added</c> and
     /// <c>library.removed</c> for those, which already become rows; a second one for the same fact cannot
     /// be deduplicated against an echo, which is the whole reason provenance is stamped instead of
     /// written.
@@ -325,7 +325,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     /// This API attributes nothing to itself.
     /// </summary>
     /// <remarks>
-    /// ⚠ Every row here records something a <em>person</em> did — signed in, changed an account's
+    /// Every row here records something a <em>person</em> did — signed in, changed an account's
     /// authority, applied a leaf's configuration. The call site knows who; this class never guesses,
     /// and a default of <c>system:api</c> would put the server's own name on somebody's sign-in. An
     /// actor that did not reach the call site is a real null, which reads as unknown rather than as

@@ -18,7 +18,7 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// pattern, and the reason these publish off the raw hook rather than a typed handler.
 /// </para>
 /// <para>
-/// ⚠ <b>Nothing here is composed.</b> <see cref="Error"/> is the engine's own stderr and
+/// <b>Nothing here is composed.</b> <see cref="Error"/> is the engine's own stderr and
 /// <see cref="ExitCode"/> its own number. A refused removal names the instances that blocked it in that
 /// stderr, and rewording it would throw away the only part an operator needs.
 /// </para>

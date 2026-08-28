@@ -275,7 +275,7 @@ public class PushActionCatalogTests
     private static ModerationCapability Can(bool kick, bool ban) => new(kick, ban, false, "name");
 
     /// <summary>
-    /// ⚠ A reactor offer gets no lock-screen button, and the absence is the design.
+    /// A reactor offer gets no lock-screen button, and the absence is the design.
     /// </summary>
     /// <remarks>
     /// Confirming one re-derives the condition on the leaf and shows the person what it found —
@@ -291,7 +291,7 @@ public class PushActionCatalogTests
     }
 
     /// <summary>
-    /// ⚠ Only the offer is announced, never the other three reactor events.
+    /// Only the offer is announced, never the other three reactor events.
     /// </summary>
     /// <remarks>
     /// A decision is a judgment nobody has to answer; an action taken alone is already done; a

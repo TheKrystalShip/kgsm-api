@@ -32,7 +32,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     }
 
     // A factory variant that registers a fake IWatchdogClient (the base leaves it unprovisioned/absent).
-    // ⚠ WithWebHostBuilder builds a DERIVED factory with its OWN random Api__DbPath + service provider —
+    // WithWebHostBuilder builds a DERIVED factory with its OWN random Api__DbPath + service provider —
     // different from the base factory. The session row MUST land in the derived factory's DB (the request
     // goes through the derived pipeline, whose SessionValidator queries the derived DB), so the token is
     // minted + inserted via the derived factory's Services (AuthTestFactory.MintTokenWithRow), NOTfactory.AccessToken

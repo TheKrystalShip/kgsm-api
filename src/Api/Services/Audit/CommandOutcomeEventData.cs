@@ -15,7 +15,7 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// could not tell which arrived.
 /// </para>
 /// <para>
-/// ⚠ <b>Nothing here is composed.</b> <see cref="Error"/> is the engine's own stderr and
+/// <b>Nothing here is composed.</b> <see cref="Error"/> is the engine's own stderr and
 /// <see cref="ExitCode"/> its own number; neither is reworded, and a run that said nothing leaves both
 /// null rather than gaining a sentence this API wrote.
 /// </para>

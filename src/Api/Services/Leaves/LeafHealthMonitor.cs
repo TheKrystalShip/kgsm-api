@@ -213,7 +213,7 @@ public sealed class LeafHealthMonitor : BackgroundService
     /// The status a leaf that answered its probe should carry, given what it says about itself.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>A probe answers yes or no, and a leaf can be answering perfectly while unable to do part of
+    /// <b>A probe answers yes or no, and a leaf can be answering perfectly while unable to do part of
     /// its job.</b> An assistant with a dead backend, a monitor serving a frozen frame and a scheduler
     /// that cannot reach the watchdog all pass their health check. <c>Degraded</c> is the state the
     /// contract has always had and nothing produced.

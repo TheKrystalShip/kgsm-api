@@ -96,7 +96,7 @@ public sealed class ServicesProvisioningController(
     /// </summary>
     /// <remarks>
     /// <para>
-    /// ⚠ <b>This API neither writes rule files nor judges rules.</b> The leaf owns its directory and is
+    /// <b>This API neither writes rule files nor judges rules.</b> The leaf owns its directory and is
     /// the only thing that knows what the running build can honour; a copy of that knowledge here is
     /// exactly how the panel and the leaf come to disagree about which rules are valid. So this
     /// authenticates the caller, names them to the leaf, and relays the answer — body and status —
@@ -129,7 +129,7 @@ public sealed class ServicesProvisioningController(
         if (string.IsNullOrWhiteSpace(rule))
             return BadRequest(new ErrorEnvelope(new ErrorBody("bad_request", "no rule to store")));
 
-        // ⚠ Built from the authenticated principal, never bound from the request. A caller-supplied
+        // Built from the authenticated principal, never bound from the request. A caller-supplied
         // name would let anybody author a rule as somebody else, and the leaf cannot tell the two
         // apart — it checks the shape and trusts whoever authenticated the person.
         string? actor = AuditPrincipal.ActorString(User);
@@ -160,7 +160,7 @@ public sealed class ServicesProvisioningController(
     /// The leaf's own answer, passed through.
     /// </summary>
     /// <remarks>
-    /// ⚠ Parsed only to re-serialise as JSON rather than as a quoted string; nothing here reads a
+    /// Parsed only to re-serialise as JSON rather than as a quoted string; nothing here reads a
     /// field. A refusal the leaf phrased in prose (its 400s are text) travels as text, because
     /// rewrapping it would replace the leaf's sentence with this API's guess at what it meant.
     /// </remarks>
@@ -186,7 +186,7 @@ public sealed class ServicesProvisioningController(
     /// <c>DELETE .../services/reactor/rules/{ruleId}</c> — remove a rule's file outright.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Deleting is not retiring, and the panel retires.</b> A retired rule keeps its file so the
+    /// <b>Deleting is not retiring, and the panel retires.</b> A retired rule keeps its file so the
     /// decisions it already made still resolve to a rule that can be named — a rule id is the actor on
     /// every one of them. This exists for a rule that was never meant to be, and it is why the panel's
     /// ordinary "turn this off" writes the rule back with <c>retired</c> set instead of calling here.

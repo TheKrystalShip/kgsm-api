@@ -17,7 +17,7 @@ namespace TheKrystalShip.Api.Tests;
 /// emptied before it is taken out.
 /// </summary>
 /// <remarks>
-/// ⚠ <b>There is still no force.</b> The engine refuses a library that holds instances, naming them, and
+/// <b>There is still no force.</b> The engine refuses a library that holds instances, naming them, and
 /// this API adds no pass-through — a panel button that deregistered a populated root would produce, in
 /// one click, the state the engine exists to prevent. Draining is the alternative, and it is what these
 /// pin: the target reaches the engine as given, the refusals come back in the engine's own words, and a

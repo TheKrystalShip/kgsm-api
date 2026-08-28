@@ -19,7 +19,7 @@ namespace TheKrystalShip.Api.Tests;
 /// proven and the dial itself honestly fails.
 /// </para>
 /// <para>
-/// ⚠ The route token is <c>verb</c> rather than <c>action</c>: MVC reserves that name for the action
+/// The route token is <c>verb</c> rather than <c>action</c>: MVC reserves that name for the action
 /// method, and a segment spelled <c>{action}</c> binds to the method's own name so the route never
 /// matches. A 404 from any of these is that mistake coming back.
 /// </para>

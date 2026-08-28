@@ -16,7 +16,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// the SPA is served perfectly from the same process.
 /// </para>
 /// <para>
-/// ⚠ <b>It reports on itself only.</b> Whether another leaf is well is
+/// <b>It reports on itself only.</b> Whether another leaf is well is
 /// <see cref="LeafDegradationTracker"/>'s answer, read from that leaf's own journal — this API stating
 /// something about a leaf in its own would be exactly the second answer able to disagree that the
 /// producer-from-location rule exists to prevent.
@@ -76,7 +76,7 @@ public sealed class ApiLifecycleReporter(
     /// Whether the store this API keeps its own records in can be reached.
     /// </summary>
     /// <remarks>
-    /// ⚠ Its loss is not visible from outside. The SPA is still served, every leaf is still probed and
+    /// Its loss is not visible from outside. The SPA is still served, every leaf is still probed and
     /// every capability still reported — while no audit row can be read or written and no session can
     /// be checked, which is a Control Panel that looks entirely healthy and refuses everybody.
     /// </remarks>

@@ -8,7 +8,7 @@ namespace TheKrystalShip.Api.Data;
 /// fabricated value — so config seeds the default and a <c>PATCH /hosts/{id}</c> overrides it live.
 /// <para>
 /// It joins <see cref="AuditEntry"/>/<see cref="IntegrationEntity"/>/<see cref="RawgEntry"/> as the API's
-/// own operational metadata (the domain itself is live-scraped, never stored). ⚠ <b>EnsureCreated, NOT a
+/// own operational metadata (the domain itself is live-scraped, never stored). <b>EnsureCreated, NOT a
 /// migration</b> (the project's dev authority — see <see cref="AppDbContext"/>): because
 /// <c>EnsureCreated</c> no-ops on an existing DB, <see cref="Services.Aggregation.HostSettingsStore"/> ALSO
 /// issues an idempotent <c>CREATE TABLE IF NOT EXISTS</c> so this table appears on an already-deployed host

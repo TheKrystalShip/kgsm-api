@@ -59,7 +59,7 @@ public sealed class EngineEventShapingTests
     /// actually made of now.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>This is the one that matters for what somebody sees.</b> A row reaches the panel twice: once
+    /// <b>This is the one that matters for what somebody sees.</b> A row reaches the panel twice: once
     /// pushed the moment it happens, and again when the page is read. The typed handler behind the live
     /// push never receives these fields — they sit on the envelope — so unless both halves apply them,
     /// a stop arrives grey and turns amber only on a reload, which reads as the panel being wrong about
@@ -253,7 +253,7 @@ public sealed class EngineEventShapingTests
 
         foreach (EventDescriptor descriptor in KgsmEventCatalog.All.Where(d => d.Weight == EventWeight.Fact))
         {
-            // ⚠ The one exception, and it is by name so adding another is a deliberate act. A leaf
+            // The one exception, and it is by name so adding another is a deliberate act. A leaf
             // reporting on its own state is a fact about a service, not somebody's action, and the
             // audit answers who did what. They have their own surface: the capability block reports
             // them as degraded with the component named. Rendering them here would also mean every
@@ -301,7 +301,7 @@ public sealed class EngineEventShapingTests
     /// A refusal for want of authority becomes a row, because it exists nowhere else.
     /// </summary>
     /// <remarks>
-    /// ⚠ The engine cannot hold this: nothing ran, so from its side nothing happened. Warn rather than
+    /// The engine cannot hold this: nothing ran, so from its side nothing happened. Warn rather than
     /// info — nothing broke, and somebody reached for something they could not do.
     /// </remarks>
     [Fact]
@@ -322,7 +322,7 @@ public sealed class EngineEventShapingTests
     }
 
     /// <summary>
-    /// ⚠ The two refusal reasons read differently, because they are different facts.
+    /// The two refusal reasons read differently, because they are different facts.
     /// </summary>
     /// <remarks>
     /// A host with actions switched off refuses everybody, which is a configuration state; a host with
@@ -364,7 +364,7 @@ public sealed class EngineEventShapingTests
     /// A corrected claim is about the assistant's honesty, so it targets nothing.
     /// </summary>
     /// <remarks>
-    /// ⚠ Naming a server here would file the model's own fabrication as something that happened to a
+    /// Naming a server here would file the model's own fabrication as something that happened to a
     /// machine, and it would surface on that server's timeline as though it had.
     /// </remarks>
     [Fact]
@@ -387,7 +387,7 @@ public sealed class EngineEventShapingTests
     /// An authoring run's close is blueprint-targeted and names no server.
     /// </summary>
     /// <remarks>
-    /// ⚠ The probe was a disposable instance that no longer exists. Carrying it as a serverId would put
+    /// The probe was a disposable instance that no longer exists. Carrying it as a serverId would put
     /// a row about a machine nobody has into the feed for one somebody does; it rides in meta instead,
     /// which is what ties this row to the twenty-odd install and uninstall rows the engine wrote.
     /// </remarks>
@@ -416,7 +416,7 @@ public sealed class EngineEventShapingTests
     }
 
     /// <summary>
-    /// ⚠ The bracket's opening half produces no row.
+    /// The bracket's opening half produces no row.
     /// </summary>
     /// <remarks>
     /// It is classified <c>Phase</c>, exactly like <c>server.install.started</c>: a step inside a

@@ -25,7 +25,7 @@ namespace TheKrystalShip.Api.Contracts;
 /// that a blueprint's figure overstates what these games really use has judged it for the selection
 /// they made. Absent ⇒ false, so the protection is what a caller gets by not asking.
 /// <para>
-/// ⚠ It does not create memory, and a batch is where that bites hardest: forcing a selection the node
+/// It does not create memory, and a batch is where that bites hardest: forcing a selection the node
 /// cannot fit does not fail one start, it invites the OOM killer to choose among everything running.
 /// </para>
 /// </param>

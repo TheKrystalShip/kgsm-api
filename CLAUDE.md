@@ -172,7 +172,7 @@ where a bounce would work.
 
 This host's own OAuth callback is **not** shared and stays `Api__DiscordRedirectUri`. Its **origin**
 is what every provider's two callbacks are built from — the paths are this API's own routes, so a
-host's public address is written once and two callbacks cannot name different origins. ⚠ A provider
+host's public address is written once and two callbacks cannot name different origins. A provider
 accepts only redirect URIs registered on the application, so **both** of a provider's callbacks have
 to be registered with it or linking is refused at the provider, where no log here sees it.
 
@@ -267,13 +267,13 @@ exactly one correct access path:
   **`Services/Leaves/SpeechLeafClient.cs`**, serving `GET /hosts/{id}/services/speech/status`.
   `Api__SpeechSocketPath` defaults to the standard path rather than being opt-in: systemd binds the
   socket whether or not the daemon runs, so the file's presence *is* the provisioning check.
-  ⚠ **Read on a page view, never polled, and never on a resting unit.** The daemon idle-exits to give
+  **Read on a page view, never polled, and never on a resting unit.** The daemon idle-exits to give
   back the ~1.6GB its models cost and **connecting to its socket is what starts it** — so there is no
   `LeafHealthMonitor` entry for speech, and the controller reads systemd first and answers
   `resting:true` without connecting when the unit is not active. What a resting host still reports is
   read here rather than asked for: the model files measured on disk and the configured voice, both
   resolved through `LeafConfigService` so no path or default is written down twice.
-  ⚠ **It also carries no Link on the Services board** (it is absent from `ProvisionableLeaf`). That axis
+  **It also carries no Link on the Services board** (it is absent from `ProvisionableLeaf`). That axis
   is a stored connection an admin can turn off, and speech has none to arm: this client runs on a page
   view, feeds no data flow, and the assistant service, the bot and a browser recording a voice note all
   reach the leaf directly. Socket activation is not the reason — the firewall is socket-activated too and
@@ -346,7 +346,7 @@ of leaves present.
   fabricated) outside a git checkout. **Full reference: `README.md` §Versioning.**
 - **Logging:** the ecosystem convention (`../logging-convention.md`) — the host does
   `ConfigureLogging(ClearProviders → AddSystemdConsole)`; levels come from the `appsettings.json`
-  `Logging` section + env (`Logging__LogLevel__Default`). ⚠ The notification-webhook `HttpClient`
+  `Logging` section + env (`Logging__LogLevel__Default`). The notification-webhook `HttpClient`
   keeps `.RemoveAllLoggers()` (Startup) — that's load-bearing secret-redaction, never drop it.
 - **Validation model:** each milestone ends at a **frontend gate** — agree the wire shapes
   first (`§6`), build + self-prove (smoke + a live leaf), then the frontend swaps its store
@@ -367,7 +367,7 @@ of leaves present.
   treat nothing in it as correct (it fabricates metrics).
 - **EF `EnsureCreated`, NOT migrations.** Greenfield/dev
   authority: the schema (`AuditEntry`) is created via `EnsureCreatedAsync` (no `__EFMigrationsHistory`),
-  and a schema change means **wiping the dev DB**, not adding a migration. ⚠ `EnsureCreated` **no-ops on
+  and a schema change means **wiping the dev DB**, not adding a migration. `EnsureCreated` **no-ops on
   an existing DB** — so after any entity change, delete the DB file (smoke `rm -f`s its own `SMOKE_DB`)
   or the new column/table silently won't exist and queries 500 at runtime, not build. Don't introduce
   `Migrations/` without re-deciding this.
@@ -377,7 +377,7 @@ of leaves present.
 - **`SuppressMapClientErrors=true`** (Startup): `[ApiController]` would otherwise turn a
   controller `NotFound()`/`BadRequest()` into RFC-9110 ProblemDetails. We suppress it so 4xx
   flow through `UseStatusCodePages` → the `{error}` envelope (one error shape everywhere).
-  ⚠ `SuppressMapClientErrors` only covers *result*-based 4xx — a model-binding/
+  `SuppressMapClientErrors` only covers *result*-based 4xx — a model-binding/
   validation `400` (malformed JSON, or a body field of the wrong type, e.g. `InstallRequest`'s typed
   `int?`/`bool?` reserved fields) is rejected by `[ApiController]` **before the action runs**, as
   `ValidationProblemDetails`. Startup's `ConfigureApiBehaviorOptions` therefore sets an

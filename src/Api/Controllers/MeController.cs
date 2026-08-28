@@ -57,7 +57,7 @@ public sealed class MeController(AppDbContext db, UserDirectory users, ApiOption
             return StatusCode(StatusCodes.Status401Unauthorized,
                 new ErrorEnvelope(new ErrorBody("unauthorized", "no session")));
 
-        // ⚠ The audit ActorName for a login is the BARE Discord username (e.g. "haru"), NOT the
+        // The audit ActorName for a login is the BARE Discord username (e.g. "haru"), NOT the
         // "discord:"-prefixed handle used elsewhere on this DTO (SessionUser.Id) — mirrors how
         // AuthController.RecordAuthAsync stamps Actor = new AuditActor(ActorKind.User, id.Username,
         // ActorProvider.Discord), and how GET /audit?actor=haru already filters. A fresh identity with

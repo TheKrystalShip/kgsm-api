@@ -48,7 +48,7 @@ public static class EngineEventShaping
     /// Whether <paramref name="type"/> is a leaf reporting on its own state.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>Not an audit row.</b> The audit answers who did what, and nobody did these — a leaf coming
+    /// <b>Not an audit row.</b> The audit answers who did what, and nobody did these — a leaf coming
     /// up, losing a component or going away is a fact about a service rather than somebody's action,
     /// and its actor is the leaf itself. They already have a surface: the capability block reports them
     /// as <c>degraded</c> with the component named. Rendering them here would also mean every deploy
@@ -82,7 +82,7 @@ public static class EngineEventShaping
         AuditWrite? write = item.Type switch
         {
             // -- what the assistant reports about ITSELF ---------------------------------------
-            // ⚠ Not a record of what it did: every action it performs is already an engine event,
+            // Not a record of what it did: every action it performs is already an engine event,
             // attributed to the person who asked. These are the turn that did NOT act, which leaves the
             // engine's record empty because from its side nothing happened.
             //
@@ -368,7 +368,7 @@ public static class EngineEventShaping
     /// <remarks>
     /// Server-targeted when the refused or proposed action named an instance, and untargeted when it did
     /// not — a refusal to read a file and a corrected claim are about the assistant, not about a machine.
-    /// ⚠ The actor and origin come off the envelope, which the leaf stamps from the same invocation the
+    /// The actor and origin come off the envelope, which the leaf stamps from the same invocation the
     /// engine's own events carry, so a refusal and the action it refused name one person by one string.
     /// </remarks>
     private static AuditWrite Assistant(
@@ -386,7 +386,7 @@ public static class EngineEventShaping
 
     /// <summary>The refusal reason, in words a person reads.</summary>
     /// <remarks>
-    /// ⚠ The two are very different facts and the row must not blur them: one host has actions switched
+    /// The two are very different facts and the row must not blur them: one host has actions switched
     /// off for everybody, the other has a person reaching past their tier. An unrecognised value is
     /// restated rather than guessed at.
     /// </remarks>

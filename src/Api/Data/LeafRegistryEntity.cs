@@ -10,7 +10,7 @@ namespace TheKrystalShip.Api.Data;
 /// reads each tick.
 /// <para>
 /// It joins <see cref="AuditEntry"/>/<see cref="HostSettingsEntity"/> as the API's own operational
-/// metadata. ⚠ <b>EnsureCreated, NOT a migration</b> (project dev authority — see <see cref="AppDbContext"/>):
+/// metadata. <b>EnsureCreated, NOT a migration</b> (project dev authority — see <see cref="AppDbContext"/>):
 /// because <c>EnsureCreated</c> no-ops on an existing DB, <see cref="Services.Leaves.LeafRegistry"/> ALSO
 /// issues an idempotent <c>CREATE TABLE IF NOT EXISTS</c> so this table appears on an already-deployed host
 /// <em>without</em> wiping the append-only audit log that shares the DB.

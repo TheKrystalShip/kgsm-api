@@ -101,7 +101,7 @@ public sealed class AssistantController(
         // context window; the user-id prefix stays server-authoritative, so this can never cross users.
         string? conversationId = SanitizeConversationId(body.ConversationId);
 
-        // ⚠ Composed field by field, NOT forwarded whole — so anything the SPA sends that is not named
+        // Composed field by field, NOT forwarded whole — so anything the SPA sends that is not named
         // here is dropped silently. A new turn field has to be added in both places or it never
         // reaches the assistant at all.
         var turnBody = new

@@ -57,7 +57,7 @@ public static class AuditQueries
     /// Excluding them here is what keeps the merge's two sources disjoint.
     /// </para>
     /// <para>
-    /// ⚠ <b>These are the spellings on disk, and they are the only correct ones for this set.</b> The
+    /// <b>These are the spellings on disk, and they are the only correct ones for this set.</b> The
     /// filter runs in SQL against the stored column, before a row is resolved to what its fact is
     /// called now (<see cref="StoredActionNames"/>), so the current names would match nothing and
     /// every frozen row would come back beside the journal's own copy of it.
@@ -395,7 +395,7 @@ public static class AuditQueries
     /// </summary>
     /// <remarks>
     /// A straight rename across a seam rather than a reinterpretation: the library reports what each
-    /// journal contributed, and this API relays it. ⚠ <c>Readable == false</c> covers both "the
+    /// journal contributed, and this API relays it. <c>Readable == false</c> covers both "the
     /// directory is not there" and "it could not be read" — a leaf that has never written an event has
     /// no journal directory yet, and this API cannot tell that from a permissions failure. Reporting
     /// them the same way is the honest option; claiming the leaf recorded nothing would be a fact

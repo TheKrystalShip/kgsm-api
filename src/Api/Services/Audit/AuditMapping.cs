@@ -42,7 +42,7 @@ public static class AuditMapping
     /// fallback (a human on the local host → <c>user</c>/<c>system</c>), and the literal <c>system</c>
     /// is an autonomous action.
     /// <para>
-    /// ⚠ <b>An unrecognized provider is not a person.</b> It keeps the name, leaves
+    /// <b>An unrecognized provider is not a person.</b> It keeps the name, leaves
     /// <see cref="AuditActor.Provider"/> null rather than coercing it to a value, and reads as
     /// <see cref="ActorKind.System"/> — because the one thing known about it is that nothing here can
     /// say who it is. Calling it a user would assert a human performed the act, which is the
@@ -802,7 +802,7 @@ public static class AuditMapping
     /// nothing is quiet rather than wrong, and keeps whatever the type-derived mapping gives it.
     /// </para>
     /// <para>
-    /// ⚠ <b>Both halves of the merged feed run through here.</b> A row pushed live and the same fact
+    /// <b>Both halves of the merged feed run through here.</b> A row pushed live and the same fact
     /// read back out of history are one event, and somebody who saw the first and then the second must
     /// not be shown two different colours for it. The live path reads these off the envelope its typed
     /// handler never receives (<see cref="EngineEnvelopeTracker"/>).
@@ -945,7 +945,7 @@ public static class AuditMapping
     /// Map a kgsm-monitor <c>host.threshold.cleared</c> event to a <c>host.threshold.clear</c> row.
     /// </summary>
     /// <remarks>
-    /// ⚠ <b>A clear is not always a recovery.</b> An episode that ended because its rule was retuned,
+    /// <b>A clear is not always a recovery.</b> An episode that ended because its rule was retuned,
     /// disabled or removed did not come back under its line — the value was never observed to come down at
     /// all. Saying "back to normal" for those would report a measurement nobody took, so the close reason
     /// picks the sentence.
@@ -1095,7 +1095,7 @@ public static class AuditMapping
 
     /// <summary>Map one of the six <c>user.*</c> events to its account action.</summary>
     /// <remarks>
-    /// ⚠ These are the trail's most sensitive rows: with the account store as this host's sole
+    /// These are the trail's most sensitive rows: with the account store as this host's sole
     /// authority, a tier change here is the ONLY way anybody's permissions ever move.
     /// </remarks>
     public static AuditWrite FromUserAccountEvent(UserAccountEventData d, string type, string hostId)
@@ -1196,7 +1196,7 @@ public static class AuditMapping
     }
 
     /// <summary>Map a <c>service.config_changed</c> event.</summary>
-    /// <remarks>⚠ Keys only. A leaf's configuration holds tokens and passwords.</remarks>
+    /// <remarks>Keys only. A leaf's configuration holds tokens and passwords.</remarks>
     public static AuditWrite FromServiceConfigEvent(ServiceConfigChangedEventData d, string hostId)
     {
         ArgumentNullException.ThrowIfNull(d);
@@ -1252,7 +1252,7 @@ public static class AuditMapping
     }
 
     /// <summary>Map a <c>file.written</c> event.</summary>
-    /// <remarks>⚠ Path, size and hash — never the content.</remarks>
+    /// <remarks>Path, size and hash — never the content.</remarks>
     public static AuditWrite FromFileWrittenEvent(FileWrittenEventData d, string hostId)
     {
         ArgumentNullException.ThrowIfNull(d);

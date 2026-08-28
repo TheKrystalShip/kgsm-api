@@ -182,7 +182,7 @@ public sealed class ApiOptions
     /// producers apart by which directory a line came from rather than by anything on the line. The
     /// audit page is the merge of every journal on the host, this one included.
     /// <para>
-    /// ⚠ The default is composed by the writer's layout rule from the producer id, <b>not</b> derived
+    /// The default is composed by the writer's layout rule from the producer id, <b>not</b> derived
     /// from where the database happens to live. Those coincide on a normal host and stop coinciding
     /// the moment somebody relocates the database — and a journal outside the scanned root is not
     /// reported as unreadable, it is simply not found, which is what a producer that has recorded
@@ -761,7 +761,7 @@ public sealed class ApiOptions
     /// the revocation surface (<c>Api__SessionsDisabled</c>, default <see langword="false"/>
     /// → sessions ON). When <see langword="true"/> the registry is inert — no per-request check,
     /// no <c>GET /auth/sessions</c>, no revoke endpoints (the M4·a stateless-JWT posture, an
-    /// escape hatch for debugging). ⚠ In-flight tokens under <c>DISABLED</c> are always alive
+    /// escape hatch for debugging). In-flight tokens under <c>DISABLED</c> are always alive
     /// (no <c>sid</c> check); only set this for a deliberate debugging window, never on a real
     /// host. <b>Default ON</b> like <see cref="AuthEnabled"/>.
     /// </summary>
@@ -790,7 +790,7 @@ public sealed class ApiOptions
     /// <summary>
     /// The session absolute-cap window in days (<c>Api__SessionsRefreshAbsoluteDays</c>,
     /// default 30, floor 1). A session row's <c>Expires = Created + this</c>. <b>No sliding</b>
-    /// on refresh (the cap stays absolute, per the original M4·a lock rationale) — D8. ⚠ Must
+    /// on refresh (the cap stays absolute, per the original M4·a lock rationale) — D8. Must
     /// stay in lockstep with <see cref="Services.Auth.SessionTokenService"/>'s refresh-token TTL:
     /// if you change one, change both. A mismatch means the registry treats alive tokens as
     /// dead (or vice versa) — the registry is the revocation authority, the JWT TTL is the mint
@@ -826,7 +826,7 @@ public sealed class ApiOptions
     /// </summary>
     /// <remarks>
     /// A separate address because the two flows end differently: one mints a session, the other
-    /// attaches a credential to an account that already exists. ⚠ A provider accepts only redirect
+    /// attaches a credential to an account that already exists. A provider accepts only redirect
     /// URIs registered on the application, so <b>this one has to be registered alongside the login
     /// callback</b> or a link is refused at the provider before it starts. That refusal is loud and
     /// names the URI.
