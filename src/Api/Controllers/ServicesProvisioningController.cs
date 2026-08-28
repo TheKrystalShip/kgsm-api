@@ -92,59 +92,142 @@ public sealed class ServicesProvisioningController(
     }
 
     /// <summary>
-    /// <c>PUT .../services/reactor/rules</c> — store the rules this host's reactor runs, point the leaf
-    /// at them and restart it onto them, then report what it made of them.
+    /// <c>PUT .../services/reactor/rules/{ruleId}</c> — store one rule, by asking the leaf to.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The write half of the rule editor. The reactor's socket is read-only — it publishes what a rule
-    /// may be made of and what one would decide, and never accepts one — so storing is this API's half:
-    /// it writes a file and restarts the unit through the grant it already holds for every other leaf
-    /// setting. Nothing off this host acquires the ability to tell a leaf what to think.
+    /// ⚠ <b>This API neither writes rule files nor judges rules.</b> The leaf owns its directory and is
+    /// the only thing that knows what the running build can honour; a copy of that knowledge here is
+    /// exactly how the panel and the leaf come to disagree about which rules are valid. So this
+    /// authenticates the caller, names them to the leaf, and relays the answer — body and status —
+    /// without an opinion of its own.
     /// </para>
     /// <para>
-    /// ⚠ <b>What a rule means is the leaf's judgement, not this API's.</b> The body is checked for being
-    /// a rules document and nothing more: which signals, operators and actions exist belongs to the
-    /// running build, and a second copy of that here is how the panel and the leaf come to disagree
-    /// about which rules are valid. The leaf's verdict is read back and returned as <c>problems</c>.
+    /// <b>A rule at a time, and nothing restarts.</b> The leaf applies the rule in process and the
+    /// others carry on undisturbed, so saving one rule is no longer an event in the life of the host.
     /// </para>
     /// <para>
-    /// ⚠ <b>Problems are not an error.</b> A file with one bad rule in it stores, and the rest runs — so
-    /// this answers <c>200</c> with the leaf's complaints rather than refusing the whole write, which
-    /// would make a partly-good file impossible to save and therefore impossible to fix.
+    /// <b>422 is the leaf refusing a rule</b>, with its reasons: nothing was written and nothing
+    /// changed. That is an answer to the caller rather than a failure of this relay, so it travels
+    /// as-is and the panel shows the problems beside the field that caused them.
     /// </para>
     /// <para>
-    /// <b>409, not 400, when this host is not wired to deliver it</b> — the request is fine and the host
-    /// is missing the leaf's override drop-in, the same distinction the config path makes.
+    /// <b>409, not 400, when this host is not wired to deliver it</b> — the request is fine and the
+    /// leaf is unreachable, the same distinction the config path makes.
     /// </para>
     /// </remarks>
-    [HttpPut("reactor/rules")]
-    public async Task<IActionResult> PutReactorRules(
-        string id, [FromServices] ReactorRulesService rules, CancellationToken ct)
+    [HttpPut("reactor/rules/{ruleId}")]
+    public async Task<IActionResult> PutReactorRule(
+        string id, string ruleId, [FromServices] ReactorClient reactor, CancellationToken ct)
     {
         if (!IsThisHost(id) || !catalog.IsConfigTarget("reactor"))
             return NotFound();
 
         using var reader = new StreamReader(Request.Body);
-        string body = await reader.ReadToEndAsync(ct);
+        string rule = await reader.ReadToEndAsync(ct);
 
+        if (string.IsNullOrWhiteSpace(rule))
+            return BadRequest(new ErrorEnvelope(new ErrorBody("bad_request", "no rule to store")));
+
+        // ⚠ Built from the authenticated principal, never bound from the request. A caller-supplied
+        // name would let anybody author a rule as somebody else, and the leaf cannot tell the two
+        // apart — it checks the shape and trusts whoever authenticated the person.
         string? actor = AuditPrincipal.ActorString(User);
-        ReactorRulesResult result = await rules.WriteAsync(body, actor, AuditOrigin.Api, ct);
-
-        if (!result.Ok)
+        if (string.IsNullOrWhiteSpace(actor))
         {
-            return result.IsConflict
-                ? StatusCode(StatusCodes.Status409Conflict,
-                    new ErrorEnvelope(new ErrorBody("conflict", result.ErrorMessage!)))
-                : StatusCode(StatusCodes.Status400BadRequest,
-                    new ErrorEnvelope(new ErrorBody("bad_request", result.ErrorMessage!)));
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new ErrorEnvelope(new ErrorBody("forbidden",
+                    "a rule records who wrote it, and this request names nobody")));
         }
 
-        return Ok(new ReactorRulesApplied(result.Path!, result.Problems, result.Live));
+        (string? body, int status) = await reactor.WriteRuleAsync(ruleId, rule, actor, ct);
+
+        if (status == 0)
+        {
+            return StatusCode(StatusCodes.Status409Conflict,
+                new ErrorEnvelope(new ErrorBody("conflict", "the reactor could not be reached")));
+        }
+
+        // Audited only when the leaf actually stored it. A refused rule changed nothing, and an audit
+        // row for it would read as an edit that happened.
+        if (status is >= 200 and < 300)
+            await AuditRuleAsync(ruleId, removed: false, ct);
+
+        return Relay(body, status);
+    }
+
+    /// <summary>
+    /// The leaf's own answer, passed through.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Parsed only to re-serialise as JSON rather than as a quoted string; nothing here reads a
+    /// field. A refusal the leaf phrased in prose (its 400s are text) travels as text, because
+    /// rewrapping it would replace the leaf's sentence with this API's guess at what it meant.
+    /// </remarks>
+    private IActionResult Relay(string? body, int status)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+            return StatusCode(status);
+
+        try
+        {
+            using System.Text.Json.JsonDocument parsed = System.Text.Json.JsonDocument.Parse(body);
+            return StatusCode(status, parsed.RootElement.Clone());
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return StatusCode(status,
+                new ErrorEnvelope(new ErrorBody(
+                    status == StatusCodes.Status404NotFound ? "not_found" : "bad_request", body)));
+        }
+    }
+
+    /// <summary>
+    /// <c>DELETE .../services/reactor/rules/{ruleId}</c> — remove a rule's file outright.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Deleting is not retiring, and the panel retires.</b> A retired rule keeps its file so the
+    /// decisions it already made still resolve to a rule that can be named — a rule id is the actor on
+    /// every one of them. This exists for a rule that was never meant to be, and it is why the panel's
+    /// ordinary "turn this off" writes the rule back with <c>retired</c> set instead of calling here.
+    /// </remarks>
+    [HttpDelete("reactor/rules/{ruleId}")]
+    public async Task<IActionResult> DeleteReactorRule(
+        string id, string ruleId, [FromServices] ReactorClient reactor, CancellationToken ct)
+    {
+        if (!IsThisHost(id) || !catalog.IsConfigTarget("reactor"))
+            return NotFound();
+
+        (string? body, int status) = await reactor.DeleteRuleAsync(ruleId, ct);
+
+        if (status == 0)
+        {
+            return StatusCode(StatusCodes.Status409Conflict,
+                new ErrorEnvelope(new ErrorBody("conflict", "the reactor could not be reached")));
+        }
+
+        if (status == StatusCodes.Status404NotFound)
+            return NotFound(new ErrorEnvelope(new ErrorBody("not_found", body ?? "no such rule")));
+
+        await AuditRuleAsync(ruleId, removed: true, ct);
+        return Relay(body, status);
     }
 
     private bool IsThisHost(string id) =>
         string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Records that somebody changed what this host's reactor is allowed to think.
+    /// </summary>
+    /// <remarks>
+    /// The rule id rather than its contents: a rule is edited through its own surface where the before
+    /// and after are both visible, and an audit row carrying a whole rule document would be unreadable
+    /// beside every other row. What the log is answering is who changed which rule, and when.
+    /// </remarks>
+    private Task AuditRuleAsync(string ruleId, bool removed, CancellationToken ct) =>
+        journal.ServiceConfigAsync(
+            "reactor", "Reactor", [$"rules/{ruleId}"], removed ? "removed" : "stored",
+            AuditPrincipal.ActorString(User) ?? "", AuditOrigin.Api, ct);
 
     private async Task AuditProvisioningAsync(string leaf, bool provisioned, CancellationToken ct)
     {

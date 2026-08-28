@@ -392,6 +392,95 @@ public sealed class ReactorClient : IDisposable
     /// </para>
     /// </remarks>
     /// <returns>The body and the leaf's status code, or <c>(null, 0)</c> when it could not be reached.</returns>
+    /// <summary>
+    /// Store one rule, by asking the leaf to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⚠ <b>This API does not write rule files and does not judge rules.</b> Which signals, operators
+    /// and actions exist belongs to the running build; a copy of that here is how the panel and the
+    /// leaf come to disagree about which rules are valid. The leaf validates against what it can
+    /// actually honour, stores only what passes, and answers with the verdict — which is relayed
+    /// verbatim, status code included.
+    /// </para>
+    /// <para>
+    /// A 422 from the leaf is a rule it refused: nothing was written and nothing changed. That is a
+    /// real answer to the caller rather than a failure of this relay, so it travels as-is.
+    /// </para>
+    /// </remarks>
+    public async Task<(string? Body, int Status)> WriteRuleAsync(
+        string ruleId, string ruleJson, string by, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
+            return (null, 0); // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            // The rule travels as the leaf's own document shape, with the actor beside it. Composed as
+            // text rather than through a DTO because this API has no opinion about a rule's contents
+            // and adding one here would be a second schema to keep in step with the build.
+            string payload =
+                $"{{\"rule\":{ruleJson},\"by\":{JsonSerializer.Serialize(by, ReactorRelayJson.Options)}}}";
+
+            using var content = new StringContent(
+                payload, System.Text.Encoding.UTF8, "application/json");
+
+            using CancellationTokenSource bound = Bounded(ct, PreviewWithin);
+            using HttpResponseMessage resp = await _http
+                .PutAsync($"/rules/{Uri.EscapeDataString(ruleId)}", content, bound.Token)
+                .ConfigureAwait(false);
+
+            string body = await resp.Content.ReadAsStringAsync(bound.Token).ConfigureAwait(false);
+            return (body, (int)resp.StatusCode);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("reactor rule write timed out after {Timeout}", PreviewWithin);
+            return (null, 0);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "reactor rule write failed");
+            return (null, 0);
+        }
+    }
+
+    /// <summary>
+    /// Remove a rule's file, by asking the leaf to.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Deleting is not retiring.</b> A retired rule keeps its file so the decisions it already made
+    /// still resolve to a rule that can be named; deleting one leaves those naming an id nothing can
+    /// describe. The panel retires by storing the rule with <c>retired</c> set — this is for a rule that
+    /// was never meant to exist.
+    /// </remarks>
+    public async Task<(string? Body, int Status)> DeleteRuleAsync(string ruleId, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
+            return (null, 0);
+
+        try
+        {
+            using CancellationTokenSource bound = Bounded(ct, PreviewWithin);
+            using HttpResponseMessage resp = await _http
+                .DeleteAsync($"/rules/{Uri.EscapeDataString(ruleId)}", bound.Token)
+                .ConfigureAwait(false);
+
+            string body = await resp.Content.ReadAsStringAsync(bound.Token).ConfigureAwait(false);
+            return (body, (int)resp.StatusCode);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("reactor rule delete timed out after {Timeout}", PreviewWithin);
+            return (null, 0);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "reactor rule delete failed");
+            return (null, 0);
+        }
+    }
+
     public async Task<(string? Body, int Status)> RedeemProposalAsync(
         string handle, bool confirm, string by, CancellationToken ct)
     {

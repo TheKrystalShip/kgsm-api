@@ -586,7 +586,6 @@ public class Startup(IConfiguration configuration)
 
         // The write half of the reactor's rule editor. The leaf's socket is read-only, so storing a rule
         // is this API's half: it writes the file and restarts the unit through the grant above.
-        services.AddSingleton<ReactorRulesService>();
 
         // M6·a — alerts (the condition-mirror). The engine is ALWAYS-ON (like LeafHealthMonitor, not gated
         // on WS subscribers): GET /alerts must serve fresh truth regardless of who is listening. It polls

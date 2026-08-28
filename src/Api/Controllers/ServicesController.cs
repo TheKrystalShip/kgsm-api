@@ -500,53 +500,6 @@ public sealed class ServicesController(
     }
 
     /// <summary>
-    /// <c>GET /hosts/{id}/services/reactor/rules</c> → the rules this API has stored for the reactor,
-    /// verbatim, for editing. <b>404 when this host runs no reactor.</b>
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// ⚠ <b>What is stored and what is running are different questions.</b> This is the first; the
-    /// second is <c>reactor/status</c>, which reports the rules the leaf could honour and names in
-    /// <c>problems</c> the ones it could not. An editor built only on the status would silently drop the
-    /// rule somebody is halfway through fixing, because a rule the leaf refuses appears in neither of
-    /// its lists.
-    /// </para>
-    /// <para>
-    /// <c>managed:false</c> is the ordinary answer on a host nobody has edited: the leaf runs the rules
-    /// it ships, its status reports them, and there is nothing here yet. It is not an empty rule set.
-    /// </para>
-    /// </remarks>
-    [HttpGet("reactor/rules")]
-    public async Task<IActionResult> GetReactorRules(
-        string id, [FromServices] ReactorRulesService rules, CancellationToken ct)
-    {
-        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
-            return NotFound();
-
-        if (HttpContext.RequestServices.GetService(typeof(ReactorClient)) is not ReactorClient reactor
-            || !reactor.IsProvisioned)
-            return NotFound();
-
-        string? stored = await rules.ReadAsync(ct).ConfigureAwait(false);
-
-        if (stored is null)
-            return Ok(new StoredReactorRules(false, rules.Path, null));
-
-        try
-        {
-            using JsonDocument parsed = JsonDocument.Parse(stored);
-            return Ok(new StoredReactorRules(true, rules.Path, parsed.RootElement.Clone()));
-        }
-        catch (JsonException)
-        {
-            // Stored and unreadable is a real state — somebody edited the file by hand — and reporting
-            // it as "nothing stored" would invite an editor to overwrite what they were trying to fix.
-            return Error(StatusCodes.Status409Conflict, "conflict",
-                "the stored rules file could not be parsed; fix or replace it");
-        }
-    }
-
-    /// <summary>
     /// <c>POST /hosts/{id}/services/reactor/preview</c> → what a proposed rule would decide about this
     /// host right now, relayed verbatim. <b>404 when this host runs no reactor</b>; <b>503</b> when it
     /// runs one that would not answer.
@@ -567,7 +520,7 @@ public sealed class ServicesController(
     /// </remarks>
     [HttpPost("reactor/preview")]
     public async Task<IActionResult> PreviewReactorRule(
-        string id, [FromServices] ReactorRulesService rules, CancellationToken ct)
+        string id, CancellationToken ct)
     {
         if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
             return NotFound();

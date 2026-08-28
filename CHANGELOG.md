@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a reactor rule is stored by the leaf, one at a time (0.148.0)
+
+`PUT /hosts/{id}/services/reactor/rules/{ruleId}` and `DELETE …/{ruleId}` relay to the reactor's own
+socket. This API neither writes rule files nor judges rules: the leaf owns its directory and is the
+only thing that knows what the running build can honour, so a copy of that judgement here is how the
+panel and the leaf come to disagree about which rules are valid. What travels back is the leaf's
+answer — body and status — including a `422` naming what it refused, which is a real answer rather
+than a failure of the relay.
+
+A rule is written on its own and nothing restarts, so saving one is no longer an event in the life of
+the host. Authorship is built from the authenticated principal and never bound from the request; a
+caller this API cannot name is refused before the leaf is asked.
+
+Reading is `reactor/status`, which reports the rules the leaf could honour and names in `problems`
+the ones it could not.
+
 ### Added — the panel can answer a reactor proposal (0.147.0)
 
 `GET /hosts/{id}/services/reactor/proposals` relays what this host is offering and what recently became
