@@ -162,6 +162,17 @@ public static class ActorKind
     public const string User = "user";
     public const string System = "system";
     public const string Token = "token";
+
+    /// <summary>
+    /// A rule that decided on its own — the reactor's actor.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Not <see cref="System"/>, and never <see cref="User"/>.</b> Nobody performed it and no
+    /// standing configuration produced it: something judged a condition and concluded that this should
+    /// happen. A reader has to be able to ask which rule, and reading it as a person would claim
+    /// somebody acted at three in the morning. Who wrote the rule is a separate field on the event.
+    /// </remarks>
+    public const string Rule = "rule";
 }
 
 /// <summary>Identity providers (architecture.html §3·d <c>actor.provider</c>).</summary>
@@ -175,6 +186,16 @@ public static class ActorProvider
     // "api" (a token, not a person) and from "system" (nobody). Beyond the doc's set; the frontend
     // accepts unknown providers forward-compat.
     public const string Local = "local";
+
+    /// <summary>
+    /// A rule the reactor evaluated. The name after it is the rule's id.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>Not an identity provider, and that is why it needs naming.</b> Every other value here
+    /// answers "how do we know who this is"; this one answers "nobody — a rule concluded it". Left
+    /// unrecognised, the prefix would be discarded and the rule id would read as a person's name.
+    /// </remarks>
+    public const string Rule = "rule";
 }
 
 /// <summary>Target kinds (architecture.html §3·d <c>target.kind</c>).</summary>
@@ -227,12 +248,23 @@ public static class AuditOrigin
     /// </summary>
     public const string Notification = "notification";
 
+    /// <summary>
+    /// The reactor deciding on its own — no surface, and nobody in front of one.
+    /// </summary>
+    /// <remarks>
+    /// Its own value rather than <see cref="System"/>, which is the scheduler and the engine's own
+    /// housekeeping: those run because somebody configured a time, where this one runs because a rule
+    /// read a condition and concluded something. A reader looking at what happened overnight needs to
+    /// tell "the clock came round" from "something judged this worth doing".
+    /// </remarks>
+    public const string Reactor = "reactor";
+
     /// <summary>True if <paramref name="origin"/> is one of the closed set (used to normalize an event's
     /// origin; an unrecognized value is treated as null — never fabricated). ⚠ A value stamped on an
     /// engine call but missing here comes back off the echo as <see langword="null"/>: this is the gate
     /// the whole provenance passes through, not a display list.</summary>
     public static bool IsKnown(string? origin) =>
-        origin is Ui or Assistant or Discord or System or Api or Notification;
+        origin is Ui or Assistant or Discord or System or Api or Notification or Reactor;
 
     /// <summary>True if a client may declare <paramref name="origin"/> on the command path — everything
     /// except the two this host stamps for itself. A caller naming <see cref="Notification"/> would be

@@ -52,12 +52,50 @@ public sealed class AuditMappingTests
     }
 
     [Fact]
-    public void ParseActor_UnknownProvider_KeepsNameButNullProvider()
+    public void ParseActor_LocalPrefixed_IsUserViaLocal()
     {
-        // Don't fabricate a provider enum value for a prefix we don't recognize.
+        // A KGSM account signed in with its own password. The provider says how this host knows them,
+        // and dropping it files every local sign-in as an identity from nowhere beside the Discord
+        // ones that keep theirs.
+        AuditActor a = AuditMapping.ParseActor("local:claude");
+        Assert.Equal(ActorKind.User, a.Kind);
+        Assert.Equal("claude", a.Name);
+        Assert.Equal(ActorProvider.Local, a.Provider);
+    }
+
+    /// <summary>
+    /// ⚠ A rule is not a person, and reading it as one is the fabrication this path exists to prevent.
+    /// </summary>
+    /// <remarks>
+    /// The reactor stamps <c>rule:&lt;id&gt;</c>. Nobody performed the act — a rule read a condition
+    /// and concluded it — so a row claiming a user did it would assert somebody was at a keyboard at
+    /// three in the morning. Who WROTE the rule rides beside the actor on the event, never in its place.
+    /// </remarks>
+    [Fact]
+    public void ParseActor_RulePrefixed_IsARuleAndNeverAUser()
+    {
+        AuditActor a = AuditMapping.ParseActor("rule:give_up_backup");
+        Assert.Equal(ActorKind.Rule, a.Kind);
+        Assert.Equal("give_up_backup", a.Name);
+        Assert.Equal(ActorProvider.Rule, a.Provider);
+        Assert.NotEqual(ActorKind.User, a.Kind);
+    }
+
+    /// <summary>
+    /// ⚠ An unrecognized prefix keeps the name and claims no person.
+    /// </summary>
+    /// <remarks>
+    /// The one thing known about it is that nothing here can say who it is, which is
+    /// <see cref="ActorKind.System"/> rather than <see cref="ActorKind.User"/> — a prefix nobody has
+    /// taught this build about is exactly the case where guessing "a human" is least defensible.
+    /// </remarks>
+    [Fact]
+    public void ParseActor_UnknownProvider_KeepsNameAndClaimsNoPerson()
+    {
         AuditActor a = AuditMapping.ParseActor("github:octocat");
         Assert.Equal("octocat", a.Name);
         Assert.Null(a.Provider);
+        Assert.Equal(ActorKind.System, a.Kind);
     }
 
     [Theory]
@@ -77,6 +115,10 @@ public sealed class AuditMappingTests
     [InlineData("API", "api")]          // case-insensitive
     [InlineData("  discord ", "discord")]
     [InlineData("system", "system")]
+    // ⚠ Its own origin rather than "system", which is the scheduler and the engine's housekeeping:
+    // those run because somebody configured a time, this one because a rule read a condition. Left
+    // out, it normalizes to null and every decision reads as having come from nowhere.
+    [InlineData("reactor", "reactor")]
     public void NormalizeOrigin_Known_Passes(string raw, string expected) =>
         Assert.Equal(expected, AuditMapping.NormalizeOrigin(raw));
 

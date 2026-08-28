@@ -217,6 +217,47 @@ public sealed class ReactorClient : IDisposable
     }
 
     /// <summary>
+    /// The events a rule may wake on (<c>GET /triggers</c>), verbatim. Null on the same terms as the
+    /// status read.
+    /// </summary>
+    /// <remarks>
+    /// Read off what the leaf's ledger has actually observed, with each type's producer and how often
+    /// it fires — a query over this host's own history rather than a property of the build, which is
+    /// why it is a separate call from the catalog. Relayed rather than reshaped.
+    /// </remarks>
+    public async Task<string?> GetTriggersJsonAsync(int days, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
+            return null; // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            // Omitted rather than sent as zero when the caller named no window, for the same reason the
+            // decision review omits it: the leaf owns both the default and the ceiling on it.
+            string path = days > 0 ? $"/triggers?days={days}" : "/triggers";
+
+            using CancellationTokenSource bound = Bounded(ct, AnswerWithin);
+            using HttpResponseMessage resp = await _http.GetAsync(path, bound.Token).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("reactor /triggers returned {Status}", (int)resp.StatusCode);
+                return null;
+            }
+            return await resp.Content.ReadAsStringAsync(bound.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("reactor /triggers timed out after {Timeout}", AnswerWithin);
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "reactor /triggers failed");
+            return null;
+        }
+    }
+
+    /// <summary>
     /// What a proposed rule would decide about this host right now (<c>POST /preview</c>), verbatim.
     /// </summary>
     /// <remarks>

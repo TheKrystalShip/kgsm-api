@@ -459,6 +459,47 @@ public sealed class ServicesController(
     }
 
     /// <summary>
+    /// <c>GET /hosts/{id}/services/reactor/triggers?days=N</c> → the events a rule may wake on, read
+    /// off what this host has actually observed: each type with its producer, how many were seen, when
+    /// it was last seen, and the weekly rate. <b>404 when this host runs no reactor</b>; <b>503</b> when
+    /// it runs one that would not answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Derived from the leaf's ledger rather than from any list held here, so a producer that joins
+    /// this host becomes available to build rules on the day it starts writing. ⚠ <b>The rate is what
+    /// makes it useful</b>: a rule built on something that fires two hundred times a week is a
+    /// different proposition from one built on something that fires twice, and a person should see
+    /// that before they build it.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>The window is bounded by the leaf</b>, which clamps <c>days</c> to its own ledger
+    /// retention — the only place that figure is known.
+    /// </para>
+    /// </remarks>
+    [HttpGet("reactor/triggers")]
+    public async Task<IActionResult> GetReactorTriggers(
+        string id, [FromQuery] int days, CancellationToken ct)
+    {
+        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
+            return NotFound();
+
+        if (HttpContext.RequestServices.GetService(typeof(ReactorClient)) is not ReactorClient reactor
+            || !reactor.IsProvisioned)
+            return NotFound();
+
+        if (days < 0)
+            return Error(StatusCodes.Status400BadRequest, "invalid_range", "days must not be negative");
+
+        string? json = await reactor.GetTriggersJsonAsync(days, ct).ConfigureAwait(false);
+        if (json is null)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the reactor didn't answer for the events it has seen");
+
+        return Content(json, "application/json");
+    }
+
+    /// <summary>
     /// <c>GET /hosts/{id}/services/reactor/rules</c> → the rules this API has stored for the reactor,
     /// verbatim, for editing. <b>404 when this host runs no reactor.</b>
     /// </summary>

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a rule is not a person, and a local sign-in has a provider (`0.146.0`)
+
+The reactor stamps `rule:<id>` as the actor on every decision it writes, and those rows were reading
+back as a **user** named after the rule — asserting that somebody was at a keyboard at three in the
+morning. A rule is its own actor kind now, drawn on the not-a-person surface rather than with an
+account avatar that renders initials for a rule id.
+
+`local:<name>` — a KGSM account signed in with its own password — was falling through the same arm
+and losing its provider, so every local sign-in read as an identity from nowhere beside the Discord
+ones that keep theirs.
+
+⚠ **An unrecognized prefix no longer claims a person.** The one thing known about it is that nothing
+here can say who it is, which is `system`, not `user`: a prefix nobody has taught this build about is
+exactly the case where guessing "a human" is least defensible.
+
+`reactor` is an origin. Its own value rather than `system`, which is the scheduler and the engine's
+housekeeping — those run because somebody configured a time, this one because a rule read a condition
+and concluded something, and a reader looking at what happened overnight needs to tell those apart.
+An origin outside the closed set normalizes to null, so every reactor decision was reading as having
+come from nowhere.
+
 ### Added — the reactor's rules, read and written (`0.145.0`)
 
 Four surfaces behind `/hosts/{id}/services/reactor`, which together are what a rule editor is built

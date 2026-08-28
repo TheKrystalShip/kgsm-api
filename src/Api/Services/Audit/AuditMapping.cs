@@ -37,11 +37,17 @@ public static class AuditMapping
     /// Parse the kgsm event's flat <c>Actor</c> string into the structured <see cref="AuditActor"/>.
     /// The convention is <c>provider:name</c> (e.g. <c>discord:haru</c>, the command path stamps this);
     /// <see cref="AuditActor.Kind"/> is <em>derived</em> from the provider — Discord identities are
-    /// humans (<c>user</c>), an <c>api</c> identity is a <c>token</c>, <c>system</c> is autonomous.
-    /// A bare string with no prefix is kgsm's OS-user fallback (a human on the local host →
-    /// <c>user</c>/<c>system</c>), and the literal <c>system</c> is an autonomous action. An
-    /// unrecognized provider keeps the name but leaves <see cref="AuditActor.Provider"/> null rather
-    /// than coerce it to an enum value (never fabricate).
+    /// humans (<c>user</c>), an <c>api</c> identity is a <c>token</c>, <c>system</c> is autonomous, and
+    /// <c>rule</c> is a rule the reactor evaluated. A bare string with no prefix is kgsm's OS-user
+    /// fallback (a human on the local host → <c>user</c>/<c>system</c>), and the literal <c>system</c>
+    /// is an autonomous action.
+    /// <para>
+    /// ⚠ <b>An unrecognized provider is not a person.</b> It keeps the name, leaves
+    /// <see cref="AuditActor.Provider"/> null rather than coercing it to a value, and reads as
+    /// <see cref="ActorKind.System"/> — because the one thing known about it is that nothing here can
+    /// say who it is. Calling it a user would assert a human performed the act, which is the
+    /// fabrication this whole path exists to prevent.
+    /// </para>
     /// </summary>
     public static AuditActor ParseActor(string? flat)
     {
@@ -58,10 +64,18 @@ public static class AuditMapping
             return provider switch
             {
                 ActorProvider.Discord => new AuditActor(ActorKind.User, name, ActorProvider.Discord),
+                // A KGSM account signed in with its own password — a person, and the provider says how
+                // this host knows them. Dropping it would file every local sign-in as an identity from
+                // nowhere, beside the Discord ones that keep theirs.
+                ActorProvider.Local => new AuditActor(ActorKind.User, name, ActorProvider.Local),
                 ActorProvider.Api => new AuditActor(ActorKind.Token, name, ActorProvider.Api),
                 ActorProvider.System => new AuditActor(ActorKind.System, name, ActorProvider.System),
-                // A named provider we don't recognize: keep the name, but don't invent a provider.
-                _ => new AuditActor(ActorKind.User, name, null),
+                // The name is a rule id. Nobody performed this: a rule read a condition and concluded
+                // it. Who WROTE the rule rides beside the actor on the event, never in place of it.
+                ActorProvider.Rule => new AuditActor(ActorKind.Rule, name, ActorProvider.Rule),
+                // A named provider we don't recognize: keep the name, don't invent a provider, and do
+                // not claim a person — the one thing known is that nothing here can say who this is.
+                _ => new AuditActor(ActorKind.System, name, null),
             };
         }
 
