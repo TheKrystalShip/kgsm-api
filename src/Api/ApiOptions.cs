@@ -158,7 +158,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// Path to the host's <c>kgsm.sh</c> entrypoint — the single C#↔engine chokepoint kgsm-lib
-    /// shells (instances, run-state). Default: the AUR-packaged symlink <c>/usr/bin/kgsm</c>.
+    /// shells (instances, run-state). Default: the packaged symlink <c>/usr/bin/kgsm</c>.
     /// Empty ⇒ the engine is not configured (a misconfiguration: <c>/servers</c> is empty + logged).
     /// </summary>
     public required string KgsmPath { get; init; }

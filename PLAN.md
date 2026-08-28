@@ -220,7 +220,7 @@ wiring* lands first.
   from `GetAll`, run-state/version from `GetAllStatuses(fast:true)`, metrics by id from the monitor
   snapshot; the two blocking kgsm-lib spawns run on the thread pool concurrently with the async
   scrape), `ServersController`. kgsm-lib is **engine/base, not a leaf**: provisioned-by-default at
-  the AUR-packaged `Api__KgsmPath` (`/usr/bin/kgsm`); an unconfigured engine degrades to an
+  the packaged `Api__KgsmPath` (`/usr/bin/kgsm`); an unconfigured engine degrades to an
   empty list + a one-time log (no §4·b "engine" capability). `IInstanceService` (transient) is
   resolved per-request from the provider. `blueprint` is the clean id (strips the unified-blueprint
   `.bp.yaml`, not just the last extension). Status/metrics are independent: a stopped server with no
@@ -1028,7 +1028,7 @@ running). Omitted as unsourceable (fabrication is what scrapped the old api): `p
 Keys are always present with explicit nulls so the SPA binds a stable shape.
 
 **Wiring.** kgsm-lib is **engine/base, not a leaf** (keystone §4): the api co-locates with a kgsm,
-so it is provisioned-by-default at the AUR-packaged path (`Api__KgsmPath=/usr/bin/kgsm`); an
+so it is provisioned-by-default at the packaged path (`Api__KgsmPath=/usr/bin/kgsm`); an
 unconfigured engine is a *misconfiguration* surfaced as an empty `/servers` + a one-time log, NOT a
 §4·b "engine" capability (there is none). `IInstanceService` is process-based (it shells `kgsm.sh`),
 so the kgsm event journal (`Api__KgsmJournalDir`) is only a registration formality here — the event
