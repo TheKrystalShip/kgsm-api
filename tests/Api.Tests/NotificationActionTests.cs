@@ -8,6 +8,7 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Integrations;
 using TheKrystalShip.Api.Services.Integrations.WebPush;
 using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -272,6 +273,57 @@ public class PushActionCatalogTests
             subject, player);
 
     private static ModerationCapability Can(bool kick, bool ban) => new(kick, ban, false, "name");
+
+    /// <summary>
+    /// ⚠ A reactor offer gets no lock-screen button, and the absence is the design.
+    /// </summary>
+    /// <remarks>
+    /// Confirming one re-derives the condition on the leaf and shows the person what it found —
+    /// sometimes that the thing is no longer applicable, which is the whole safety argument. A tap that
+    /// authorised it from a lock screen would skip exactly that reading. The push exists to get somebody
+    /// to open the offer before it expires, which the notification's own tap already does.
+    /// </remarks>
+    [Fact]
+    public void A_reactor_offer_is_opened_rather_than_answered_from_a_lock_screen()
+    {
+        Assert.Empty(PushActionCatalog.For(Event("reactor_offer", null)));
+        Assert.Empty(PushActionCatalog.For(Event("reactor_offer", "factorio-01")));
+    }
+
+    /// <summary>
+    /// ⚠ Only the offer is announced, never the other three reactor events.
+    /// </summary>
+    /// <remarks>
+    /// A decision is a judgment nobody has to answer; an action taken alone is already done; a
+    /// resolution is somebody having answered, which would announce their own tap back to them. The
+    /// offer is the one with something for a person to do — and the one whose whole point is reaching
+    /// somebody who is not looking, because an unanswered offer expires.
+    /// </remarks>
+    [Fact]
+    public void Only_the_reactors_offer_is_announced()
+    {
+        Assert.Equal("reactor_offer",
+            NotificationCatalog.CatalogIdForAction(KgsmEventCatalog.NameOf<ReactorProposedEventData>()));
+
+        Assert.Null(NotificationCatalog.CatalogIdForAction(KgsmEventCatalog.NameOf<ReactorDecidedEventData>()));
+        Assert.Null(NotificationCatalog.CatalogIdForAction(KgsmEventCatalog.NameOf<ReactorResolvedEventData>()));
+        Assert.Null(NotificationCatalog.CatalogIdForAction(KgsmEventCatalog.NameOf<ReactorActedEventData>()));
+    }
+
+    /// <summary>
+    /// An offer arrives by default, like everything the fleet does on its own.
+    /// </summary>
+    /// <remarks>
+    /// The two opt-in events are bounded by how popular a server is; this one is bounded by how often a
+    /// rule fires, which an operator already controls by writing the rule. Defaulting it off would mean
+    /// staging an offer and being the only one who knows.
+    /// </remarks>
+    [Fact]
+    public void An_offer_is_announced_unless_somebody_switches_it_off()
+    {
+        Assert.True(NotificationCatalog.IsKnown("reactor_offer"));
+        Assert.True(NotificationCatalog.DefaultRule("reactor_offer").Enabled);
+    }
 
     [Fact]
     public void An_available_update_offers_to_apply_it()

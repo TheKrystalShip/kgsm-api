@@ -117,3 +117,35 @@ public sealed class ReactorRulesTests
         Assert.Empty(live);
     }
 }
+
+/// <summary>
+/// The one judgement the proposal relay makes on its own: who a confirmation is attributed to.
+/// </summary>
+/// <remarks>
+/// ⚠ <b>Everything else about a proposal is the leaf's.</b> Whether the condition still holds, whether
+/// the handle is redeemable, what the action does — all of it is re-derived there, and a second opinion
+/// here would be a copy of a judgement that can only be made where the rules are. What this API owes is
+/// that a confirmation names the person who actually authorised it.
+/// </remarks>
+public sealed class ReactorProposalRelayTests
+{
+    /// <summary>
+    /// ⚠ The identity travels in the shape the leaf reads, spelled the way the leaf reads it.
+    /// </summary>
+    /// <remarks>
+    /// The leaf refuses a confirmation that names nobody, and a body whose one field was capitalised
+    /// differently would reach it as a confirmation that names nobody — a 400 from a spelling, on the
+    /// one call in this relay that changes the host.
+    /// </remarks>
+    [Fact]
+    public void A_confirmation_carries_who_is_confirming_under_the_name_the_leaf_reads()
+    {
+        string body = System.Text.Json.JsonSerializer.Serialize(
+            new ReactorRedemptionBody("local:claude"), ReactorRelayJson.Options);
+
+        using System.Text.Json.JsonDocument parsed = System.Text.Json.JsonDocument.Parse(body);
+
+        Assert.Equal("local:claude", parsed.RootElement.GetProperty("by").GetString());
+        Assert.Single(parsed.RootElement.EnumerateObject());
+    }
+}

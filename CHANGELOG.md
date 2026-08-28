@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the panel can answer a reactor proposal (0.147.0)
+
+`GET /hosts/{id}/services/reactor/proposals` relays what this host is offering and what recently became
+of its offers. `POST .../proposals/{handle}/confirm` and `.../dismiss` redeem one. All three sit at
+operator with the rest of the services controller, and confirming is operator **because that is what
+performing the action directly requires** — a proposal must not be a cheaper route to a backup or a
+restore than asking for one.
+
+⚠ **Who is confirming comes from the authenticated principal and never from the request body.** The
+leaf takes any `provider:name` it is handed and cannot tell a real one from a supplied one, so a request
+this API cannot attribute to an account is refused here with 403 rather than relayed with a placeholder.
+
+⚠ **The body carries redemption handles, and a handle is the capability** — anything holding one can ask
+for the action it names. That is why the read is operator-gated rather than viewer.
+
+The leaf's status codes are carried rather than re-derived: 404 for a handle nothing carries, 409 for one
+already answered or expired, 503 for a world that would not answer, and 200 for every proper ending —
+including `no_longer_applicable`, which is the condition having resolved itself before anybody answered
+and is the safety property working rather than a failure. A caller renders the body's `outcome`.
+
+⚠ **A redemption that times out does not mean nothing happened.** The leaf claims a proposal before it
+performs, so a slow backup and a refused one look the same from here; the 503 message sends the caller
+back to the list rather than inviting a retry.
+
+`reactor_offer` joins the notification catalog, so a staged offer reaches a phone. It is the only one
+of the reactor's four events that is announced: a decision is a judgment nobody has to answer, an action
+taken alone is already done, and a resolution is somebody having answered — which would announce their
+own tap back to them. It is also the one whose whole point is reaching somebody who is not looking,
+because an unanswered offer expires. It arrives by default, like everything else the fleet does on its
+own.
+
+⚠ **An offer gets no lock-screen button, and the absence is the design.** Confirming re-derives the
+condition on the leaf and shows the person what it found — sometimes that the thing is no longer
+applicable, which is the whole safety argument — and a tap that authorised it from a lock screen would
+skip exactly that reading. The push exists to get somebody to *open* the offer before it expires, which
+the notification's own tap already does.
+
+Pinned to `TheKrystalShip.KGSM.Lib` 8.7.0, which classifies `reactor.proposed` and `reactor.resolved`
+so the audit and event surfaces read them typed.
+
 ### Fixed — a rule is not a person, and a local sign-in has a provider (`0.146.0`)
 
 The reactor stamps `rule:<id>` as the actor on every decision it writes, and those rows were reading

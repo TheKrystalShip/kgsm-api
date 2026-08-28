@@ -593,6 +593,127 @@ public sealed class ServicesController(
     }
 
     /// <summary>
+    /// <c>GET /hosts/{id}/services/reactor/proposals?days=N</c> → what this host is currently offering
+    /// and what recently became of its offers, relayed verbatim. <b>404 when this host runs no
+    /// reactor</b>; <b>503</b> when it runs one that would not answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An offer is a rule that fired in propose mode: it found a condition, described what it would do,
+    /// and did nothing. Each carries the sentence the decision was made with, which is what a person
+    /// actually decides on — a confirm dialog without it asks somebody to authorise an action on trust.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>The body carries redemption handles, and a handle is the capability.</b> Operator, with the
+    /// rest of this controller, and that is the floor rather than a convenience: anything holding a
+    /// handle can ask for the action it names.
+    /// </para>
+    /// <para>
+    /// The open and recent halves come back in one call because reading them separately would show them
+    /// a moment apart — an offer that lapsed between the two would appear in neither.
+    /// </para>
+    /// </remarks>
+    [HttpGet("reactor/proposals")]
+    public async Task<IActionResult> GetReactorProposals(string id, int? days, CancellationToken ct)
+    {
+        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
+            return NotFound();
+
+        if (HttpContext.RequestServices.GetService(typeof(ReactorClient)) is not ReactorClient reactor
+            || !reactor.IsProvisioned)
+            return NotFound();
+
+        string? json = await reactor.GetProposalsJsonAsync(days ?? 0, ct).ConfigureAwait(false);
+        if (json is null)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the reactor didn't answer for its proposals");
+
+        return Content(json, "application/json");
+    }
+
+    /// <summary>
+    /// <c>POST /hosts/{id}/services/reactor/proposals/{handle}/confirm</c> → authorise a staged action.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Operator, because that is what performing the action directly requires.</b> Confirming a
+    /// backup or a restore is asking for a backup or a restore, and a proposal must not be a cheaper
+    /// route to either — so the floor is the action's own, neither lower nor invented for proposals.
+    /// </para>
+    /// <para>
+    /// ⚠ <b>The identity is taken from the authenticated principal and never from the body.</b> An
+    /// action a person authorised has to name the person who actually authorised it, and the leaf
+    /// cannot tell a caller-supplied name from a real one — it checks the shape and trusts whoever
+    /// authenticated them.
+    /// </para>
+    /// <para>
+    /// The leaf's status codes are relayed rather than flattened, and <b>200 covers more than success</b>:
+    /// <c>no_longer_applicable</c> is the condition having resolved itself before anybody answered,
+    /// which is the safety property working and not a failure. The body's <c>outcome</c> is what a
+    /// surface renders. <b>503</b> is a world that would not answer — the offer is still open and
+    /// trying again later is right.
+    /// </para>
+    /// </remarks>
+    [HttpPost("reactor/proposals/{handle}/confirm")]
+    public Task<IActionResult> ConfirmReactorProposal(string id, string handle, CancellationToken ct) =>
+        RedeemAsync(id, handle, confirm: true, ct);
+
+    /// <summary>
+    /// <c>POST /hosts/{id}/services/reactor/proposals/{handle}/dismiss</c> → decline a staged action.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is attempted and the world is not re-read to decide it: a person saying no is answering
+    /// the offer rather than the world, and it stays a no whatever the world has since done.
+    /// </remarks>
+    [HttpPost("reactor/proposals/{handle}/dismiss")]
+    public Task<IActionResult> DismissReactorProposal(string id, string handle, CancellationToken ct) =>
+        RedeemAsync(id, handle, confirm: false, ct);
+
+    /// <summary>Redeems a handle as the authenticated caller, and relays what the leaf said.</summary>
+    private async Task<IActionResult> RedeemAsync(
+        string id, string handle, bool confirm, CancellationToken ct)
+    {
+        if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
+            return NotFound();
+
+        if (HttpContext.RequestServices.GetService(typeof(ReactorClient)) is not ReactorClient reactor
+            || !reactor.IsProvisioned)
+            return NotFound();
+
+        // ⚠ Refused rather than relayed with a placeholder. The leaf would take any provider:name it
+        // was handed, so a request that cannot name its caller has to stop here — an unattributable
+        // confirmation is an action on this host that nobody can be shown to have asked for.
+        string? by = AuditPrincipal.ActorString(User);
+        if (string.IsNullOrWhiteSpace(by))
+        {
+            return Error(StatusCodes.Status403Forbidden, "unattributable",
+                "this request cannot be attributed to an account, and a confirmation has to name one");
+        }
+
+        (string? body, int status) =
+            await reactor.RedeemProposalAsync(handle, confirm, by, ct).ConfigureAwait(false);
+
+        if (body is null)
+        {
+            // ⚠ Not "nothing happened". The leaf claims a proposal before it performs, so this can be a
+            // slow action rather than a refused one — which is why the message sends the caller back to
+            // the list instead of inviting a retry.
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the reactor didn't answer; re-read the proposals to see whether it was spent");
+        }
+
+        // The leaf's own code, carried rather than re-derived: 404, 409, 503 and 200 each mean
+        // something distinct there, and mapping them here would be a second opinion about an answer
+        // this API did not form.
+        return new ContentResult
+        {
+            Content = body,
+            ContentType = "application/json",
+            StatusCode = status == 0 ? StatusCodes.Status502BadGateway : status,
+        };
+    }
+
+    /// <summary>
     /// <c>GET /hosts/{id}/services/reactor/decisions?days=N</c> → what the reactor made of what it saw,
     /// relayed verbatim: what each rule concluded and how often, the busiest rolling hour of fired
     /// decisions, how far apart a rule's repeats on one subject were, the rules that decided nothing,

@@ -1,7 +1,26 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text.Json;
 
 namespace TheKrystalShip.Api.Services.Leaves;
+
+/// <summary>Who is answering a proposal, in the shape the leaf takes it.</summary>
+/// <remarks>
+/// ⚠ <b>Built here from the authenticated principal, never bound from the request.</b> A caller-supplied
+/// name would let anybody sign anybody else's confirmation, and the leaf has no way to tell the two
+/// apart — it checks the shape and trusts whoever authenticated the person.
+/// </remarks>
+internal sealed record ReactorRedemptionBody(string By)
+{
+    [System.Text.Json.Serialization.JsonPropertyName("by")]
+    public string By { get; init; } = By;
+}
+
+/// <summary>The one serializer setting this relay needs, so the leaf reads what it expects.</summary>
+internal static class ReactorRelayJson
+{
+    public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+}
 
 /// <summary>
 /// The kgsm-reactor leaf client: the API's read seam onto the reactor's status socket.
@@ -304,6 +323,108 @@ public sealed class ReactorClient : IDisposable
         catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
         {
             _logger.LogDebug(ex, "reactor /preview failed");
+            return (null, 0);
+        }
+    }
+
+    /// <summary>
+    /// What this host is offering, and what recently became of its offers
+    /// (<c>GET /proposals</c>), verbatim.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>The body carries redemption handles, so this is operator-gated on the way out.</b> A handle
+    /// is the capability: anything holding one can ask for the action it names. The leaf will not act on
+    /// one without a named caller and the API will not hand one to a caller it has not authorised, and
+    /// both halves are needed — the leaf cannot know who anybody is, and the API cannot re-derive the
+    /// condition.
+    /// </remarks>
+    public async Task<string?> GetProposalsJsonAsync(int days, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
+            return null; // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            string path = days > 0 ? $"/proposals?days={days}" : "/proposals";
+
+            using CancellationTokenSource bound = Bounded(ct, AnswerWithin);
+            using HttpResponseMessage resp = await _http.GetAsync(path, bound.Token).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("reactor /proposals returned {Status}", (int)resp.StatusCode);
+                return null;
+            }
+            return await resp.Content.ReadAsStringAsync(bound.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogDebug("reactor /proposals timed out after {Timeout}", AnswerWithin);
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "reactor /proposals failed");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Redeems a proposal handle — confirm or dismiss — as <paramref name="by"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// ⚠ <b>The one call here that changes the host, and the identity it carries is not the caller's to
+    /// choose.</b> <paramref name="by"/> comes from the authenticated principal, never from the request
+    /// body: an action a person authorised has to name the person who actually authorised it, and a
+    /// caller-supplied name would let anybody sign anybody else's confirmation.
+    /// </para>
+    /// <para>
+    /// Confirming can take as long as the action does — a backup of a large world is minutes — so it
+    /// gets the preview budget rather than the two seconds a question gets. ⚠ Timing out here does not
+    /// mean nothing happened: the leaf claims the proposal before it performs, so the offer is spent
+    /// and re-reading <c>/proposals</c> is what says how it went.
+    /// </para>
+    /// <para>
+    /// The status travels with the body because the leaf's codes are meaningful and distinct — 404 for
+    /// a handle nothing carries, 409 for one already answered or expired, 503 for a world that would not
+    /// answer, and 200 for every proper ending including "no longer applicable", which is the safety
+    /// property working rather than a failure.
+    /// </para>
+    /// </remarks>
+    /// <returns>The body and the leaf's status code, or <c>(null, 0)</c> when it could not be reached.</returns>
+    public async Task<(string? Body, int Status)> RedeemProposalAsync(
+        string handle, bool confirm, string by, CancellationToken ct)
+    {
+        if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
+            return (null, 0); // disconnected at runtime: honest absent, no request.
+
+        try
+        {
+            string verb = confirm ? "confirm" : "dismiss";
+            using var content = new StringContent(
+                JsonSerializer.Serialize(new ReactorRedemptionBody(by), ReactorRelayJson.Options),
+                System.Text.Encoding.UTF8, "application/json");
+
+            using CancellationTokenSource bound = Bounded(ct, PreviewWithin);
+            using HttpResponseMessage resp = await _http
+                .PostAsync($"/proposals/{Uri.EscapeDataString(handle)}/{verb}", content, bound.Token)
+                .ConfigureAwait(false);
+
+            string body = await resp.Content.ReadAsStringAsync(bound.Token).ConfigureAwait(false);
+            return (body, (int)resp.StatusCode);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // ⚠ Not "nothing happened". The leaf claims a proposal before performing, so a timeout here
+            // is a slow action rather than a refused one, and the caller has to re-read to find out.
+            _logger.LogWarning(
+                "reactor proposal redemption timed out after {Timeout}; the offer may already be spent",
+                PreviewWithin);
+            return (null, 0);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or SocketException)
+        {
+            _logger.LogDebug(ex, "reactor proposal redemption failed");
             return (null, 0);
         }
     }

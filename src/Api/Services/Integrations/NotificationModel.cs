@@ -89,6 +89,7 @@ public static class NotificationCatalog
         new("leaf_up", "Service came back", "A KGSM service that was down is answering again."),
         new("restart_soon", "Scheduled restart due", "A running server is minutes away from its scheduled restart."),
         new("awaiting_approval", "Account awaiting approval", "Somebody signed in for the first time and cannot do anything until an admin approves them (user.provisioned)."),
+        new("reactor_offer", "Reactor offer", "A reactor rule staged an action and is waiting for somebody to confirm or dismiss it (reactor.proposed)."),
     ];
 
     /// <summary>
@@ -152,6 +153,14 @@ public static class NotificationCatalog
         var a when a == KgsmEventCatalog.NameOf<InstanceBackupCreatedData>() => "backup",
         var a when a == KgsmEventCatalog.NameOf<HostThresholdBreachedData>() => "threshold_breach",
         var a when a == KgsmEventCatalog.NameOf<HostThresholdClearedData>() => "threshold_clear",
+
+        // ⚠ The offer, and never its resolution. `reactor.proposed` is the only one of the reactor's
+        // four events with anything for a person to do: a decision is a judgment nobody has to answer,
+        // an action taken alone is already done, and a resolution is somebody having answered — which
+        // would announce their own tap back to them. This is also the one event on this host whose
+        // whole point is reaching somebody who is not looking, because an unanswered offer expires.
+        var a when a == KgsmEventCatalog.NameOf<ReactorProposedEventData>() => "reactor_offer",
+
         _ => null,
     };
 }
