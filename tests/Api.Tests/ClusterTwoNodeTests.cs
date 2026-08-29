@@ -420,7 +420,7 @@ public sealed class ClusterNodeFactory(
                 ["Api:ClusterPollMs"] = pollMs.ToString(CultureInfo.InvariantCulture),
             };
             if (advertiseUrl is not null)
-                settings["Api:ClusterAdvertiseUrl"] = advertiseUrl;
+                settings["Api:PublicBaseUrl"] = advertiseUrl;
             if (corsOrigins is not null)
                 settings["Api:CorsOrigins"] = corsOrigins;
             config.AddInMemoryCollection(settings);

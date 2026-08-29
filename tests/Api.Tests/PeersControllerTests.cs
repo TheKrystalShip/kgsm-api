@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 
@@ -80,6 +81,7 @@ public sealed class PeersControllerTests : IClassFixture<AuthTestFactory>
                 capabilities,
                 candidates = new[] { new { url = $"https://{nodeId}.test", client = true } },
                 incarnation = 0,
+                protocol = ClusterProtocol.Current,
             },
             youAre = (object?)null,
             panelOrigins = Array.Empty<string>(),

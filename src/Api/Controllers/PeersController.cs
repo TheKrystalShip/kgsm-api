@@ -376,6 +376,9 @@ public sealed class PeersController(
         PeerAddOutcome.NotCluster => Error(StatusCodes.Status422UnprocessableEntity, "peer_not_cluster",
             "remote node does not advertise the cluster capability"),
 
+        PeerAddOutcome.ProtocolMismatch => Error(StatusCodes.Status409Conflict, "protocol_mismatch",
+            "the two nodes speak different cluster protocol versions — upgrade both to the same build"),
+
         PeerAddOutcome.InsecureTransport => Error(StatusCodes.Status422UnprocessableEntity, "insecure_transport",
             "a public address must be https — the cluster secret authenticates but does not encrypt"),
 

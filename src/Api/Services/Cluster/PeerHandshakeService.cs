@@ -32,6 +32,11 @@ public enum PeerAddOutcome
     /// <summary>The candidate's <c>apiVersion</c> doesn't match this node's (<c>409 version_mismatch</c>).</summary>
     VersionMismatch,
 
+    /// <summary>The candidate speaks a different node-to-node record version
+    /// (<c>409 protocol_mismatch</c>). The routes match, so nothing else would have caught it, and what
+    /// follows a silent join is a peer whose gossip arrives half-empty.</summary>
+    ProtocolMismatch,
+
     /// <summary>The candidate is this node (<c>409 peer_is_self</c>) — a node is not its own peer, and a
     /// roster row for self would make the mesh gossip with a mirror.</summary>
     IsSelf,
@@ -128,6 +133,9 @@ public sealed class PeerHandshakeService
 
         if (!string.Equals(card.ApiVersion, ApiInfo.ApiVersion, StringComparison.Ordinal))
             return PeerAddOutcome.VersionMismatch;
+
+        if (card.Protocol != ClusterProtocol.Current)
+            return PeerAddOutcome.ProtocolMismatch;
 
         foreach (NodeCandidate candidate in card.Candidates ?? [])
         {
@@ -401,6 +409,7 @@ public sealed class PeerHandshakeService
             "peer_is_self" => PeerAddOutcome.IsSelf,
             "version_mismatch" => PeerAddOutcome.VersionMismatch,
             "peer_not_cluster" => PeerAddOutcome.NotCluster,
+            "protocol_mismatch" => PeerAddOutcome.ProtocolMismatch,
             "insecure_transport" => PeerAddOutcome.InsecureTransport,
             _ => PeerAddOutcome.Unreachable,
         };

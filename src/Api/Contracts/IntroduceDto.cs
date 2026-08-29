@@ -13,16 +13,36 @@ namespace TheKrystalShip.Api.Contracts;
 public sealed record NodeCandidate(string Url, bool Client);
 
 /// <summary>
+/// The version of the node-to-node record shapes — the introduce exchange and the gossip roster.
+/// </summary>
+/// <remarks>
+/// Distinct from <see cref="ApiInfo.ApiVersion"/>, which is the frozen <c>/api/v1</c> route segment and
+/// stays put across builds. Two nodes can serve the same routes and still disagree about what a
+/// <see cref="SyncMember"/> contains, and that disagreement is silent: the fields one side does not send
+/// simply arrive empty, so a peer joins and then quietly cannot be reached. This number is what makes the
+/// refusal loud instead. Raise it whenever a record on the wire between nodes changes shape.
+/// </remarks>
+public static class ClusterProtocol
+{
+    /// <summary>The protocol this build speaks.</summary>
+    public const int Current = 1;
+}
+
+/// <summary>
 /// Everything one node needs to know about another (<c>PLAN-peers.md</c> P0.6) — the payload of the
 /// symmetric introduce exchange, and the body of <c>GET /peers/identity</c>'s answer.
 /// </summary>
+/// <param name="Protocol">The node-to-node record version this node speaks
+/// (<see cref="ClusterProtocol.Current"/>). A card from a build that predates the field carries
+/// <c>0</c>, which is a mismatch, which is the point.</param>
 public sealed record NodeCard(
     string NodeId,
     string ApiVersion,
     string Build,
     IReadOnlyList<string> Capabilities,
     IReadOnlyList<NodeCandidate> Candidates,
-    long Incarnation);
+    long Incarnation,
+    int Protocol = 0);
 
 /// <summary>
 /// An address one node reports back to the other: "this is where I reached you."

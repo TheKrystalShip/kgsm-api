@@ -15,9 +15,10 @@ namespace TheKrystalShip.Api.Services.Cluster;
 /// a panel (which a peer then proved answers), and the scheme and host a browser arrived on.
 /// </para>
 /// <para>
-/// Configuration still wins when it is present: <c>Api__ClusterAdvertiseUrl</c>, <c>Api__PublicBaseUrl</c>
-/// and <c>Api__ClusterGossipUrl</c> are merged in ahead of anything learned, which is what lets an operator
-/// correct a topology where reflection reports the wrong thing. They are read from options on every
+/// Configuration still wins when it is present: <c>Api__PublicBaseUrl</c> — this host's public address
+/// behind a reverse proxy, which is the same fact a peer needs — and <c>Api__ClusterGossipUrl</c>, an
+/// address only other nodes use, are merged in ahead of anything learned. That is what lets an operator
+/// correct a topology where reflection reports the wrong thing. Both are read from options on every
 /// resolve rather than copied into the table, so config stays the single statement of itself.
 /// </para>
 /// </summary>
@@ -78,7 +79,6 @@ public sealed class SelfIdentityStore(IServiceScopeFactory scopeFactory, ApiOpti
             seen[url] = new NodeCandidate(url, client);
         }
 
-        Offer(options.ClusterAdvertiseUrl, client: true);
         Offer(options.PublicBaseUrl, client: true);
         Offer(options.ClusterGossipUrl, client: false);
 
@@ -100,6 +100,13 @@ public sealed class SelfIdentityStore(IServiceScopeFactory scopeFactory, ApiOpti
             .Where(f => string.Equals(f.Kind, SelfFactKinds.Origin, StringComparison.Ordinal))
             .Select(f => f.Value)];
     }
+
+    /// <summary>
+    /// Load what this node knows about itself into memory. Called once at startup, because the CORS check
+    /// reads the cache synchronously on the request path and a cold cache reads as "nothing learned" — which
+    /// would leave a node that HAS learned an origin answering as though it had not.
+    /// </summary>
+    public Task PrimeAsync(CancellationToken ct) => FactsAsync(ct);
 
     /// <summary>The cached origins, or null when nothing has been loaded yet. Lets the CORS check answer
     /// synchronously without blocking a request thread on the DB; a cold cache falls through to the

@@ -29,5 +29,6 @@ public sealed class NodeCardSource(
             hostIdentity.Build,
             NodeCapabilities.Current(leafHealth.Current, options.ClusterEnabled),
             await selfIdentity.CandidatesAsync(ct).ConfigureAwait(false),
-            selfIncarnation.Current);
+            selfIncarnation.Current,
+            ClusterProtocol.Current);
 }

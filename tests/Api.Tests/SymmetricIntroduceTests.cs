@@ -69,7 +69,8 @@ public sealed class SymmetricIntroduceTests
                 "0.0.0+test",
                 cluster ? ["cluster"] : ["monitor"],
                 [new NodeCandidate(candidate, Client: true)],
-                0);
+                0,
+                ClusterProtocol.Current);
 
             // Asked as the initiator (validating what came back) and as the receiver (validating what
             // arrived): one function, so one answer.
@@ -79,6 +80,31 @@ public sealed class SymmetricIntroduceTests
                 new IntroduceExchange(card, null, []), observedAddress: null, default);
             Assert.Equal(expected, received);
             Assert.Null(answer);
+        }
+        finally { DeleteBestEffort(db); }
+    }
+
+    [Fact]
+    public async Task ABuildSpeakingADifferentRecordVersionIsRefusedRatherThanJoined()
+    {
+        string db = NewDbPath("protocol");
+        try
+        {
+            await using var node = new ClusterNodeFactory("node-a", "host-a", Secret, dbPath: db);
+            PeerHandshakeService handshake = node.Services.GetRequiredService<PeerHandshakeService>();
+
+            // Same routes, same capability, same api version — everything the join used to look at. The
+            // records on the wire between nodes are what differ, and nothing else would notice.
+            var card = new NodeCard(
+                "node-b", ApiInfo.ApiVersion, "0.0.0+test", ["cluster"],
+                [new NodeCandidate("https://node-b.test", Client: true)], 0,
+                ClusterProtocol.Current + 1);
+
+            Assert.Equal(PeerAddOutcome.ProtocolMismatch, handshake.Validate(card));
+
+            // A card from a build that predates the field carries 0, and is refused the same way.
+            var older = card with { Protocol = 0 };
+            Assert.Equal(PeerAddOutcome.ProtocolMismatch, handshake.Validate(older));
         }
         finally { DeleteBestEffort(db); }
     }
@@ -249,6 +275,43 @@ public sealed class SymmetricIntroduceTests
             Assert.Equal("http://node-b", b.Url);
         }
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
+    }
+
+    [Fact]
+    public async Task ALearnedOriginAnswersCorsOnANodeThatHasJustStarted()
+    {
+        const string panel = "https://panel.example";
+        string db = NewDbPath("cors-cold");
+        try
+        {
+            // A node that learned the origin during an earlier run of the process.
+            await using (var first = new ClusterNodeFactory(
+                "node-a", "host-a", Secret, dbPath: db, corsOrigins: "https://unrelated.example"))
+            {
+                using HttpClient warm = first.CreateClient();   // force the host to build
+                await warm.GetAsync("/health");
+                await first.Services.GetRequiredService<SelfIdentityStore>()
+                    .RecordPanelOriginAsync(panel, default);
+            }
+
+            // A cold start over the same store. The CORS check reads its cache synchronously, so the
+            // knowledge has to be in memory before the first request — not after whatever happens to touch
+            // the store first, which on a node with no peers is nothing at all.
+            await using var second = new ClusterNodeFactory(
+                "node-a", "host-a", Secret, dbPath: db, corsOrigins: "https://unrelated.example");
+            using HttpClient client = second.CreateClient();
+
+            var probe = new HttpRequestMessage(HttpMethod.Get, "/health");
+            probe.Headers.Add("Origin", panel);
+            HttpResponseMessage allowed = await client.SendAsync(probe);
+            Assert.Equal(panel, Assert.Single(allowed.Headers.GetValues("Access-Control-Allow-Origin")));
+
+            var stranger = new HttpRequestMessage(HttpMethod.Get, "/health");
+            stranger.Headers.Add("Origin", "https://somewhere.else");
+            HttpResponseMessage refused = await client.SendAsync(stranger);
+            Assert.False(refused.Headers.Contains("Access-Control-Allow-Origin"));
+        }
+        finally { DeleteBestEffort(db); }
     }
 
     // ── 5. The panel origin travels with the join ────────────────────────────────────────────────────

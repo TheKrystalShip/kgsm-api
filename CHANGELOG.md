@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a version on the records nodes exchange (0.151.0)
+
+`apiVersion` is the frozen `/api/v1` route segment and does not move between builds, so it cannot
+tell two nodes that they disagree about what a gossip record contains — and that disagreement is
+silent, because the fields one side does not send simply arrive empty and the peer joins, then
+quietly cannot be reached. The node card carries a protocol number of its own, and a mismatch is a
+`409 protocol_mismatch` at the join.
+
+### Changed — one key joins a cluster, and it is written down (0.151.0)
+
+`Api__ClusterAdvertiseUrl` is gone. It stated the same fact as `Api__PublicBaseUrl` — this host's
+public address behind a reverse proxy — and two knobs that must agree with nothing enforcing it is a
+drift waiting to happen. `Api__PublicBaseUrl` seeds the browser-reachable candidate; a node that has
+neither learns its address from being introduced. `Api__ClusterGossipUrl` stays, because an address
+only other nodes use is a genuinely different thing and is never handed to a browser.
+
+`deploy/kgsm-api.env.example` documents clustering, which it never did: the one key, how to generate
+it, that nothing else is needed, and how to roll it without downtime.
+
+### Fixed — a learned panel origin actually answers CORS (0.151.0)
+
+The CORS check reads the learned panel origins from an in-memory cache on the request path, and that
+cache was filled only as a side effect of gossip or a join. On a node with no peers nothing ever
+touched it, so an unloaded cache read as "nothing learned" and the node kept answering every origin —
+the permissive default — while holding the exact origin it should have been restricted to. The store
+is read once at startup, before the first request is served.
+
 ### Changed — a node learns its own address instead of being told it (0.150.0)
 
 Joining a cluster needs one configured value, `Api__ClusterSecret`. A node cannot work out its own

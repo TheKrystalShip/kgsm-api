@@ -562,18 +562,10 @@ public sealed class ApiOptions
     //     defaults so existing ApiOptions literals need no update. ------------------------------------------
 
     /// <summary>
-    /// This node's <b>advertised, browser-reachable client URL</b> (<c>Api__ClusterAdvertiseUrl</c>,
-    /// <c>PLAN-peers.md §2</c> #13a) — the address it puts in its own gossip self-entry so peers that learn
-    /// it via gossip know where the SPA should reach it. Blank ⇒ this node omits its own URL from gossip
-    /// (peers still learn it from whoever seeded it by handshake); a node discovered ONLY through this node's
-    /// self-entry then has no client address and stays provisional. Honest default: unset.
-    /// </summary>
-    public string ClusterAdvertiseUrl { get; init; } = "";
-
-    /// <summary>
-    /// This node's <b>node-to-node gossip URL</b> (<c>Api__ClusterGossipUrl</c>, <c>PLAN-peers.md
-    /// §2</c> #13a), when it differs from <see cref="ClusterAdvertiseUrl"/> (e.g. an internal/VPN address).
-    /// Blank ⇒ falls back to <see cref="ClusterAdvertiseUrl"/> in the self-entry.
+    /// An address only other nodes use (<c>Api__ClusterGossipUrl</c>, <c>PLAN-peers.md §2</c> #13a) — for a
+    /// topology where peers must not take the path a browser takes, such as an internal or VPN address.
+    /// Offered as a node-only candidate, so it is never handed to a browser. Blank ⇒ peers and browsers
+    /// reach this node the same way.
     /// </summary>
     public string ClusterGossipUrl { get; init; } = "";
 
@@ -1066,7 +1058,6 @@ public sealed class ApiOptions
             // Membership gossip. Advertised/gossip URLs default blank (honest: a node that doesn't
             // know its own client address just doesn't advertise it). Intervals share the drainer's
             // clamp-to-a-floor posture so a fat-fingered tiny value can't spin the loop.
-            ClusterAdvertiseUrl = Defaulted(s.ClusterAdvertiseUrl, ""),
             ClusterGossipUrl = Defaulted(s.ClusterGossipUrl, ""),
             ClusterGossipMs = Math.Max(250, s.ClusterGossipMs ?? 5000),
             ClusterPollMs = Math.Max(250, s.ClusterPollMs ?? 10000),

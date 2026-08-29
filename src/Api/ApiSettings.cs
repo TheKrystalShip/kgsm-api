@@ -457,14 +457,6 @@ public sealed class ApiSettings
         Type = LeafType.Secret, Risk = LeafRisk.Wiring, NoDefault = true)]
     public string? ClusterSecretPrevious { get; set; }
 
-    /// <summary>Override for the browser-reachable address this node advertises to peers. Blank lets the
-    /// node use the addresses it learns from whoever reaches it.</summary>
-    /// <panel>Address other hosts and browsers should reach this one at. Empty means this host uses the
-    /// address it is reached at, which is usually the right one.</panel>
-    [LeafField("clusterAdvertiseUrl", "Advertised URL", Group = "cluster", Risk = LeafRisk.Wiring,
-        NoDefault = true)]
-    public string? ClusterAdvertiseUrl { get; set; }
-
     /// <summary>Override for a node-to-node-only address, for a topology where peers must not take the
     /// browser-reachable path. Blank offers no node-only address.</summary>
     /// <panel>An address only other hosts use, when they must not go the way a browser does. Empty means

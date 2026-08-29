@@ -81,7 +81,7 @@ per-leaf status, not from a status line on the capability itself.
 | 11 | Discovery | **Join-via-one-seed + gossip convergence.** The admin's only membership action, ever, is "join the cluster": paste **one** existing member's URL. From that seed the roster converges automatically (§2·b) — add one, join all. No per-peer approvals, no master node |
 | 12 | Peer + secret storage | SQLite (`Peers` table = the durable roster + seed set; secret from config/env, never stored) |
 | 13a | Node addresses | Each node carries a **candidate list** of addresses it answers at, most-trusted first. Reachability is a property of a pair, not of a node: every peer probes the candidates and pins the one that answers *for it*, so two peers legitimately hold different addresses for the same third node |
-| 13b | Where candidates come from | **Reflection, not configuration.** A node learns its own addresses from whoever demonstrably reached it — the operator-supplied URL a peer introduced it at, and the scheme+host of an admin-authenticated browser request. `Api__ClusterAdvertiseUrl` and `Api__ClusterGossipUrl` stay as overrides for topologies where neither source is right; a node needs neither to join |
+| 13b | Where candidates come from | **Reflection, not configuration.** A node learns its own addresses from whoever demonstrably reached it — the operator-supplied URL a peer introduced it at, and the scheme+host of an admin-authenticated browser request. `Api__PublicBaseUrl` (this host's public address, which is the same fact a peer needs) and `Api__ClusterGossipUrl` (an address only nodes use) stay as overrides for topologies where reflection is not right; a node needs neither to join |
 | 13c | An address is a claim until probed | A reflected or gossiped address is recorded **unverified** and promoted only when a probe answers with the expected `nodeId` (the address form of G3). A node whose every candidate fails is honestly `unreachable`; no address is guessed, and none is fabricated to fill the column |
 
 ### Membership & discovery — gossip (locked)
@@ -350,8 +350,8 @@ pre-told its own address (§2 #13a-c).
   `PeerLatencyPoller` walks them in order and pins the first that answers `/identity` with
   the expected `nodeId`. Every candidate failing is an honest `unreachable`.
 - **Bootstrap for the first node.** A node with no reflections resolves its own candidates
-  from `Api__ClusterAdvertiseUrl`, then `Api__PublicBaseUrl`, then the scheme and host
-  observed on an admin-authenticated request. Learned candidates persist in
+  from `Api__PublicBaseUrl`, then the scheme and host observed on an admin-authenticated
+  request. Learned candidates persist in
   `HostSettingsEntity` beside the other runtime-mutable identity overrides, so a restart
   keeps them and an operator corrects them live rather than through a service restart.
 - **Panel origins ride along.** The origin an admin's browser signs in from is cluster
@@ -362,8 +362,13 @@ pre-told its own address (§2 #13a-c).
   from B leave the identical cluster state, and simultaneous mutual introduction leaves one
   roster row per node: both upserts key on `nodeId`, and incarnation ordering settles the
   rest.
-- **Coordinated upgrade.** `SyncMember` carries candidates, so the gossip record changes
-  shape. The handshake's `apiVersion` check is what enforces that both sides run it.
+- **Coordinated upgrade, refused loudly.** The records nodes exchange carry their own
+  version (`ClusterProtocol.Current` on the node card), because `apiVersion` is the frozen
+  `/api/v1` route segment and stays put across builds: two nodes can serve identical
+  routes and still disagree about what a `SyncMember` contains. That disagreement is
+  silent — the fields one side does not send arrive empty, so a peer joins and then
+  quietly cannot be reached — so a mismatch is a `409 protocol_mismatch` at the join
+  instead. Raise the number whenever a node-to-node record changes shape.
 - **A node id is unique in the roster.** Two introductions arriving at once resolve the row
   under one gate and the column is uniquely indexed, so the same peer cannot be counted
   twice. The surplus of an older duplicate is dropped rather than reconciled: the roster is
@@ -510,7 +515,7 @@ record, and the same validation predicate runs on both sides.
 { "self": { "nodeId": "node-a", "apiVersion": "v1", "build": "0.1.0+abc123",
             "capabilities": ["monitor","watchdog","cluster"],
             "candidates": [{ "url": "https://node-a.example", "client": true }],
-            "incarnation": 3 },
+            "incarnation": 3, "protocol": 1 },
   "youAre": { "url": "https://node-b.example", "provenance": "operator" },
   "panelOrigins": ["https://panel.example"] }
 → 200  the same record from the other side; its `youAre` carries
@@ -518,6 +523,7 @@ record, and the same validation predicate runs on both sides.
 → 401 { error: { code: "invalid_cluster_token" } }
 → 409 { error: { code: "peer_is_self" } }
 → 409 { error: { code: "version_mismatch", details: { remote:"v2", local:"v1" } } }
+→ 409 { error: { code: "protocol_mismatch" } }
 → 422 { error: { code: "peer_not_cluster" } }
 → 422 { error: { code: "insecure_transport" } }
 ```
@@ -526,7 +532,7 @@ record, and the same validation predicate runs on both sides.
 ```json
 { "nodeId": "node-b", "apiVersion": "v1", "build": "0.1.0+abc123",
   "capabilities": ["monitor","watchdog","cluster"],
-  "candidates": [{ "url": "https://node-b.example", "client": true }] }
+  "candidates": [{ "url": "https://node-b.example", "client": true }], "protocol": 1 }
 ```
 
 ### `POST /auth/cluster-session` (cluster-token authed + disable-gated)
@@ -660,8 +666,9 @@ The message-bus receive endpoint — one endpoint, typed envelope. Full contract
 - Gossip traffic leaves no `cluster_outbox` rows (ephemeral transport).
 
 ### P0.6 — self-validated (`SymmetricIntroduceTests`, plus the suite it runs in)
-- The same predicate refuses a mismatched `apiVersion`, a missing `cluster` capability, a
-  self-introduction and a plaintext public candidate — whichever side is asked.
+- The same predicate refuses a mismatched `apiVersion`, a mismatched cluster protocol, a
+  missing `cluster` capability, a self-introduction and a plaintext public candidate —
+  whichever side is asked.
 - A node never configured with an address adopts the operator-pasted URL from its first
   introduction and gossips it onward.
 - Introducing B from A and introducing A from B leave the two nodes holding the same

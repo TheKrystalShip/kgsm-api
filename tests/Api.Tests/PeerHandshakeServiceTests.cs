@@ -125,6 +125,7 @@ public sealed class PeerHandshakeServiceTests
                 candidates = (candidates ?? [$"https://{nodeId}.test"])
                     .Select(c => new { url = c, client = true }),
                 incarnation = 0,
+                protocol = ClusterProtocol.Current,
             },
             youAre = (object?)null,
             panelOrigins = Array.Empty<string>(),
@@ -178,7 +179,7 @@ public sealed class PeerHandshakeServiceTests
     {
         public Task<NodeCard> BuildAsync(CancellationToken ct) => Task.FromResult(
             new NodeCard(nodeId, ApiInfo.ApiVersion, "0.0.0+test", ["cluster"],
-                [new NodeCandidate("https://node-a.test", Client: true)], 0));
+                [new NodeCandidate("https://node-a.test", Client: true)], 0, ClusterProtocol.Current));
     }
 
     /// <summary>Always hands back a fresh <see cref="HttpClient"/> wrapping the SAME handler instance,

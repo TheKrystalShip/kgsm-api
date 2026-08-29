@@ -983,6 +983,16 @@ public class Startup(IConfiguration configuration)
         // Make the trust posture impossible to miss in the logs.
         ApiOptions options = app.ApplicationServices.GetRequiredService<ApiOptions>();
         _corsPanelOrigins = app.ApplicationServices.GetRequiredService<SelfIdentityStore>();
+        // Warm it before the first request: the CORS predicate reads this cache synchronously, and an
+        // unloaded cache is indistinguishable from an empty one — which would silently widen a node that
+        // has learned exactly which origin its panel is served from. A store that cannot be read leaves the
+        // configured allowlist in charge rather than taking the host down.
+        try { _corsPanelOrigins.PrimeAsync(CancellationToken.None).GetAwaiter().GetResult(); }
+        catch (Exception ex)
+        {
+            loggerFactory.CreateLogger("TheKrystalShip.Api.Startup")
+                .LogWarning(ex, "could not read this node's learned addresses and panel origins at startup");
+        }
         ILogger startupLog = loggerFactory.CreateLogger("TheKrystalShip.Api.Startup");
         if (options.AuthDisabled)
             startupLog.LogWarning(

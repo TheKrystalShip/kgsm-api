@@ -745,15 +745,6 @@
       "risk": "wiring"
     },
     {
-      "key": "clusterAdvertiseUrl",
-      "env": "Api__ClusterAdvertiseUrl",
-      "label": "Advertised URL",
-      "description": "Address other hosts and browsers should reach this one at. Empty means this host uses the address it is reached at, which is usually the right one.",
-      "group": "cluster",
-      "type": "string",
-      "risk": "wiring"
-    },
-    {
       "key": "clusterGossipUrl",
       "env": "Api__ClusterGossipUrl",
       "label": "Peer URL",
