@@ -133,7 +133,7 @@ public sealed class PeerHandshakeServiceTests
     private static ApiOptions Options() => new()
     {
         HostId = "node-a", HostLabel = "node-a",
-        MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
+        MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "", RelaySecretPath = "",
         FirewallSocketPath = "", SchedulerSocketPath = "", BotSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmJournalDir = "/var/lib/kgsm/events",
         EventJournalDir = "",
         JournalStateRoot = "",

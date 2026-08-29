@@ -28,10 +28,10 @@ public sealed record LeafConfigIdentity(
 /// regresses while descriptors roll out repo by repo.</para>
 /// <para><b>Readable and editable are separate questions.</b> Any descriptor makes a leaf's configuration
 /// <em>visible</em> with full provenance. Editing additionally needs this host to have wired the delivery
-/// channel for that leaf — the systemd drop-in that layers the API's override file, installed by kgsm-api's
-/// <c>deploy/setup-leaf-config.sh</c>. Without it an apply would render a file nothing reads and then fail
-/// at the restart, so the API reports the surface as locked, with the reason, instead of accepting a write
-/// it cannot honour.</para>
+/// channel for that leaf — the systemd drop-in that layers the API's override file, which kgsm-api's
+/// package installs per leaf and its <c>deploy/setup-leaf-config.sh</c> installs on a host deployed from a
+/// checkout. Without it an apply would render a file nothing reads and then fail at the restart, so the API
+/// reports the surface as locked, with the reason, instead of accepting a write it cannot honour.</para>
 /// </remarks>
 public sealed class LeafConfigCatalog(LeafDescriptorStore descriptors, ApiOptions options)
 {
@@ -90,13 +90,16 @@ public sealed class LeafConfigCatalog(LeafDescriptorStore descriptors, ApiOption
             return false;
         }
 
-        string dropIn = Path.Combine(options.LeafDropInDir, identity.Unit + ".d", OverrideDropInName);
-        if (File.Exists(dropIn))
+        // Every unit-file root, not one: the drop-in arrives in /usr/lib on a node that installed
+        // kgsm-api from a package and in /etc on a host its setup script provisioned, and systemd
+        // applies it from either. Looking in one place answers correctly for one kind of host.
+        if (SystemdUnitPaths.HasDropIn(identity.Unit, OverrideDropInName, options.LeafDropInDir))
             return true;
 
         reason = $"{identity.DisplayName} is not wired for configuration on this host — {identity.Unit} has no "
-               + "kgsm-api override drop-in, so a change would be written but never read. Run kgsm-api's "
-               + "deploy/setup-leaf-config.sh to wire it.";
+               + "kgsm-api override drop-in, so a change would be written but never read. Installing "
+               + "kgsm-api's package ships one per leaf; kgsm-api's deploy/setup-leaf-config.sh installs "
+               + "them on a host deployed from a checkout.";
         return false;
     }
 }

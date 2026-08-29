@@ -118,12 +118,21 @@ public static class LeafConfigDescriptorParser
                 error = $"floorSources: unknown kind '{f.Kind}'";
                 return null;
             }
-            if (string.IsNullOrWhiteSpace(f.Path) || !f.Path.StartsWith('/'))
+            // A systemd-unit source names the UNIT, because where its file sits is a property of how
+            // the host was provisioned — /usr/lib for a packaged unit, /etc for a deployed one — and a
+            // leaf cannot know which. An absolute path is still accepted there, for a leaf whose unit
+            // lives somewhere systemd's own roots do not cover. Every other kind is a real file, so
+            // naming it any other way than absolutely is a descriptor that cannot be resolved.
+            string path = f.Path ?? "";
+            bool namesAUnit = string.Equals(f.Kind, "systemd-unit", StringComparison.Ordinal)
+                              && path.EndsWith(".service", StringComparison.Ordinal);
+
+            if (!namesAUnit && !path.StartsWith('/'))
             {
                 error = "floorSources: path must be absolute";
                 return null;
             }
-            floors.Add(new LeafFloorSource(f.Kind, f.Path));
+            floors.Add(new LeafFloorSource(f.Kind, path));
         }
 
         var groups = new List<LeafConfigGroup>();

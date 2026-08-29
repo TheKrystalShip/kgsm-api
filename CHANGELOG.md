@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — an installed leaf is a wired leaf (0.149.0)
+
+The firewall authority, the scheduler, the reactor, the Discord bot and the assistant are resolved
+from what is installed on the host rather than from paths repeated in a second file. Each of them
+binds a fixed endpoint its own configuration already names, and each leaves a config descriptor in
+`Api__LeafDescriptorDir` when its package installs it — so that directory answers the only question
+this API could not derive: whether the leaf is here at all.
+
+The distinction that matters is kept. A leaf with no descriptor is `absent`, never a row that is
+perpetually down. A pinned path still wins, for a leaf that does not sit where its package puts it.
+An empty string still means off, so a host can keep a leaf it installed off the panel.
+
+### Added — `Api__RelaySecretPath`, and a relay secret that is not owed (0.149.0)
+
+`Api__AssistantRelaySecret` left blank now takes the host's own secret from
+`/var/lib/kgsm/auth/relay-secret`, minting it if no surface has yet. The assistant resolves the same file,
+so the pair matches with nothing asked of an operator — where before both sides shipped blank and the
+Control Panel's chat was silently off on every host nobody hand-configured.
+
+The secret sits beside the account store because `/var/lib/kgsm` itself is root-owned on a host
+provisioned from a checkout — minting at the top of the tree fails there, into the empty fail-closed
+secret, on exactly the hosts this is meant to fix. And the client now says so when it cannot resolve
+one: an assistant to reach with no secret to reach it with is a relay the leaf refuses, which used to
+surface a turn later as a 502 naming nothing.
+
+### Fixed — a leaf's unit is found wherever the host keeps it (0.149.0)
+
+Unit fragments and drop-ins are resolved across every root systemd reads, in systemd's order, instead
+of one directory. A packaged host keeps them in `/usr/lib/systemd/system` and one deployed from a
+checkout in `/etc/systemd/system`; reading a single directory reported every leaf on the other kind of
+host as unconfigurable, and left every value its unit sets showing as unknown.
+
+`Api__LeafDropInDir` now names one directory to search *instead of* systemd's roots, and is blank by
+default. A `systemd-unit` floor source names the unit rather than a path, since where the file sits is
+a property of the host and not of the leaf; an absolute path is still accepted there.
+
+### Changed — the declared bind address is the one the unit uses (0.149.0)
+
+`Api:Urls` declares `http://0.0.0.0:8080`, which is what `kgsm-api.service` sets and therefore what a
+host binds. The settings file declared a loopback address no deployed host has ever used.
+
+
 ### Changed — a reactor rule is stored by the leaf, one at a time (0.148.0)
 
 `PUT /hosts/{id}/services/reactor/rules/{ruleId}` and `DELETE …/{ruleId}` relay to the reactor's own

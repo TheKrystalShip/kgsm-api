@@ -100,6 +100,13 @@ public sealed class ApiOptions
     public required string AssistantRelaySecret { get; init; }
 
     /// <summary>
+    /// Where this host keeps the secret above (<c>Api__RelaySecretPath</c>, default
+    /// <see cref="KgsmRelaySecret.DefaultPath"/>). The assistant and the Discord bot resolve the same
+    /// file, which is what lets three co-located surfaces share a secret nobody was asked for.
+    /// </summary>
+    public required string RelaySecretPath { get; init; }
+
+    /// <summary>
     /// kgsm-firewall control socket (M6·b). Empty ⇒ the firewall/ports surface is not provisioned
     /// (the per-server <c>network</c> block reports <c>firewall:"absent"</c>, the host
     /// <c>network</c> is null). <strong>Opt-in like the assistant</strong>: the host-firewall
@@ -439,11 +446,12 @@ public sealed class ApiOptions
     public required string LeafDescriptorDir { get; init; }
 
     /// <summary>
-    /// Where systemd unit drop-ins live (<c>Api__LeafDropInDir</c>, default
-    /// <c>/etc/systemd/system</c>). Read for two things: to tell whether a leaf is wired for config delivery
-    /// at all (its <c>50-kgsm-api-override.conf</c> exists), and to resolve a leaf's floor values from the
-    /// unit fragments that set them. Never written — the drop-ins are installed by
-    /// <c>deploy/setup-leaf-config.sh</c>.
+    /// One unit-file directory to search instead of systemd's own (<c>Api__LeafDropInDir</c>). Blank —
+    /// the default — searches every root systemd does, in its order, which is what makes a packaged
+    /// unit in <c>/usr/lib/systemd/system</c> and a deployed one in <c>/etc/systemd/system</c> both
+    /// readable from the same build. Read for two things: to tell whether a leaf is wired for config
+    /// delivery at all (its <c>50-kgsm-api-override.conf</c> applies), and to resolve a leaf's floor
+    /// values from the unit fragments that set them. Never written.
     /// </summary>
     public required string LeafDropInDir { get; init; }
 
@@ -933,9 +941,14 @@ public sealed class ApiOptions
         // (an initializer can't read a sibling property off the object being constructed).
         int clusterRetryTtlDays = Math.Max(1, s.ClusterRetryTtlDays ?? 7);
 
+        // Same reason: the optional leaves' endpoints are resolved against the descriptor directory,
+        // which is a sibling property.
+        string leafDescriptorDir = BlankFallback(s.LeafDescriptorDir, DefaultLeafDescriptorDir);
+        string relaySecretPath = BlankFallback(s.RelaySecretPath, KgsmRelaySecret.DefaultPath);
+
         return new ApiOptions
         {
-            Urls = BlankFallback(s.Urls, "http://127.0.0.1:8080"),
+            Urls = BlankFallback(s.Urls, "http://0.0.0.0:8080"),
             CorsOrigins = Csv(s.CorsOrigins),
 
             HostId = hostId,
@@ -947,20 +960,24 @@ public sealed class ApiOptions
             // value stays empty, an absent key falls back to the standard path.
             MonitorSocketPath = Defaulted(s.MonitorSocketPath, "/run/kgsm-monitor/metrics.sock"),
             WatchdogSocketPath = Defaulted(s.WatchdogSocketPath, "/run/kgsm-watchdog/control.sock"),
-            AssistantBaseUrl = Defaulted(s.AssistantBaseUrl, ""),
+            // The optional leaves. Each binds a fixed, well-known endpoint, so what a host has to say
+            // is not WHERE its scheduler is — it is whether it runs one at all. That is a question the
+            // host can already answer: a leaf's package installs its config descriptor, so the
+            // descriptor directory is the list of what is installed here. LeafEndpoint reads it, and an
+            // installed leaf is wired with nothing asked of an operator. See the method for the rest.
+            AssistantBaseUrl = LeafEndpoint(s.AssistantBaseUrl, "http://127.0.0.1:5180", "assistant", leafDescriptorDir),
             // The browser route is opt-in and has no sensible default — a loopback URL is not one.
             AssistantPublicUrl = Clean(s.AssistantPublicUrl),
-            AssistantRelaySecret = Defaulted(s.AssistantRelaySecret, ""),
-            // Opt-in (blank = absent): the firewall authority is a separate optional install.
-            FirewallSocketPath = Defaulted(s.FirewallSocketPath, ""),
-            // Opt-in (blank = absent): the scheduler is a separate optional leaf. Set it to
-            // /run/kgsm-scheduler/status.sock on a host that runs kgsm-scheduler.
-            SchedulerSocketPath = Defaulted(s.SchedulerSocketPath, ""),
-            SchedulerControlSocketPath = Defaulted(s.SchedulerControlSocketPath, ""),
-            BotSocketPath = Defaulted(s.BotSocketPath, ""),
-            // Opt-in (blank = absent), on the same terms as the scheduler. Set it to
-            // /run/kgsm-reactor/status.sock on a host that runs kgsm-reactor.
-            ReactorSocketPath = Defaulted(s.ReactorSocketPath, ""),
+            // The relay secret is host-local and machine-generatable, so a blank one is resolved
+            // rather than owed: KgsmRelaySecret hands back what this host already minted, or mints it.
+            // The assistant on the other end of the relay resolves the same file the same way.
+            AssistantRelaySecret = KgsmRelaySecret.Resolve(s.AssistantRelaySecret, relaySecretPath),
+            RelaySecretPath = relaySecretPath,
+            FirewallSocketPath = LeafEndpoint(s.FirewallSocketPath, "/run/kgsm-firewall/firewall.sock", "firewall", leafDescriptorDir),
+            SchedulerSocketPath = LeafEndpoint(s.SchedulerSocketPath, "/run/kgsm-scheduler/status.sock", "scheduler", leafDescriptorDir),
+            SchedulerControlSocketPath = LeafEndpoint(s.SchedulerControlSocketPath, "/run/kgsm-scheduler/control.sock", "scheduler", leafDescriptorDir),
+            BotSocketPath = LeafEndpoint(s.BotSocketPath, "/run/kgsm-bot/status.sock", "bot", leafDescriptorDir),
+            ReactorSocketPath = LeafEndpoint(s.ReactorSocketPath, "/run/kgsm-reactor/status.sock", "reactor", leafDescriptorDir),
             // Not opt-in like its neighbours: the socket file's presence is the provisioning check, so
             // the standard path is the right default and an unconfigured host still finds the leaf.
             SpeechSocketPath = Defaulted(s.SpeechSocketPath, DefaultSpeechSocketPath),
@@ -1026,8 +1043,10 @@ public sealed class ApiOptions
             // before the leaf has even restarted.
             LeafOverridesDir = BlankFallback(s.LeafOverridesDir, "/var/lib/kgsm-api/leaf-overrides"),
             LeafApplyCanaryMs = Math.Max(2000, s.LeafApplyCanaryMs ?? 15000),
-            LeafDescriptorDir = BlankFallback(s.LeafDescriptorDir, "/var/lib/kgsm/leaves"),
-            LeafDropInDir = BlankFallback(s.LeafDropInDir, "/etc/systemd/system"),
+            LeafDescriptorDir = leafDescriptorDir,
+            // Blank on purpose: SystemdUnitPaths then searches every root systemd reads, rather than
+            // one this API would have to guess from how the host was provisioned.
+            LeafDropInDir = Defaulted(s.LeafDropInDir, ""),
 
             // Cluster message bus foundation. Blank secret => ClusterEnabled false => the cluster
             // service token seam stays dormant. NodeId defaults to the already-resolved HostId,
@@ -1110,6 +1129,49 @@ public sealed class ApiOptions
 
     // null key (unset) -> fallback; present key (even empty) -> the given value, trimmed.
     private static string Defaulted(string? value, string fallback) => value is null ? fallback : value.Trim();
+
+    /// <summary>Where a leaf's package installs its config descriptor on a standard install.</summary>
+    public const string DefaultLeafDescriptorDir = "/var/lib/kgsm/leaves";
+
+    /// <summary>
+    /// Resolves one optional leaf's endpoint. A pinned value always wins; otherwise the leaf's
+    /// well-known endpoint applies when the leaf is installed here, and an empty string — the API's
+    /// "this capability is absent" — when it is not.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Installed is a fact, not a setting.</b> Every one of these leaves binds a fixed
+    /// endpoint that its own shipped configuration names, so a host repeating that path in a second
+    /// file says nothing new — it only creates somewhere for the two to disagree. What the API cannot
+    /// infer from a path is whether the leaf is here at all, and that is what decides between
+    /// <c>absent</c> and a row that is perpetually down. A leaf's package installs its descriptor into
+    /// the shared descriptor directory, so its presence there answers exactly that question, for a
+    /// leaf this API has never heard of as much as for these.</para>
+    /// <para><b>Blank still means off.</b> A host that sets the key to an empty string keeps a leaf
+    /// off the panel however it was installed — the value is present, so it is honoured rather than
+    /// resolved. Absent from configuration entirely is what asks for this resolution.</para>
+    /// </remarks>
+    private static string LeafEndpoint(string? configured, string wellKnown, string leafId, string descriptorDir)
+    {
+        if (configured is not null)
+            return configured.Trim();
+
+        return LeafInstalled(leafId, descriptorDir) ? wellKnown : "";
+    }
+
+    // A leaf is installed here when its package left a descriptor behind. Unreadable directory =>
+    // not installed: an endpoint guessed from a failed read is the fabricated capability this whole
+    // resolution exists to avoid.
+    private static bool LeafInstalled(string leafId, string descriptorDir)
+    {
+        try
+        {
+            return File.Exists(Path.Combine(descriptorDir, leafId + ".json"));
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     // null OR blank/whitespace -> fallback; otherwise the trimmed value. For a value that must never be empty
     // (e.g. a filesystem path Path.* will throw on), where the declared default is a blank "".

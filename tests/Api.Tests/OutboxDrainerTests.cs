@@ -279,7 +279,7 @@ public sealed class OutboxDrainerTests
     private static ApiOptions TestOptions() => new()
     {
         HostId = NodeId, HostLabel = NodeId,
-        MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
+        MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "", RelaySecretPath = "",
         FirewallSocketPath = "", SchedulerSocketPath = "", BotSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmJournalDir = "/var/lib/kgsm/events",
         EventJournalDir = "",
         JournalStateRoot = "",

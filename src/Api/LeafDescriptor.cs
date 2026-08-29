@@ -29,7 +29,7 @@ using TheKrystalShip.KGSM.LeafConfig;
 
 // Lowest precedence first — the same order Program.cs registers them in.
 [assembly: LeafFloorSource("appsettings", "/opt/kgsm-api/kgsm-api.settings.json")]
-[assembly: LeafFloorSource("systemd-unit", "/etc/kgsm-api/systemd/kgsm-api.service")]
+[assembly: LeafFloorSource("systemd-unit", "kgsm-api.service")]
 [assembly: LeafFloorSource("env-file", "/etc/kgsm-api/kgsm-api.env")]
 
 [assembly: LeafFrameworkNamespace("Logging__",

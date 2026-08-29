@@ -82,6 +82,18 @@ public sealed class AssistantClient : HttpClient
             BaseAddress = baseUri;
             _hasBaseUrl = true;
         }
+
+        // An assistant to reach and no secret to reach it with is a relay the leaf will refuse, and the
+        // refusal surfaces one turn later as a 502 with nothing pointing at the cause. The secret is
+        // normally the host's own, minted on first look, so getting here means the file could be neither
+        // read nor created — a provisioning fault, and one that is invisible until somebody asks a
+        // question. Say it once, at startup, naming the file.
+        if (_hasBaseUrl && !_relay.IsConfigured)
+            _logger.LogWarning(
+                "no relay secret — the assistant is configured at {BaseUrl} but will refuse every turn this "
+                + "API forwards. The host's own secret is {Path}, which could not be read or created; check "
+                + "that directory is owned by the account this service runs as",
+                options.AssistantBaseUrl, options.RelaySecretPath);
     }
 
     /// <summary>True when the assistant is provisioned (connected) on this host at runtime AND a base URL is

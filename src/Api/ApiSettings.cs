@@ -96,6 +96,14 @@ public sealed class ApiSettings
         Type = LeafType.Secret, Risk = LeafRisk.Wiring, NoDefault = true)]
     public string? AssistantRelaySecret { get; set; }
 
+    /// <summary>File the host's relay secret is kept in, read when no secret is set here.</summary>
+    /// <panel>Where this host keeps the secret its surfaces prove themselves to each other with. The
+    /// first surface to look for it creates it, so nothing has to be typed in; point this elsewhere on
+    /// a host that keeps its state somewhere other than /var/lib.</panel>
+    [LeafField("relaySecretPath", "Relay secret file", Group = "leaves", Type = LeafType.Path,
+        Risk = LeafRisk.Wiring)]
+    public string? RelaySecretPath { get; set; }
+
     /// <summary>kgsm-firewall control socket. Blank reports the ports surface absent.</summary>
     /// <panel>The firewall authority's socket. Empty means port state is reported as unknown rather than
     /// assumed closed.</panel>
@@ -418,11 +426,13 @@ public sealed class ApiSettings
         Risk = LeafRisk.Wiring)]
     public string? LeafDescriptorDir { get; set; }
 
-    /// <summary>Directory the per-leaf systemd drop-ins live in.</summary>
-    /// <panel>Where the per-leaf systemd drop-ins live. It is how this API tells whether a change can
-    /// actually be delivered to a leaf.</panel>
+    /// <summary>One unit-file directory to search instead of systemd's own roots. Blank searches all
+    /// of them, in systemd's order.</summary>
+    /// <panel>One directory to look for unit files and their drop-ins in, instead of everywhere systemd
+    /// looks. Empty searches all of them, which is what finds a leaf's unit whether its package installed
+    /// it or a deploy script did.</panel>
     [LeafField("leafDropInDir", "Drop-in directory", Group = "leafconfig", Type = LeafType.Path,
-        Risk = LeafRisk.Wiring)]
+        Risk = LeafRisk.Wiring, NoDefault = true)]
     public string? LeafDropInDir { get; set; }
 
     /// <summary>How long a leaf's health is watched after a config restart before the change is declared good. Floor 2000.</summary>

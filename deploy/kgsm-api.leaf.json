@@ -15,7 +15,7 @@
     },
     {
       "kind": "systemd-unit",
-      "path": "/etc/kgsm-api/systemd/kgsm-api.service"
+      "path": "kgsm-api.service"
     },
     {
       "kind": "env-file",
@@ -180,6 +180,16 @@
       "description": "Shared secret letting this API ask the assistant on a signed-in user's behalf. It has to match the assistant's own relay secret.",
       "group": "leaves",
       "type": "secret",
+      "risk": "wiring"
+    },
+    {
+      "key": "relaySecretPath",
+      "env": "Api__RelaySecretPath",
+      "label": "Relay secret file",
+      "description": "Where this host keeps the secret its surfaces prove themselves to each other with. The first surface to look for it creates it, so nothing has to be typed in; point this elsewhere on a host that keeps its state somewhere other than /var/lib.",
+      "group": "leaves",
+      "type": "path",
+      "default": "/var/lib/kgsm/auth/relay-secret",
       "risk": "wiring"
     },
     {
@@ -699,10 +709,9 @@
       "key": "leafDropInDir",
       "env": "Api__LeafDropInDir",
       "label": "Drop-in directory",
-      "description": "Where the per-leaf systemd drop-ins live. It is how this API tells whether a change can actually be delivered to a leaf.",
+      "description": "One directory to look for unit files and their drop-ins in, instead of everywhere systemd looks. Empty searches all of them, which is what finds a leaf's unit whether its package installed it or a deploy script did.",
       "group": "leafconfig",
       "type": "path",
-      "default": "/etc/systemd/system",
       "risk": "wiring"
     },
     {
@@ -884,7 +893,7 @@
       "description": "Addresses this API serves on. The Control Panel and every other surface reach it here.",
       "group": "general",
       "type": "string",
-      "default": "http://127.0.0.1:8080",
+      "default": "http://0.0.0.0:8080",
       "risk": "wiring"
     },
     {

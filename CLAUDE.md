@@ -111,8 +111,10 @@ whole and logged once, never half-read. Format: `../leaf-command-manifest.md`.
 Two consequences worth knowing before touching this code:
 
 - **Readable and editable are separate.** A descriptor makes a leaf's config visible with full
-  provenance; editing also needs the leaf's override drop-in to exist on this host
-  (`Api__LeafDropInDir`), because without it a write renders a file nothing reads. `GET` reports
+  provenance; editing also needs the leaf's override drop-in to apply on this host, because without it
+  a write renders a file nothing reads. Units and drop-ins are located across every root systemd
+  reads — a package leaves them in `/usr/lib/systemd/system`, a deploy script in `/etc` — and
+  `Api__LeafDropInDir` names one directory to search instead of all of them. `GET` reports
   `editable:false` with the reason; `PUT` is a **409**, not a 400 — the request is fine, the host is not
   wired.
 - **`applied_unreachable` is a real outcome.** A `wiring`-risk change passes the liveness canary — the
@@ -181,7 +183,14 @@ An environment variable **overrides one key** by spelling that key's path with `
 wins because it is registered last — that is how the systemd unit and the smoke configure a host. A
 variable naming a key the file does not declare **binds to nothing**, and the build fails if the
 settings file and `ApiSettings` disagree in any direction, or if `deploy/kgsm-api.env.example` sets a
-key the settings file never declared. A blank leaf endpoint reports its capability `absent`.
+key the settings file never declared.
+
+**An optional leaf's endpoint is resolved, not configured.** The firewall authority, the scheduler,
+the reactor, the bot and the assistant each bind a fixed endpoint their own configuration names, so
+this API reads `Api__LeafDescriptorDir` — where a leaf's package installs its descriptor — and wires
+what is installed. A leaf with no descriptor there reports its capability `absent`, which is a
+different claim from a row that is perpetually down. A pinned path wins, for a leaf that does not sit
+where its package puts it, and a key set to an empty string still means off.
 
 **`deploy/kgsm-api.leaf.json` is generated, not written.** `TheKrystalShip.KGSM.LeafConfig` rewrites
 it on every build from `[LeafField]` attributes and `<panel>` doc tags on `ApiSettings` — so edit the

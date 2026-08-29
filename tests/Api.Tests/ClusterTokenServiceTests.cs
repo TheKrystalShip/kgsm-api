@@ -23,7 +23,7 @@ public sealed class ClusterTokenServiceTests
         string nodeId = "node-a") => new()
     {
         HostId = "test", HostLabel = "test",
-        MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "",
+        MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "", RelaySecretPath = "",
         FirewallSocketPath = "", SchedulerSocketPath = "", BotSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmJournalDir = "/var/lib/kgsm/events",
         EventJournalDir = "",
         JournalStateRoot = "",

@@ -43,7 +43,7 @@ public sealed class LeafFloorReader(
                 switch (source.Kind)
                 {
                     case "systemd-unit":
-                        if (!ReadUnit(source.Path, descriptor.Unit, overridePath, values))
+                        if (!ReadUnit(descriptor.Unit, source.Path, overridePath, values))
                             complete = false;
                         break;
                     case "env-file":
@@ -67,18 +67,25 @@ public sealed class LeafFloorReader(
     }
 
     // A unit's Environment= assignments plus every EnvironmentFile= it pulls in, drop-ins included and
-    // applied in systemd's own order (the unit first, then drop-ins lexically). Returns false if the unit
+    // applied in systemd's own order (the unit first, then drop-ins by filename). Returns false if the unit
     // itself is unreadable — a missing optional EnvironmentFile is not a failure, systemd tolerates it too.
-    private bool ReadUnit(string unitPath, string unitName, string overridePath, Dictionary<string, string> into)
+    //
+    // The unit is located the way systemd locates it, by NAME across every unit-file root, because where
+    // the file sits is a property of how the host was provisioned rather than of the leaf: a package
+    // leaves it in /usr/lib, a deploy script in /etc. A descriptor that names an absolute path instead
+    // of a unit is honoured as a fallback, for a leaf keeping its unit somewhere no root covers.
+    private bool ReadUnit(string unitName, string declared, string overridePath, Dictionary<string, string> into)
     {
-        if (!File.Exists(unitPath))
+        string? unitPath = SystemdUnitPaths.Fragment(unitName, options.LeafDropInDir);
+
+        if (unitPath is null && Path.IsPathRooted(declared) && File.Exists(declared))
+            unitPath = declared;
+
+        if (unitPath is null)
             return false;
 
         var files = new List<string> { unitPath };
-
-        string dropInDir = Path.Combine(options.LeafDropInDir, unitName + ".d");
-        if (Directory.Exists(dropInDir))
-            files.AddRange(Directory.GetFiles(dropInDir, "*.conf").OrderBy(f => f, StringComparer.Ordinal));
+        files.AddRange(SystemdUnitPaths.DropIns(unitName, options.LeafDropInDir));
 
         foreach (string file in files)
         {

@@ -84,6 +84,16 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 // holds would be reading THIS machine's real engine history.
                 ["Api:KgsmJournalDir"] =
                     Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-journal-{Guid.NewGuid():N}"),
+                // Same rule again, for the directory that says which leaves are installed. The default
+                // is the machine's real /var/lib/kgsm/leaves, and an unconfigured leaf endpoint resolves
+                // against it — so a developer's own host would decide whether "the assistant is absent"
+                // is true in a test that never mentioned the assistant.
+                ["Api:LeafDescriptorDir"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-leaves-{Guid.NewGuid():N}"),
+                // And the relay secret, for the reason UsersDbPath is pinned: resolving it CREATES the
+                // file, so an unpinned run would mint the host's real shared secret from a test.
+                ["Api:RelaySecretPath"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-relay-{Guid.NewGuid():N}"),
                 // Never the default. /var/lib/kgsm/auth/users.db is the HOST's real account store, shared
                 // with every KGSM service on the box, and opening it CREATES it — so an unpinned test
                 // run would hand the operator a live accounts file that nobody made. Same rule that

@@ -33,22 +33,26 @@
       "MonitorSocketPath": "/run/kgsm-monitor/metrics.sock",
       // kgsm-watchdog control socket. Blank reports the watchdog capability absent.
       "WatchdogSocketPath": "/run/kgsm-watchdog/control.sock",
-      // Assistant base URL. Blank reports the assistant absent.
-      "AssistantBaseUrl": "",
-      // Public origin browsers reach the assistant on. Blank reports no browser route.
+      // The optional leaves, all six declared null: not "no endpoint" but "nothing pinned here". Each
+      // of these leaves binds a fixed endpoint its own configuration already names, so the API resolves
+      // one from the leaf's package rather than from a path a host would have to copy — a leaf whose
+      // descriptor is in LeafDescriptorDir is installed, and an installed leaf is wired. Setting one to
+      // an empty string is how a host keeps a leaf it installed off the panel anyway; setting a path is
+      // how it names one that does not sit where its package puts it.
+      "AssistantBaseUrl": null,
+      // Public origin browsers reach the assistant on. There is no resolving this one — a loopback
+      // address is not a browser route — so blank reports no browser route and means it.
       "AssistantPublicUrl": "",
-      // Shared secret for the assistant turn relay (X-Relay-Secret). Blank sends none.
+      // Shared secret for the assistant turn relay (X-Relay-Secret). Blank takes the host's own, which
+      // the first surface to look for it mints in /var/lib/kgsm/auth/relay-secret.
       "AssistantRelaySecret": "",
-      // kgsm-firewall control socket. Blank reports the ports surface absent.
-      "FirewallSocketPath": "",
-      // kgsm-scheduler status socket. Blank reports the scheduler absent.
-      "SchedulerSocketPath": "",
-      // kgsm-scheduler control socket. Blank means a scheduled restart can be seen but not deferred.
-      "SchedulerControlSocketPath": "",
-      // kgsm-reactor status socket. Blank reports the reactor absent.
-      "ReactorSocketPath": "",
-      // kgsm-bot status socket. Blank leaves the bot page with systemd liveness only.
-      "BotSocketPath": "",
+      // Where that secret is kept. The first surface to look for it creates it.
+      "RelaySecretPath": "/var/lib/kgsm/auth/relay-secret",
+      "FirewallSocketPath": null,
+      "SchedulerSocketPath": null,
+      "SchedulerControlSocketPath": null,
+      "ReactorSocketPath": null,
+      "BotSocketPath": null,
       // kgsm-speech control socket. systemd binds it whether or not the daemon runs, so the file being
       // there is what says the leaf is installed — this only says where to look.
       "SpeechSocketPath": "/run/kgsm-speech/speech.sock",
@@ -152,8 +156,8 @@
       "LeafOverridesDir": "/var/lib/kgsm-api/leaf-overrides",
       // Shared directory the leaf config descriptors are discovered in.
       "LeafDescriptorDir": "/var/lib/kgsm/leaves",
-      // Directory the per-leaf systemd drop-ins live in.
-      "LeafDropInDir": "/etc/systemd/system",
+      // One unit-file directory to search instead of systemd's own roots. Blank searches all of them.
+      "LeafDropInDir": "",
       // How long a leaf's health is watched after a config restart before the change is declared good. Floor 2000.
       "LeafApplyCanaryMs": 15000,
 
@@ -189,7 +193,7 @@
 
       // ── General ──
       // HTTP bind address(es), semicolon-separated. Read before the host exists, so it is bound separately in Program.
-      "Urls": "http://127.0.0.1:8080",
+      "Urls": "http://0.0.0.0:8080",
       // Comma-separated CORS origin allowlist. Blank allows any origin, which is a dev-only posture.
       "CorsOrigins": ""
   },
