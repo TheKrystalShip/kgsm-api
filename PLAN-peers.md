@@ -167,6 +167,11 @@ inconsistent, unjustified cost.
 
 ### User single sign-on (vouch)
 
+> **What a vouch is worth, and where accounts live, are owned by `../cluster-auth-plan.md`.** An
+> account is a cluster-scoped fact there: one person, one tier, held by the node the cluster names as
+> the authority, with withdrawal fanned out over this bus. This section owns the mechanism — who
+> calls whom, with what token — and defers to that document on the authority question.
+
 ```
 User → Node A: Discord OAuth round-trip (only A talks to Discord)
   A mints its own session (sid_A in A's registry) + returns tokens to the SPA.
