@@ -40,11 +40,6 @@ public sealed record PeerVersionMismatchDetails(string Remote, string Local);
 /// <summary>PATCH /peers/{id} — the disable-list toggle. Only <see cref="Enabled"/> is settable today.</summary>
 public sealed record PeerPatchRequest(bool Enabled);
 
-/// <summary>GET /peers/identity — this node's identity card, pulled by a candidate's join-via-seed
-/// handshake (<c>PLAN-peers.md §7</c>). Cluster-token authed, not user-authed.</summary>
-public sealed record PeerIdentityView(
-    string NodeId, string ApiVersion, string Build, IReadOnlyList<string> Capabilities);
-
 /// <summary>GET /peers/{id}/latency — the roster row's last-observed liveness sample (§4).
 /// <see cref="LatencyMs"/>/<see cref="LastSeen"/> are honest <see langword="null"/> (not omitted — see
 /// <c>ApiJson</c>) until this peer's first successful probe.</summary>

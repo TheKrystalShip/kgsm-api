@@ -28,19 +28,25 @@ public sealed class PeerEntity
     public string Id { get; set; } = "";
 
     /// <summary>
-    /// The peer's advertised, browser-reachable client URL (<c>PLAN-peers.md</c> §2 #13a) — what the SPA
-    /// uses to talk to that node directly (e.g. <c>https://node-b:8097</c>). A node behind LAN/VPN may
-    /// gossip over a different address than this one, which is why <see cref="GossipUrl"/> exists
-    /// separately; when the two coincide only this field is set.
+    /// The address this node calls the peer on: the best candidate from <see cref="Candidates"/>, pinned by
+    /// the latency poller once a probe has answered it with the expected <see cref="NodeId"/>
+    /// (<c>PLAN-peers.md</c> §2 #13c). Before any candidate has answered it holds the most-trusted one on
+    /// offer and <see cref="AddressVerified"/> is false, so a caller can tell a proven address from a
+    /// proposed one. Empty when the peer has offered no address at all.
     /// </summary>
     public string Url { get; set; } = "";
 
     /// <summary>
-    /// The peer's node-to-node URL, when it differs from <see cref="Url"/> (<c>PLAN-peers.md</c> §2 #13a) —
-    /// e.g. an internal/VPN address the gossip and message-bus traffic rides, while <see cref="Url"/> stays
-    /// the browser-reachable one. <see langword="null"/> ⇒ collapse to the same address as <see cref="Url"/>.
+    /// Every address the peer says it answers at, most-trusted first, as a JSON array of
+    /// <see cref="Contracts.NodeCandidate"/> (<c>PLAN-peers.md</c> §2 #13a). Read and written through
+    /// <see cref="Services.Cluster.PeerCandidates"/>. Reachability is a property of a pair, so two nodes
+    /// legitimately pin different candidates of the same peer.
     /// </summary>
-    public string? GossipUrl { get; set; }
+    public string Candidates { get; set; } = "";
+
+    /// <summary>Whether <see cref="Url"/> has answered a probe with this peer's <see cref="NodeId"/>. An
+    /// unverified address is a claim, never reported as a fact.</summary>
+    public bool AddressVerified { get; set; }
 
     /// <summary>Operator-assigned display label for this peer (e.g. "Gaming Box"). <see langword="null"/> ⇒
     /// the SPA falls back to <see cref="NodeId"/> or the URL.</summary>

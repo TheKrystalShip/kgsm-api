@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a node learns its own address instead of being told it (0.150.0)
+
+Joining a cluster needs one configured value, `Api__ClusterSecret`. A node cannot work out its own
+public address — behind NAT, a reverse proxy or a load balancer the address it is reached at leaves
+no local trace — so it is reflected instead: the URL an operator pastes into a panel is the one
+address a human has stated and a peer has just proven answers, and the introducing node hands it to
+the joining node, which adopts it. A node also records the address an admin's own browser reached it
+at, which is where the first node in a cluster gets its own.
+
+`POST /api/v1/peers/introduce` replaces the identity pull the join used to make. Its request body and
+its answer are the same record, both sides run the same validation function over the other's node
+card, and each records the mirror of what the other records — so introducing B from A leaves the same
+cluster state as introducing A from B, and a simultaneous introduction from both directions leaves one
+roster row per node rather than two.
+
+A node now carries a list of address candidates rather than one address and one override. Reachability
+is a property of a pair, so each peer probes the candidates and pins the one that answers for it, and
+two peers may legitimately hold different addresses for the same third node. An address is a claim
+until a probe answers it under the expected node id; a peer whose every candidate fails is honestly
+unreachable and holds no invented address, and the roster hands the browser a client-reachable
+candidate or nothing at all.
+
+The panel origin travels with the join, so a Control Panel served from somewhere that is not a node
+reaches every node in a cluster without a per-node CORS allowlist. `Api__ClusterAdvertiseUrl` and
+`Api__ClusterGossipUrl` remain as overrides for topologies where reflection reports the wrong thing.
+
+A public address must be https. The cluster secret authenticates but does not encrypt, and a vouch
+carries a person's identity and roles; loopback, the private ranges, single-label hostnames and the
+private-use suffixes stay plaintext-legal.
+
 ### Fixed — the packaged binary is executable again (0.149.1)
 
 The release workflow hands the build job's publish output to the packaging job as a GitHub artifact,

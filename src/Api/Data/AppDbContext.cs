@@ -82,6 +82,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// audit log.</summary>
     public DbSet<PeerEntity> Peers => Set<PeerEntity>();
 
+    /// <summary>What this node has learned about itself by reflection — the addresses it answers at and the
+    /// browser origins an admin has signed in from (<c>PLAN-peers.md</c> P0.6). Created by
+    /// <see cref="Services.Cluster.SelfIdentityStore"/>'s idempotent <c>CREATE TABLE IF NOT EXISTS</c> on an
+    /// already-deployed DB, the same posture as <see cref="Peers"/>.</summary>
+    public DbSet<SelfFactEntity> SelfFacts => Set<SelfFactEntity>();
+
     /// <summary>Web Push subscriptions — one row per (user × device), keyed by the push service's
     /// endpoint URL. The shape that does not fit <see cref="Integrations"/>: an integration holds one
     /// host-wide secret, push holds a per-device credential the browser mints. Created by
@@ -428,6 +434,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasKey(p => p.Id);
             // The disable-list gate's and the outbox/poller's "enabled peers only" read.
             e.HasIndex(p => p.Enabled);
+            // A peer's own node id is what identifies it; Id is only this node's local handle. Unique, so
+            // two introductions arriving at once cannot leave the same peer in the roster twice.
+            e.HasIndex(p => p.NodeId).IsUnique();
             e.Property(p => p.LastSeen).HasConversion(
                 new ValueConverter<DateTimeOffset, long>(
                     v => v.UtcTicks,
@@ -435,6 +444,18 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // StateChangedAt — the gossip failure-timer clock (PLAN-peers.md §2·b, G5). Same nullable-ticks
             // posture as LastSeen; SQLite has no date type.
             e.Property(p => p.StateChangedAt).HasConversion(
+                new ValueConverter<DateTimeOffset, long>(
+                    v => v.UtcTicks,
+                    v => new DateTimeOffset(v, TimeSpan.Zero)));
+        });
+
+        modelBuilder.Entity<SelfFactEntity>(e =>
+        {
+            e.ToTable("node_self");
+            e.HasKey(f => f.Id);
+            // The CORS check reads origins on the request path, so the kind lookup is indexed.
+            e.HasIndex(f => f.Kind);
+            e.Property(f => f.LastSeen).HasConversion(
                 new ValueConverter<DateTimeOffset, long>(
                     v => v.UtcTicks,
                     v => new DateTimeOffset(v, TimeSpan.Zero)));

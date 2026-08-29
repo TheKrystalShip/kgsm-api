@@ -624,9 +624,9 @@ public sealed class AuthController(
 
         MintedClusterToken token = clusterTokens.Mint();
 
-        // The node-to-node address (GossipUrl) when this peer has one, else its public Url — same
+        // The peer's pinned candidate — same
         // preference GossipWorker/OutboxDrainer use to reach a peer's own HTTP surface.
-        string url = $"{(peer.GossipUrl ?? peer.Url).TrimEnd('/')}/auth/cluster-session";
+        string url = $"{peer.Url.TrimEnd('/')}/auth/cluster-session";
 
         // Built from the CALLER'S CLAIMS, never body — body carries only nodeId (see the XML doc above).
         var reqBody = new ClusterSessionRequest(

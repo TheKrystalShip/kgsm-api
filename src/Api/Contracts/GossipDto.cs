@@ -10,10 +10,9 @@ namespace TheKrystalShip.Api.Contracts;
 /// </summary>
 /// <param name="NodeId">The member's own stable node id — the merge key and, for the sender's own
 /// self-entry, the identity a refutation is asserted under.</param>
-/// <param name="Url">The member's advertised, browser-reachable client URL (may be empty when a node
-/// doesn't know/advertise its own — <c>PLAN-peers.md §2</c> #13a).</param>
-/// <param name="GossipUrl">The member's node-to-node URL when it differs from <see cref="Url"/>; null ⇒
-/// same as <see cref="Url"/>.</param>
+/// <param name="Candidates">Every address the member answers at, most-trusted first
+/// (<c>PLAN-peers.md §2</c> #13a). Empty when a node knows no address of its own — an honest gap the
+/// receiver leaves unfilled rather than guessing one.</param>
 /// <param name="Incarnation">The member's incarnation (owned by that member) — the primary merge ordering
 /// key; a strictly higher value always wins (G2 refutation).</param>
 /// <param name="State">The member's SWIM membership state (see <see cref="Services.Cluster.GossipState"/>):
@@ -21,7 +20,7 @@ namespace TheKrystalShip.Api.Contracts;
 /// <param name="ApiVersion">The member's route version, propagated so a gossip-discovered node's version is
 /// known before this node authenticates it first-hand; may be empty when not yet known.</param>
 public sealed record SyncMember(
-    string NodeId, string Url, string? GossipUrl, long Incarnation, string State, string ApiVersion);
+    string NodeId, IReadOnlyList<NodeCandidate> Candidates, long Incarnation, string State, string ApiVersion);
 
 /// <summary>POST /peers/sync request — the caller's full roster view, INCLUDING its own self-entry.</summary>
 /// <param name="From">The caller's node id (equals the cluster service token's <c>iss</c>).</param>

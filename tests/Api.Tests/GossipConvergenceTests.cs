@@ -211,7 +211,7 @@ public sealed class GossipConvergenceTests
             ApiJson.Configure(jsonOptions);
 
             var syncRequest = new SyncRequest(
-                "node-a", [new SyncMember("node-b", "http://node-b", null, 2, GossipState.Dead, "v1")]);
+                "node-a", [new SyncMember("node-b", [new NodeCandidate("https://node-b", Client: true)], 2, GossipState.Dead, "v1")]);
 
             using HttpClient client = factoryB.CreateClient();
             var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/peers/sync")

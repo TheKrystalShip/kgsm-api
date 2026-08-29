@@ -32,7 +32,7 @@ public sealed class RosterMergerTests
 
     private static SyncMember Member(
         string nodeId = "node-b", long incarnation = 0, string state = GossipState.Alive) =>
-        new(nodeId, $"http://{nodeId}", null, incarnation, state, "v1");
+        new(nodeId, [new NodeCandidate($"https://{nodeId}", Client: true)], incarnation, state, "v1");
 
     [Fact]
     public void HigherIncarnation_Wins_Update()

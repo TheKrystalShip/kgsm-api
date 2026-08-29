@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
@@ -537,7 +538,7 @@ public sealed class ClusterSsoTests
         {
             Id = "peer_roster_nicknamed",
             Url = "https://node-nicknamed.pub",
-            GossipUrl = "https://node-nicknamed.internal",
+            Candidates = PeerCandidates.Encode([new NodeCandidate("https://node-nicknamed.pub", Client: true)]),
             Nickname = "Nicknamed Box",
             NodeId = "node-nicknamed",
             Status = "reachable",

@@ -166,9 +166,11 @@
       "ClusterSecret": "",
       // The previous cluster secret, accepted during a rotation overlap.
       "ClusterSecretPrevious": "",
-      // The client URL this node advertises to peers. Blank advertises none.
+      // Override for the browser-reachable address this node advertises. Blank lets the node use the
+      // addresses it learns from whoever reaches it, which is the usual case.
       "ClusterAdvertiseUrl": "",
-      // The gossip URL this node advertises to peers. Blank advertises none.
+      // Override for a node-to-node-only address, for a topology where peers must not take the
+      // browser-reachable path. Blank offers no node-only address.
       "ClusterGossipUrl": "",
       // How often membership gossip is pushed. Floor 250.
       "ClusterGossipMs": 5000,
@@ -194,7 +196,8 @@
       // ── General ──
       // HTTP bind address(es), semicolon-separated. Read before the host exists, so it is bound separately in Program.
       "Urls": "http://0.0.0.0:8080",
-      // Comma-separated CORS origin allowlist. Blank allows any origin, which is a dev-only posture.
+      // Comma-separated CORS origin allowlist, joined with the panel origins this node learns when an
+      // admin signs in and when a peer introduces itself. Blank on both allows any origin, a dev-only posture.
       "CorsOrigins": ""
   },
 

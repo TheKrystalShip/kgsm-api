@@ -111,8 +111,24 @@ public sealed class PeerHandshakeServiceTests
 
     // ── helpers ──────────────────────────────────────────────────────────────────────────────────────
 
-    private static string Identity(string nodeId, string apiVersion, string[] capabilities) =>
-        JsonSerializer.Serialize(new { nodeId, apiVersion, build = "0.0.0+test", capabilities });
+    /// <summary>An introduce answer from a candidate peer: the same record this node sends it.</summary>
+    private static string Identity(
+        string nodeId, string apiVersion, string[] capabilities, string[]? candidates = null) =>
+        JsonSerializer.Serialize(new
+        {
+            self = new
+            {
+                nodeId,
+                apiVersion,
+                build = "0.0.0+test",
+                capabilities,
+                candidates = (candidates ?? [$"https://{nodeId}.test"])
+                    .Select(c => new { url = c, client = true }),
+                incarnation = 0,
+            },
+            youAre = (object?)null,
+            panelOrigins = Array.Empty<string>(),
+        });
 
     private static PeerHandshakeService NewService(HttpMessageHandler handler, out PeersStore store)
     {
@@ -126,8 +142,10 @@ public sealed class PeerHandshakeServiceTests
 
         var options = Options();
         var tokens = new ClusterTokenService(options, NullLogger<ClusterTokenService>.Instance);
+        var selfIdentity = new SelfIdentityStore(provider.GetRequiredService<IServiceScopeFactory>(), options);
         return new PeerHandshakeService(
-            new FakeHttpClientFactory(handler), store, tokens, options, NullLogger<PeerHandshakeService>.Instance);
+            new FakeHttpClientFactory(handler), store, selfIdentity, new StatedCard(options.NodeId), tokens,
+            options, NullLogger<PeerHandshakeService>.Instance);
     }
 
     private static ApiOptions Options() => new()
@@ -153,6 +171,15 @@ public sealed class PeerHandshakeServiceTests
         // Cluster ON (non-blank secret) — this node's own identity, minted and presented to the candidate.
         ClusterSecret = ClusterSecret, ClusterSecretPrevious = "", NodeId = "node-a",
     };
+
+    /// <summary>This node's own card, stated rather than assembled — the handshake's behaviour under test
+    /// is what it does with the OTHER side's card, not how it builds its own.</summary>
+    private sealed class StatedCard(string nodeId) : INodeCardSource
+    {
+        public Task<NodeCard> BuildAsync(CancellationToken ct) => Task.FromResult(
+            new NodeCard(nodeId, ApiInfo.ApiVersion, "0.0.0+test", ["cluster"],
+                [new NodeCandidate("https://node-a.test", Client: true)], 0));
+    }
 
     /// <summary>Always hands back a fresh <see cref="HttpClient"/> wrapping the SAME handler instance,
     /// never disposing it — same seam as <see cref="OutboxDrainerTests"/>'s fake factory.</summary>

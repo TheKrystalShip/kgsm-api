@@ -34,6 +34,7 @@ public sealed class PeersStore(IServiceScopeFactory scopeFactory, ILogger<PeersS
 {
     private readonly SemaphoreSlim _ensureGate = new(1, 1);
     private bool _ensured;
+    private readonly SemaphoreSlim _nodeIdGate = new(1, 1);
 
     /// <inheritdoc/>
     public async Task StartAsync(CancellationToken ct)
@@ -96,7 +97,8 @@ public sealed class PeersStore(IServiceScopeFactory scopeFactory, ILogger<PeersS
         else
         {
             existing.Url = peer.Url;
-            existing.GossipUrl = peer.GossipUrl;
+            existing.Candidates = peer.Candidates;
+            existing.AddressVerified = peer.AddressVerified;
             existing.Nickname = peer.Nickname;
             existing.NodeId = peer.NodeId;
             existing.Incarnation = peer.Incarnation;
@@ -122,7 +124,7 @@ public sealed class PeersStore(IServiceScopeFactory scopeFactory, ILogger<PeersS
     /// </summary>
     public async Task UpdateMembershipAsync(
         string id, string membershipState, long incarnation, DateTimeOffset stateChangedAt,
-        string? url, string? gossipUrl, string? apiVersion, CancellationToken ct)
+        IReadOnlyList<Contracts.NodeCandidate>? candidates, string? apiVersion, CancellationToken ct)
     {
         await EnsureSchemaAsync(ct).ConfigureAwait(false);
         using IServiceScope scope = scopeFactory.CreateScope();
@@ -133,9 +135,85 @@ public sealed class PeersStore(IServiceScopeFactory scopeFactory, ILogger<PeersS
         row.MembershipState = membershipState;
         row.Incarnation = incarnation;
         row.StateChangedAt = stateChangedAt;
-        if (!string.IsNullOrWhiteSpace(url)) row.Url = url;
-        if (gossipUrl is not null) row.GossipUrl = gossipUrl;
+        if (candidates is { Count: > 0 })
+        {
+            row.Candidates = PeerCandidates.Merge(row.Candidates, candidates);
+            // An unverified address follows the offer; a proven one is left alone until a probe says
+            // otherwise, so one short gossip round cannot unpin an address this node knows works.
+            if (!row.AddressVerified)
+                row.Url = PeerCandidates.Best(PeerCandidates.Decode(row.Candidates));
+        }
         if (!string.IsNullOrWhiteSpace(apiVersion)) row.ApiVersion = apiVersion;
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Resolve the row for <paramref name="nodeId"/>, hand it to <paramref name="build"/> (null when this
+    /// node is new to us), and write what comes back — all under one gate, so two introductions arriving at
+    /// once converge on a single row instead of both deciding the peer is new. A node id is the peer's own
+    /// identity and this row's real key; <see cref="PeerEntity.Id"/> is only ever this node's local handle
+    /// on it.
+    /// </summary>
+    public async Task<PeerEntity> UpsertByNodeIdAsync(
+        string nodeId, Func<PeerEntity?, PeerEntity> build, CancellationToken ct)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await _nodeIdGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using IServiceScope scope = scopeFactory.CreateScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            PeerEntity? existing = await db.Peers
+                .AsNoTracking()
+                .FirstOrDefaultAsync(p => p.NodeId == nodeId, ct)
+                .ConfigureAwait(false);
+
+            PeerEntity built = build(existing);
+            PeerEntity? tracked = existing is null
+                ? null
+                : await db.Peers.FirstOrDefaultAsync(p => p.Id == built.Id, ct).ConfigureAwait(false);
+
+            if (tracked is null)
+            {
+                db.Peers.Add(built);
+            }
+            else
+            {
+                db.Entry(tracked).CurrentValues.SetValues(built);
+            }
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return built;
+        }
+        finally { _nodeIdGate.Release(); }
+    }
+
+    /// <summary>
+    /// Pin the address a peer has just answered on under its own node id, and fold the candidates it
+    /// offered into what we already hold (<c>PLAN-peers.md §2</c> #13c). This is the only thing that marks
+    /// an address verified: until a probe has come back as the right node, the row carries a claim.
+    /// A silent no-op if <paramref name="id"/> is gone.
+    /// </summary>
+    public async Task PinAddressAsync(
+        string id, string address, IReadOnlyList<Contracts.NodeCandidate>? offered, CancellationToken ct)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        using IServiceScope scope = scopeFactory.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        PeerEntity? row = await db.Peers.FirstOrDefaultAsync(p => p.Id == id, ct).ConfigureAwait(false);
+        if (row is null)
+            return;
+
+        // The address that answered leads the candidate list: it is the one thing here this node has
+        // proven, so it is what a later cold start tries first. Whether a BROWSER can also use it is a
+        // separate claim this probe says nothing about, so the flag is carried over from whoever offered
+        // the address rather than assumed — an address of unknown kind stays node-only, and the roster
+        // reports no client URL rather than handing the SPA one that cannot work.
+        string merged = PeerCandidates.Merge(row.Candidates, offered);
+        bool client = PeerCandidates.Decode(merged)
+            .Any(c => c.Client && string.Equals(c.Url, address, StringComparison.OrdinalIgnoreCase));
+        row.Candidates = PeerCandidates.Merge(merged, [new Contracts.NodeCandidate(address, client)]);
+        row.Url = address;
+        row.AddressVerified = true;
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
@@ -271,7 +349,8 @@ public sealed class PeersStore(IServiceScopeFactory scopeFactory, ILogger<PeersS
                 CREATE TABLE IF NOT EXISTS peers (
                     "Id" TEXT NOT NULL CONSTRAINT "PK_peers" PRIMARY KEY,
                     "Url" TEXT NOT NULL,
-                    "GossipUrl" TEXT NULL,
+                    "Candidates" TEXT NOT NULL DEFAULT '',
+                    "AddressVerified" INTEGER NOT NULL DEFAULT 0,
                     "Nickname" TEXT NULL,
                     "NodeId" TEXT NOT NULL,
                     "Incarnation" INTEGER NOT NULL,
@@ -289,12 +368,26 @@ public sealed class PeersStore(IServiceScopeFactory scopeFactory, ILogger<PeersS
                 CREATE INDEX IF NOT EXISTS "IX_peers_Enabled" ON "peers" ("Enabled");
                 """, ct).ConfigureAwait(false);
 
+            // A node id identifies a peer; two rows carrying one are the same peer counted twice, and the
+            // roster is this node's own copy that gossip refills, so the surplus is dropped rather than
+            // reconciled. The index then makes the duplicate impossible instead of merely unlikely.
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                DELETE FROM peers WHERE rowid NOT IN (SELECT MIN(rowid) FROM peers GROUP BY "NodeId");
+                """, ct).ConfigureAwait(false);
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS "IX_peers_NodeId" ON "peers" ("NodeId");
+                """, ct).ConfigureAwait(false);
+
             // Idempotent forward-add of the gossip columns onto an EXISTING peers table (a dev/host DB
             // created by the pre-gossip peer-foundation shape, where the CREATE TABLE IF NOT EXISTS above
             // no-ops and would otherwise leave the new columns absent → runtime 500s, not a build error).
             // SQLite has no ADD COLUMN IF NOT EXISTS, so probe table_info first and add only what's missing.
             await EnsureColumnAsync(db, "MembershipState", "TEXT NOT NULL DEFAULT 'alive'", ct).ConfigureAwait(false);
             await EnsureColumnAsync(db, "StateChangedAt", "INTEGER NULL", ct).ConfigureAwait(false);
+            await EnsureColumnAsync(db, "Candidates", "TEXT NOT NULL DEFAULT ''", ct).ConfigureAwait(false);
+            await EnsureColumnAsync(db, "AddressVerified", "INTEGER NOT NULL DEFAULT 0", ct).ConfigureAwait(false);
             _ensured = true;
         }
         finally { _ensureGate.Release(); }

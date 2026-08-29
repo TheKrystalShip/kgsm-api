@@ -7,7 +7,7 @@ namespace TheKrystalShip.Api.Services.Cluster;
 /// </summary>
 /// <remarks>
 /// Projects <see cref="PeersStore.ListEnabledAsync"/> rows into <see cref="ClusterTarget"/>s, using each
-/// peer's gossip-or-client URL (<c>PLAN-peers.md §2</c> #13a) — <see cref="Data.PeerEntity.GossipUrl"/> when
+/// peer's pinned candidate (<c>PLAN-peers.md §2</c> #13a) — <see cref="Data.PeerEntity.Url"/> when
 /// set, else the advertised <see cref="Data.PeerEntity.Url"/> — restricted to first-hand-
 /// <see cref="GossipState.Alive"/> peers only (<c>PLAN-peers.md §P1</c>; see <see cref="GetEnabledTargetsAsync"/>).
 /// </remarks>
@@ -46,7 +46,7 @@ public sealed class RosterClusterTargetProvider
         IReadOnlyList<Data.PeerEntity> enabled = await _peers.ListEnabledAsync(ct).ConfigureAwait(false);
         return enabled
             .Where(p => p.MembershipState == GossipState.Alive && p.LastSeen is not null)
-            .Select(p => new ClusterTarget(p.NodeId, p.GossipUrl ?? p.Url))
+            .Select(p => new ClusterTarget(p.NodeId, p.Url))
             .ToList();
     }
 }

@@ -748,7 +748,7 @@
       "key": "clusterAdvertiseUrl",
       "env": "Api__ClusterAdvertiseUrl",
       "label": "Advertised URL",
-      "description": "Address other hosts should reach this one at. Empty means this host does not advertise itself.",
+      "description": "Address other hosts and browsers should reach this one at. Empty means this host uses the address it is reached at, which is usually the right one.",
       "group": "cluster",
       "type": "string",
       "risk": "wiring"
@@ -757,7 +757,7 @@
       "key": "clusterGossipUrl",
       "env": "Api__ClusterGossipUrl",
       "label": "Peer URL",
-      "description": "A peer to learn the rest of the cluster from. Empty means this host waits to be contacted.",
+      "description": "An address only other hosts use, when they must not go the way a browser does. Empty means hosts and browsers reach this one the same way.",
       "group": "cluster",
       "type": "string",
       "risk": "wiring"

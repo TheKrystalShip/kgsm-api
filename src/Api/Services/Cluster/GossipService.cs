@@ -19,14 +19,17 @@ public sealed class GossipService
 
     private readonly PeersStore _peers;
     private readonly SelfIncarnation _selfIncarnation;
+    private readonly SelfIdentityStore _selfIdentity;
     private readonly ApiOptions _options;
     private readonly ILogger<GossipService> _logger;
 
     public GossipService(
-        PeersStore peers, SelfIncarnation selfIncarnation, ApiOptions options, ILogger<GossipService> logger)
+        PeersStore peers, SelfIncarnation selfIncarnation, SelfIdentityStore selfIdentity, ApiOptions options,
+        ILogger<GossipService> logger)
     {
         _peers = peers;
         _selfIncarnation = selfIncarnation;
+        _selfIdentity = selfIdentity;
         _options = options;
         _logger = logger;
     }
@@ -63,8 +66,8 @@ public sealed class GossipService
                         var peer = new PeerEntity
                         {
                             Id = "peer_" + Guid.NewGuid().ToString("N")[..10],
-                            Url = member.Url,
-                            GossipUrl = member.GossipUrl,
+                            Url = PeerCandidates.Best(member.Candidates),
+                            Candidates = PeerCandidates.Encode(member.Candidates),
                             NodeId = member.NodeId,
                             Incarnation = member.Incarnation,
                             MembershipState = member.State,
@@ -81,7 +84,7 @@ public sealed class GossipService
                     case MergeAction.Update:
                         await _peers
                             .UpdateMembershipAsync(
-                                existing!.Id, member.State, member.Incarnation, now, member.Url, member.GossipUrl,
+                                existing!.Id, member.State, member.Incarnation, now, member.Candidates,
                                 member.ApiVersion, ct)
                             .ConfigureAwait(false);
                         _logger.LogDebug(
@@ -114,8 +117,7 @@ public sealed class GossipService
     {
         var self = new SyncMember(
             _options.NodeId,
-            _options.ClusterAdvertiseUrl,
-            string.IsNullOrWhiteSpace(_options.ClusterGossipUrl) ? null : _options.ClusterGossipUrl,
+            await _selfIdentity.CandidatesAsync(ct).ConfigureAwait(false),
             _selfIncarnation.Current,
             GossipState.Alive,
             ApiInfo.ApiVersion);
@@ -126,7 +128,8 @@ public sealed class GossipService
         {
             if (string.Equals(p.NodeId, _options.NodeId, StringComparison.Ordinal))
                 continue;
-            roster.Add(new SyncMember(p.NodeId, p.Url, p.GossipUrl, p.Incarnation, p.MembershipState, p.ApiVersion));
+            roster.Add(new SyncMember(
+                p.NodeId, PeerCandidates.Decode(p.Candidates), p.Incarnation, p.MembershipState, p.ApiVersion));
         }
         return roster;
     }
@@ -166,7 +169,7 @@ public sealed class GossipService
                     if (since is null || now - since.Value >= TimeSpan.FromMilliseconds(_options.ClusterSuspectMs))
                     {
                         await _peers
-                            .UpdateMembershipAsync(p.Id, GossipState.Suspect, p.Incarnation, now, null, null, null, ct)
+                            .UpdateMembershipAsync(p.Id, GossipState.Suspect, p.Incarnation, now, null, null, ct)
                             .ConfigureAwait(false);
                         _logger.LogInformation("peer {NodeId} → suspect (no liveness evidence)", p.NodeId);
                     }
@@ -180,7 +183,7 @@ public sealed class GossipService
                         && now - since >= TimeSpan.FromMilliseconds(_options.ClusterSuspectMs))
                     {
                         await _peers
-                            .UpdateMembershipAsync(p.Id, GossipState.Dead, p.Incarnation, now, null, null, null, ct)
+                            .UpdateMembershipAsync(p.Id, GossipState.Dead, p.Incarnation, now, null, null, ct)
                             .ConfigureAwait(false);
                         _logger.LogInformation("peer {NodeId} → dead (suspect timeout)", p.NodeId);
                     }

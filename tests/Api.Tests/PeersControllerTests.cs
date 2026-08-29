@@ -68,8 +68,22 @@ public sealed class PeersControllerTests : IClassFixture<AuthTestFactory>
         return request;
     }
 
+    /// <summary>A candidate peer's answer to the introduce exchange — the same record this node sent it.</summary>
     private static string Identity(string nodeId, string apiVersion, string[] capabilities) =>
-        JsonSerializer.Serialize(new { nodeId, apiVersion, build = "0.0.0+test", capabilities });
+        JsonSerializer.Serialize(new
+        {
+            self = new
+            {
+                nodeId,
+                apiVersion,
+                build = "0.0.0+test",
+                capabilities,
+                candidates = new[] { new { url = $"https://{nodeId}.test", client = true } },
+                incarnation = 0,
+            },
+            youAre = (object?)null,
+            panelOrigins = Array.Empty<string>(),
+        });
 
     private static async Task<JsonElement> Json(HttpResponseMessage resp) =>
         JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;

@@ -58,6 +58,12 @@ public class Startup(IConfiguration configuration)
 {
     private const string CorsPolicy = "frontend";
 
+    // The CORS policy is built in ConfigureServices, before any service exists to resolve, but it has to
+    // consult the panel origins this node learns at runtime. The store is dropped in here once the provider
+    // is up (Configure), and the policy predicate reads it per request. Null until then, which reads as
+    // "nothing learned yet" — the same answer the node gave before it learned anything.
+    private SelfIdentityStore? _corsPanelOrigins;
+
     public void ConfigureServices(IServiceCollection services)
     {
         // Resolve the whole configurable surface once, up front. Everything below reads it from here
@@ -646,6 +652,7 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<PeersStore>();
         services.AddHostedService(sp => sp.GetRequiredService<PeersStore>());
         services.AddHttpClient(PeerHandshakeService.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
+        services.AddSingleton<INodeCardSource, NodeCardSource>();
         services.AddSingleton<PeerHandshakeService>();
         services.AddSingleton<RosterClusterTargetProvider>();
         services.AddHttpClient(PeerLatencyPoller.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
@@ -657,6 +664,11 @@ public class Startup(IConfiguration configuration)
         // random-peer push-pull loop (a hosted service, inert when ClusterEnabled is false). Its named
         // HttpClient carries the short-timeout, ephemeral (never-outboxed) sync round-trip.
         services.AddSingleton<SelfIncarnation>();
+        // What this node has learned about ITSELF by reflection — the addresses it answers at and the
+        // browser origins an admin signs in from (PLAN-peers.md P0.6). A node cannot work out its own
+        // public address, so these arrive from whoever reached it and are what let a node join a cluster
+        // with nothing configured but the shared secret.
+        services.AddSingleton<SelfIdentityStore>();
         services.AddSingleton<GossipService>();
         services.AddHttpClient(GossipWorker.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
         services.AddHostedService<GossipWorker>();
@@ -941,23 +953,36 @@ public class Startup(IConfiguration configuration)
         services.AddExceptionHandler<ApiExceptionHandler>();
         services.AddProblemDetails();
 
-        // CORS allowlist is config-driven — the frontend's origin isn't known yet, and the
-        // validation venue is still open. When unset we allow any origin (dev only — safe because
-        // bearers ride the Authorization header, not cookies).
+        // CORS answers from two places: the configured allowlist, and the panel origins this node has
+        // learned — an origin an admin signed in from here, or one a peer carried over in an introduce
+        // exchange (PLAN-peers.md P0.6). That is what lets a panel served from somewhere that is not a node
+        // reach every node in a cluster without a per-node allowlist. When neither names anything we allow
+        // any origin (dev only — safe because bearers ride the Authorization header, not cookies).
         IReadOnlyList<string> corsOrigins = apiOptions.CorsOrigins;
         services.AddCors(options => options.AddPolicy(CorsPolicy, policy =>
-        {
-            if (corsOrigins.Count > 0)
-                policy.WithOrigins([.. corsOrigins]).AllowAnyHeader().AllowAnyMethod().AllowCredentials();
-            else
-                policy.SetIsOriginAllowed(_ => true).AllowAnyHeader().AllowAnyMethod();
-        }));
+            policy.SetIsOriginAllowed(origin =>
+                  {
+                      IReadOnlyList<string>? learned = _corsPanelOrigins?.CachedPanelOrigins();
+                      if (corsOrigins.Count == 0 && (learned is null || learned.Count == 0))
+                          return true;
+
+                      string? normalized = SelfIdentityStore.Normalize(origin);
+                      if (normalized is null) return false;
+
+                      return corsOrigins.Any(o => string.Equals(
+                                 SelfIdentityStore.Normalize(o), normalized, StringComparison.OrdinalIgnoreCase))
+                             || (learned?.Any(o => string.Equals(o, normalized, StringComparison.OrdinalIgnoreCase))
+                                 ?? false);
+                  })
+                  .AllowAnyHeader()
+                  .AllowAnyMethod()));
     }
 
     public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ILoggerFactory loggerFactory)
     {
         // Make the trust posture impossible to miss in the logs.
         ApiOptions options = app.ApplicationServices.GetRequiredService<ApiOptions>();
+        _corsPanelOrigins = app.ApplicationServices.GetRequiredService<SelfIdentityStore>();
         ILogger startupLog = loggerFactory.CreateLogger("TheKrystalShip.Api.Startup");
         if (options.AuthDisabled)
             startupLog.LogWarning(

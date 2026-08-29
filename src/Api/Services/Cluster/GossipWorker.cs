@@ -111,7 +111,7 @@ public sealed class GossipWorker : BackgroundService
 
         IReadOnlyList<SyncMember> members = await _gossip.BuildLocalRosterAsync(ct).ConfigureAwait(false);
 
-        string baseUrl = (partner.GossipUrl ?? partner.Url).TrimEnd('/');
+        string baseUrl = partner.Url.TrimEnd('/');
         HttpClient http = _httpClientFactory.CreateClient(HttpClientName);
 
         HttpResponseMessage? response = null;

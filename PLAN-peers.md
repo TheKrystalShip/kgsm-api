@@ -73,14 +73,16 @@ per-leaf status, not from a status line on the capability itself.
 | 3 | Cluster membership proof | A shared **`Api__ClusterSecret`** (HMAC), distinct from the user JWT signing key |
 | 4 | Node-to-node auth | A **service JWT** signed with the cluster secret (`sub=node:<id>`, `aud=cluster`, `iss=<id>`, short TTL) |
 | 5 | No per-node keypairs | Symmetric shared secret only — no Ed25519, no per-request asymmetric signing |
-| 6 | Handshake | Admin pastes a URL → local node pulls the remote `/identity` over TLS → stores it. No key exchange, no fingerprint confirmation |
+| 6 | Handshake | Admin pastes a URL → the two nodes exchange **node cards** in one symmetric `POST /peers/introduce` over TLS (§7), each validating the other with the same predicate and each recording the mirror of what the other records. No key exchange, no fingerprint confirmation |
 | 7 | Trust direction | **Symmetric by construction** — the shared secret *is* the trust boundary. A node trusts any caller bearing a valid cluster-secret service token whose `iss` is **not an explicitly-disabled peer** (a **disable-list** gate, not an allow-list): an unknown-but-validly-tokened node is trusted, because holding the secret already proves guild membership. This is what makes trust transitive without pairwise handshakes and lets the mesh work under a partial topology view |
 | 8 | Node disable | A row flag in the `Peers` table — disabled ⇒ its service tokens rejected (`403 peer_disabled`); stays in DB for re-enable. Disable is the **only** local override to the shared-secret trust; absence from the table is *not* rejection |
 | 9 | Secret rotation | Dual-secret overlap window: nodes accept `{current, previous}`, roll one at a time, drop `previous` |
 | 10 | Version policy | **Match on `apiVersion` (`v1`)**, not build version — allows rolling upgrades across a heterogeneous-build mesh |
 | 11 | Discovery | **Join-via-one-seed + gossip convergence.** The admin's only membership action, ever, is "join the cluster": paste **one** existing member's URL. From that seed the roster converges automatically (§2·b) — add one, join all. No per-peer approvals, no master node |
 | 12 | Peer + secret storage | SQLite (`Peers` table = the durable roster + seed set; secret from config/env, never stored) |
-| 13a | Advertised client URL | Each roster entry carries a **browser-reachable** URL (what the SPA uses), which may differ from the node-to-node gossip URL — a node behind LAN/VPN gossips over one address but must advertise a client-reachable one, or "add one, see all" silently breaks in the browser. Collapse to one field when they are equal (§8, §10 #2) |
+| 13a | Node addresses | Each node carries a **candidate list** of addresses it answers at, most-trusted first. Reachability is a property of a pair, not of a node: every peer probes the candidates and pins the one that answers *for it*, so two peers legitimately hold different addresses for the same third node |
+| 13b | Where candidates come from | **Reflection, not configuration.** A node learns its own addresses from whoever demonstrably reached it — the operator-supplied URL a peer introduced it at, and the scheme+host of an admin-authenticated browser request. `Api__ClusterAdvertiseUrl` and `Api__ClusterGossipUrl` stay as overrides for topologies where neither source is right; a node needs neither to join |
+| 13c | An address is a claim until probed | A reflected or gossiped address is recorded **unverified** and promoted only when a probe answers with the expected `nodeId` (the address form of G3). A node whose every candidate fails is honestly `unreachable`; no address is guessed, and none is fabricated to fill the column |
 
 ### Membership & discovery — gossip (locked)
 
@@ -319,6 +321,54 @@ service or dependency (§2·b).
   "I'm leaving" vs the inferred "you went silent"). Ties to open item #6. Small; fold
   into P1 or land standalone.
 
+### P0.6 — Symmetric introduce and address reflection · `built`
+Collapses cluster addressing to a single configured value — `Api__ClusterSecret` — by
+making the join teach both nodes what they need, instead of requiring each node to be
+pre-told its own address (§2 #13a-c).
+
+- **A candidate says whether a browser can use it.** Each candidate is `{ url, client }`.
+  The two reflection sources are browser-reachable by construction — an operator pastes a URL
+  into a panel, and an observed host *is* a browser that arrived — so `client` is true for
+  both; `Api__ClusterGossipUrl` and a peer-observed source address contribute node-only
+  candidates. The roster's `clientUrl` is the best verified client candidate, and
+  node-to-node traffic takes the best verified candidate of either kind.
+- **One exchange, one record shape.** `POST /api/v1/peers/introduce` carries an
+  `IntroduceExchange` and answers with the same record — the push-pull idiom
+  `/peers/sync` already uses. Each side sends its own `NodeCard` (`nodeId`, `apiVersion`,
+  `build`, `capabilities`, `candidates`, `incarnation`), the address it reached the other
+  at, and the panel origins it knows.
+- **One predicate, called by both sides.** Token validity, `nodeId` is not our own, a
+  matching `apiVersion`, the `cluster` capability, and a transport gate refusing plaintext
+  to anything outside loopback and the private ranges. Initiator and receiver run the same
+  function over the same record, so the two directions cannot drift apart.
+- **Reflection carries the address.** The URL an operator pasted is the one address in the
+  system a human has stated and a peer has just proven reachable, so the introducing node
+  hands it back as `youAre` and the joining node adopts it as its first candidate. The
+  reverse direction reflects the source address the receiver observed, labelled
+  `observed` — a hint that seeds a candidate, never a URL anything depends on.
+- **Verification is the probe that already exists.** Candidates land unverified;
+  `PeerLatencyPoller` walks them in order and pins the first that answers `/identity` with
+  the expected `nodeId`. Every candidate failing is an honest `unreachable`.
+- **Bootstrap for the first node.** A node with no reflections resolves its own candidates
+  from `Api__ClusterAdvertiseUrl`, then `Api__PublicBaseUrl`, then the scheme and host
+  observed on an admin-authenticated request. Learned candidates persist in
+  `HostSettingsEntity` beside the other runtime-mutable identity overrides, so a restart
+  keeps them and an operator corrects them live rather than through a service restart.
+- **Panel origins ride along.** The origin an admin's browser signs in from is cluster
+  state, gossiped like any other, and CORS answers from it — so a panel served from
+  somewhere that is not a node reaches every node without a per-node allowlist. An origin
+  is recorded only from an admin-authenticated request.
+- **Order independence is the acceptance test.** Introducing B from A and introducing A
+  from B leave the identical cluster state, and simultaneous mutual introduction leaves one
+  roster row per node: both upserts key on `nodeId`, and incarnation ordering settles the
+  rest.
+- **Coordinated upgrade.** `SyncMember` carries candidates, so the gossip record changes
+  shape. The handshake's `apiVersion` check is what enforces that both sides run it.
+- **A node id is unique in the roster.** Two introductions arriving at once resolve the row
+  under one gate and the column is uniquely indexed, so the same peer cannot be counted
+  twice. The surplus of an older duplicate is dropped rather than reconciled: the roster is
+  this node's own copy, and gossip refills it.
+
 ### P1 — Single sign-on · `built` (backend); SPA half owed
 - **`POST /auth/cluster-session` vouch endpoint** — cluster-token authed +
   disable-list gated (the `/peers/inbox` fail-closed preamble). A peer asserts an
@@ -448,13 +498,35 @@ registry.
 → 409 { error: { code: "version_mismatch", details: { remote:"v2", local:"v1" } } }
 → 422 { error: { code: "peer_not_cluster",
         message: "Remote node does not advertise the cluster capability" } }
+→ 422 { error: { code: "insecure_transport" } }
+→ 409 { error: { code: "peer_is_self" } }
 → 502 { error: { code: "peer_unreachable" } }
+```
+
+### `POST /api/v1/peers/introduce` (cluster-token authed)
+The symmetric join exchange (§2 #6): the request body and the `200` body are the same
+record, and the same validation predicate runs on both sides.
+```json
+{ "self": { "nodeId": "node-a", "apiVersion": "v1", "build": "0.1.0+abc123",
+            "capabilities": ["monitor","watchdog","cluster"],
+            "candidates": [{ "url": "https://node-a.example", "client": true }],
+            "incarnation": 3 },
+  "youAre": { "url": "https://node-b.example", "provenance": "operator" },
+  "panelOrigins": ["https://panel.example"] }
+→ 200  the same record from the other side; its `youAre` carries
+       `"provenance": "observed"`, or is null when the receiver saw no usable address
+→ 401 { error: { code: "invalid_cluster_token" } }
+→ 409 { error: { code: "peer_is_self" } }
+→ 409 { error: { code: "version_mismatch", details: { remote:"v2", local:"v1" } } }
+→ 422 { error: { code: "peer_not_cluster" } }
+→ 422 { error: { code: "insecure_transport" } }
 ```
 
 ### `GET /api/v1/peers/identity` (cluster-token authed)
 ```json
 { "nodeId": "node-b", "apiVersion": "v1", "build": "0.1.0+abc123",
-  "capabilities": ["monitor","watchdog","cluster"] }
+  "capabilities": ["monitor","watchdog","cluster"],
+  "candidates": [{ "url": "https://node-b.example", "client": true }] }
 ```
 
 ### `POST /auth/cluster-session` (cluster-token authed + disable-gated)
@@ -587,6 +659,18 @@ The message-bus receive endpoint — one endpoint, typed envelope. Full contract
 - A phantom node injected by gossip never reaches `alive` (fails first-hand auth).
 - Gossip traffic leaves no `cluster_outbox` rows (ephemeral transport).
 
+### P0.6 — self-validated (`SymmetricIntroduceTests`, plus the suite it runs in)
+- The same predicate refuses a mismatched `apiVersion`, a missing `cluster` capability, a
+  self-introduction and a plaintext public candidate — whichever side is asked.
+- A node never configured with an address adopts the operator-pasted URL from its first
+  introduction and gossips it onward.
+- Introducing B from A and introducing A from B leave the two nodes holding the same
+  roster; simultaneous mutual introduction leaves one row per node, not two.
+- An unverified candidate is never reported `alive`, and a node whose candidates all fail
+  reports `unreachable` while holding no invented address.
+- A panel origin learned at join answers CORS on a node the browser was never configured
+  against.
+
 ### P1
 - Log into A; hit B with no B session → transparent vouch → native B session.
 - Logout-everywhere revokes A **and** B.
@@ -622,13 +706,11 @@ Still open — to resolve before or during the relevant phase:
    know the peer). If nodes span the public internet, that endpoint is an
    internet-exposed enumeration/DoS surface — decide LAN-only (VPN/overlay) vs WAN,
    and rate-limit `/identity` + `/inbox` + `/sync` accordingly. Ties into who opens
-   the cross-node port (kgsm-firewall/watchdog own port-opening). **Concrete
-   sub-decision (§2 #13a):** the two-URL split is **built as config knobs** —
-   `ClusterAdvertiseUrl` (the browser-reachable client URL the roster carries) and
-   `ClusterGossipUrl` (the node-to-node address). What remains open is
-   **auto-derivation** (so an operator need not set both by hand) and the **SPA CORS
-   preflight-warn** (§8) — so the roster the SPA consumes is always browser-reachable,
-   never an internal address.
+   the cross-node port (kgsm-firewall/watchdog own port-opening). Addressing itself is
+   settled (§2 #13a-c, P0.6): candidates are reflected at join and probed before use, so
+   neither URL knob is required to form a cluster. What remains open here is the exposure
+   question — whether `/identity`, `/inbox` and `/sync` face the public internet at all,
+   and the rate limits if they do.
 7. **Role-map drift honesty.** §0 makes a uniform `KGSM_API_AUTH_ROLE_*` map a
    cluster-formation precondition, so tier is consistent by construction. If an
    operator lets two nodes' maps drift, a user is legitimately admin on one and

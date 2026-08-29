@@ -101,113 +101,162 @@ public sealed class PeerLatencyPoller : BackgroundService
         await Task.WhenAll(peers.Select(peer => ProbeAsync(peer, token, ct))).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// One probe round for one peer: walk its candidate addresses in order (the pinned one first) and stop
+    /// at the first that answers <c>/identity</c> as this peer. The winner is pinned, so the next round —
+    /// and every node-to-node call in between — goes straight there. Reachability is a property of a pair,
+    /// so the address this node pins is its own answer and need not match what another peer pinned.
+    /// </summary>
     private async Task ProbeAsync(PeerEntity peer, MintedClusterToken token, CancellationToken ct)
     {
         try
         {
-            string baseUrl = (peer.GossipUrl ?? peer.Url).TrimEnd('/');
             HttpClient http = _httpClientFactory.CreateClient(HttpClientName);
+            string? lastFailure = null;
 
-            long start = Stopwatch.GetTimestamp();
-            HttpResponseMessage? response = null;
-            string? failure = null;
-            try
+            foreach (string address in AddressesFor(peer))
             {
-                // A per-request message (not a header on the shared named client) — probes for every peer
-                // run concurrently off the same HttpClient instance, so a default header would race.
-                using var request = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/api/v1/peers/identity");
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-                response = await http.SendAsync(request, ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw; // real shutdown — propagate, don't treat this as a probe failure
-            }
-            catch (Exception ex)
-            {
-                // Connect refused, DNS failure, the client's own request timeout — all transport-level
-                // failures, all honestly "unreachable."
-                failure = ex.Message;
-            }
+                (int? latencyMs, NodeCard? identity, string? failure) =
+                    await TryAddressAsync(http, address, token, ct).ConfigureAwait(false);
 
-            using (response)
-            {
-                if (response is not null && response.IsSuccessStatusCode)
+                if (latencyMs is null)
                 {
-                    int latencyMs = (int)Stopwatch.GetElapsedTime(start).TotalMilliseconds;
-                    await _peers.UpdateLivenessAsync(peer.Id, "reachable", latencyMs, DateTimeOffset.UtcNow, ct)
-                        .ConfigureAwait(false);
-                    if (peer.Status != "reachable")
-                    {
-                        _logger.LogInformation(
-                            "peer {Id} ({NodeId}) is now reachable ({LatencyMs}ms)", peer.Id, peer.NodeId, latencyMs);
-                    }
-
-                    // First-hand authentication (PLAN-peers.md §2·b, G3): a peer we just reached directly
-                    // is promoted to alive only once its own /identity confirms it's a real cluster member
-                    // at our route version — direct reachability alone isn't membership proof. A body we
-                    // can't parse still counts as reachable above; it just isn't vouched for.
-                    PeerIdentityView? identity = null;
-                    try
-                    {
-                        await using Stream identityBody = await response.Content.ReadAsStreamAsync(ct)
-                            .ConfigureAwait(false);
-                        identity = await JsonSerializer
-                            .DeserializeAsync<PeerIdentityView>(identityBody, IdentityJsonOptions, ct)
-                            .ConfigureAwait(false);
-                    }
-                    catch (JsonException)
-                    {
-                        _logger.LogDebug(
-                            "peer {Id} ({NodeId}) identity body did not parse — reachable, not promoted",
-                            peer.Id, peer.NodeId);
-                    }
-
-                    if (identity is not null
-                        && identity.Capabilities?.Contains("cluster") == true
-                        && string.Equals(identity.ApiVersion, ApiInfo.ApiVersion, StringComparison.Ordinal))
-                    {
-                        bool wasAlive = peer.MembershipState == GossipState.Alive;
-                        await _peers.PromoteAliveAsync(peer.Id, identity.ApiVersion, DateTimeOffset.UtcNow, ct)
-                            .ConfigureAwait(false);
-                        if (!wasAlive)
-                        {
-                            _logger.LogInformation(
-                                "peer {NodeId} promoted alive (first-hand authenticated)", peer.NodeId);
-                        }
-                    }
-                    else if (identity is not null)
-                    {
-                        _logger.LogDebug(
-                            "peer {NodeId} reached but not a matching cluster member: caps={Caps} version={Version}",
-                            peer.NodeId,
-                            identity.Capabilities is null ? "(none)" : string.Join(",", identity.Capabilities),
-                            identity.ApiVersion);
-                    }
-
-                    return;
+                    lastFailure = failure;
+                    continue;
                 }
 
-                // A non-2xx or a transport failure — never a fabricated latency, and lastSeen stays
-                // whatever it already was (a failed probe never advances "last successfully reached").
-                string reason = failure ?? $"HTTP {(int)response!.StatusCode}";
-                await _peers.UpdateLivenessAsync(peer.Id, "unreachable", null, peer.LastSeen, ct)
+                bool pinned = string.Equals(address, peer.Url, StringComparison.OrdinalIgnoreCase);
+                if (!pinned)
+                {
+                    _logger.LogInformation(
+                        "peer {NodeId} answers at {Address} — pinning it", peer.NodeId, address);
+                }
+
+                await _peers.UpdateLivenessAsync(peer.Id, "reachable", latencyMs.Value, DateTimeOffset.UtcNow, ct)
                     .ConfigureAwait(false);
-                if (peer.Status == "reachable")
-                    _logger.LogInformation("peer {Id} ({NodeId}) went unreachable: {Reason}", peer.Id, peer.NodeId, reason);
-                else
-                    _logger.LogDebug("peer {Id} ({NodeId}) still unreachable: {Reason}", peer.Id, peer.NodeId, reason);
+                if (peer.Status != "reachable")
+                {
+                    _logger.LogInformation(
+                        "peer {Id} ({NodeId}) is now reachable ({LatencyMs}ms)", peer.Id, peer.NodeId, latencyMs);
+                }
+
+                // First-hand authentication (PLAN-peers.md §2·b, G3): a peer we just reached directly is
+                // promoted to alive only once its own /identity confirms it is a real cluster member, at our
+                // route version, under the node id this row is keyed on — direct reachability alone is not
+                // membership proof, and an address that answers as somebody else is not this peer's address.
+                // A body we cannot parse still counts as reachable; it just isn't vouched for.
+                bool authentic = identity is not null
+                    && string.Equals(identity.NodeId, peer.NodeId, StringComparison.Ordinal)
+                    && identity.Capabilities?.Contains("cluster") == true
+                    && string.Equals(identity.ApiVersion, ApiInfo.ApiVersion, StringComparison.Ordinal);
+
+                if (authentic)
+                {
+                    // An address only becomes this peer's address once it has answered under this peer's
+                    // node id (§2 #13c) — until then it is a claim the roster carries unverified.
+                    await _peers.PinAddressAsync(peer.Id, address, identity!.Candidates, ct).ConfigureAwait(false);
+
+                    bool wasAlive = peer.MembershipState == GossipState.Alive;
+                    await _peers.PromoteAliveAsync(peer.Id, identity.ApiVersion, DateTimeOffset.UtcNow, ct)
+                        .ConfigureAwait(false);
+                    if (!wasAlive)
+                    {
+                        _logger.LogInformation(
+                            "peer {NodeId} promoted alive (first-hand authenticated)", peer.NodeId);
+                    }
+                }
+                else if (identity is not null)
+                {
+                    _logger.LogDebug(
+                        "peer {NodeId} reached at {Address} but not a matching cluster member: id={Id} caps={Caps} version={Version}",
+                        peer.NodeId, address, identity.NodeId,
+                        identity.Capabilities is null ? "(none)" : string.Join(",", identity.Capabilities),
+                        identity.ApiVersion);
+                }
+
+                return;
             }
+
+            // Every candidate failed — never a fabricated latency, and lastSeen stays whatever it already
+            // was (a failed probe never advances "last successfully reached").
+            string reason = lastFailure ?? "no address to try";
+            await _peers.UpdateLivenessAsync(peer.Id, "unreachable", null, peer.LastSeen, ct).ConfigureAwait(false);
+            if (peer.Status == "reachable")
+                _logger.LogInformation("peer {Id} ({NodeId}) went unreachable: {Reason}", peer.Id, peer.NodeId, reason);
+            else
+                _logger.LogDebug("peer {Id} ({NodeId}) still unreachable: {Reason}", peer.Id, peer.NodeId, reason);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            throw; // real shutdown
+            throw;
         }
         catch (Exception ex)
         {
-            // Any other unexpected failure (including a liveness write itself) must never break the tick
-            // for the other peers being probed alongside this one — fail-open, PLAN-peers.md §2 #25.
-            _logger.LogDebug(ex, "peer latency probe failed unexpectedly for {Id}", peer.Id);
+            _logger.LogWarning(ex, "peer {Id} ({NodeId}) probe failed unexpectedly", peer.Id, peer.NodeId);
+        }
+    }
+
+    /// <summary>The addresses to try, in order: the pinned one first (it worked last time, or it is the
+    /// most-trusted thing on offer), then every other candidate the peer has advertised.</summary>
+    private static IEnumerable<string> AddressesFor(PeerEntity peer)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(peer.Url) && seen.Add(peer.Url.TrimEnd('/')))
+            yield return peer.Url.TrimEnd('/');
+
+        foreach (NodeCandidate candidate in PeerCandidates.Decode(peer.Candidates))
+        {
+            string url = candidate.Url.TrimEnd('/');
+            if (!string.IsNullOrWhiteSpace(url) && seen.Add(url))
+                yield return url;
+        }
+    }
+
+    /// <summary>One <c>GET /identity</c> against one address. Returns the measured latency and the parsed
+    /// card on success, or the transport/status failure that explains why not.</summary>
+    private async Task<(int? LatencyMs, NodeCard? Identity, string? Failure)> TryAddressAsync(
+        HttpClient http, string address, MintedClusterToken token, CancellationToken ct)
+    {
+        long start = Stopwatch.GetTimestamp();
+        HttpResponseMessage? response = null;
+        try
+        {
+            // A per-request message (not a header on the shared named client) — probes for every peer run
+            // concurrently off the same HttpClient instance, so a default header would race.
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{address}/api/v1/peers/identity");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+            response = await http.SendAsync(request, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // real shutdown — propagate, don't treat this as a probe failure
+        }
+        catch (Exception ex)
+        {
+            // Connect refused, DNS failure, the client's own request timeout — all transport-level
+            // failures, all honestly "unreachable."
+            return (null, null, ex.Message);
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+                return (null, null, $"HTTP {(int)response.StatusCode}");
+
+            int latencyMs = (int)Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+            try
+            {
+                await using Stream body = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                NodeCard? card = await JsonSerializer
+                    .DeserializeAsync<NodeCard>(body, IdentityJsonOptions, ct)
+                    .ConfigureAwait(false);
+                return (latencyMs, card, null);
+            }
+            catch (JsonException)
+            {
+                _logger.LogDebug("identity body from {Address} did not parse — reachable, not promoted", address);
+                return (latencyMs, null, null);
+            }
         }
     }
 }

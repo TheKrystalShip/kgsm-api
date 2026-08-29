@@ -43,10 +43,9 @@ public sealed class PeersController(
     ClusterInbox inbox,
     PeersStore peers,
     PeerHandshakeService handshake,
+    SelfIdentityStore selfIdentity,
     GossipService gossip,
     ApiOptions options,
-    HostIdentityProvider hostIdentity,
-    LeafHealthMonitor leafHealth,
     HostAggregator hostAggregator,
     LibraryAggregator library,
     ClusterPeerRelay relay,
@@ -229,37 +228,31 @@ public sealed class PeersController(
         if (body is null || string.IsNullOrWhiteSpace(body.Url))
             return Error(StatusCodes.Status400BadRequest, "invalid_url", "url is required");
 
+        // This request is the one moment a node can learn its own address honestly: an admin reached it
+        // here, through a browser, to run an admin action. A node cannot work that address out for itself
+        // (PLAN-peers.md §2 #13b), and it needs one before it can tell the node it is about to introduce
+        // itself to where to call back. The browser's origin is recorded for the same reason — it is the
+        // panel's origin, and every node in the cluster will need to answer CORS from it.
+        await selfIdentity
+            .RecordCandidateAsync($"{Request.Scheme}://{Request.Host}", client: true,
+                SelfIdentityStore.BrowserObserved, ct)
+            .ConfigureAwait(false);
+        if (Request.Headers.TryGetValue("Origin", out Microsoft.Extensions.Primitives.StringValues origin)
+            && origin.Count > 0 && origin[0] is { Length: > 0 } panel)
+        {
+            await selfIdentity.RecordPanelOriginAsync(panel, ct).ConfigureAwait(false);
+        }
+
         PeerAddResult result = await handshake.AddPeerAsync(body.Url.Trim(), body.Nickname, ct)
             .ConfigureAwait(false);
 
-        switch (result.Outcome)
-        {
-            case PeerAddOutcome.Added:
-                PeerEntity peer = result.Peer!;
-                var added = new PeerAddedResponse(
-                    peer.Id, peer.Url, peer.Nickname, peer.NodeId, peer.ApiVersion, peer.Status, peer.Enabled);
-                return StatusCode(StatusCodes.Status201Created, added);
+        if (result.Outcome != PeerAddOutcome.Added)
+            return OutcomeError(result.Outcome, result.RemoteApiVersion);
 
-            case PeerAddOutcome.InvalidUrl:
-                return Error(StatusCodes.Status400BadRequest, "invalid_url",
-                    "url is not a valid absolute http(s) address");
-
-            case PeerAddOutcome.VersionMismatch:
-                JsonElement details = JsonSerializer.SerializeToElement(
-                    new PeerVersionMismatchDetails(result.RemoteApiVersion ?? "unknown", ApiInfo.ApiVersion),
-                    EnvelopeJsonOptions);
-                return Error(StatusCodes.Status409Conflict, "version_mismatch",
-                    "the candidate node's api version does not match this node's", details);
-
-            case PeerAddOutcome.NotCluster:
-                return Error(StatusCodes.Status422UnprocessableEntity, "peer_not_cluster",
-                    "remote node does not advertise the cluster capability");
-
-            case PeerAddOutcome.Unreachable:
-            default:
-                return Error(StatusCodes.Status502BadGateway, "peer_unreachable",
-                    "could not reach the candidate node");
-        }
+        PeerEntity peer = result.Peer!;
+        var added = new PeerAddedResponse(
+            peer.Id, peer.Url, peer.Nickname, peer.NodeId, peer.ApiVersion, peer.Status, peer.Enabled);
+        return StatusCode(StatusCodes.Status201Created, added);
     }
 
     /// <summary><c>DELETE /api/v1/peers/{id}</c> — forget a roster row entirely (admin-gated).</summary>
@@ -306,13 +299,88 @@ public sealed class PeersController(
             return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token",
                 "invalid, expired, or unsigned cluster service token");
 
-        var view = new PeerIdentityView(
-            options.NodeId,
-            ApiInfo.ApiVersion,
-            hostIdentity.Build,
-            NodeCapabilities.Current(leafHealth.Current, options.ClusterEnabled));
-        return Ok(view);
+        return Ok(await handshake.BuildCardAsync(ct).ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// <c>POST /api/v1/peers/introduce</c> — the symmetric join exchange (<c>PLAN-peers.md §7</c>, P0.6).
+    /// The request body and the answer are the same record: the caller sends its node card, where it reached
+    /// us, and the panel origins it knows; we validate its card with the same predicate it will apply to
+    /// ours, record the mirror of what it records, and answer with our own. One round trip leaves both nodes
+    /// equally informed, so introducing B from A and introducing A from B end in the same place.
+    /// <para>
+    /// Cluster-token authed, not user-authed — the same inline fail-closed check as <see cref="Inbox"/>,
+    /// minus the enabled-peer gate: a node that hasn't joined the roster yet must still be able to introduce
+    /// itself, which is the whole point of the endpoint.
+    /// </para>
+    /// </summary>
+    [HttpPost("introduce")]
+    [AllowAnonymous]
+    public async Task<IActionResult> Introduce([FromBody] IntroduceExchange? body, CancellationToken ct)
+    {
+        string? token = ExtractBearerToken(Request);
+        if (token is null)
+            return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token", "missing bearer token");
+
+        ClusterPrincipal? principal = await clusterTokens.ValidateAsync(token).ConfigureAwait(false);
+        if (principal is null)
+            return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token",
+                "invalid, expired, or unsigned cluster service token");
+
+        (PeerAddOutcome outcome, IntroduceExchange? answer) =
+            await handshake.ReceiveAsync(body, ObservedCallerAddress(), ct).ConfigureAwait(false);
+
+        return outcome == PeerAddOutcome.Added && answer is not null
+            ? Ok(answer)
+            : OutcomeError(outcome, body?.Self?.ApiVersion);
+    }
+
+    /// <summary>
+    /// The address this request appears to have come from, reported back so the caller can seed it as a
+    /// candidate for itself. It is a socket address rather than a URL — a port and a scheme are guesses no
+    /// one can make honestly — so it is offered only when the source is a plain remote IP, and never when a
+    /// proxy sits in front (the address would be the proxy's). Null is the honest answer everywhere else.
+    /// </summary>
+    private string? ObservedCallerAddress()
+    {
+        if (Request.Headers.ContainsKey("X-Forwarded-For"))
+            return null;
+
+        System.Net.IPAddress? remote = HttpContext.Connection.RemoteIpAddress;
+        if (remote is null || System.Net.IPAddress.IsLoopback(remote))
+            return null;
+
+        string host = remote.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6
+            ? $"[{remote}]"
+            : remote.ToString();
+        return $"{Request.Scheme}://{host}";
+    }
+
+    /// <summary>Map one handshake outcome onto its frozen status code and error envelope
+    /// (<c>PLAN-peers.md §7</c>), so both the initiator's <c>POST /peers</c> and the receiver's
+    /// <c>POST /peers/introduce</c> refuse in exactly the same words.</summary>
+    private IActionResult OutcomeError(PeerAddOutcome outcome, string? remoteApiVersion) => outcome switch
+    {
+        PeerAddOutcome.InvalidUrl => Error(StatusCodes.Status400BadRequest, "invalid_url",
+            "url is not a valid absolute http(s) address"),
+
+        PeerAddOutcome.IsSelf => Error(StatusCodes.Status409Conflict, "peer_is_self",
+            "that address answers as this node"),
+
+        PeerAddOutcome.VersionMismatch => Error(StatusCodes.Status409Conflict, "version_mismatch",
+            "the candidate node's api version does not match this node's",
+            JsonSerializer.SerializeToElement(
+                new PeerVersionMismatchDetails(remoteApiVersion ?? "unknown", ApiInfo.ApiVersion),
+                EnvelopeJsonOptions)),
+
+        PeerAddOutcome.NotCluster => Error(StatusCodes.Status422UnprocessableEntity, "peer_not_cluster",
+            "remote node does not advertise the cluster capability"),
+
+        PeerAddOutcome.InsecureTransport => Error(StatusCodes.Status422UnprocessableEntity, "insecure_transport",
+            "a public address must be https — the cluster secret authenticates but does not encrypt"),
+
+        _ => Error(StatusCodes.Status502BadGateway, "peer_unreachable", "could not reach the candidate node"),
+    };
 
     /// <summary><c>GET /api/v1/peers/{id}/latency</c> — the roster row's last-observed liveness sample
     /// (admin-gated, §4). <c>404</c> if <paramref name="id"/> isn't a known row.</summary>
@@ -441,7 +509,9 @@ public sealed class PeersController(
             p.LatencyMs, p.LastSeen, p.ApiVersion, p.Enabled);
 
     private static ClusterNodeView ToNodeView(PeerEntity p) =>
-        new(p.NodeId, p.Nickname ?? p.NodeId, p.Url,
+        // The browser gets a browser-reachable candidate or nothing: handing the SPA a node-only address
+        // it cannot reach reads as a broken panel rather than as the missing advertisement it is.
+        new(p.NodeId, p.Nickname ?? p.NodeId, PeerCandidates.ClientUrl(PeerCandidates.Decode(p.Candidates)),
             GossipState.Display(p.MembershipState, p.LastSeen),
             p.Status, p.LatencyMs);
 
