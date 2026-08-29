@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
@@ -6,6 +7,7 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster.Messaging;
 
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
@@ -44,6 +46,17 @@ public sealed class SessionController(
     IClusterBus clusterBus,
     RosterClusterTargetProvider rosterTargets) : ControllerBase
 {
+    // The same camelCase, Z-timestamp convention every response on this API uses, so a payload the bus
+    // carries and a payload a browser reads have one shape.
+    private static readonly JsonSerializerOptions ClusterPayloadJsonOptions = BuildClusterPayloadJsonOptions();
+
+    private static JsonSerializerOptions BuildClusterPayloadJsonOptions()
+    {
+        var options = new JsonSerializerOptions();
+        Json.ApiJson.Configure(options);
+        return options;
+    }
+
     /// <summary>
     /// Fans a "log out user everywhere" out to the rest of the cluster (<c>PLAN-peers.md §P1</c>) —
     /// called AFTER this node's own local revoke + evict has already committed, from both
@@ -59,10 +72,11 @@ public sealed class SessionController(
             return;
 
         IReadOnlyList<ClusterTarget> targets = await rosterTargets.GetEnabledTargetsAsync(ct).ConfigureAwait(false);
-        await clusterBus.EnqueueAsync(
-            "session.revoke",
-            new { scope = "user", discordId = rawDiscordId },
-            targets, ct).ConfigureAwait(false);
+        // Serialized here, through this API's own JSON convention, so the payload on the wire is the same
+        // camelCase shape every other response uses and the bus stores exactly what it is handed.
+        string payload = JsonSerializer.Serialize(
+            new SessionRevokePayload("user", rawDiscordId), ClusterPayloadJsonOptions);
+        await clusterBus.EnqueueJsonAsync("session.revoke", payload, targets, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -251,3 +265,10 @@ public sealed class SessionController(
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
 }
+
+/// <summary>
+/// The <c>session.revoke</c> payload this host fans out. <c>scope</c> selects what is revoked, and the
+/// field that scope needs travels with it: <c>user</c> carries the bare Discord id, which
+/// <c>SessionRevokeHandler</c> re-prefixes on the receiving side.
+/// </summary>
+public sealed record SessionRevokePayload(string Scope, string? DiscordId = null, string? Sid = null);

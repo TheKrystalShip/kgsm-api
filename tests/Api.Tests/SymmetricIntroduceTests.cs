@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster.Identity;
 using TheKrystalShip.KGSM.Auth;
 
 namespace TheKrystalShip.Api.Tests;

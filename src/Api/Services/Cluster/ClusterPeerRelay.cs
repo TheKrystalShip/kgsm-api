@@ -1,6 +1,9 @@
 using System.Net.Http.Headers;
 using TheKrystalShip.Api.Data;
 
+using TheKrystalShip.KGSM.Cluster.Identity;
+using TheKrystalShip.KGSM.Cluster.Messaging;
+
 namespace TheKrystalShip.Api.Services.Cluster;
 
 /// <summary>The outcome of a server-side node-proxy relay (<see cref="ClusterPeerRelay"/>).</summary>

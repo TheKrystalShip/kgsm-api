@@ -2,15 +2,16 @@ using System.Text.Json;
 using TheKrystalShip.Api.Services.Auth;
 
 using TheKrystalShip.KGSM.Auth.Sessions;
+using TheKrystalShip.KGSM.Cluster.Messaging;
 
 namespace TheKrystalShip.Api.Services.Cluster.Handlers;
 
 /// <summary>
 /// The cluster bus's first message type (<c>docs/cluster-message-bus-plan.md §3</c>, the "sign out
-/// everywhere" customer this whole bus was built for). Payload: <c>{ scope: "user"|"sid"|"all",
+/// everywhere" customer the bus was built for). Payload: <c>{ scope: "user"|"sid"|"all",
 /// discordId?, sid? }</c>. Delegates the actual revoke to the SAME <see cref="SessionStore"/> the
 /// local <c>/auth/session/revoke</c> endpoints use — this handler is just the cluster-bus front door
-/// onto that existing authority, so a peer-triggered revoke and a local one are indistinguishable
+/// onto that existing authority, so a member-triggered revoke and a local one are indistinguishable
 /// once applied.
 /// </summary>
 /// <remarks>
@@ -19,9 +20,8 @@ namespace TheKrystalShip.Api.Services.Cluster.Handlers;
 /// row, so replaying this handler for the same envelope (or receiving two different envelopes that
 /// both target the same session) is always harmless — exactly what <see cref="IClusterMessageHandler"/>
 /// requires. A malformed-but-known-type payload (missing the field the scope needs) is logged and
-/// swallowed, never thrown — throwing here would surface as a transient <c>500</c>
-/// (<see cref="ClusterInbox"/>) and the sender would retry forever against a payload that can never
-/// become valid.
+/// swallowed, never thrown — throwing here surfaces as a transient <c>500</c> and the sender retries
+/// forever against a payload that can never become valid.
 /// </remarks>
 public sealed class SessionRevokeHandler(
     SessionStore sessionStore,
@@ -71,11 +71,11 @@ public sealed class SessionRevokeHandler(
             }
 
             case "all":
-                // RESERVED — a node-wide revoke-everything is out of MVP scope (§3 registry note).
-                // Log loudly and no-op rather than guess at a destructive interpretation.
+                // Reserved. A host-wide revoke-everything is not implemented, so log loudly and no-op
+                // rather than guess at a destructive interpretation of it.
                 logger.LogWarning(
-                    "cluster session.revoke (id={Id} from={From}): scope=all is RESERVED and not yet " +
-                    "implemented — no-op (a node-wide revoke-all is out of MVP scope)",
+                    "cluster session.revoke (id={Id} from={From}): scope=all is reserved and not " +
+                    "implemented — no-op",
                     envelope.Id, envelope.From);
                 break;
 

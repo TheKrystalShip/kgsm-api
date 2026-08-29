@@ -58,21 +58,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// the audit log is untouched. See <c>Services/Auth/CLAUDE.md</c>.</summary>
     public DbSet<SessionEntry> Sessions => Set<SessionEntry>();
 
-    /// <summary>The cluster message bus's transactional outbox (Phase 1 foundation — see
-    /// <see cref="OutboxMessage"/>; <c>docs/cluster-message-bus-plan.md §5</c>). One row per
-    /// (message, target) delivery. Created automatically by <c>EnsureCreated</c> on a fresh DB
-    /// (registered in <see cref="OnModelCreating"/>); on an already-deployed DB the table needs a
-    /// one-shot creation the same way the session registry did (D11), never a wipe of the shared
-    /// audit log. No writer exists yet — the enqueue path (<c>IClusterBus</c>) and the drainer are
-    /// later phases.</summary>
-    public DbSet<OutboxMessage> ClusterOutbox => Set<OutboxMessage>();
-
-    /// <summary>The cluster message bus's inbox dedupe ledger (Phase 1 foundation — see
-    /// <see cref="InboxMessage"/>; <c>docs/cluster-message-bus-plan.md §5</c>). One row per received
-    /// envelope id. Same creation posture as <see cref="ClusterOutbox"/>. No writer exists yet — the
-    /// <c>/peers/inbox</c> endpoint and its dispatch handler are later phases.</summary>
-    public DbSet<InboxMessage> ClusterInbox => Set<InboxMessage>();
-
     /// <summary>The cluster membership roster (the peer-foundation milestone — see <see cref="PeerEntity"/>;
     /// <c>PLAN-peers.md §2</c> #12, P0). One row per known peer, this node's own copy (the mesh is
     /// masterless — there is no shared roster table). Created automatically by <c>EnsureCreated</c> on a
@@ -383,46 +368,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             // composite index. A second index backs the GC worker's expired-row sweep (Expires < now).
             e.HasIndex(s => new { s.UserId, s.Revoked, s.Expires });
             e.HasIndex(s => s.Expires);
-        });
-
-        // Cluster message bus — Phase 1 foundation tables (docs/cluster-message-bus-plan.md §5).
-        // Timestamps as UTC ticks (long) via ValueConverter, the same posture as every other table
-        // here (SQLite has no date type; the drainer's/GC's due-scans need a translatable INTEGER
-        // compare). No writer/reader exists yet — the drainer, IClusterBus, and the inbox endpoint
-        // are later phases; these mappings just get the schema in place ahead of them.
-        modelBuilder.Entity<OutboxMessage>(e =>
-        {
-            e.ToTable("cluster_outbox");
-            e.HasKey(o => o.Id);
-            e.Property(o => o.NextAttemptAt).HasConversion(
-                v => v.UtcTicks,
-                v => new DateTimeOffset(v, TimeSpan.Zero));
-            e.Property(o => o.CreatedAt).HasConversion(
-                v => v.UtcTicks,
-                v => new DateTimeOffset(v, TimeSpan.Zero));
-            e.Property(o => o.DeliveredAt).HasConversion(
-                new ValueConverter<DateTimeOffset, long>(
-                    v => v.UtcTicks,
-                    v => new DateTimeOffset(v, TimeSpan.Zero)));
-            // The drainer's due-scan: WHERE Status='pending' AND NextAttemptAt<=now, grouped by target.
-            e.HasIndex(o => new { o.Status, o.NextAttemptAt });
-            // The GC sweep: delivered/dead rows older than the retention window.
-            e.HasIndex(o => new { o.Status, o.CreatedAt });
-        });
-
-        modelBuilder.Entity<InboxMessage>(e =>
-        {
-            e.ToTable("cluster_inbox");
-            e.HasKey(i => i.Id);
-            e.Property(i => i.ReceivedAt).HasConversion(
-                v => v.UtcTicks,
-                v => new DateTimeOffset(v, TimeSpan.Zero));
-            e.Property(i => i.ProcessedAt).HasConversion(
-                new ValueConverter<DateTimeOffset, long>(
-                    v => v.UtcTicks,
-                    v => new DateTimeOffset(v, TimeSpan.Zero)));
-            // The GC sweep: rows older than the retention window (≥ the outbox retry TTL + margin).
-            e.HasIndex(i => i.ReceivedAt);
         });
 
         // Cluster membership roster — the peer-foundation milestone (PLAN-peers.md §2 #12, P0). This

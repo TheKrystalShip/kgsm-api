@@ -9,6 +9,8 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster.Identity;
+using TheKrystalShip.KGSM.Cluster.Messaging;
 
 using TheKrystalShip.KGSM.Auth;
 
@@ -309,7 +311,7 @@ public sealed class ClusterSsoTests
             Assert.True(rowA!.Revoked, "expected node A's own session to be revoked locally");
 
             // An outbox row of type session.revoke targeting node-b was enqueued.
-            OutboxMessage? outboxRow = await PollForOutboxRowAsync(factoryA, "node-b", "session.revoke",
+            OutboxRow? outboxRow = await PollForOutboxRowAsync(factoryA, "node-b", "session.revoke",
                 TimeSpan.FromSeconds(2));
             Assert.NotNull(outboxRow);
             Assert.Equal("session.revoke", outboxRow!.Type);
@@ -383,13 +385,13 @@ public sealed class ClusterSsoTests
             HttpResponseMessage revokeResp = await clientA.SendAsync(revokeRequest);
             Assert.Equal(HttpStatusCode.NoContent, revokeResp.StatusCode);
 
-            OutboxMessage? bRow = await PollForOutboxRowAsync(factoryA, "node-b", "session.revoke", TimeSpan.FromSeconds(2));
+            OutboxRow? bRow = await PollForOutboxRowAsync(factoryA, "node-b", "session.revoke", TimeSpan.FromSeconds(2));
             Assert.NotNull(bRow);
 
             // Give the drainer a couple of ticks either way, then assert no row EVER targeted the
             // phantom node — not merely "not yet delivered."
             await Task.Delay(TimeSpan.FromMilliseconds(600));
-            OutboxMessage? phantomRow = await GetOutboxRowAsync(factoryA, "node-phantom");
+            OutboxRow? phantomRow = await GetOutboxRowAsync(factoryA, "node-phantom");
             Assert.Null(phantomRow);
         }
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
@@ -404,7 +406,7 @@ public sealed class ClusterSsoTests
 
         IReadOnlyList<ClusterTarget> targets = await provider.GetEnabledTargetsAsync(default);
 
-        Assert.Contains(targets, t => t.NodeId == "node-alive");
+        Assert.Contains(targets, t => t.MemberId == "node-alive");
     }
 
     [Fact]
@@ -416,7 +418,7 @@ public sealed class ClusterSsoTests
 
         IReadOnlyList<ClusterTarget> targets = await provider.GetEnabledTargetsAsync(default);
 
-        Assert.DoesNotContain(targets, t => t.NodeId == "node-hearsay");
+        Assert.DoesNotContain(targets, t => t.MemberId == "node-hearsay");
     }
 
     [Fact]
@@ -428,7 +430,7 @@ public sealed class ClusterSsoTests
 
         IReadOnlyList<ClusterTarget> targets = await provider.GetEnabledTargetsAsync(default);
 
-        Assert.DoesNotContain(targets, t => t.NodeId == "node-suspect");
+        Assert.DoesNotContain(targets, t => t.MemberId == "node-suspect");
     }
 
     [Fact]
@@ -440,7 +442,7 @@ public sealed class ClusterSsoTests
 
         IReadOnlyList<ClusterTarget> targets = await provider.GetEnabledTargetsAsync(default);
 
-        Assert.DoesNotContain(targets, t => t.NodeId == "node-disabled");
+        Assert.DoesNotContain(targets, t => t.MemberId == "node-disabled");
     }
 
     // ── 5. Down-node redelivery ──────────────────────────────────────────────────────────────────────
@@ -500,7 +502,7 @@ public sealed class ClusterSsoTests
             bool retriedWhileDown = await PollUntilAsync(
                 async () =>
                 {
-                    OutboxMessage? row = await GetOutboxRowAsync(factoryA, "node-b");
+                    OutboxRow? row = await GetOutboxRowAsync(factoryA, "node-b");
                     return row is { Status: "pending", Attempts: >= 1 };
                 },
                 TimeSpan.FromSeconds(3));
@@ -923,28 +925,25 @@ public sealed class ClusterSsoTests
         try { File.Delete(path); } catch { /* best effort */ }
     }
 
-    private static async Task<OutboxMessage?> GetOutboxRowAsync(ClusterNodeFactory factory, string targetNodeId)
+    private static async Task<OutboxRow?> GetOutboxRowAsync(ClusterNodeFactory factory, string targetNodeId)
     {
-        using IServiceScope scope = factory.Services.CreateScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        return await db.ClusterOutbox.AsNoTracking()
-            .Where(o => o.TargetNodeId == targetNodeId)
-            .OrderByDescending(o => o.CreatedAt)
-            .FirstOrDefaultAsync();
+        ClusterBus bus = factory.Services.GetRequiredService<ClusterBus>();
+        IReadOnlyList<OutboxRow> rows = await bus.ListForTargetAsync(targetNodeId, CancellationToken.None);
+        return rows.FirstOrDefault();
     }
 
-    private static async Task<OutboxMessage?> PollForOutboxRowAsync(
+    private static async Task<OutboxRow?> PollForOutboxRowAsync(
         ClusterNodeFactory factory, string targetNodeId, string type, TimeSpan timeout)
     {
         DateTime deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
         {
-            OutboxMessage? row = await GetOutboxRowAsync(factory, targetNodeId);
+            OutboxRow? row = await GetOutboxRowAsync(factory, targetNodeId);
             if (row is not null && row.Type == type)
                 return row;
             await Task.Delay(TimeSpan.FromMilliseconds(150));
         }
-        OutboxMessage? last = await GetOutboxRowAsync(factory, targetNodeId);
+        OutboxRow? last = await GetOutboxRowAsync(factory, targetNodeId);
         return last is not null && last.Type == type ? last : null;
     }
 

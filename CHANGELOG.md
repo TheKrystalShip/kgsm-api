@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — cluster membership and messaging move to a shared package (0.154.0)
+
+The cluster bus lived here, so a machine could only join a cluster by running this API. The outbox,
+the inbox, the member service token, the store behind them and the member-to-member wire now come
+from `TheKrystalShip.KGSM.Cluster`, and this API takes part in a cluster as one member among several.
+
+The wire is `/api/v1/members/inbox`. A cluster has members, and a member is a node or an anchor, so
+the route says so; the two `cluster_outbox`/`cluster_inbox` tables leave this API's database for the
+package's own file beside it, named from the database rather than fixed in its directory so two
+members sharing a directory cannot share one outbox. `session.revoke` stays here and is registered
+as a handler, because the package dispatches by type and knows nothing about sessions.
+
+Both members of a cluster have to be on this version or later: the member-to-member path changed,
+and a member still posting to the old one is refused by routing before any protocol check can say so.
+
 ### Fixed — the node Logs tab reads the journal, and offers only the services that are here (0.153.0)
 
 Two things stood between a node's Logs tab and its journal.

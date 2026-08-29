@@ -5,6 +5,8 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Json;
 
+using TheKrystalShip.KGSM.Cluster.Identity;
+
 namespace TheKrystalShip.Api.Services.Cluster;
 
 /// <summary>

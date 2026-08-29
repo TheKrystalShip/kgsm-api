@@ -22,6 +22,9 @@ using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster;
+using TheKrystalShip.KGSM.Cluster.Identity;
+using TheKrystalShip.KGSM.Cluster.Messaging;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Files;
 using TheKrystalShip.Api.Services.Integrations;
@@ -640,38 +643,39 @@ public class Startup(IConfiguration configuration)
         // (AuditMapping.FromThresholdBreachedEvent), because the wording and severity are a reader's
         // business and the record holds only what was measured.
 
-        // Cluster message bus — Phase 1 foundation (docs/cluster-message-bus-plan.md, PLAN-peers.md §3).
-        // The service-token mint/validate seam. Registered unconditionally — ClusterTokenService itself
-        // degrades to a throwing Mint()/always-null ValidateAsync when Api__ClusterSecret is blank
-        // (the normal, opt-in-and-off-by-default posture, mirroring the assistant relay secret).
-        services.AddSingleton<IClusterTokenService, ClusterTokenService>();
+        // Cluster membership and durable member-to-member messaging (TheKrystalShip.KGSM.Cluster). The
+        // outbox, the inbox, the member service token, the SQLite store behind them and the
+        // member-to-member wire all live in the package, so this API takes part in a cluster as one
+        // member rather than being the thing a cluster is made of.
+        //
+        // The gate is registered FIRST, deliberately: the package registers its own accept-anything gate
+        // with TryAddSingleton, so whichever gate is already there wins. This API has a roster, so it
+        // brings the roster-backed one, keyed on the member id a token's iss carries.
+        //
+        // Everything below is inert on a host with no cluster secret — the token service validates
+        // nothing, so the inbox endpoint rejects every call before a handler is reached, and neither
+        // background worker starts a timer.
+        services.AddSingleton<IClusterMemberGate, PeersTableGate>();
+        services.AddKgsmCluster(new ClusterOptions
+        {
+            MemberId = apiOptions.NodeId,
+            Secret = apiOptions.ClusterSecret,
+            SecretPrevious = apiOptions.ClusterSecretPrevious,
+            // Beside this API's own database rather than inside it: the roster and the queues are
+            // cluster state, and this API's database is operational state that is wiped whenever its
+            // schema changes. Named FROM that database rather than fixed within its directory, so the
+            // cluster store belongs to this member rather than to the directory it sits in — two members
+            // sharing a directory would otherwise share one outbox.
+            StorePath = Path.ChangeExtension(apiOptions.DbPath, ".cluster.db"),
+            DrainMs = apiOptions.ClusterDrainMs,
+            RetryTtlDays = apiOptions.ClusterRetryTtlDays,
+            RetentionDays = apiOptions.ClusterRetentionDays,
+            GcMs = apiOptions.ClusterGcMs,
+        });
 
-        // Cluster message bus — Phase 2, the receive path (§4/§7). ClusterInbox is the dedupe+dispatch
-        // store (scoped-singleton, mirrors SessionStore); IClusterPeerGate is the §4 "iss is an enabled
-        // peer" seam — now PeersTableGate (the Peers-table-backed disable-list gate, PLAN-peers.md §0 #8;
-        // AllowAllClusterPeerGate stays in place as the documented pre-registry default, just unregistered);
-        // IClusterMessageHandler is registered as a collection (resolved as IEnumerable<> by ClusterInbox)
-        // — session.revoke is the first, and so far only, message type. All inert on a non-cluster node:
-        // PeersController's own auth 401s everything before ClusterInbox is ever reached (ClusterTokenService
-        // never validates a token when Api__ClusterSecret is blank).
-        services.AddSingleton<ClusterInbox>();
-        services.AddSingleton<IClusterPeerGate, PeersTableGate>();
+        // session.revoke is this API's one message type, and it is registered rather than built in:
+        // the package dispatches by type and knows nothing about sessions.
         services.AddSingleton<IClusterMessageHandler, Services.Cluster.Handlers.SessionRevokeHandler>();
-
-        // Cluster message bus — Phase 3, the send path (§6/§7/§8). ClusterBus is the outbox
-        // reader/writer (scoped-singleton, mirrors SessionStore/ClusterInbox), exposed both as the public
-        // IClusterBus.EnqueueAsync seam (a future caller, e.g. cluster logout, PLAN-peers.md P1) and as
-        // its concrete type (the drainer/GC's store-side helpers, which aren't part of that public seam).
-        // The drainer POSTs through a named HttpClient with a short (~10s) per-request timeout — deliberately
-        // short: a hung peer must not pin a drain-pass slot for long, the row just retries next tick.
-        // OutboxDrainer/ClusterBusGcWorker are BOTH inert (no timer at all) when ClusterEnabled is false,
-        // the same opt-in-and-off-by-default posture as the token seam and the inbox above.
-        services.AddHttpClient(OutboxDrainer.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
-        services.AddSingleton<ClusterBus>();
-        services.AddSingleton<IClusterBus>(sp => sp.GetRequiredService<ClusterBus>());
-        services.AddSingleton<OutboxDrainer>();
-        services.AddHostedService(sp => sp.GetRequiredService<OutboxDrainer>());
-        services.AddHostedService<ClusterBusGcWorker>();
 
         // Cluster peer foundation (PLAN-peers.md §6, P0). PeersStore is the roster's single data-access
         // seam (the LeafRegistry idiom: a singleton owning an IServiceScopeFactory, also a hosted service so
@@ -1118,6 +1122,11 @@ public class Startup(IConfiguration configuration)
         app.UseEndpoints(endpoints =>
         {
             endpoints.MapControllers();
+
+            // The member-to-member wire, served by the cluster package beside this API's own routes:
+            // one implementation of the status codes, the size cap, the token check and the spoof
+            // guard, so two members cannot come to disagree about what the protocol is.
+            endpoints.MapClusterEndpoints();
 
             // SPA fallback: a client-routed GET (deep link / refresh — no file extension, matched no
             // controller) boots the app by returning index.html. EXCLUDE /api/* so a bogus API path stays

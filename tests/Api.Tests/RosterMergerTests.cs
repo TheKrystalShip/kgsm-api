@@ -1,6 +1,7 @@
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster.Identity;
 
 namespace TheKrystalShip.Api.Tests;
 

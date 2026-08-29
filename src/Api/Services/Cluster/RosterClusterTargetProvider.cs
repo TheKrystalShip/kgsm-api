@@ -1,3 +1,5 @@
+using TheKrystalShip.KGSM.Cluster.Messaging;
+
 namespace TheKrystalShip.Api.Services.Cluster;
 
 /// <summary>

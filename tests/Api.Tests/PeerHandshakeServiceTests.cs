@@ -8,6 +8,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster;
+using TheKrystalShip.KGSM.Cluster.Identity;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -142,7 +144,17 @@ public sealed class PeerHandshakeServiceTests
         store = new PeersStore(provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<PeersStore>.Instance);
 
         var options = Options();
-        var tokens = new ClusterTokenService(options, NullLogger<ClusterTokenService>.Instance);
+        // The token service is the cluster package's, so it takes the package's own options: this API's
+        // settings are projected onto them here exactly as Startup projects them.
+        var tokens = new ClusterTokenService(
+            new ClusterOptions
+            {
+                MemberId = options.NodeId,
+                Secret = options.ClusterSecret,
+                SecretPrevious = options.ClusterSecretPrevious,
+                StorePath = Path.Combine(Path.GetTempPath(), $"kgsm-handshake-test-{Guid.NewGuid():N}.db"),
+            },
+            NullLogger<ClusterTokenService>.Instance);
         var selfIdentity = new SelfIdentityStore(provider.GetRequiredService<IServiceScopeFactory>(), options);
         return new PeerHandshakeService(
             new FakeHttpClientFactory(handler), store, selfIdentity, new StatedCard(options.NodeId), tokens,

@@ -9,6 +9,8 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Json;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster.Identity;
+using TheKrystalShip.KGSM.Cluster.Messaging;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -284,11 +286,15 @@ public sealed class GossipConvergenceTests
         ApiVersion = "v1",
     };
 
+    /// <summary>How many durable rows this member holds for either of the two members in play.
+    /// Gossip is a best-effort exchange and must leave none.</summary>
     private static async Task<int> OutboxCountAsync(ClusterNodeFactory factory)
     {
-        using IServiceScope scope = factory.Services.CreateScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        return await db.ClusterOutbox.AsNoTracking().CountAsync();
+        ClusterBus bus = factory.Services.GetRequiredService<ClusterBus>();
+        int total = 0;
+        foreach (string memberId in new[] { "node-a", "node-b" })
+            total += (await bus.ListForTargetAsync(memberId, CancellationToken.None)).Count;
+        return total;
     }
 
     private static string NewDbPath(string label) =>

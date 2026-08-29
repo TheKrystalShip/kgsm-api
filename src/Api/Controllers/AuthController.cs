@@ -12,6 +12,8 @@ using TheKrystalShip.Api.Json;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster.Identity;
+using TheKrystalShip.KGSM.Cluster.Messaging;
 
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
@@ -47,7 +49,7 @@ public sealed class AuthController(
     ApiOptions options,
     ApiJournal journal,
     IClusterTokenService clusterTokens,
-    IClusterPeerGate peerGate,
+    IClusterMemberGate peerGate,
     PeersStore peers,
     IHttpClientFactory httpClientFactory,
     ILogger<AuthController> logger) : ControllerBase
@@ -510,9 +512,9 @@ public sealed class AuthController(
             return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token",
                 "invalid, expired, or unsigned cluster service token");
 
-        if (!await peerGate.IsEnabledAsync(principal.NodeId).ConfigureAwait(false))
+        if (!await peerGate.IsEnabledAsync(principal.MemberId).ConfigureAwait(false))
             return Error(StatusCodes.Status403Forbidden, "peer_disabled",
-                $"node '{principal.NodeId}' is not an enabled peer of this cluster");
+                $"node '{principal.MemberId}' is not an enabled peer of this cluster");
 
         if (body is null || string.IsNullOrWhiteSpace(body.DiscordId))
             return Error(StatusCodes.Status400BadRequest, "bad_request", "discordId is required");
@@ -569,7 +571,7 @@ public sealed class AuthController(
         // Meta instead — the forensic detail ("this session was minted on a vouch FROM node X"), never
         // fabricated into a fake origin.
         await RecordAuthAsync(ApiJournal.ClusterSessionEvent, identity, tier,
-            sessionId, userAgent: null, ct, peerNode: principal.NodeId, origin: AuditOrigin.Api);
+            sessionId, userAgent: null, ct, peerNode: principal.MemberId, origin: AuditOrigin.Api);
 
         return StatusCode(StatusCodes.Status201Created,
             new ClusterSessionResult(access.Token, refresh.Token, sessionId, access.ExpiresAt));

@@ -12,6 +12,9 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster.Identity;
+using TheKrystalShip.KGSM.Cluster;
+using TheKrystalShip.KGSM.Cluster.Messaging;
 
 using TheKrystalShip.KGSM.Auth;
 
@@ -64,8 +67,8 @@ public sealed class ClusterTwoNodeTests
                 userAgent: null, initialJti: null);
 
             IClusterBus busA = factoryA.Services.GetRequiredService<IClusterBus>();
-            await busA.EnqueueAsync(
-                "session.revoke", new { scope = "sid", sid },
+            await busA.EnqueueJsonAsync(
+                "session.revoke", $$"""{"scope":"sid","sid":"{{sid}}"}""",
                 [new ClusterTarget("node-b", "http://node-b")], CancellationToken.None);
 
             bool revoked = await PollUntilAsync(
@@ -81,7 +84,7 @@ public sealed class ClusterTwoNodeTests
                 TimeSpan.FromSeconds(2));
             Assert.True(delivered, "expected node A's outbox row for this message to reach 'delivered'");
 
-            OutboxMessage? row = await GetOutboxRowAsync(factoryA, "node-b");
+            OutboxRow? row = await GetOutboxRowAsync(factoryA, "node-b");
             Assert.NotNull(row);
             Assert.Equal("delivered", row!.Status);
             Assert.NotNull(row.DeliveredAt);
@@ -111,8 +114,8 @@ public sealed class ClusterTwoNodeTests
                 userAgent: null, initialJti: null);
 
             IClusterBus busA = factoryA.Services.GetRequiredService<IClusterBus>();
-            await busA.EnqueueAsync(
-                "session.revoke", new { scope = "sid", sid },
+            await busA.EnqueueJsonAsync(
+                "session.revoke", $$"""{"scope":"sid","sid":"{{sid}}"}""",
                 [new ClusterTarget("node-b", "http://node-b")], CancellationToken.None);
 
             // While B is "down" (the toggle short-circuits every request to a 503), give the drainer a
@@ -121,7 +124,7 @@ public sealed class ClusterTwoNodeTests
             bool retriedWhileDown = await PollUntilAsync(
                 async () =>
                 {
-                    OutboxMessage? row = await GetOutboxRowAsync(factoryA, "node-b");
+                    OutboxRow? row = await GetOutboxRowAsync(factoryA, "node-b");
                     return row is { Status: "pending", Attempts: >= 1 };
                 },
                 TimeSpan.FromSeconds(3));
@@ -131,7 +134,7 @@ public sealed class ClusterTwoNodeTests
             Assert.NotNull(stillActive);
             Assert.False(stillActive!.Revoked, "the session must NOT be revoked while B is unreachable");
 
-            OutboxMessage? pendingRow = await GetOutboxRowAsync(factoryA, "node-b");
+            OutboxRow? pendingRow = await GetOutboxRowAsync(factoryA, "node-b");
             Assert.NotNull(pendingRow);
             Assert.Equal("pending", pendingRow!.Status);
 
@@ -151,7 +154,7 @@ public sealed class ClusterTwoNodeTests
                 TimeSpan.FromSeconds(2));
             Assert.True(delivered, "expected node A's outbox row to reach 'delivered' once B recovers");
 
-            OutboxMessage? deliveredRow = await GetOutboxRowAsync(factoryA, "node-b");
+            OutboxRow? deliveredRow = await GetOutboxRowAsync(factoryA, "node-b");
             Assert.NotNull(deliveredRow);
             Assert.Equal("delivered", deliveredRow!.Status);
             Assert.NotNull(deliveredRow.DeliveredAt);
@@ -180,8 +183,8 @@ public sealed class ClusterTwoNodeTests
                 userAgent: null, initialJti: null);
 
             IClusterBus busA = factoryA.Services.GetRequiredService<IClusterBus>();
-            await busA.EnqueueAsync(
-                "session.revoke", new { scope = "sid", sid },
+            await busA.EnqueueJsonAsync(
+                "session.revoke", $$"""{"scope":"sid","sid":"{{sid}}"}""",
                 [new ClusterTarget("node-b", "http://node-b")], CancellationToken.None);
 
             bool dead = await PollUntilAsync(
@@ -189,7 +192,7 @@ public sealed class ClusterTwoNodeTests
                 TimeSpan.FromSeconds(5));
             Assert.True(dead, "a token signed with A's secret must be permanently rejected (401) by B and dead-lettered");
 
-            OutboxMessage? row = await GetOutboxRowAsync(factoryA, "node-b");
+            OutboxRow? row = await GetOutboxRowAsync(factoryA, "node-b");
             Assert.NotNull(row);
             Assert.Contains("401", row!.LastError ?? "", StringComparison.Ordinal);
 
@@ -286,7 +289,7 @@ public sealed class ClusterTwoNodeTests
             Assert.Equal(HttpStatusCode.Forbidden, whileDisabled.StatusCode);
             JsonElement error = JsonDocument.Parse(await whileDisabled.Content.ReadAsStringAsync())
                 .RootElement.GetProperty("error");
-            Assert.Equal("peer_disabled", error.GetProperty("code").GetString());
+            Assert.Equal("member_disabled", error.GetProperty("code").GetString());
 
             // Re-enabling restores acceptance — the row is a toggle, not a one-way ban.
             await peersOnA.SetEnabledAsync("peer_node_b_gate_test", true, default);
@@ -299,7 +302,7 @@ public sealed class ClusterTwoNodeTests
     private static async Task<HttpResponseMessage> PostInboxAsync(ClusterNodeFactory factory, string token, string body)
     {
         using HttpClient client = factory.CreateClient();
-        var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/peers/inbox")
+        var request = new HttpRequestMessage(HttpMethod.Post, ClusterRoutes.Inbox)
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json"),
         };
@@ -317,14 +320,11 @@ public sealed class ClusterTwoNodeTests
         try { File.Delete(path); } catch { /* best effort */ }
     }
 
-    private static async Task<OutboxMessage?> GetOutboxRowAsync(ClusterNodeFactory factory, string targetNodeId)
+    private static async Task<OutboxRow?> GetOutboxRowAsync(ClusterNodeFactory factory, string targetNodeId)
     {
-        using IServiceScope scope = factory.Services.CreateScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        return await db.ClusterOutbox.AsNoTracking()
-            .Where(o => o.TargetNodeId == targetNodeId)
-            .OrderByDescending(o => o.CreatedAt)
-            .FirstOrDefaultAsync();
+        ClusterBus bus = factory.Services.GetRequiredService<ClusterBus>();
+        IReadOnlyList<OutboxRow> rows = await bus.ListForTargetAsync(targetNodeId, CancellationToken.None);
+        return rows.FirstOrDefault();
     }
 
     /// <summary>Polls <paramref name="condition"/> every 150ms until it returns <see langword="true"/>
