@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the https upgrade asks who is calling, not which wire they landed on (0.152.0)
+
+"No bare HTTP on the internet" is a statement about the caller, and the upgrade was reading the
+receiving interface instead: any request that did not arrive on loopback was redirected. Those are
+not the same question, and behind NAT they are not even close — a request from the internet lands on
+a private LAN address exactly as one from the next room does.
+
+It made a node behind a reverse proxy on ANOTHER machine unreachable. The proxy terminates TLS,
+forwards plain http from its own address, and the node answered 308 to the public https URL, which
+resolves back to the proxy: an endless redirect, and a browser showing nothing but
+ERR_TOO_MANY_REDIRECTS. Invisible from the node itself, because a local curl is on loopback and
+exempt.
+
+The gate reads the caller's address. Loopback, the private ranges, link-local and unique-local
+callers are inside the operator's own network and cross nothing that needs protecting; everyone else
+is upgraded. An IPv4 caller arriving mapped into IPv6 is read as the IPv4 address it is, so a
+dual-stack socket does not turn the proxy next door into a stranger.
+
+### Changed — an observed loopback address is not offered to peers (0.152.0)
+
+A candidate exists to tell other nodes where to find this one, and a loopback address means "me"
+wherever it is read — so observing one says nothing a peer can use, and advertising it hands every
+peer an address that resolves back to itself. An operator who deliberately types one still gets it:
+co-located nodes are a real topology, and there the address is exactly right.
+
 ### Added — a version on the records nodes exchange (0.151.0)
 
 `apiVersion` is the frozen `/api/v1` route segment and does not move between builds, so it cannot

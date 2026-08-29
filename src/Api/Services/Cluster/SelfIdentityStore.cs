@@ -48,6 +48,15 @@ public sealed class SelfIdentityStore(IServiceScopeFactory scopeFactory, ApiOpti
         _ => 4,
     };
 
+    /// <summary>Whether an address points back at whoever reads it.</summary>
+    private static bool IsLoopback(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri)) return false;
+        if (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        return System.Net.IPAddress.TryParse(uri.Host, out System.Net.IPAddress? ip)
+               && System.Net.IPAddress.IsLoopback(ip);
+    }
+
     /// <summary>Normalise an address for comparison and storage: no trailing slash, scheme and host
     /// lower-cased, default ports dropped. Returns null when the input is not an absolute http(s) URL —
     /// an unusable address is discarded, never stored in a mangled form.</summary>
@@ -131,6 +140,17 @@ public sealed class SelfIdentityStore(IServiceScopeFactory scopeFactory, ApiOpti
     {
         string? value = Normalize(raw);
         if (value is null) return;
+
+        // A candidate exists to tell OTHER nodes where to find this one, and a loopback address means "me"
+        // wherever it is read — so observing one says nothing a peer could use, and advertising it hands
+        // every peer an address that resolves back to itself. An operator who deliberately types one is a
+        // different matter: co-located nodes are a real topology, and there the address is exactly right.
+        if (string.Equals(kind, SelfFactKinds.Candidate, StringComparison.Ordinal)
+            && !string.Equals(provenance, PeerHandshakeService.OperatorProvenance, StringComparison.Ordinal)
+            && IsLoopback(value))
+        {
+            return;
+        }
 
         await EnsureSchemaAsync(ct).ConfigureAwait(false);
         await _writeGate.WaitAsync(ct).ConfigureAwait(false);

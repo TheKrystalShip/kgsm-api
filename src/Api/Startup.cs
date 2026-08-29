@@ -56,6 +56,36 @@ namespace TheKrystalShip.Api;
 /// </summary>
 public class Startup(IConfiguration configuration)
 {
+    /// <summary>
+    /// Whether an address is one a stranger on the internet could be calling from. Loopback, the private
+    /// ranges, link-local and unique-local addresses are all reachable only from inside the operator's own
+    /// network, so a plain-HTTP request from one crosses nothing that needs protecting.
+    /// </summary>
+    internal static bool IsOutOnTheInternet(IPAddress address)
+    {
+        if (IPAddress.IsLoopback(address)) return false;
+
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+
+        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+        {
+            byte[] b = address.GetAddressBytes();
+            return b[0] switch
+            {
+                10 => false,
+                127 => false,
+                169 => b[1] != 254,
+                172 => b[1] < 16 || b[1] > 31,
+                192 => b[1] != 168,
+                _ => true,
+            };
+        }
+
+        return !address.IsIPv6LinkLocal
+               && !address.IsIPv6SiteLocal
+               && (address.GetAddressBytes()[0] & 0xFE) != 0xFC;   // fc00::/7 unique-local
+    }
+
     private const string CorsPolicy = "frontend";
 
     // The CORS policy is built in ConfigureServices, before any service exists to resolve, but it has to
@@ -1022,20 +1052,27 @@ public class Startup(IConfiguration configuration)
 
         app.UseExceptionHandler(); // unhandled -> 500 error envelope (ApiExceptionHandler)
 
-        // HTTP → HTTPS upgrade (production posture: NO bare HTTP on the internet). Any plain-HTTP
-        // request that arrives on a PUBLIC interface is permanently redirected (308 — it preserves the
-        // method + body, so a POST upgrades cleanly instead of being silently turned into a GET) to its
-        // https:// equivalent on the standard port (the inbound :80 is dropped → :443). The SOLE allowed
-        // plain-HTTP surface is the LOOPBACK ops/health port (127.0.0.1:8097, never internet-exposed): the
-        // deploy probe and a local `curl http://127.0.0.1:8097/health` don't speak TLS and the cert isn't
-        // valid for 127.0.0.1, so those must pass through un-redirected. We gate on the RECEIVING interface
-        // (a loopback local address ⇒ an ops call) rather than a hard-coded port, so it stays correct if the
-        // ops port ever changes. For an external http:// to reach here at all, Api__Urls must include a
-        // plain-http public bind (http://0.0.0.0:80); without one, bare http simply refuses the connection.
+        // HTTP → HTTPS upgrade (production posture: NO bare HTTP on the internet). A plain-HTTP request
+        // from a client OUT ON THE INTERNET is permanently redirected (308 — it preserves the method and
+        // body, so a POST upgrades cleanly instead of being silently turned into a GET) to its https://
+        // equivalent on the standard port (the inbound :80 is dropped → :443).
+        //
+        // The gate is the CALLER's address, because "on the internet" is a fact about the caller and
+        // nothing else. A caller on loopback or a private network has no internet hop to protect: the
+        // deploy's `curl http://127.0.0.1:8097/health` doesn't speak TLS and the cert isn't valid for
+        // 127.0.0.1, and a reverse proxy on another machine in the same network has already terminated TLS
+        // for the real client and is talking to us over the operator's own wire. Redirecting either would
+        // send them to an address that lands right back here — a loop, not an upgrade.
+        //
+        // The receiving interface cannot answer this question: behind NAT a request from the internet
+        // arrives on a private LAN address exactly as a request from the next room does, so reading the
+        // local address would exempt genuine internet traffic on every home-network node and refuse the
+        // proxy on none. For an external http:// to reach here at all, Api__Urls must include a plain-http
+        // public bind (http://0.0.0.0:80); without one, bare http simply refuses the connection.
         app.Use(async (context, next) =>
         {
-            System.Net.IPAddress local = context.Connection.LocalIpAddress ?? System.Net.IPAddress.Loopback;
-            if (!context.Request.IsHttps && !System.Net.IPAddress.IsLoopback(local))
+            System.Net.IPAddress caller = context.Connection.RemoteIpAddress ?? System.Net.IPAddress.Loopback;
+            if (!context.Request.IsHttps && IsOutOnTheInternet(caller))
             {
                 string target = $"https://{context.Request.Host.Host}{context.Request.PathBase}{context.Request.Path}{context.Request.QueryString}";
                 // permanent + preserveMethod => 308 (NOT 301): a 301 lets a client silently retry a POST as

@@ -132,8 +132,12 @@ public sealed class SymmetricIntroduceTests
         {
             await using var factoryB = new ClusterNodeFactory("node-b", "host-b", Secret, dbPath: dbB);
             HttpMessageHandler toB = factoryB.Server.CreateHandler();
+            // Node A knows its own public address the ordinary way, from config. It has to know SOME
+            // address a peer could use: the admin request that drives the join arrives over loopback here,
+            // and a loopback observation is deliberately not offered to anyone.
             await using var factoryA = new ClusterNodeFactory(
-                "node-a", "host-a", Secret, dbPath: dbA, handshakeHandlerFactory: () => toB);
+                "node-a", "host-a", Secret, dbPath: dbA, handshakeHandlerFactory: () => toB,
+                advertiseUrl: "https://node-a.test");
 
             // Node B is configured with no address of its own — the state a freshly-installed node is in.
             SelfIdentityStore selfB = factoryB.Services.GetRequiredService<SelfIdentityStore>();
@@ -156,6 +160,29 @@ public sealed class SymmetricIntroduceTests
             Assert.NotEmpty(PeerCandidates.Decode(a.Candidates));
         }
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
+    }
+
+    [Fact]
+    public async Task AnObservedLoopbackAddressIsNotOfferedToPeers()
+    {
+        string db = NewDbPath("loopback");
+        try
+        {
+            await using var node = new ClusterNodeFactory("node-a", "host-a", Secret, dbPath: db);
+            SelfIdentityStore self = node.Services.GetRequiredService<SelfIdentityStore>();
+
+            // Somebody reached this node over loopback — a local curl, a health probe, an admin on the box.
+            // True, and useless to a peer: read anywhere else it means that reader.
+            await self.RecordCandidateAsync("http://127.0.0.1:8097", client: true, SelfIdentityStore.BrowserObserved, default);
+            await self.RecordCandidateAsync("http://localhost:8097", client: true, SelfIdentityStore.BrowserObserved, default);
+            Assert.Empty(await self.CandidatesAsync(default));
+
+            // An operator who types one means it: co-located nodes are a real topology and there it is
+            // exactly the right address.
+            await self.RecordCandidateAsync("http://127.0.0.1:8099", client: true, PeerHandshakeService.OperatorProvenance, default);
+            Assert.Contains(await self.CandidatesAsync(default), c => c.Url == "http://127.0.0.1:8099");
+        }
+        finally { DeleteBestEffort(db); }
     }
 
     // ── 3. Order does not matter ─────────────────────────────────────────────────────────────────────

@@ -100,9 +100,23 @@ public sealed class ForwardedHeadersTests
         // The whole trust model. Anyone can send X-Forwarded-Proto; only a peer we recognise as our
         // own proxy is believed. This is also what makes the middleware safe to run with no proxy in
         // front at all.
+        //
+        // Read through the https upgrade, which is the first thing downstream of the middleware to act on
+        // the resolved scheme: a plain-http caller out on the internet is redirected. Had the forged header
+        // been believed the request would have counted as https and sailed past it, so the 308 IS the
+        // observation that it was not.
         using WebApplicationFactory<Program> factory = Factory(IPAddress.Parse("203.0.113.7"));
+        HttpClient client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+        });
 
-        Assert.False(await StateCookieIsSecureAsync(factory, "https"));
+        var request = new HttpRequestMessage(HttpMethod.Get, "/auth/discord/start");
+        request.Headers.Add("X-Forwarded-Proto", "https");
+        using HttpResponseMessage response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.PermanentRedirect, response.StatusCode);
+        Assert.StartsWith("https://", response.Headers.Location!.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
