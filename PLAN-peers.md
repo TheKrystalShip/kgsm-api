@@ -167,10 +167,12 @@ inconsistent, unjustified cost.
 
 ### User single sign-on (vouch)
 
-> **What a vouch is worth, and where accounts live, are owned by `../cluster-auth-plan.md`.** An
-> account is a cluster-scoped fact there: one person, one tier, held by the node the cluster names as
-> the authority, with withdrawal fanned out over this bus. This section owns the mechanism — who
-> calls whom, with what token — and defers to that document on the authority question.
+> **Superseded by `../cluster-auth-plan.md`.** Identity is a cluster-scoped fact there: one account
+> store held by an **auth anchor** — a cluster member in its own right — with every member holding a
+> read-only replica, a person signing in once against the anchor, and asymmetric signing so a member
+> verifies a session it cannot mint. The vouch below is the per-node mechanism that model replaces,
+> and it is deleted rather than repaired: it cannot carry withdrawal, only granting. Read it as the
+> description of what runs today, not as the design.
 
 ```
 User → Node A: Discord OAuth round-trip (only A talks to Discord)
