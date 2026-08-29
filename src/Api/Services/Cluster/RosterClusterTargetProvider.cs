@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Messaging;
 
 namespace TheKrystalShip.Api.Services.Cluster;
@@ -13,14 +14,8 @@ namespace TheKrystalShip.Api.Services.Cluster;
 /// set, else the advertised <see cref="Data.PeerEntity.Url"/> — restricted to first-hand-
 /// <see cref="GossipState.Alive"/> peers only (<c>PLAN-peers.md §P1</c>; see <see cref="GetEnabledTargetsAsync"/>).
 /// </remarks>
-public sealed class RosterClusterTargetProvider
+public sealed class RosterClusterTargetProvider(MembersStore members)
 {
-    private readonly PeersStore _peers;
-
-    public RosterClusterTargetProvider(PeersStore peers)
-    {
-        _peers = peers;
-    }
 
     /// <summary>
     /// Every enabled, first-hand-<see cref="GossipState.Alive"/> peer, as a fan-out target list for
@@ -45,10 +40,10 @@ public sealed class RosterClusterTargetProvider
     /// </remarks>
     public async Task<IReadOnlyList<ClusterTarget>> GetEnabledTargetsAsync(CancellationToken ct)
     {
-        IReadOnlyList<Data.PeerEntity> enabled = await _peers.ListEnabledAsync(ct).ConfigureAwait(false);
+        IReadOnlyList<MemberRow> enabled = await members.ListEnabledAsync(ct).ConfigureAwait(false);
         return enabled
-            .Where(p => p.MembershipState == GossipState.Alive && p.LastSeen is not null)
-            .Select(p => new ClusterTarget(p.NodeId, p.Url))
+            .Where(m => m.MembershipState == GossipState.Alive && m.LastSeen is not null)
+            .Select(m => new ClusterTarget(m.MemberId, m.Url))
             .ToList();
     }
 }

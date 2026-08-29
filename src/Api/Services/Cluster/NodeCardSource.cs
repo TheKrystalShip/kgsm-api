@@ -1,34 +1,35 @@
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Leaves;
+using TheKrystalShip.KGSM.Cluster;
+using TheKrystalShip.KGSM.Cluster.Membership;
 
 namespace TheKrystalShip.Api.Services.Cluster;
 
 /// <summary>
-/// Builds this node's card — who it is, what it runs, and every address it knows it answers at
-/// (<c>PLAN-peers.md</c> P0.6). A seam rather than a direct dependency so the handshake can be exercised
-/// against a stated card without standing up leaf health and host identity behind it.
+/// This node's card: the cluster package's own answer about who this member is and where it answers, plus
+/// the block only a node has — its route version, its build, and the leaves provisioned on it.
 /// </summary>
-public interface INodeCardSource
-{
-    /// <summary>This node's card, as it is right now.</summary>
-    Task<NodeCard> BuildAsync(CancellationToken ct);
-}
-
-/// <inheritdoc cref="INodeCardSource"/>
+/// <remarks>
+/// It wraps the package's source rather than replacing it, because the identity and the reflected addresses
+/// are the package's to state and a second implementation of them is how two members come to disagree about
+/// where one of them lives.
+/// </remarks>
 public sealed class NodeCardSource(
-    ApiOptions options,
+    SelfMemberCardSource inner,
     HostIdentityProvider hostIdentity,
     LeafHealthMonitor leafHealth,
-    SelfIdentityStore selfIdentity,
-    SelfIncarnation selfIncarnation) : INodeCardSource
+    ApiOptions options) : IMemberCardSource
 {
-    public async Task<NodeCard> BuildAsync(CancellationToken ct) =>
-        new(options.NodeId,
-            ApiInfo.ApiVersion,
-            hostIdentity.Build,
-            NodeCapabilities.Current(leafHealth.Current, options.ClusterEnabled),
-            await selfIdentity.CandidatesAsync(ct).ConfigureAwait(false),
-            selfIncarnation.Current,
-            ClusterProtocol.Current);
+    public async Task<MemberCard> BuildAsync(CancellationToken ct)
+    {
+        MemberCard card = await inner.BuildAsync(ct).ConfigureAwait(false);
+        return card with
+        {
+            Node = new NodeFacts(
+                ApiInfo.ApiVersion,
+                hostIdentity.Build,
+                NodeCapabilities.Current(leafHealth.Current, options.ClusterEnabled)),
+        };
+    }
 }

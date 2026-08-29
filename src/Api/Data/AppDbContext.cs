@@ -58,20 +58,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// the audit log is untouched. See <c>Services/Auth/CLAUDE.md</c>.</summary>
     public DbSet<SessionEntry> Sessions => Set<SessionEntry>();
 
-    /// <summary>The cluster membership roster (the peer-foundation milestone — see <see cref="PeerEntity"/>;
-    /// <c>PLAN-peers.md §2</c> #12, P0). One row per known peer, this node's own copy (the mesh is
-    /// masterless — there is no shared roster table). Created automatically by <c>EnsureCreated</c> on a
-    /// fresh DB (registered in <see cref="OnModelCreating"/>); on an already-deployed DB the table is added
-    /// by <see cref="Services.Cluster.PeersStore"/>'s idempotent <c>CREATE TABLE IF NOT EXISTS</c>, the same
-    /// posture as <see cref="LeafRegistryEntries"/>/<see cref="HostSettings"/> — never a wipe of the shared
-    /// audit log.</summary>
-    public DbSet<PeerEntity> Peers => Set<PeerEntity>();
-
-    /// <summary>What this node has learned about itself by reflection — the addresses it answers at and the
-    /// browser origins an admin has signed in from (<c>PLAN-peers.md</c> P0.6). Created by
-    /// <see cref="Services.Cluster.SelfIdentityStore"/>'s idempotent <c>CREATE TABLE IF NOT EXISTS</c> on an
-    /// already-deployed DB, the same posture as <see cref="Peers"/>.</summary>
-    public DbSet<SelfFactEntity> SelfFacts => Set<SelfFactEntity>();
 
     /// <summary>Web Push subscriptions — one row per (user × device), keyed by the push service's
     /// endpoint URL. The shape that does not fit <see cref="Integrations"/>: an integration holds one
@@ -370,40 +356,5 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(s => s.Expires);
         });
 
-        // Cluster membership roster — the peer-foundation milestone (PLAN-peers.md §2 #12, P0). This
-        // node's own copy of the mesh (masterless — no shared table). LastSeen as UTC ticks (long) via the
-        // nullable-converter form (the HostSettingsEntity.UpdatedAt posture) — SQLite has no date type.
-        modelBuilder.Entity<PeerEntity>(e =>
-        {
-            e.ToTable("peers");
-            e.HasKey(p => p.Id);
-            // The disable-list gate's and the outbox/poller's "enabled peers only" read.
-            e.HasIndex(p => p.Enabled);
-            // A peer's own node id is what identifies it; Id is only this node's local handle. Unique, so
-            // two introductions arriving at once cannot leave the same peer in the roster twice.
-            e.HasIndex(p => p.NodeId).IsUnique();
-            e.Property(p => p.LastSeen).HasConversion(
-                new ValueConverter<DateTimeOffset, long>(
-                    v => v.UtcTicks,
-                    v => new DateTimeOffset(v, TimeSpan.Zero)));
-            // StateChangedAt — the gossip failure-timer clock (PLAN-peers.md §2·b, G5). Same nullable-ticks
-            // posture as LastSeen; SQLite has no date type.
-            e.Property(p => p.StateChangedAt).HasConversion(
-                new ValueConverter<DateTimeOffset, long>(
-                    v => v.UtcTicks,
-                    v => new DateTimeOffset(v, TimeSpan.Zero)));
-        });
-
-        modelBuilder.Entity<SelfFactEntity>(e =>
-        {
-            e.ToTable("node_self");
-            e.HasKey(f => f.Id);
-            // The CORS check reads origins on the request path, so the kind lookup is indexed.
-            e.HasIndex(f => f.Kind);
-            e.Property(f => f.LastSeen).HasConversion(
-                new ValueConverter<DateTimeOffset, long>(
-                    v => v.UtcTicks,
-                    v => new DateTimeOffset(v, TimeSpan.Zero)));
-        });
     }
 }

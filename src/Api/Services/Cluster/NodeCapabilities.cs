@@ -4,7 +4,7 @@ using TheKrystalShip.Api.Services.Leaves;
 namespace TheKrystalShip.Api.Services.Cluster;
 
 /// <summary>
-/// Projects this node's capability set into the flat id list <c>GET /api/v1/peers/identity</c> advertises
+/// Projects this node's capability set into the flat id list <c>GET /api/v1/members/identity</c> advertises
 /// (<c>PLAN-peers.md §7</c>, e.g. <c>["monitor","watchdog","cluster"]</c>). Deliberately distinct from
 /// <see cref="HostCapabilities"/> (the rich <c>provisioned</c>+<c>status</c>+<c>since</c> block
 /// <c>GET /hosts</c> serves, architecture §4·b): a node-to-node identity handshake only needs to know WHICH

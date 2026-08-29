@@ -24,6 +24,7 @@ using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Identity;
+using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Messaging;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Files;
@@ -655,7 +656,14 @@ public class Startup(IConfiguration configuration)
         // Everything below is inert on a host with no cluster secret — the token service validates
         // nothing, so the inbox endpoint rejects every call before a handler is reached, and neither
         // background worker starts a timer.
+        // Both of these are registered BEFORE the package, deliberately: it registers its own defaults for
+        // each with TryAddSingleton, so whichever is already there wins. This API has a roster, so it
+        // brings the roster-backed gate; and it is a node, so it brings a card source that adds the node
+        // block — a route version, a build, and the leaves provisioned here — over the package's own,
+        // which states only what the package itself knows.
         services.AddSingleton<IClusterMemberGate, PeersTableGate>();
+        services.AddSingleton<SelfMemberCardSource>();
+        services.AddSingleton<IMemberCardSource, NodeCardSource>();
         services.AddKgsmCluster(new ClusterOptions
         {
             MemberId = apiOptions.NodeId,
@@ -671,41 +679,24 @@ public class Startup(IConfiguration configuration)
             RetryTtlDays = apiOptions.ClusterRetryTtlDays,
             RetentionDays = apiOptions.ClusterRetentionDays,
             GcMs = apiOptions.ClusterGcMs,
+            // This API is a node: it runs the engine and game servers and hosts leaves.
+            Kind = MemberKind.Node,
+            PublicBaseUrl = apiOptions.PublicBaseUrl,
+            GossipUrl = apiOptions.ClusterGossipUrl,
+            GossipMs = apiOptions.ClusterGossipMs,
+            PollMs = apiOptions.ClusterPollMs,
+            SuspectMs = apiOptions.ClusterSuspectMs,
+            ReapMs = apiOptions.ClusterReapMs,
         });
 
         // session.revoke is this API's one message type, and it is registered rather than built in:
         // the package dispatches by type and knows nothing about sessions.
         services.AddSingleton<IClusterMessageHandler, Services.Cluster.Handlers.SessionRevokeHandler>();
 
-        // Cluster peer foundation (PLAN-peers.md §6, P0). PeersStore is the roster's single data-access
-        // seam (the LeafRegistry idiom: a singleton owning an IServiceScopeFactory, also a hosted service so
-        // its idempotent CREATE TABLE IF NOT EXISTS runs once at boot). PeerHandshakeService/
-        // RosterClusterTargetProvider/PeerLatencyPoller are P0 skeletons — DI-wired and compiling now so a
-        // later slice fills in their bodies without touching this file again. Named HttpClients, short
-        // timeouts (a hung candidate/peer must not stall an admin request or a poll tick).
-        services.AddSingleton<PeersStore>();
-        services.AddHostedService(sp => sp.GetRequiredService<PeersStore>());
-        services.AddHttpClient(PeerHandshakeService.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
-        services.AddSingleton<INodeCardSource, NodeCardSource>();
-        services.AddSingleton<PeerHandshakeService>();
+        // The roster-backed fan-out target list. A durable, identity-carrying message goes only to members
+        // this node has authenticated first-hand — never to one it has merely heard about — or the outbox
+        // would retry a secret-bearing message at a phantom for the full retry window.
         services.AddSingleton<RosterClusterTargetProvider>();
-        services.AddHttpClient(PeerLatencyPoller.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
-        services.AddHostedService<PeerLatencyPoller>();
-
-        // Cluster membership gossip (PLAN-peers.md §2·b, P0.5). SelfIncarnation is this node's monotonic
-        // refutation counter (a process-lifetime singleton); GossipService is the stateful shell around the
-        // pure RosterMerger (merge + roster projection + failure-timer escalation); GossipWorker is the
-        // random-peer push-pull loop (a hosted service, inert when ClusterEnabled is false). Its named
-        // HttpClient carries the short-timeout, ephemeral (never-outboxed) sync round-trip.
-        services.AddSingleton<SelfIncarnation>();
-        // What this node has learned about ITSELF by reflection — the addresses it answers at and the
-        // browser origins an admin signs in from (PLAN-peers.md P0.6). A node cannot work out its own
-        // public address, so these arrive from whoever reached it and are what let a node join a cluster
-        // with nothing configured but the shared secret.
-        services.AddSingleton<SelfIdentityStore>();
-        services.AddSingleton<GossipService>();
-        services.AddHttpClient(GossipWorker.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(10));
-        services.AddHostedService<GossipWorker>();
 
         // Cluster resource visibility (PLAN-peers.md P2). The server-side node-proxy that fans a resource read
         // out to a peer's self/* surface — reuses the OutboxDrainer named HttpClient (mint-authed, 10s bound),

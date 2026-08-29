@@ -9,7 +9,10 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Identity;
+using TheKrystalShip.KGSM.Cluster.Membership;
+using TheKrystalShip.KGSM.Cluster.Storage;
 using TheKrystalShip.KGSM.Cluster.Messaging;
 
 using TheKrystalShip.KGSM.Auth;
@@ -162,12 +165,11 @@ public sealed class ClusterSsoTests
             string tokenFromA = factoryA.Services.GetRequiredService<IClusterTokenService>().Mint().Token;
 
             // B explicitly disables node-a.
-            PeersStore peersOnB = factoryB.Services.GetRequiredService<PeersStore>();
-            await peersOnB.UpsertAsync(new PeerEntity
+            MembersStore peersOnB = factoryB.Services.GetRequiredService<MembersStore>();
+            await peersOnB.UpsertAsync(MemberRow.New("node-a", MemberKind.Node) with
             {
                 Id = "peer_node_a_disabled",
                 Url = "http://node-a",
-                NodeId = "node-a",
                 Status = "unknown",
                 ApiVersion = "v1",
                 Enabled = false,
@@ -179,7 +181,7 @@ public sealed class ClusterSsoTests
 
             Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
             JsonElement error = (await Json(resp)).GetProperty("error");
-            Assert.Equal("peer_disabled", error.GetProperty("code").GetString());
+            Assert.Equal("member_disabled", error.GetProperty("code").GetString());
         }
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
     }
@@ -282,12 +284,11 @@ public sealed class ClusterSsoTests
             // Make B a first-hand-alive peer in A's roster (LastSeen stamped — the join-via-seed
             // handshake's own postcondition, reproduced directly here rather than running the full
             // handshake, since this test is about the fan-out, not the handshake itself).
-            PeersStore peersOnA = factoryA.Services.GetRequiredService<PeersStore>();
-            await peersOnA.UpsertAsync(new PeerEntity
+            MembersStore peersOnA = factoryA.Services.GetRequiredService<MembersStore>();
+            await peersOnA.UpsertAsync(MemberRow.New("node-b", MemberKind.Node) with
             {
                 Id = "peer_node_b_logout",
                 Url = "http://node-b",
-                NodeId = "node-b",
                 Status = "reachable",
                 MembershipState = GossipState.Alive,
                 LastSeen = DateTimeOffset.UtcNow,
@@ -350,13 +351,12 @@ public sealed class ClusterSsoTests
                 clientA, tokenA, discordId, "hearsayuser", "Hearsay User", "viewer"));
             string accessTokenA = bodyA.GetProperty("accessToken").GetString()!;
 
-            PeersStore peersOnA = factoryA.Services.GetRequiredService<PeersStore>();
+            MembersStore peersOnA = factoryA.Services.GetRequiredService<MembersStore>();
             // The real, first-hand-alive B.
-            await peersOnA.UpsertAsync(new PeerEntity
+            await peersOnA.UpsertAsync(MemberRow.New("node-b", MemberKind.Node) with
             {
                 Id = "peer_node_b_hearsay_test",
                 Url = "http://node-b",
-                NodeId = "node-b",
                 Status = "reachable",
                 MembershipState = GossipState.Alive,
                 LastSeen = DateTimeOffset.UtcNow,
@@ -365,11 +365,10 @@ public sealed class ClusterSsoTests
             }, default);
             // A HEARSAY/phantom peer: gossip reported it alive, but this node has never reached it
             // first-hand (LastSeen null) — must be excluded from a durable, identity-carrying fan-out.
-            await peersOnA.UpsertAsync(new PeerEntity
+            await peersOnA.UpsertAsync(MemberRow.New("node-phantom", MemberKind.Node) with
             {
                 Id = "peer_node_phantom_hearsay_test",
                 Url = "http://node-phantom",
-                NodeId = "node-phantom",
                 Status = "unknown",
                 MembershipState = GossipState.Alive,
                 LastSeen = null,
@@ -400,7 +399,7 @@ public sealed class ClusterSsoTests
     [Fact]
     public async Task RosterClusterTargetProvider_AliveWithLastSeen_Included()
     {
-        PeersStore store = NewPeersStore();
+        MembersStore store = NewPeersStore();
         await store.UpsertAsync(Peer("node-alive", GossipState.Alive, lastSeen: DateTimeOffset.UtcNow, enabled: true), default);
         var provider = new RosterClusterTargetProvider(store);
 
@@ -412,7 +411,7 @@ public sealed class ClusterSsoTests
     [Fact]
     public async Task RosterClusterTargetProvider_AliveWithNullLastSeen_Excluded_Hearsay()
     {
-        PeersStore store = NewPeersStore();
+        MembersStore store = NewPeersStore();
         await store.UpsertAsync(Peer("node-hearsay", GossipState.Alive, lastSeen: null, enabled: true), default);
         var provider = new RosterClusterTargetProvider(store);
 
@@ -424,7 +423,7 @@ public sealed class ClusterSsoTests
     [Fact]
     public async Task RosterClusterTargetProvider_Suspect_Excluded()
     {
-        PeersStore store = NewPeersStore();
+        MembersStore store = NewPeersStore();
         await store.UpsertAsync(Peer("node-suspect", GossipState.Suspect, lastSeen: DateTimeOffset.UtcNow, enabled: true), default);
         var provider = new RosterClusterTargetProvider(store);
 
@@ -436,7 +435,7 @@ public sealed class ClusterSsoTests
     [Fact]
     public async Task RosterClusterTargetProvider_DisabledAliveFirstHand_Excluded()
     {
-        PeersStore store = NewPeersStore();
+        MembersStore store = NewPeersStore();
         await store.UpsertAsync(Peer("node-disabled", GossipState.Alive, lastSeen: DateTimeOffset.UtcNow, enabled: false), default);
         var provider = new RosterClusterTargetProvider(store);
 
@@ -477,12 +476,11 @@ public sealed class ClusterSsoTests
                 clientB, tokenB, discordId, "downupuser", "DownUp User", "viewer"));
             string sidB = bodyB.GetProperty("sid").GetString()!;
 
-            PeersStore peersOnA = factoryA.Services.GetRequiredService<PeersStore>();
-            await peersOnA.UpsertAsync(new PeerEntity
+            MembersStore peersOnA = factoryA.Services.GetRequiredService<MembersStore>();
+            await peersOnA.UpsertAsync(MemberRow.New("node-b", MemberKind.Node) with
             {
                 Id = "peer_node_b_downup",
                 Url = "http://node-b",
-                NodeId = "node-b",
                 Status = "reachable",
                 MembershipState = GossipState.Alive,
                 LastSeen = DateTimeOffset.UtcNow,
@@ -529,29 +527,27 @@ public sealed class ClusterSsoTests
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
     }
 
-    // ── 6. GET /api/v1/peers/roster — the viewer-tier roster projection (G1) ──────────────────────────
+    // ── 6. GET /api/v1/members/roster — the viewer-tier roster projection (G1) ──────────────────────────
 
     [Fact]
     public async Task Roster_EnabledPeer_ClientUrlIsUrlNotGossipUrl_LabelIsNicknameOrNodeId()
     {
         await using var factory = new AuthTestFactory();
-        PeersStore store = factory.Services.GetRequiredService<PeersStore>();
-        await store.UpsertAsync(new PeerEntity
+        MembersStore store = factory.Services.GetRequiredService<MembersStore>();
+        await store.UpsertAsync(MemberRow.New("node-nicknamed", MemberKind.Node) with
         {
             Id = "peer_roster_nicknamed",
             Url = "https://node-nicknamed.pub",
-            Candidates = PeerCandidates.Encode([new NodeCandidate("https://node-nicknamed.pub", Client: true)]),
+            Candidates = MemberCandidates.Encode([new MemberCandidate("https://node-nicknamed.pub", Client: true)]),
             Nickname = "Nicknamed Box",
-            NodeId = "node-nicknamed",
             Status = "reachable",
             ApiVersion = "v1",
             Enabled = true,
         }, default);
-        await store.UpsertAsync(new PeerEntity
+        await store.UpsertAsync(MemberRow.New("node-unnicknamed", MemberKind.Node) with
         {
             Id = "peer_roster_unnicknamed",
             Url = "https://node-unnicknamed.pub",
-            NodeId = "node-unnicknamed",
             Status = "reachable",
             ApiVersion = "v1",
             Enabled = true,
@@ -561,14 +557,14 @@ public sealed class ClusterSsoTests
         HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(KgsmTier.Viewer));
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        JsonElement nodes = (await Json(resp)).GetProperty("nodes");
+        JsonElement nodes = (await Json(resp)).GetProperty("members");
 
-        JsonElement nicknamed = nodes.EnumerateArray().Single(n => n.GetProperty("nodeId").GetString() == "node-nicknamed");
+        JsonElement nicknamed = nodes.EnumerateArray().Single(n => n.GetProperty("memberId").GetString() == "node-nicknamed");
         // The advertised (browser-reachable) Url, never the internal GossipUrl.
         Assert.Equal("https://node-nicknamed.pub", nicknamed.GetProperty("clientUrl").GetString());
         Assert.Equal("Nicknamed Box", nicknamed.GetProperty("label").GetString());
 
-        JsonElement unnicknamed = nodes.EnumerateArray().Single(n => n.GetProperty("nodeId").GetString() == "node-unnicknamed");
+        JsonElement unnicknamed = nodes.EnumerateArray().Single(n => n.GetProperty("memberId").GetString() == "node-unnicknamed");
         Assert.Equal("node-unnicknamed", unnicknamed.GetProperty("label").GetString());
     }
 
@@ -576,21 +572,19 @@ public sealed class ClusterSsoTests
     public async Task Roster_ExcludesDisabledPeer()
     {
         await using var factory = new AuthTestFactory();
-        PeersStore store = factory.Services.GetRequiredService<PeersStore>();
-        await store.UpsertAsync(new PeerEntity
+        MembersStore store = factory.Services.GetRequiredService<MembersStore>();
+        await store.UpsertAsync(MemberRow.New("node-enabled", MemberKind.Node) with
         {
             Id = "peer_roster_enabled",
             Url = "https://node-enabled.pub",
-            NodeId = "node-enabled",
             Status = "reachable",
             ApiVersion = "v1",
             Enabled = true,
         }, default);
-        await store.UpsertAsync(new PeerEntity
+        await store.UpsertAsync(MemberRow.New("node-disabled", MemberKind.Node) with
         {
             Id = "peer_roster_disabled",
             Url = "https://node-disabled.pub",
-            NodeId = "node-disabled",
             Status = "unknown",
             ApiVersion = "v1",
             Enabled = false,
@@ -600,22 +594,21 @@ public sealed class ClusterSsoTests
         HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(KgsmTier.Viewer));
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        JsonElement nodes = (await Json(resp)).GetProperty("nodes");
-        Assert.Contains(nodes.EnumerateArray(), n => n.GetProperty("nodeId").GetString() == "node-enabled");
-        Assert.DoesNotContain(nodes.EnumerateArray(), n => n.GetProperty("nodeId").GetString() == "node-disabled");
+        JsonElement nodes = (await Json(resp)).GetProperty("members");
+        Assert.Contains(nodes.EnumerateArray(), n => n.GetProperty("memberId").GetString() == "node-enabled");
+        Assert.DoesNotContain(nodes.EnumerateArray(), n => n.GetProperty("memberId").GetString() == "node-disabled");
     }
 
     [Fact]
     public async Task Roster_MembershipDerivation_HearsayIsJoining_FirstHandIsAlive()
     {
         await using var factory = new AuthTestFactory();
-        PeersStore store = factory.Services.GetRequiredService<PeersStore>();
+        MembersStore store = factory.Services.GetRequiredService<MembersStore>();
         // Gossip says alive, but this node has never reached it first-hand (LastSeen null) -> "joining".
-        await store.UpsertAsync(new PeerEntity
+        await store.UpsertAsync(MemberRow.New("node-hearsay", MemberKind.Node) with
         {
             Id = "peer_roster_hearsay",
             Url = "https://node-hearsay.pub",
-            NodeId = "node-hearsay",
             Status = "unknown",
             MembershipState = GossipState.Alive,
             LastSeen = null,
@@ -623,11 +616,10 @@ public sealed class ClusterSsoTests
             Enabled = true,
         }, default);
         // Gossip-alive AND first-hand reached -> the converged state shows verbatim, "alive".
-        await store.UpsertAsync(new PeerEntity
+        await store.UpsertAsync(MemberRow.New("node-firsthand", MemberKind.Node) with
         {
             Id = "peer_roster_firsthand",
             Url = "https://node-firsthand.pub",
-            NodeId = "node-firsthand",
             Status = "reachable",
             MembershipState = GossipState.Alive,
             LastSeen = DateTimeOffset.UtcNow,
@@ -638,10 +630,10 @@ public sealed class ClusterSsoTests
         using HttpClient client = factory.CreateClient();
         HttpResponseMessage resp = await GetRosterAsync(client, factory.AccessToken(KgsmTier.Viewer));
 
-        JsonElement nodes = (await Json(resp)).GetProperty("nodes");
-        JsonElement hearsay = nodes.EnumerateArray().Single(n => n.GetProperty("nodeId").GetString() == "node-hearsay");
+        JsonElement nodes = (await Json(resp)).GetProperty("members");
+        JsonElement hearsay = nodes.EnumerateArray().Single(n => n.GetProperty("memberId").GetString() == "node-hearsay");
         Assert.Equal("joining", hearsay.GetProperty("membership").GetString());
-        JsonElement firstHand = nodes.EnumerateArray().Single(n => n.GetProperty("nodeId").GetString() == "node-firsthand");
+        JsonElement firstHand = nodes.EnumerateArray().Single(n => n.GetProperty("memberId").GetString() == "node-firsthand");
         Assert.Equal("alive", firstHand.GetProperty("membership").GetString());
     }
 
@@ -776,7 +768,7 @@ public sealed class ClusterSsoTests
 
             Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
             JsonElement error = (await Json(resp)).GetProperty("error");
-            Assert.Equal("unknown_node", error.GetProperty("code").GetString());
+            Assert.Equal("unknown_member", error.GetProperty("code").GetString());
         }
         finally { DeleteBestEffort(dbA); }
     }
@@ -789,12 +781,11 @@ public sealed class ClusterSsoTests
         try
         {
             await using var factoryA = new ClusterNodeFactory("node-a", "host-a", secret, dbPath: dbA);
-            PeersStore peersOnA = factoryA.Services.GetRequiredService<PeersStore>();
-            await peersOnA.UpsertAsync(new PeerEntity
+            MembersStore peersOnA = factoryA.Services.GetRequiredService<MembersStore>();
+            await peersOnA.UpsertAsync(MemberRow.New("node-c", MemberKind.Node) with
             {
                 Id = "peer_node_c_request_disabled",
                 Url = "http://node-c",
-                NodeId = "node-c",
                 Status = "unknown",
                 ApiVersion = "v1",
                 Enabled = false,
@@ -806,7 +797,7 @@ public sealed class ClusterSsoTests
 
             Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
             JsonElement error = (await Json(resp)).GetProperty("error");
-            Assert.Equal("peer_disabled", error.GetProperty("code").GetString());
+            Assert.Equal("member_disabled", error.GetProperty("code").GetString());
         }
         finally { DeleteBestEffort(dbA); }
     }
@@ -832,7 +823,7 @@ public sealed class ClusterSsoTests
 
             Assert.Equal(HttpStatusCode.BadGateway, resp.StatusCode);
             JsonElement error = (await Json(resp)).GetProperty("error");
-            Assert.Equal("peer_unreachable", error.GetProperty("code").GetString());
+            Assert.Equal("member_unreachable", error.GetProperty("code").GetString());
         }
         finally { DeleteBestEffort(dbA); }
     }
@@ -841,7 +832,7 @@ public sealed class ClusterSsoTests
 
     private static Task<HttpResponseMessage> GetRosterAsync(HttpClient client, string? bearer)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/roster");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members/roster");
         if (!string.IsNullOrEmpty(bearer))
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
         return client.SendAsync(request);
@@ -876,12 +867,11 @@ public sealed class ClusterSsoTests
     /// (no nickname/gossipUrl; those are exercised separately by the roster-projection tests above).</summary>
     private static async Task SeedEnabledTargetAsync(ClusterNodeFactory factory, string rowId, string nodeId)
     {
-        PeersStore store = factory.Services.GetRequiredService<PeersStore>();
-        await store.UpsertAsync(new PeerEntity
+        MembersStore store = factory.Services.GetRequiredService<MembersStore>();
+        await store.UpsertAsync(MemberRow.New(nodeId, MemberKind.Node) with
         {
             Id = rowId,
             Url = $"http://{nodeId}",
-            NodeId = nodeId,
             Status = "reachable",
             ApiVersion = "v1",
             Enabled = true,
@@ -976,28 +966,23 @@ public sealed class ClusterSsoTests
                 : base.SendAsync(request, ct);
     }
 
-    // ── RosterClusterTargetProvider focused unit-test plumbing (PeersTableGateTests' NewStore pattern) ──
+    // ── RosterClusterTargetProvider focused unit-test plumbing ──
 
-    private static PeerEntity Peer(string nodeId, string membershipState, DateTimeOffset? lastSeen, bool enabled) => new()
-    {
-        Id = "peer_" + Guid.NewGuid().ToString("N")[..10],
-        Url = $"https://{nodeId}.test",
-        NodeId = nodeId,
-        Status = lastSeen is null ? "unknown" : "reachable",
-        MembershipState = membershipState,
-        LastSeen = lastSeen,
-        ApiVersion = "v1",
-        Enabled = enabled,
-    };
+    private static MemberRow Peer(string memberId, string membershipState, DateTimeOffset? lastSeen, bool enabled) =>
+        MemberRow.New(memberId, MemberKind.Node) with
+        {
+            Url = $"https://{memberId}.test",
+            Status = lastSeen is null ? MemberStatus.Unknown : MemberStatus.Reachable,
+            MembershipState = membershipState,
+            LastSeen = lastSeen,
+            ApiVersion = "v1",
+            Enabled = enabled,
+        };
 
-    private static PeersStore NewPeersStore()
+    private static MembersStore NewPeersStore()
     {
         string dbPath = Path.Combine(Path.GetTempPath(), $"rosterclustertargettest-{Guid.NewGuid():N}.db");
-        ServiceProvider provider = new ServiceCollection()
-            .AddDbContext<AppDbContext>(o => o.UseSqlite($"Data Source={dbPath}"))
-            .BuildServiceProvider();
-        using (IServiceScope scope = provider.CreateScope())
-            scope.ServiceProvider.GetRequiredService<AppDbContext>().Database.EnsureCreated();
-        return new PeersStore(provider.GetRequiredService<IServiceScopeFactory>(), NullLogger<PeersStore>.Instance);
+        var options = new ClusterOptions { MemberId = "node-a", Secret = "test", StorePath = dbPath };
+        return new MembersStore(new ClusterStore(options, NullLogger<ClusterStore>.Instance));
     }
 }

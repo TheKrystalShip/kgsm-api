@@ -5,6 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster;
+using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Identity;
 
 using TheKrystalShip.KGSM.Auth;
@@ -49,7 +51,7 @@ public sealed class ClusterResourceRelayTests
             await using var node = new ClusterNodeFactory("node-a", "host-a", Secret, dbPath: db);
             using HttpClient client = node.CreateClient();
 
-            HttpResponseMessage resp = await client.GetAsync("/api/v1/peers/self/resources");
+            HttpResponseMessage resp = await client.GetAsync("/api/v1/members/self/resources");
 
             Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
             JsonElement body = await Json(resp);
@@ -68,7 +70,7 @@ public sealed class ClusterResourceRelayTests
             string token = node.Services.GetRequiredService<IClusterTokenService>().Mint().Token;
             using HttpClient client = node.CreateClient();
 
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/self/resources");
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members/self/resources");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             HttpResponseMessage resp = await client.SendAsync(request);
 
@@ -97,7 +99,7 @@ public sealed class ClusterResourceRelayTests
             string token = node.Services.GetRequiredService<IClusterTokenService>().Mint().Token;
             using HttpClient client = node.CreateClient();
 
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/self/capabilities");
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members/self/capabilities");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             HttpResponseMessage resp = await client.SendAsync(request);
 
@@ -121,7 +123,7 @@ public sealed class ClusterResourceRelayTests
             string token = node.Services.GetRequiredService<IClusterTokenService>().Mint().Token;
             using HttpClient client = node.CreateClient();
 
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/self/library");
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members/self/library");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             HttpResponseMessage resp = await client.SendAsync(request);
 
@@ -143,7 +145,7 @@ public sealed class ClusterResourceRelayTests
         {
             await using var node = new ClusterNodeFactory("node-a", "host-a", Secret, dbPath: db);
             using HttpClient client = node.CreateClient();
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/does-not-exist/resources");
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members/does-not-exist/resources");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(KgsmTier.Admin));
 
             HttpResponseMessage resp = await client.SendAsync(request);
@@ -160,21 +162,21 @@ public sealed class ClusterResourceRelayTests
         try
         {
             await using var node = new ClusterNodeFactory("node-a", "host-a", Secret, dbPath: db);
-            PeersStore peers = node.Services.GetRequiredService<PeersStore>();
-            await peers.UpsertAsync(new PeerEntity
+            MembersStore peers = node.Services.GetRequiredService<MembersStore>();
+            await peers.UpsertAsync(MemberRow.New("node-b", MemberKind.Node) with
             {
-                Id = "peer-b", Url = "http://node-b", NodeId = "node-b", Status = "unknown",
+                Id = "peer-b", Url = "http://node-b", Status = "unknown",
                 MembershipState = GossipState.Alive, ApiVersion = "v1", Enabled = false,
             }, default);
 
             using HttpClient client = node.CreateClient();
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/peer-b/resources");
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members/peer-b/resources");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(KgsmTier.Admin));
             HttpResponseMessage resp = await client.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
             JsonElement body = await Json(resp);
-            Assert.Equal("peer_disabled", body.GetProperty("error").GetProperty("code").GetString());
+            Assert.Equal("member_disabled", body.GetProperty("error").GetProperty("code").GetString());
         }
         finally { DeleteBestEffort(db); }
     }
@@ -188,21 +190,21 @@ public sealed class ClusterResourceRelayTests
             // No drainerHandlerFactory → the relay's real HttpClient tries to dial the (bogus) peer URL and
             // fails. The honesty rule: a down peer degrades to 502 peer_unreachable, never a 500.
             await using var node = new ClusterNodeFactory("node-a", "host-a", Secret, dbPath: db);
-            PeersStore peers = node.Services.GetRequiredService<PeersStore>();
-            await peers.UpsertAsync(new PeerEntity
+            MembersStore peers = node.Services.GetRequiredService<MembersStore>();
+            await peers.UpsertAsync(MemberRow.New("node-b", MemberKind.Node) with
             {
-                Id = "peer-b", Url = "http://127.0.0.1:1/unreachable", NodeId = "node-b", Status = "unreachable",
+                Id = "peer-b", Url = "http://127.0.0.1:1/unreachable", Status = "unreachable",
                 MembershipState = GossipState.Alive, ApiVersion = "v1", Enabled = true,
             }, default);
 
             using HttpClient client = node.CreateClient();
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/peer-b/resources");
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members/peer-b/resources");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(KgsmTier.Admin));
             HttpResponseMessage resp = await client.SendAsync(request);
 
             Assert.Equal(HttpStatusCode.BadGateway, resp.StatusCode);
             JsonElement body = await Json(resp);
-            Assert.Equal("peer_unreachable", body.GetProperty("error").GetProperty("code").GetString());
+            Assert.Equal("member_unreachable", body.GetProperty("error").GetProperty("code").GetString());
         }
         finally { DeleteBestEffort(db); }
     }
@@ -215,7 +217,7 @@ public sealed class ClusterResourceRelayTests
         {
             await using var node = new ClusterNodeFactory("node-a", "host-a", Secret, dbPath: db);
             using HttpClient client = node.CreateClient();
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/peer-b/resources");
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members/peer-b/resources");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(KgsmTier.Viewer));
 
             HttpResponseMessage resp = await client.SendAsync(request);
@@ -241,16 +243,16 @@ public sealed class ClusterResourceRelayTests
                 "node-a", "host-a", Secret, dbPath: dbA, drainerHandlerFactory: () => handlerToB);
 
             // B is a first-hand-alive, enabled peer in A's roster.
-            PeersStore peersOnA = factoryA.Services.GetRequiredService<PeersStore>();
-            await peersOnA.UpsertAsync(new PeerEntity
+            MembersStore peersOnA = factoryA.Services.GetRequiredService<MembersStore>();
+            await peersOnA.UpsertAsync(MemberRow.New("node-b", MemberKind.Node) with
             {
-                Id = "peer-b", Url = "http://node-b", NodeId = "node-b", Status = "reachable",
+                Id = "peer-b", Url = "http://node-b", Status = MemberStatus.Reachable,
                 MembershipState = GossipState.Alive, LastSeen = DateTimeOffset.UtcNow,
                 ApiVersion = "v1", Enabled = true,
             }, default);
 
             using HttpClient clientA = factoryA.CreateClient();
-            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers/peer-b/resources");
+            var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members/peer-b/resources");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", factoryA.AccessToken(KgsmTier.Admin));
             HttpResponseMessage resp = await clientA.SendAsync(request);
 

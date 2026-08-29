@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using TheKrystalShip.Api.Data;
 
 using TheKrystalShip.KGSM.Cluster.Identity;
+using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Messaging;
 
 namespace TheKrystalShip.Api.Services.Cluster;
@@ -26,7 +27,7 @@ public sealed record ClusterRelayResult(ClusterRelayStatus Status, string? Paylo
 
 /// <summary>
 /// The <strong>server-side capacity fan-out</strong> — the one node-proxied path (PLAN-peers.md P2). Given a
-/// peer's roster-row id, it mints a cluster service token and GETs that peer's <c>/api/v1/peers/self/{leaf}</c>
+/// peer's roster-row id, it mints a cluster service token and GETs that peer's <c>/api/v1/members/self/{leaf}</c>
 /// surface, returning the response verbatim. This is consumed by the on-demand "find a node with capacity"
 /// logic and (later) the assistant — <strong>never by the SPA</strong>, which reads a peer's resources
 /// directly over its own native session (per-node pages stay client-side; §8).
@@ -38,7 +39,7 @@ public sealed record ClusterRelayResult(ClusterRelayStatus Status, string? Paylo
 /// <see cref="ClusterRelayStatus.Unreachable"/> — never a 500 (the P2 honesty rule).
 /// </remarks>
 public sealed class ClusterPeerRelay(
-    PeersStore peers,
+    MembersStore members,
     IClusterTokenService clusterTokens,
     IHttpClientFactory httpClientFactory,
     ApiOptions options,
@@ -49,12 +50,12 @@ public sealed class ClusterPeerRelay(
     /// is returned untouched on success.</summary>
     public async Task<ClusterRelayResult> RelayGetAsync(string peerId, string leaf, CancellationToken ct)
     {
-        // A non-cluster node has an empty roster (PeersStore never seeds rows without ClusterEnabled), so this
+        // A non-cluster node has an empty roster, so this
         // reads as an explicit "unknown node," matching the vouch relay's early-out.
         if (!options.ClusterEnabled)
             return new ClusterRelayResult(ClusterRelayStatus.UnknownNode, null, null);
 
-        PeerEntity? peer = await peers.GetAsync(peerId, ct).ConfigureAwait(false);
+        MemberRow? peer = await members.GetAsync(peerId, ct).ConfigureAwait(false);
         if (peer is null)
             return new ClusterRelayResult(ClusterRelayStatus.UnknownNode, null, null);
         if (!peer.Enabled)
@@ -63,7 +64,7 @@ public sealed class ClusterPeerRelay(
         MintedClusterToken token = clusterTokens.Mint();
         // The pinned candidate — the same address GossipWorker/OutboxDrainer/the vouch relay reach this
         // peer's own HTTP surface on.
-        string url = $"{peer.Url.TrimEnd('/')}/api/v1/peers/self/{leaf}";
+        string url = $"{peer.Url.TrimEnd('/')}/api/v1/members/self/{leaf}";
 
         HttpClient http = httpClientFactory.CreateClient(OutboxDrainer.HttpClientName);
         try

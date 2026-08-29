@@ -12,6 +12,7 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Identity;
 using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Messaging;
@@ -214,7 +215,7 @@ public sealed class ClusterTwoNodeTests
         {
             await using var factoryB = new ClusterNodeFactory("node-b", "host-b", secret, dbPath: dbB);
             // Route node A's handshake client at node B's real in-memory pipeline — the same routing
-            // trick as the outbox drainer above, applied to PeerHandshakeService's named client instead.
+            // trick as the outbox drainer above, applied to MemberHandshakeService's named client instead.
             HttpMessageHandler handlerToB = factoryB.Server.CreateHandler();
             await using var factoryA = new ClusterNodeFactory(
                 "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
@@ -222,7 +223,7 @@ public sealed class ClusterTwoNodeTests
             using HttpClient clientA = factoryA.CreateClient();
             string adminToken = AuthTestFactory.MintTokenWithRow(factoryA.Services, KgsmTier.Admin, access: true);
 
-            var addRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/peers")
+            var addRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/members")
             {
                 Content = JsonContent.Create(new { url = "http://node-b", nickname = "Node B" }),
             };
@@ -231,15 +232,15 @@ public sealed class ClusterTwoNodeTests
 
             Assert.Equal(HttpStatusCode.Created, addResp.StatusCode);
             JsonElement added = JsonDocument.Parse(await addResp.Content.ReadAsStringAsync()).RootElement;
-            Assert.Equal("node-b", added.GetProperty("nodeId").GetString());
+            Assert.Equal("node-b", added.GetProperty("memberId").GetString());
             Assert.True(added.GetProperty("enabled").GetBoolean());
 
-            var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/peers");
+            var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members");
             listRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
             HttpResponseMessage listResp = await clientA.SendAsync(listRequest);
             JsonElement peers = JsonDocument.Parse(await listResp.Content.ReadAsStringAsync())
-                .RootElement.GetProperty("peers");
-            Assert.Contains(peers.EnumerateArray(), p => p.GetProperty("nodeId").GetString() == "node-b");
+                .RootElement.GetProperty("members");
+            Assert.Contains(peers.EnumerateArray(), p => p.GetProperty("memberId").GetString() == "node-b");
         }
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
     }
@@ -274,12 +275,11 @@ public sealed class ClusterTwoNodeTests
             Assert.Equal(HttpStatusCode.OK, before.StatusCode);
 
             // A explicitly disables node-b.
-            PeersStore peersOnA = factoryA.Services.GetRequiredService<PeersStore>();
-            await peersOnA.UpsertAsync(new PeerEntity
+            MembersStore peersOnA = factoryA.Services.GetRequiredService<MembersStore>();
+            await peersOnA.UpsertAsync(MemberRow.New("node-b", MemberKind.Node) with
             {
                 Id = "peer_node_b_gate_test",
                 Url = "http://node-b",
-                NodeId = "node-b",
                 Status = "unknown",
                 ApiVersion = "v1",
                 Enabled = false,
@@ -365,7 +365,7 @@ public sealed class ClusterTwoNodeTests
 /// OWN node identity, host identity, cluster secret, drain interval, and DB file, so two instances can run
 /// side by side in one process as genuinely independent nodes. Optionally rewires the outbox drainer's
 /// named <see cref="HttpClient"/> (<see cref="OutboxDrainer.HttpClientName"/>) and/or the join-via-seed
-/// handshake's named client (<see cref="PeerHandshakeService.HttpClientName"/>) onto a caller-supplied
+/// handshake's named client (<see cref="MemberHandshakeService.HttpClientName"/>) onto a caller-supplied
 /// handler — the seam <see cref="ClusterTwoNodeTests"/> uses to route this node's outbound cluster traffic
 /// into another node's in-memory <c>TestServer</c> pipeline instead of a real socket.
 /// </summary>
@@ -416,7 +416,7 @@ public sealed class ClusterNodeFactory(
                 ["Api:ClusterGossipMs"] = gossipMs.ToString(CultureInfo.InvariantCulture),
                 ["Api:ClusterSuspectMs"] = suspectMs.ToString(CultureInfo.InvariantCulture),
                 ["Api:ClusterReapMs"] = reapMs.ToString(CultureInfo.InvariantCulture),
-                // PeerLatencyPoller's first-hand probe cadence — floored at 250ms, same as gossip.
+                // MemberLatencyPoller's first-hand probe cadence — floored at 250ms, same as gossip.
                 ["Api:ClusterPollMs"] = pollMs.ToString(CultureInfo.InvariantCulture),
             };
             if (advertiseUrl is not null)
@@ -436,7 +436,7 @@ public sealed class ClusterNodeFactory(
         if (handshakeHandlerFactory is not null)
         {
             builder.ConfigureTestServices(services =>
-                services.AddHttpClient(PeerHandshakeService.HttpClientName)
+                services.AddHttpClient(MemberHandshakeService.HttpClientName)
                     .ConfigurePrimaryHttpMessageHandler(handshakeHandlerFactory));
         }
 
@@ -450,7 +450,7 @@ public sealed class ClusterNodeFactory(
         if (latencyHandlerFactory is not null)
         {
             builder.ConfigureTestServices(services =>
-                services.AddHttpClient(PeerLatencyPoller.HttpClientName)
+                services.AddHttpClient(MemberLatencyPoller.HttpClientName)
                     .ConfigurePrimaryHttpMessageHandler(latencyHandlerFactory));
         }
     }

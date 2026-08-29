@@ -13,6 +13,7 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 using TheKrystalShip.KGSM.Cluster.Identity;
+using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Messaging;
 
 using TheKrystalShip.KGSM.Auth;
@@ -50,7 +51,7 @@ public sealed class AuthController(
     ApiJournal journal,
     IClusterTokenService clusterTokens,
     IClusterMemberGate peerGate,
-    PeersStore peers,
+    MembersStore members,
     IHttpClientFactory httpClientFactory,
     ILogger<AuthController> logger) : ControllerBase
 {
@@ -513,8 +514,8 @@ public sealed class AuthController(
                 "invalid, expired, or unsigned cluster service token");
 
         if (!await peerGate.IsEnabledAsync(principal.MemberId).ConfigureAwait(false))
-            return Error(StatusCodes.Status403Forbidden, "peer_disabled",
-                $"node '{principal.MemberId}' is not an enabled peer of this cluster");
+            return Error(StatusCodes.Status403Forbidden, "member_disabled",
+                $"member '{principal.MemberId}' is not an enabled member of this cluster");
 
         if (body is null || string.IsNullOrWhiteSpace(body.DiscordId))
             return Error(StatusCodes.Status400BadRequest, "bad_request", "discordId is required");
@@ -594,7 +595,7 @@ public sealed class AuthController(
     /// <item><c>401</c> <c>unauthorized</c> — no valid session on this node.</item>
     /// <item><c>404</c> <c>unknown_node</c> — <c>nodeId</c> isn't in this node's roster (a non-cluster
     /// node's roster is always empty, so a disabled/unconfigured cluster also lands here).</item>
-    /// <item><c>403</c> <c>peer_disabled</c> — the target peer is disabled on this node.</item>
+    /// <item><c>403</c> <c>member_disabled</c> — the target member is disabled on this node.</item>
     /// <item><c>502</c> <c>peer_unreachable</c> — the peer was unreachable, refused the vouch, or
     /// returned an unparseable response.</item>
     /// </list>
@@ -611,18 +612,18 @@ public sealed class AuthController(
         if (body is null || string.IsNullOrWhiteSpace(body.NodeId))
             return Error(StatusCodes.Status400BadRequest, "bad_request", "nodeId is required");
 
-        // A disabled/unconfigured cluster has an empty roster anyway (PeersStore never seeds rows
+        // A disabled/unconfigured cluster has an empty roster anyway (nothing seeds rows
         // without ClusterEnabled), so this is redundant with the lookup below — kept only so the
         // "no cluster here at all" case reads as an explicit early-out rather than a roster miss.
         if (!options.ClusterEnabled)
-            return Error(StatusCodes.Status404NotFound, "unknown_node", $"node '{body.NodeId}' is not a known peer");
+            return Error(StatusCodes.Status404NotFound, "unknown_member", $"member '{body.NodeId}' is not in this cluster");
 
-        PeerEntity? peer = await peers.GetByNodeIdAsync(body.NodeId, ct);
+        MemberRow? peer = await members.GetByMemberIdAsync(body.NodeId, ct);
         if (peer is null)
-            return Error(StatusCodes.Status404NotFound, "unknown_node", $"node '{body.NodeId}' is not a known peer");
+            return Error(StatusCodes.Status404NotFound, "unknown_member", $"member '{body.NodeId}' is not in this cluster");
 
         if (!peer.Enabled)
-            return Error(StatusCodes.Status403Forbidden, "peer_disabled", $"node '{body.NodeId}' is disabled on this node");
+            return Error(StatusCodes.Status403Forbidden, "member_disabled", $"member '{body.NodeId}' is disabled on this node");
 
         MintedClusterToken token = clusterTokens.Mint();
 
@@ -646,7 +647,7 @@ public sealed class AuthController(
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
             logger.LogWarning(ex, "cluster-session vouch to node '{NodeId}' failed", body.NodeId);
-            return Error(StatusCodes.Status502BadGateway, "peer_unreachable", $"node '{body.NodeId}' is unreachable");
+            return Error(StatusCodes.Status502BadGateway, "member_unreachable", $"member '{body.NodeId}' is unreachable");
         }
 
         using (response)
@@ -655,7 +656,7 @@ public sealed class AuthController(
             {
                 logger.LogWarning("cluster-session vouch to node '{NodeId}' rejected: HTTP {Status}",
                     body.NodeId, (int)response.StatusCode);
-                return Error(StatusCodes.Status502BadGateway, "peer_unreachable",
+                return Error(StatusCodes.Status502BadGateway, "member_unreachable",
                     $"node '{body.NodeId}' refused the vouch");
             }
 
@@ -671,7 +672,7 @@ public sealed class AuthController(
                 result = null;
             }
             if (result is null)
-                return Error(StatusCodes.Status502BadGateway, "peer_unreachable",
+                return Error(StatusCodes.Status502BadGateway, "member_unreachable",
                     $"node '{body.NodeId}' returned an unparseable vouch response");
 
             return StatusCode(StatusCodes.Status201Created, result);

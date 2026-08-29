@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a cluster has members, and a member is a node or an anchor (0.155.0)
+
+The roster assumed every member was a node, which is the assumption that stops an auth anchor existing.
+Membership moves to `TheKrystalShip.KGSM.Cluster` with the messaging half: the roster, the join handshake,
+gossip and per-member liveness polling now all come from the package, and this API keeps what a person
+touches — the Cluster page's routes, the roster the SPA reads, enable and disable, and the resource reads a
+capacity fan-out needs.
+
+The surface is `/api/v1/members`. A member row carries a `kind` (`node` or `anchor`) and a `memberId`; the
+roster envelope's key is `members`. A refusal answers `member_disabled`, `member_unreachable`,
+`member_not_cluster`, `member_is_self` and `unknown_member`, and a version mismatch names both versions.
+
+The route version is checked only between two nodes. It is a statement about a surface an anchor does not
+serve, so an anchor joins on the cluster protocol version alone — which is the check that always mattered
+between members.
+
+`peers` and `self_facts` leave this API's database for the package's own file. There is no migration:
+re-join the cluster after deploying.
+
+Both members of a cluster have to be on this version or later.
+
 ### Changed — cluster membership and messaging move to a shared package (0.154.0)
 
 The cluster bus lived here, so a machine could only join a cluster by running this API. The outbox,
