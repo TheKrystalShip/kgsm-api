@@ -9,7 +9,7 @@ verified once at OAuth, then represented as a short-lived HMAC-signed JWT (see
 src/Api/Services/Auth/). There is no user-profile table; the audit log's actor is read
 straight off the token's `uname` claim (AuditPrincipal.ActorString -> "discord:<uname>").
 
-Because the bearer is signed by Api__SigningKey alone (no Discord call on
+Because the bearer is signed by the host's session key alone (no Discord call on
 validation), we can mint a valid, distinctly-attributable token for an agent identity
 ("claude") WITHOUT a Discord round-trip. This is appropriate ONLY on a trusted dev host —
 it bypasses Discord by design. It does NOT weaken auth for anyone else (auth stays ON); it
@@ -60,12 +60,16 @@ def b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
-def read_signing_key(env_file: str) -> str:
-    # Pull Api__SigningKey out of a systemd EnvironmentFile-style file.
-    # Honor the same precedence as the API: env var of the same name wins if exported.
-    import os
+def read_signing_key(env_file: str, state_dir: str) -> str:
+    # Resolve the key exactly as HostSigningKey does, in its order: a configured
+    # Api__SigningKey (exported, or in the systemd EnvironmentFile) is the answer whenever there
+    # is one; with none, the host generated 48 random bytes on first start and keeps them in
+    # {StateDir}/signing-key at 0600, reusing them on every later start. A host nobody handed a
+    # secret to therefore signs with a perfectly stable key, and reading that file is the only way
+    # to mint a token it will accept.
     if os.environ.get("Api__SigningKey"):
         return os.environ["Api__SigningKey"]
+    env_missing = False
     try:
         with open(env_file, "r", encoding="utf-8") as fh:
             for line in fh:
@@ -76,9 +80,25 @@ def read_signing_key(env_file: str) -> str:
                 if k.strip() == "Api__SigningKey":
                     return v.strip().strip('"').strip("'")
     except FileNotFoundError:
-        sys.exit(f"error: env file not found: {env_file} (pass --env-file or export Api__SigningKey)")
-    sys.exit(f"error: Api__SigningKey not present in {env_file} — auth may be running with an "
-             f"ephemeral key (tokens die on restart); set a stable key first.")
+        env_missing = True
+    except PermissionError:
+        env_missing = True
+
+    key_file = os.path.join(state_dir, "signing-key")
+    try:
+        with open(key_file, "r", encoding="utf-8") as fh:
+            stored = fh.read().strip()
+        if stored:
+            return stored
+    except FileNotFoundError:
+        pass
+    except PermissionError:
+        sys.exit(f"error: {key_file} is not readable (it is 0600, owned by the service user) — "
+                 f"re-run with sudo, or export Api__SigningKey")
+
+    where = f"{env_file} (unreadable or absent)" if env_missing else env_file
+    sys.exit(f"error: no signing key found — Api__SigningKey is not in {where}, and this host has "
+             f"generated no {key_file}. Start kgsm-api once so it writes one, or set a key.")
 
 
 # .NET DateTimeOffset.UtcTicks at the Unix epoch — the API stores session timestamps as UTC ticks
@@ -182,7 +202,7 @@ def main() -> None:
                          "the request is refused at the real one.")
     ap.add_argument("--host", default="hotrod", help="host id == token audience (Api__HostId, default machine name)")
     ap.add_argument("--ttl", default="12h", help="lifetime: 30m / 12h / 7d (default 12h)")
-    ap.add_argument("--env-file", default="/etc/kgsm-api/kgsm-api.env", help="EnvironmentFile holding the signing key")
+    ap.add_argument("--env-file", default="/etc/kgsm-api/kgsm-api.env", help="EnvironmentFile a pinned Api__SigningKey may be in; without one the key is read from {StateDir}/signing-key")
     ap.add_argument("--db", default=None,
                     help="API DB to insert the session row into (default: Api__DbPath / env file / "
                          "/var/lib/kgsm-api/kgsm-api.db)")
@@ -190,7 +210,9 @@ def main() -> None:
                     help="mint the token only; skip the session row (for Api__AuthDisabled hosts)")
     args = ap.parse_args()
 
-    secret = read_signing_key(args.env_file)
+    # The state dir is the DB's, so an Api__DbPath override moves the key lookup with it — the API
+    # derives SigningKeyPath from the same StateDir.
+    secret = read_signing_key(args.env_file, os.path.dirname(resolve_db_path(args.db, args.env_file)))
     # SessionTokenService: key = SHA256(UTF8(secret)) -> 32-byte HMAC key.
     key = hashlib.sha256(secret.encode("utf-8")).digest()
 

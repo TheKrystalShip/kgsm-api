@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the dev token minter finds a key the host generated for itself (0.152.1)
+
+A host given no `Api__SigningKey` generates 48 random bytes on first start and keeps them in
+`{StateDir}/signing-key` at 0600, reusing them on every later start — so its sessions are as stable
+as a pinned key's. The minter only looked in the EnvironmentFile, and told a host in exactly that
+state that its key was ephemeral and had to be pinned before a token could be had. Pinning one there
+would have rotated the key and signed out everyone holding a session.
+
+It now resolves the key in the API's own order: a configured `Api__SigningKey`, then the file. The
+state directory comes from the resolved DB path, so an `Api__DbPath` override moves the lookup with
+it. The file belongs to the service user at 0600, so an unreadable one says to re-run with sudo
+rather than reporting no key at all.
+
 ### Fixed — the https upgrade asks who is calling, not which wire they landed on (0.152.0)
 
 "No bare HTTP on the internet" is a statement about the caller, and the upgrade was reading the
