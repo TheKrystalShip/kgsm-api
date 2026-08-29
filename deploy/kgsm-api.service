@@ -13,6 +13,13 @@ Type=simple
 User=kgsm
 Group=kgsm
 
+# The Logs tab reads every leaf's journal, and journald grants that to root and to members of
+# systemd-journal alone. Without this the service account sees no system journal at all: journalctl
+# prints "No journal files were opened due to insufficient permissions" on stderr and exits 0, so the
+# reader gets an empty page and the tab renders "no recent log lines" for a host that is logging
+# steadily. Grant it here rather than relying on the account's own groups, which differ per host.
+SupplementaryGroups=systemd-journal
+
 # Framework-dependent single-file publish — REQUIRES the .NET 10 + ASP.NET Core shared runtime
 # on the host (deploy/deploy.sh checks for it). Smaller artifact than self-contained; the binary,
 # kgsm-api.settings.json and libe_sqlite3.so are published into /opt/kgsm-api by the deploy script:

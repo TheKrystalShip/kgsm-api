@@ -495,3 +495,9 @@ CLAUDE.local.md
 src/Api/kgsm-api.db
 src/Api/kgsm-api.db-shm
 src/Api/kgsm-api.db-wal
+
+# makepkg leaves these beside the PKGBUILD. Root-anchored: an unanchored "src/" or "pkg/"
+# matches at every depth and would swallow real source.
+/packaging/pkg/
+/packaging/src/
+/packaging/*.pkg.tar.zst

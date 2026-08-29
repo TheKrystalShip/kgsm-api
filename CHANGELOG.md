@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the node Logs tab reads the journal, and offers only the services that are here (0.153.0)
+
+Two things stood between a node's Logs tab and its journal.
+
+The service account had no journal access. journald grants that to root and to `systemd-journal`
+members alone, and a node's kgsm-api runs as `kgsm`, which is in neither — so `journalctl` printed
+"No journal files were opened due to insufficient permissions" to stderr and exited 0, the reader
+took the empty output at its word, and the tab said "no recent log lines" about a host logging
+steadily. The unit now carries `SupplementaryGroups=systemd-journal`, so the grant travels with the
+service rather than depending on which account a host happens to run it as.
+
+The source dropdown offered the ecosystem's whole leaf set regardless of what the host has. A node
+carrying no assistant, speech or bot still listed all three, and picking one selected a service that
+could never answer. `GET /hosts/{id}/logs/sources` now drops the units systemd reports as
+`not-installed` on this host. Absence is claimed only where systemd said so: a unit the reader could
+not read at all stays listed, and so does an installed unit that is stopped, failed or masked —
+that journal is exactly what someone opens this tab for.
+
 ### Fixed — the dev token minter finds a key the host generated for itself (0.152.1)
 
 A host given no `Api__SigningKey` generates 48 random bytes on first start and keeps them in

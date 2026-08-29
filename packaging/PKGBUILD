@@ -11,7 +11,7 @@
 # upgrades without rebuilding this and a node can run the API headless.
 
 pkgname=kgsm-api
-pkgver=0.148.0
+pkgver=0.153.0
 pkgrel=1
 pkgdesc="KGSM Control Panel API — the per-host aggregator for the panel and other surfaces"
 arch=('x86_64')

@@ -24,25 +24,44 @@ namespace TheKrystalShip.Api.Controllers;
 [ApiController]
 [Route("api/v1/hosts/{id}/logs")]
 [Authorize(Policy = AuthPolicy.Operator)]
-public sealed class LogsController(JournalReader journal, ApiOptions options) : ControllerBase
+public sealed class LogsController(JournalReader journal, ApiOptions options, SystemdReader systemd) : ControllerBase
 {
     /// <summary>
-    /// <c>GET /hosts/{id}/logs/sources</c> — the configured host-log sources this host can serve. Returns
-    /// the ordered set derived from the canonical <see cref="LeafCatalog"/> (via <see cref="ApiOptions.LogSources"/>),
-    /// so the frontend can populate the source dropdown regardless of whether a source has recent journal
-    /// entries. Quiet services remain selectable; the "no recent log lines" state is rendered client-side.
+    /// <c>GET /hosts/{id}/logs/sources</c> — the host-log sources <b>this</b> host can serve: the ordered
+    /// <see cref="ApiOptions.LogSources"/> map (labelled from the canonical <see cref="LeafCatalog"/>), less
+    /// the units systemd reports as <c>not-installed</c> here. The map is the ecosystem's whole leaf set,
+    /// which no single node has to carry; a source for a unit that is not on the host is one a person can
+    /// select and never hear from, so it is not offered.
+    /// <para>
+    /// Absence is only claimed when systemd actually said so. A unit the reader could not read at all
+    /// (<c>unknown</c> — systemctl missing, errored, timed out) stays in the list: not knowing whether a
+    /// service is here is not the same as knowing it is not, and hiding it would state the stronger thing.
+    /// Presence is the only test — an installed unit that is stopped, failed or masked stays selectable,
+    /// because its journal is exactly what someone comes to this tab to read. A source with nothing in the
+    /// recent window is a client-side "no recent log lines", not an absent source.
+    /// </para>
     /// </summary>
     [HttpGet("sources")]
-    public ActionResult<IReadOnlyList<LogSourceInfo>> GetSources()
+    public async Task<ActionResult<IReadOnlyList<LogSourceInfo>>> GetSources(CancellationToken ct)
     {
-        var sources = options.LogSources.Select(s =>
-        {
-            string label = LeafCatalog.Default
-                .FirstOrDefault(l => l.Id == s.Source)?.DisplayName ?? s.Source;
-            return new LogSourceInfo(s.Source, label, s.Unit);
-        }).ToList();
-        return Ok(sources);
+        IReadOnlyDictionary<string, UnitState> units = await systemd
+            .ReadAsync([.. options.LogSources.Select(s => s.Unit)], ct)
+            .ConfigureAwait(false);
+        return Ok(SelectSources(options.LogSources, units));
     }
+
+    /// <summary>The offering rule itself, separated from the systemd read so it can be driven with a
+    /// synthetic unit table. A source is offered unless systemd said its unit is <c>not-installed</c>;
+    /// every other state, and a unit missing from the table entirely, keeps it.</summary>
+    internal static IReadOnlyList<LogSourceInfo> SelectSources(
+        IReadOnlyList<LogSourceMap> configured, IReadOnlyDictionary<string, UnitState> units) =>
+        [.. configured
+            .Where(s => !units.TryGetValue(s.Unit, out UnitState? unit)
+                        || !string.Equals(unit.State, "not-installed", StringComparison.Ordinal))
+            .Select(s => new LogSourceInfo(
+                s.Source,
+                LeafCatalog.Default.FirstOrDefault(l => l.Id == s.Source)?.DisplayName ?? s.Source,
+                s.Unit))];
 
     /// <summary>
     /// <c>GET /hosts/{id}/logs?source=&amp;cursor=&amp;limit=100&amp;priority=</c> — newest first. Returns
