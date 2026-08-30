@@ -85,6 +85,22 @@ if [[ "${SKIP_SPA:-0}" == "1" ]]; then
     log "SKIP_SPA=1 → not bundling the SPA (API-only deploy; the deployed one is left as it is)"
 elif [[ -f "$SPA_DIR/package.json" ]]; then
     command -v npm >/dev/null 2>&1 || { err "npm not found, but the SPA build needs it (set SKIP_SPA=1 to skip)"; exit 1; }
+
+    # This builds a DIFFERENT repository's working tree, so it publishes whatever happens to be
+    # checked out there — including somebody's half-finished work, with nothing in the output saying
+    # so. A deploy of this repo must not be able to ship another repo's uncommitted state.
+    #
+    # Refused rather than worked around: building from HEAD instead would deploy something nobody
+    # can see on disk, and stashing would reach into a checkout this script does not own. Both are
+    # worse than stopping and naming the file.
+    if git -C "$SPA_DIR" rev-parse --git-dir >/dev/null 2>&1 \
+        && [[ -n "$(git -C "$SPA_DIR" status --porcelain 2>/dev/null)" ]]; then
+        err "the SPA checkout at ${SPA_DIR} has uncommitted changes, and this deploy would publish them:"
+        git -C "$SPA_DIR" status --short 2>/dev/null | sed 's/^/       /' >&2
+        err "commit them, stash them, or re-run with SKIP_SPA=1 to leave the deployed SPA untouched."
+        exit 1
+    fi
+
     log "building the SPA (${SPA_DIR}) → bundling into wwwroot"
     (
         cd "$SPA_DIR" || exit 1
