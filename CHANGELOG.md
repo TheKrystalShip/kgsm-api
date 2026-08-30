@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a loopback address is never gossiped onward (0.159.1)
+
+Gossip carries a member's whole roster, not only what it says about itself — so a loopback address
+this node pinned for another member was told to every other member, whichever machine they were on.
+There it names *that* machine, and a member trying it does not fail to connect: it reaches whatever
+is on its own port while believing it reached somebody else.
+
+The filter is the cluster package's, at the wire, applied wherever candidates cross it. A loopback
+stays in the store and stays usable — two members on one machine reach each other that way and that
+is a real topology — but it is true only for whoever already holds it.
+
+hotrod had this live: the anchor was joined over `http://127.0.0.1:8098` before it had a public name,
+and that address was still being offered to the mesh.
+
 ### Added — a capability whose holder is gone says so (0.159.0)
 
 A capability assignment outlives the member holding it, and a holder whose machine dies is reaped by
