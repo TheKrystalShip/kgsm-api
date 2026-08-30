@@ -17,7 +17,7 @@
 # Deploy is verified by an actual HTTP 200 from /health — not just "the unit launched". The
 # health URL is resolved from the configured bind (see deploy-common.sh), not hardcoded.
 #
-# Knobs: RID, HEALTH_URL, HEALTH_TRIES, SKIP_SPA=1 (API-only), KGSM_WEB_DIR.
+# Knobs: RID, HEALTH_URL, HEALTH_TRIES.
 #
 set -euo pipefail
 
@@ -25,10 +25,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/deploy-common.sh"
 
 PROJECT_CSPROJ="$REPO_DIR/src/Api/Api.csproj"
 RID="${RID:-linux-x64}"
-
-# The umbrella tks/ checkout. Only the SPA bundle still reads from it — every TheKrystalShip.*
-# package comes from the GitHub Packages feed, so this repo's .NET build needs no sibling present.
-WORKSPACE="$(cd "$REPO_DIR/.." && pwd)"
 
 STOPPED=0
 on_err() {
@@ -68,54 +64,12 @@ log "publishing framework-dependent single-file (${RID}) → ${PUBLISH_DIR}"
 rm -rf "$PUBLISH_DIR"
 dotnet publish "$PROJECT_CSPROJ" -c Release -r "$RID" --no-self-contained -o "$PUBLISH_DIR"
 
-# ── 1b. Bundle the Control Panel SPA (Kestrel serves it same-origin) ───────────
-# kgsm-api serves the SPA at / on the SAME origin as the API (one domain, no CORS). Build the
-# sibling kgsm-web checkout and drop its dist/ into the publish wwwroot, where UseStaticFiles +
-# the SPA fallback serve it. VITE_API_BASE=self makes the bundle talk to whatever origin served
-# it (no baked domain). Skip with SKIP_SPA=1 for an API-only deploy (the API runs fine with no
-# SPA — Startup's serveSpa gate no-ops when wwwroot has no index.html).
-#
-# A run that does not build the SPA leaves the deployed one alone. The publish tree is rebuilt from
-# empty every deploy, so without this the prune below reads "no wwwroot here" as "delete the one
-# over there" — an API-only deploy would take the Control Panel down with it. Not bundling a page
-# and removing the page already being served are different intentions.
-SPA_DIR="${KGSM_WEB_DIR:-$WORKSPACE/kgsm-web}"
+# The Control Panel is not this repo's to publish. kgsm-web builds and installs its own bundle into
+# the same wwwroot, and one artifact with one owner is what keeps a deploy of either from carrying
+# the other's half-finished work. So wwwroot is excluded from the sync below: the publish tree is
+# rebuilt from empty every deploy, and without this the prune would read "no wwwroot here" as
+# "delete the one that is there".
 SPA_SYNC_EXCLUDES=(--exclude='/wwwroot/')
-if [[ "${SKIP_SPA:-0}" == "1" ]]; then
-    log "SKIP_SPA=1 → not bundling the SPA (API-only deploy; the deployed one is left as it is)"
-elif [[ -f "$SPA_DIR/package.json" ]]; then
-    command -v npm >/dev/null 2>&1 || { err "npm not found, but the SPA build needs it (set SKIP_SPA=1 to skip)"; exit 1; }
-
-    # This builds a DIFFERENT repository's working tree, so it publishes whatever happens to be
-    # checked out there — including somebody's half-finished work, with nothing in the output saying
-    # so. A deploy of this repo must not be able to ship another repo's uncommitted state.
-    #
-    # Refused rather than worked around: building from HEAD instead would deploy something nobody
-    # can see on disk, and stashing would reach into a checkout this script does not own. Both are
-    # worse than stopping and naming the file.
-    if git -C "$SPA_DIR" rev-parse --git-dir >/dev/null 2>&1 \
-        && [[ -n "$(git -C "$SPA_DIR" status --porcelain 2>/dev/null)" ]]; then
-        err "the SPA checkout at ${SPA_DIR} has uncommitted changes, and this deploy would publish them:"
-        git -C "$SPA_DIR" status --short 2>/dev/null | sed 's/^/       /' >&2
-        err "commit them, stash them, or re-run with SKIP_SPA=1 to leave the deployed SPA untouched."
-        exit 1
-    fi
-
-    log "building the SPA (${SPA_DIR}) → bundling into wwwroot"
-    (
-        cd "$SPA_DIR" || exit 1
-        [[ -d node_modules ]] || npm ci
-        VITE_API_BASE=self npm run build
-    )
-    rm -rf "$PUBLISH_DIR/wwwroot"
-    mkdir -p "$PUBLISH_DIR/wwwroot"
-    cp -a "$SPA_DIR/dist/." "$PUBLISH_DIR/wwwroot/"
-    # This run owns wwwroot, so the prune manages it: a file the new bundle dropped must go.
-    SPA_SYNC_EXCLUDES=()
-else
-    warn "SPA checkout not found at ${SPA_DIR} — deploying API-only (the deployed SPA is left as it is)."
-    warn "set KGSM_WEB_DIR=/path/to/kgsm-web, or SKIP_SPA=1 to silence this."
-fi
 
 # ── 2. Refresh the unit if it changed (we own the file; systemd reads it via the symlink) ──
 install_units_unprivileged

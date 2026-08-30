@@ -8,16 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed — a deploy of this repo cannot publish another repo's uncommitted work (0.165.1)
+### Changed — this repo's deploy deploys this repo (0.165.1)
 
-`deploy/deploy.sh` builds the sibling `kgsm-web` checkout and bundles it into `wwwroot`, so it
-published whatever happened to be on disk there — including somebody else's half-finished work, with
+`deploy/deploy.sh` built the sibling `kgsm-web` checkout and bundled it into `wwwroot`, so it
+published whatever happened to be on disk there — another session's half-finished work included, with
 nothing in the output saying so. Two sessions in adjacent repositories is enough for one repo's
-deploy to ship the other's working tree to production, which is what happened.
+deploy to ship the other's working tree to production.
 
-It now refuses, names the files, and points at `SKIP_SPA=1` for a deploy that leaves the installed
-SPA alone. Refused rather than worked around: building from `HEAD` instead would publish something
-nobody can see on disk, and stashing would reach into a checkout this script does not own.
+The Control Panel is `kgsm-web`'s to publish and it already does, into the same `wwwroot`. One
+artifact with one owner is what stops a deploy of either carrying the other's work. `wwwroot` is
+excluded from the sync, so deploying the API leaves the installed panel exactly as it is.
 
 ### Fixed — the panel is given an address a browser can reach (0.165.0)
 
