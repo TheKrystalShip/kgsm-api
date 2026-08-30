@@ -70,7 +70,7 @@ per-leaf status, not from a status line on the capability itself.
 |---|---|---|
 | 1 | Peer transport | REST over HTTPS on the existing API surface |
 | 2 | Node identity | Config-driven `nodeId` (default: machine name, same as HostId) |
-| 3 | Cluster membership proof | A shared **`Api__ClusterSecret`** (HMAC), distinct from the user JWT signing key |
+| 3 | Cluster membership proof | A shared **`Cluster__Secret`** (HMAC), host-level and distinct from the user JWT signing key |
 | 4 | Node-to-node auth | A **service JWT** signed with the cluster secret (`sub=node:<id>`, `aud=cluster`, `iss=<id>`, short TTL) |
 | 5 | No per-node keypairs | Symmetric shared secret only — no Ed25519, no per-request asymmetric signing |
 | 6 | Handshake | Admin pastes a URL → the two nodes exchange **node cards** in one symmetric `POST /peers/introduce` over TLS (§7), each validating the other with the same predicate and each recording the mirror of what the other records. No key exchange, no fingerprint confirmation |
@@ -129,7 +129,7 @@ two controller endpoints), **no new service, broker, or dependency**.
 ## 3 · Trust & auth model
 
 ```
-Cluster secret  Api__ClusterSecret   (HMAC, shared by every node in the guild)
+Cluster secret  Cluster__Secret      (HMAC, shared by every member of the cluster)
 JWT signing key Api__SigningKey (HMAC, shared — signs user tokens)
                 └─ deliberately two secrets: leaking the cluster secret does not
                    also hand over user-token forgery, and vice-versa.
@@ -142,7 +142,7 @@ JWT signing key Api__SigningKey (HMAC, shared — signs user tokens)
 │  Wants: GET {B}/api/v1/peers/self/resources          │
 │  Mints a service JWT:                                 │
 │    { sub:"node:A", iss:"A", aud:"cluster", exp:+60s } │
-│    signed with Api__ClusterSecret                │
+│    signed with Cluster__Secret                   │
 │  Sends: Authorization: Bearer <service JWT>           │
 └───────────────────┬───────────────────────────────────┘
                     ▼
@@ -197,7 +197,7 @@ Later the SPA needs Node B (renders B's data / issues a B action):
 
 - **Disabled node:** its service tokens are rejected (`403`); it stays in the
   `Peers` table for one-click re-enable.
-- **Stolen cluster secret:** rotate `Api__ClusterSecret` across all nodes via
+- **Stolen cluster secret:** rotate `Cluster__Secret` across all members via
   the dual-secret overlap window (#9). The `Peers.enabled` gate is an operational
   on/off, **not** a cryptographic boundary against a stolen secret (a thief can set
   `iss` to any enabled peer) — rotation is the real remedy.
@@ -256,7 +256,7 @@ is entirely API-side — the assistant only learns the parameter.
 
 ### P0 — Peer foundation (membership + trust) · `planned`
 The trust half already exists (the message-bus foundation built the
-`Api__ClusterSecret` config + the `ClusterTokenService` mint/verify seam with
+`Cluster__Secret` config + the `ClusterTokenService` mint/verify seam with
 current+previous rotation). P0 adds the **membership** half — a manually-seeded
 mesh that works fully before gossip lands:
 - `Peers` table (id, url — the advertised client URL, gossipUrl?, nickname, nodeId,
@@ -329,7 +329,7 @@ service or dependency (§2·b).
   into P1 or land standalone.
 
 ### P0.6 — Symmetric introduce and address reflection · `built`
-Collapses cluster addressing to a single configured value — `Api__ClusterSecret` — by
+Collapses cluster addressing to a single configured value — `Cluster__Secret` — by
 making the join teach both nodes what they need, instead of requiring each node to be
 pre-told its own address (§2 #13a-c).
 
