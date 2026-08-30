@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — cluster protocol 3 (0.156.1)
+
+Members now exchange which one of them holds each cluster capability, and what each states about itself.
+This API uses neither yet, but a member on the older protocol is refused by one on the newer, so it moves
+with them.
+
 ### Changed — the cluster secret is host-level (0.156.0)
 
 `Api__ClusterSecret` is gone. The secret lives in `/etc/kgsm/kgsm-cluster.env` as `Cluster__Secret`,
