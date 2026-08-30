@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the enabled-member gate comes from the cluster package (0.155.1)
+
+Every member holds a roster, so every member answers "is this caller disabled" the same way. That
+answer now comes from `TheKrystalShip.KGSM.Cluster` rather than being implemented here, which is one
+fewer place for two members to come to disagree about who may talk to them.
+
+Unchanged in behaviour: absence from the roster is still not rejection, and only an explicit disable is.
+
 ### Changed — a cluster has members, and a member is a node or an anchor (0.155.0)
 
 The roster assumed every member was a node, which is the assumption that stops an auth anchor existing.

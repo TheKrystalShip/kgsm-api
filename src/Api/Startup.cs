@@ -656,12 +656,11 @@ public class Startup(IConfiguration configuration)
         // Everything below is inert on a host with no cluster secret — the token service validates
         // nothing, so the inbox endpoint rejects every call before a handler is reached, and neither
         // background worker starts a timer.
-        // Both of these are registered BEFORE the package, deliberately: it registers its own defaults for
-        // each with TryAddSingleton, so whichever is already there wins. This API has a roster, so it
-        // brings the roster-backed gate; and it is a node, so it brings a card source that adds the node
-        // block — a route version, a build, and the leaves provisioned here — over the package's own,
-        // which states only what the package itself knows.
-        services.AddSingleton<IClusterMemberGate, PeersTableGate>();
+        // Registered BEFORE the package, deliberately: it registers its own default card source with
+        // TryAddSingleton, so whichever is already there wins. This API is a node, so it brings one that
+        // adds the node block — a route version, a build, and the leaves provisioned here — over the
+        // package's own, which states only what the package itself knows. The enabled-member gate needs
+        // nothing here: the package's is roster-backed and this API's roster is that roster.
         services.AddSingleton<SelfMemberCardSource>();
         services.AddSingleton<IMemberCardSource, NodeCardSource>();
         services.AddKgsmCluster(new ClusterOptions
