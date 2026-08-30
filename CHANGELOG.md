@@ -8,23 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — carrying a cluster session through an anchor outage (0.163.0)
+### Changed — a browser talks auth to one address for the whole cluster (0.164.0)
 
-`POST /auth/session/cluster-exchange` takes an anchor-signed refresh token and hands back a bearer
-for **this** node. It exists because an access bearer lives fifteen minutes: were refreshing the
-anchor's alone, an anchor outage would stop every member accepting anybody a quarter of an hour
-later — the whole panel, not just signing in.
+A person signs in at the auth anchor and renews there. This node issues no credential from an
+anchor-signed one and extends no session it did not mint: its part is to verify the signature against
+the key the anchor publishes and to resolve the person against its own replica, neither of which is a
+call in either direction.
 
-**It hands this node nothing the anchor holds.** The token it reads is anchor-signed, so this node
-verifies it and cannot forge one. Standing comes from this node's own replica rather than from the
-token's tier claim. What is minted is audienced to this node and refused by every other member. And
-no refresh token is minted at all, so the session's absolute cap stays where the anchor put it — a
-member spends what was granted without extending it. A member could always mint itself a local
-bearer; what it still cannot do is produce one anybody else accepts.
-
-A session already ended here is never taken up again, or signing out would be undone by the next
-refresh. An access token presented in a refresh token's place buys nothing, and every other reason to
-refuse collapses to the same answer so a caller cannot learn which one it hit.
+The cost is deliberate rather than overlooked. While the anchor is unreachable this node keeps
+serving a session until its bearer expires and then accepts nobody, which is minutes rather than
+instant. Issuing a replacement locally would avoid that and would be a second door to the same
+session on every machine in the cluster — and the outage it guards against is largely correlated
+anyway, since an anchor is ordinarily reached through the same ingress as the panel it serves.
 
 ### Added — a session this node did not mint (0.162.0)
 
