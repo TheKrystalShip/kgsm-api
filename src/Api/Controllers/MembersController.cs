@@ -56,6 +56,7 @@ public sealed class MembersController(
     HostAggregator hostAggregator,
     LibraryAggregator library,
     ClusterStateStore clusterState,
+    ClusterFacts clusterFacts,
     ClusterPeerRelay relay) : ControllerBase
 {
     /// <summary><c>GET /api/v1/members</c> — the full roster, enabled and disabled alike.</summary>
@@ -95,10 +96,15 @@ public sealed class MembersController(
     {
         IReadOnlyList<ClusterAssignment> assignments =
             await clusterState.ListAsync(ct).ConfigureAwait(false);
+        IReadOnlyList<ClusterAssignment> orphaned =
+            await clusterFacts.OrphanedAsync(ct).ConfigureAwait(false);
+
+        var orphanedCapabilities = orphaned.Select(a => a.Capability).ToHashSet(StringComparer.Ordinal);
 
         return new ClusterCapabilitiesResponse(
             [.. assignments.Select(a => new ClusterCapabilityView(
-                a.Capability, a.MemberId, a.IsHeld, a.Version, a.SetBy))]);
+                a.Capability, a.MemberId, a.IsHeld, a.Version, a.SetBy,
+                orphanedCapabilities.Contains(a.Capability)))]);
     }
 
     /// <summary>
@@ -141,9 +147,10 @@ public sealed class MembersController(
         ClusterAssignment assignment =
             await clusterState.AssignAsync(capability, memberId, ct).ConfigureAwait(false);
 
+        // Never orphaned on the way out: the target was just checked to be a member.
         return Ok(new ClusterCapabilityView(
             assignment.Capability, assignment.MemberId, assignment.IsHeld, assignment.Version,
-            assignment.SetBy));
+            assignment.SetBy, Orphaned: false));
     }
 
     /// <summary><c>POST /api/v1/members</c> — the admin action that starts a join. The exchange itself is

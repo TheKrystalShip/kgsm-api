@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a capability whose holder is gone says so (0.159.0)
+
+A capability assignment outlives the member holding it, and a holder whose machine dies is reaped by
+the failure timers while the assignment survives. The result is the one cluster state where
+everything reads healthy and nothing works: every member stands by against a holder that will never
+answer, the capability is not served, and nothing errors anywhere because from the inside nothing
+failed.
+
+`GET /api/v1/members/capabilities` now carries `orphaned` on each assignment — the member named holds
+no place in the roster any more. Reported, never repaired: reassigning is a decision, and promoting
+automatically is the election this design rejects.
+
 ### Fixed — removing a member that holds a capability is refused, and says which (0.158.0)
 
 A capability belongs to the cluster and outlives the member holding it, so removing that member left

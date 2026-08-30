@@ -59,8 +59,16 @@ public sealed record MemberVersionMismatchDetails(string Remote, string Local);
 /// <param name="Held">Whether anybody holds it.</param>
 /// <param name="Version">The assignment's version. A reassignment supersedes a lower one.</param>
 /// <param name="SetBy">The member whose copy this came from, which is what breaks a version tie.</param>
+/// <param name="Orphaned">
+/// Whether the member named holds no place in the roster any more. A holder whose machine died is
+/// reaped by the failure timers while the assignment survives it, and the result is the one cluster
+/// state where everything reads healthy and nothing works: every member stands by against a holder
+/// that will never answer, the capability is not served, and nothing errors because nothing failed.
+/// Reported rather than repaired — reassigning is a decision, and promoting automatically is the
+/// election this design rejects.
+/// </param>
 public sealed record ClusterCapabilityView(
-    string Capability, string MemberId, bool Held, long Version, string SetBy);
+    string Capability, string MemberId, bool Held, long Version, string SetBy, bool Orphaned);
 
 /// <summary>Every capability assignment this node holds a copy of.</summary>
 public sealed record ClusterCapabilitiesResponse(IReadOnlyList<ClusterCapabilityView> Capabilities);
