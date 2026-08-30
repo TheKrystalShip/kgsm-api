@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a joining node takes the cluster's accounts before it follows them (0.161.0)
+
+The stream alone is not enough. A node that joins on Tuesday only ever hears what changed after it
+arrived, and resolves everybody who existed before that as a stranger. It now takes one full copy
+from the member holding the accounts, then follows.
+
+**No coordination is needed between the two paths.** Both carry the same per-account version and the
+replica refuses anything not newer, so a change landing while the snapshot is being applied is safe
+whichever order the two arrive in — which is what makes "snapshot, then follow" a sequence rather
+than a handover.
+
+It retries while there is nothing to copy from — no holder assigned yet, the holder unreachable, or
+this node being the holder — and stops once it has succeeded, because the stream carries everything
+after that and re-reading the whole set on a timer would be a poll standing in for a push that works.
+
+An account whose username this node already gave to a different account is **named and not taken**.
+Merging two accounts because they share a name is the documented route to handing one person
+another's access, so the refusal is logged per account for somebody to resolve.
+
 ### Fixed — an existing cluster store is upgraded rather than silently half-working (0.160.1)
 
 A `cluster.db` created before per-member facts never gained the column they added, and the gossip

@@ -696,6 +696,17 @@ public class Startup(IConfiguration configuration)
         // the package dispatches by type and knows nothing about sessions.
         services.AddSingleton<IClusterMessageHandler, Services.Cluster.Handlers.SessionRevokeHandler>();
 
+        // This node's own copy of the cluster's accounts. It is what lets authority be resolved here
+        // rather than by asking the member that holds them — so a demotion lands on the next request
+        // and an outage over there costs this node nothing it serves. The replica itself lives on
+        // UserDirectory, which already owns this host's answer to a store it cannot read.
+        services.AddSingleton<IClusterMessageHandler, Services.Cluster.Handlers.AccountReplicationHandler>();
+        services.AddSingleton<IClusterMessageHandler, Services.Cluster.Handlers.AccountRemovalHandler>();
+
+        // The first full copy. The stream alone would leave a node holding only what changed after it
+        // joined, resolving everybody who existed before that as a stranger.
+        services.AddHostedService<Services.Cluster.AccountSnapshotWorker>();
+
         // The roster-backed fan-out target list. A durable, identity-carrying message goes only to members
         // this node has authenticated first-hand — never to one it has merely heard about — or the outbox
         // would retry a secret-bearing message at a phantom for the full retry window.

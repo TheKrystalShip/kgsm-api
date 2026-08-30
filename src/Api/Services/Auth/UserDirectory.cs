@@ -58,6 +58,7 @@ public sealed class UserDirectory
     private readonly LocalSignInService? _signIn;
     private readonly UserStoreAuthority? _authority;
     private readonly IdentityLinkService? _linking;
+    private readonly AccountReplica? _replica;
 
     public UserDirectory(ApiOptions options, ILogger<UserDirectory> logger)
     {
@@ -68,6 +69,12 @@ public sealed class UserDirectory
                 _store, TimeSpan.FromSeconds(options.AuthorityCacheSeconds));
             _linking = new IdentityLinkService(_store);
             _signIn = new LocalSignInService(_store, new IdentityPasswordHasher(), _authority);
+            // This node's copy of the cluster's accounts, and the counter that orders what arrives.
+            // Built here rather than registered separately so it inherits this type's whole answer to
+            // an unreadable store: a node that cannot read accounts reports it once, as a capability,
+            // instead of failing a replication message with an exception the sender would retry.
+            _replica = new AccountReplica(_store, new SqliteAccountVersions(
+                new UserStoreOptions { Path = options.UsersDbPath }));
             logger.LogInformation("KGSM account store opened at {Path}.", options.UsersDbPath);
         }
         catch (UserStoreSchemaException e)
@@ -116,6 +123,17 @@ public sealed class UserDirectory
     /// </summary>
     public IdentityLinkService Linking =>
         _linking ?? throw new InvalidOperationException("The KGSM account store is unavailable.");
+
+    /// <summary>
+    /// This node's own copy of the cluster's accounts, or <see langword="null"/> when the store
+    /// cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// Null rather than throwing, unlike its neighbours, because its caller is a message handler
+    /// rather than a request: an exception there is a <c>500</c>, which the sender reads as transient
+    /// and retries forever against a node whose store will not become readable by being asked again.
+    /// </remarks>
+    public AccountReplica? Replica => _replica;
 
     /// <summary>
     /// Where <paramref name="identity"/> stands on this host — the one answer <c>GET /me</c> and the
