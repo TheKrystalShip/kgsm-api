@@ -40,6 +40,20 @@ public sealed record CallbackResult(
     // instead of waiting for a 401. Tail-additive; every existing field/consumer is unaffected.
     public sealed record RefreshResponse(string Token, string Refresh, string Tier, DateTimeOffset ExpiresAt);
 
+/// <summary>
+/// What a member hands back when it takes up a session the cluster's auth anchor minted.
+/// </summary>
+/// <remarks>
+/// One token, and deliberately no refresh token. The bearer is this member's own and works here
+/// alone; the session's absolute cap stays with the anchor, which holds the only refresh token that
+/// exists for it. A client keeps presenting the anchor's refresh token — to the anchor when it can
+/// reach it, and to this member when it cannot.
+/// </remarks>
+/// <param name="Token">A bearer minted by this member, audienced to this member.</param>
+/// <param name="Tier">What the caller may do, resolved from this member's own replica.</param>
+/// <param name="ExpiresAt">When this bearer dies. Never later than the anchor's cap on the session.</param>
+public sealed record ClusterExchangeResponse(string Token, string Tier, DateTimeOffset ExpiresAt);
+
 // GET /auth/session — the profile snapshot behind the bearer (captured at login), or 401.
 public sealed record SessionResponse(SessionUser User, IReadOnlyList<string> Scopes);
 

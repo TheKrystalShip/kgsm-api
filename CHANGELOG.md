@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — carrying a cluster session through an anchor outage (0.163.0)
+
+`POST /auth/session/cluster-exchange` takes an anchor-signed refresh token and hands back a bearer
+for **this** node. It exists because an access bearer lives fifteen minutes: were refreshing the
+anchor's alone, an anchor outage would stop every member accepting anybody a quarter of an hour
+later — the whole panel, not just signing in.
+
+**It hands this node nothing the anchor holds.** The token it reads is anchor-signed, so this node
+verifies it and cannot forge one. Standing comes from this node's own replica rather than from the
+token's tier claim. What is minted is audienced to this node and refused by every other member. And
+no refresh token is minted at all, so the session's absolute cap stays where the anchor put it — a
+member spends what was granted without extending it. A member could always mint itself a local
+bearer; what it still cannot do is produce one anybody else accepts.
+
+A session already ended here is never taken up again, or signing out would be undone by the next
+refresh. An access token presented in a refresh token's place buys nothing, and every other reason to
+refuse collapses to the same answer so a caller cannot learn which one it hit.
+
 ### Added — a session this node did not mint (0.162.0)
 
 A person signs in once, against the cluster's auth anchor, and every member accepts what they get.

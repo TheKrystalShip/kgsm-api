@@ -47,6 +47,8 @@ public sealed class AuthController(
     ISessionTokenService tokens,
     SessionStore sessions,
     ISessionValidator sessionValidator,
+    ClusterSessionExchange clusterExchange,
+    ClusterSessionRevocations clusterSessions,
     ReauthGate reauth,
     ApiOptions options,
     ApiJournal journal,
@@ -705,6 +707,86 @@ public sealed class AuthController(
             sb.Append(key).Append('=').Append(Uri.EscapeDataString(value!));
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Carry a session the cluster's auth anchor minted through a window in which the anchor cannot
+    /// be reached: an anchor-signed refresh token in, a bearer for <em>this</em> member out.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this exists.</b> An access bearer lives fifteen minutes. Were refreshing the anchor's
+    /// alone, an anchor outage would stop every member accepting anybody a quarter of an hour later —
+    /// the whole panel, not only signing in. A client keeps presenting the anchor's refresh token to
+    /// the anchor while it can, and here when it cannot.
+    /// </para>
+    /// <para>
+    /// <b>What this member gains from it, which is nothing.</b> The token read is anchor-signed, so
+    /// this member verifies it and cannot forge one. Standing comes from this member's own replica,
+    /// not from the token's tier claim. What is minted is audienced to <em>this</em> member and is
+    /// refused by every other one, and no refresh token is minted at all — so the session's absolute
+    /// cap stays the anchor's and a member spends what was granted without extending it. A member
+    /// could always mint itself a local bearer; what it still cannot do is produce one anybody else
+    /// accepts.
+    /// </para>
+    /// <para>
+    /// <b>An ended session is never taken up.</b> A revoke that reached this member is what the row
+    /// records, and a still-valid refresh token does not resurrect it — otherwise signing out would
+    /// be undone by the next refresh.
+    /// </para>
+    /// </remarks>
+    [AllowAnonymous]
+    [HttpPost("/auth/session/cluster-exchange")]
+    public async Task<IActionResult> ClusterExchange()
+    {
+        string? presented = BearerToken();
+        if (presented is null)
+            return Error(StatusCodes.Status401Unauthorized, "unauthorized", "missing refresh token");
+
+        // One answer for every reason to refuse: expired, signed with a key nobody published,
+        // carrying this member's own audience, an access token in a refresh token's place, or simply
+        // a member that has not yet heard who holds the cluster's accounts. Separate answers would
+        // let a caller learn which.
+        ClusterSessionExchange.ClusterRefresh? claims = await clusterExchange.ReadAsync(presented);
+        if (claims is null)
+        {
+            return Error(StatusCodes.Status401Unauthorized, "unauthorized",
+                "the refresh token is invalid or expired");
+        }
+
+        KgsmTier tier;
+        try
+        {
+            tier = (await users.StandingAsync(claims.Identity, HttpContext.RequestAborted)).Tier;
+        }
+        catch (KgsmAuthProviderException e)
+        {
+            logger.LogError(e,
+                "Could not resolve authority for {Handle} while taking up a cluster session.",
+                claims.Identity.Handle);
+            return Error(StatusCodes.Status502BadGateway, "authority_unavailable",
+                "The KGSM account store could not be read.");
+        }
+
+        bool adopted = await sessions.AdoptClusterSessionAsync(
+            claims.SessionId, claims.Identity.Handle, options.HostId, claims.Expires,
+            Request.Headers.UserAgent.ToString() is { Length: > 0 } ua ? ua : null,
+            HttpContext.RequestAborted);
+
+        if (!adopted)
+        {
+            return Error(StatusCodes.Status401Unauthorized, "unauthorized",
+                "the refresh token is invalid or expired");
+        }
+
+        // The cached deny-list answer for this session was taken before the row existed. Dropping it
+        // is what stops the bearer this call just minted being refused for the length of the cache.
+        clusterSessions.Evict(claims.SessionId);
+
+        MintedToken access = tokens.MintAccess(claims.Identity, tier, claims.SessionId);
+
+        return Ok(new ClusterExchangeResponse(
+            access.Token, KgsmTiers.ToWire(tier), access.ExpiresAt));
     }
 
     /// <summary>

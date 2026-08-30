@@ -252,6 +252,76 @@ public sealed class SessionStore(
     }
 
     /// <summary>
+    /// Take up a session the cluster's auth anchor minted, so this node can serve it while the anchor
+    /// is unreachable.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The row carries the <b>anchor's</b> session id and the <b>anchor's</b> expiry. That is what
+    /// keeps a revoke naming that session effective against everything this node mints from it, and
+    /// what stops this node extending a session past the cap it was granted.
+    /// </para>
+    /// <para>
+    /// <b>A revoked session is never taken up again.</b> Otherwise a still-valid refresh token would
+    /// resurrect a row somebody had ended, and signing out would be undone by the next refresh.
+    /// </para>
+    /// </remarks>
+    /// <returns>
+    /// <see langword="false"/> when the session has been ended here, which the caller answers as a
+    /// refusal. <see langword="true"/> when the row is present and live, whether this call wrote it or
+    /// found it.
+    /// </returns>
+    public async Task<bool> AdoptClusterSessionAsync(
+        string sid, string userId, string hostId, DateTimeOffset expires,
+        string? userAgent, CancellationToken ct = default)
+    {
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using IServiceScope scope = scopeFactory.CreateScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+
+            SessionEntry? row = await db.Sessions
+                .FirstOrDefaultAsync(s => s.Id == sid, ct).ConfigureAwait(false);
+
+            if (row is not null)
+            {
+                if (row.Revoked)
+                    return false;
+
+                row.LastSeen = now;
+                // The anchor's cap, never this node's idea of one. It only ever moves because the
+                // anchor moved it, and it is not slid by being used here.
+                row.Expires = expires;
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                return true;
+            }
+
+            db.Sessions.Add(new SessionEntry
+            {
+                Id = sid,
+                UserId = userId,
+                HostId = hostId,
+                Created = now,
+                LastSeen = now,
+                Expires = expires,
+                UserAgent = userAgent,
+                Revoked = false,
+                RevokedAt = null,
+                // No refresh token is minted here, so there is no rotation key to hold. The session
+                // is refreshed at the anchor, which owns the one that exists.
+                CurrentJti = null,
+            });
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            logger.LogInformation(
+                "took up cluster session {Sid} for {User} — the anchor is unreachable", sid, userId);
+            return true;
+        }
+        finally { _writeGate.Release(); }
+    }
+
+    /// <summary>
     /// M4·c Increment 6 — the active set for <c>GET /auth/sessions</c> (a caller's own set, or, for an
     /// admin, another user's set via <c>?userId=</c>). Matches the composite index
     /// <c>ix_sessions_user (UserId, Revoked, Expires)</c> — a read, no write-gate needed. AsNoTracking

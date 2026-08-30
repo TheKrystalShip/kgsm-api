@@ -252,3 +252,214 @@ public sealed class ClusterSessionAcceptanceTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Get("/api/v1/me", refresh))).StatusCode);
     }
 }
+
+/// <summary>
+/// Carrying a cluster session through an anchor outage: a member re-mints for itself, and gains
+/// nothing the anchor holds.
+/// </summary>
+/// <remarks>
+/// The property under test is not that the exchange works — it is what the exchange is unable to do.
+/// What comes out is audienced to the member that minted it, carries the tier that member's own
+/// replica says, and comes with no refresh token, so the session's absolute cap stays where the
+/// anchor put it.
+/// </remarks>
+public sealed class ClusterSessionExchangeTests
+{
+    private const string ClusterId = "test-cluster";
+    private const string AnchorIssuer = "kgsm";
+
+    private sealed record Published(string? Audience, string? Issuer, IReadOnlyList<SecurityKey> Keys)
+        : IClusterSessionKeys
+    {
+        public static Published Of(EcdsaSessionSigner signer) =>
+            new(ClusterId, AnchorIssuer, EcdsaSessionSigner.VerificationKeysFrom(signer.PublicKeys));
+
+        public static Published Nothing => new(null, null, []);
+    }
+
+    private static WebApplicationFactory<Program> NodeKnowing(
+        AuthTestFactory factory, IClusterSessionKeys published) =>
+        factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<IClusterSessionKeys>();
+            services.AddSingleton(published);
+        }));
+
+    private static SessionTokenService Anchor(EcdsaSessionSigner signer) =>
+        new(new SessionTokenOptions(
+                HostId: ClusterId,
+                SigningKey: "",
+                AccessLifetime: TimeSpan.FromMinutes(15),
+                RefreshLifetime: TimeSpan.FromDays(30),
+                Issuer: AnchorIssuer),
+            logger: null,
+            signer: signer);
+
+    private static KgsmIdentity Somebody(string subject) =>
+        new("discord", subject, subject, subject, null, []);
+
+    private static async Task<HttpResponseMessage> ExchangeAsync(HttpClient client, string refresh)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/auth/session/cluster-exchange");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", refresh);
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> MeAsync(HttpClient client, string token)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/me");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return await client.SendAsync(request);
+    }
+
+    [Fact]
+    public async Task An_anchor_refresh_token_buys_a_bearer_for_this_member_and_no_refresh_token()
+    {
+        using var signer = EcdsaSessionSigner.Generate();
+        await using var factory = new AuthTestFactory();
+        using WebApplicationFactory<Program> node = NodeKnowing(factory, Published.Of(signer));
+        using HttpClient client = node.CreateClient();
+
+        KgsmIdentity person = Somebody("usr_working_through_an_outage");
+        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Operator);
+
+        string refresh = Anchor(signer).MintRefresh(person, KgsmTier.Admin, "sid_outage").Token;
+
+        HttpResponseMessage response = await ExchangeAsync(client, refresh);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        JsonElement body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+
+        // Operator, from this member's replica — not the admin the anchor's token claimed.
+        Assert.Equal("operator", body.GetProperty("tier").GetString());
+
+        // Nothing that extends the session. The anchor holds the only refresh token there is for it.
+        Assert.False(body.TryGetProperty("refresh", out _));
+
+        string minted = body.GetProperty("token").GetString()!;
+        Assert.Equal(HttpStatusCode.OK, (await MeAsync(client, minted)).StatusCode);
+    }
+
+    [Fact]
+    public async Task What_it_mints_is_this_member_s_own_and_no_other_member_would_take_it()
+    {
+        using var signer = EcdsaSessionSigner.Generate();
+        await using var factory = new AuthTestFactory();
+        using WebApplicationFactory<Program> node = NodeKnowing(factory, Published.Of(signer));
+        using HttpClient client = node.CreateClient();
+
+        KgsmIdentity person = Somebody("usr_scoped");
+        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
+
+        string refresh = Anchor(signer).MintRefresh(person, KgsmTier.Admin, "sid_scoped").Token;
+        JsonElement body = JsonDocument.Parse(
+            await (await ExchangeAsync(client, refresh)).Content.ReadAsStringAsync()).RootElement;
+
+        string minted = body.GetProperty("token").GetString()!;
+        string payload = minted.Split('.')[1];
+        payload = payload.PadRight(payload.Length + ((4 - (payload.Length % 4)) % 4), '=')
+            .Replace('-', '+').Replace('_', '/');
+        JsonElement claims = JsonDocument.Parse(Convert.FromBase64String(payload)).RootElement;
+
+        // Audienced to the member that minted it, signed with that member's symmetric key. Every
+        // other member pairs a symmetric signature to its OWN audience, so this reaches nobody else.
+        Assert.Equal(AuthTestFactory.HostId, claims.GetProperty("aud").GetString());
+        Assert.Equal("kgsm-api", claims.GetProperty("iss").GetString());
+
+        // The anchor's session id, carried through unchanged, so a revoke naming it reaches this too.
+        Assert.Equal("sid_scoped", claims.GetProperty("sid").GetString());
+    }
+
+    [Fact]
+    public async Task A_session_already_ended_here_is_not_taken_up_again()
+    {
+        using var signer = EcdsaSessionSigner.Generate();
+        await using var factory = new AuthTestFactory();
+        using WebApplicationFactory<Program> node = NodeKnowing(factory, Published.Of(signer));
+        using HttpClient client = node.CreateClient();
+
+        KgsmIdentity person = Somebody("usr_signed_out");
+        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
+
+        const string sid = "sid_signed_out";
+        await node.Services.GetRequiredService<SessionStore>()
+            .RecordRevocationAsync(sid, AuthTestFactory.HostId, DateTimeOffset.UtcNow.AddDays(30));
+
+        string refresh = Anchor(signer).MintRefresh(person, KgsmTier.Admin, sid).Token;
+
+        // Signing out must not be undone by the next refresh.
+        Assert.Equal(HttpStatusCode.Unauthorized, (await ExchangeAsync(client, refresh)).StatusCode);
+    }
+
+    [Fact]
+    public async Task An_anchor_access_token_does_not_buy_one()
+    {
+        using var signer = EcdsaSessionSigner.Generate();
+        await using var factory = new AuthTestFactory();
+        using WebApplicationFactory<Program> node = NodeKnowing(factory, Published.Of(signer));
+        using HttpClient client = node.CreateClient();
+
+        KgsmIdentity person = Somebody("usr_somebody");
+        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
+
+        // A fifteen-minute bearer must not become a credential for the length of the session.
+        string access = Anchor(signer).MintAccess(person, KgsmTier.Admin, "sid_1").Token;
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await ExchangeAsync(client, access)).StatusCode);
+    }
+
+    [Fact]
+    public async Task This_member_s_own_refresh_token_is_not_exchanged_here()
+    {
+        using var signer = EcdsaSessionSigner.Generate();
+        await using var factory = new AuthTestFactory();
+        using WebApplicationFactory<Program> node = NodeKnowing(factory, Published.Of(signer));
+        using HttpClient client = node.CreateClient();
+
+        // It goes through the ordinary rotation, which slides the session's cap. This path exists
+        // precisely because it cannot, so accepting one here would extend a session by the wrong door.
+        string own = AuthTestFactory.MintTokenWithRow(node.Services, KgsmTier.Admin, access: false);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await ExchangeAsync(client, own)).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_member_that_has_heard_nothing_exchanges_nothing()
+    {
+        using var signer = EcdsaSessionSigner.Generate();
+        await using var factory = new AuthTestFactory();
+        using WebApplicationFactory<Program> node = NodeKnowing(factory, Published.Nothing);
+        using HttpClient client = node.CreateClient();
+
+        KgsmIdentity person = Somebody("usr_somebody");
+        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
+        string refresh = Anchor(signer).MintRefresh(person, KgsmTier.Admin, "sid_1").Token;
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await ExchangeAsync(client, refresh)).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_disabled_account_gets_no_bearer_out_of_it()
+    {
+        using var signer = EcdsaSessionSigner.Generate();
+        await using var factory = new AuthTestFactory();
+        using WebApplicationFactory<Program> node = NodeKnowing(factory, Published.Of(signer));
+        using HttpClient client = node.CreateClient();
+
+        KgsmIdentity person = Somebody("usr_switched_off");
+        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin, UserStatus.Disabled);
+
+        string refresh = Anchor(signer).MintRefresh(person, KgsmTier.Admin, "sid_1").Token;
+
+        // The exchange itself answers, because standing is resolved before anything is minted; what
+        // it hands back reaches nothing, because a disabled account fails the per-request read too.
+        HttpResponseMessage response = await ExchangeAsync(client, refresh);
+        if (response.StatusCode == HttpStatusCode.OK)
+        {
+            JsonElement body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                (await MeAsync(client, body.GetProperty("token").GetString()!)).StatusCode);
+        }
+    }
+}

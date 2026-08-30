@@ -738,6 +738,10 @@ public class Startup(IConfiguration configuration)
 
         // A cluster session has no row here, so the only thing worth storing about one is that it has
         // been ended. Same cache bound as the validator beside it, for the same reason.
+        // An anchor-signed refresh token, read so this node can carry the session through an anchor
+        // outage without gaining anything the anchor holds.
+        services.AddSingleton<ClusterSessionExchange>();
+
         services.AddSingleton(sp => new ClusterSessionRevocations(
             sp.GetRequiredService<SessionStore>(),
             sp.GetRequiredService<IMemoryCache>(),
