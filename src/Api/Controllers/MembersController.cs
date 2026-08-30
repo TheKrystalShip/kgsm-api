@@ -55,6 +55,7 @@ public sealed class MembersController(
     ApiOptions options,
     HostAggregator hostAggregator,
     LibraryAggregator library,
+    ClusterStateStore clusterState,
     ClusterPeerRelay relay) : ControllerBase
 {
     /// <summary><c>GET /api/v1/members</c> — the full roster, enabled and disabled alike.</summary>
@@ -78,6 +79,71 @@ public sealed class MembersController(
     {
         IReadOnlyList<MemberRow> rows = await members.ListEnabledAsync(ct).ConfigureAwait(false);
         return new ClusterMembersResponse([.. rows.Select(ToMemberView)]);
+    }
+
+    /// <summary>
+    /// <c>GET /api/v1/members/capabilities</c> — which member holds each of the cluster's capabilities.
+    /// </summary>
+    /// <remarks>
+    /// Viewer-visible, because it is what makes the cluster legible: a member with no servers is not a
+    /// broken node, it is the one holding the accounts, and a person looking at the Cluster page needs
+    /// to be able to see that. It names members, never addresses or credentials.
+    /// </remarks>
+    [HttpGet("capabilities")]
+    [Authorize(Policy = AuthPolicy.Viewer)]
+    public async Task<ClusterCapabilitiesResponse> Capabilities(CancellationToken ct)
+    {
+        IReadOnlyList<ClusterAssignment> assignments =
+            await clusterState.ListAsync(ct).ConfigureAwait(false);
+
+        return new ClusterCapabilitiesResponse(
+            [.. assignments.Select(a => new ClusterCapabilityView(
+                a.Capability, a.MemberId, a.IsHeld, a.Version, a.SetBy))]);
+    }
+
+    /// <summary>
+    /// <c>PUT /api/v1/members/capabilities/{capability}</c> — move a capability to another member.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The deliberate failover. Nothing promotes itself: an automatic one during a partition would
+    /// produce two members issuing conflicting statements about who may do what, so the decision is a
+    /// person's and this is where they make it.
+    /// </para>
+    /// <para>
+    /// The member is not required to be reachable. Reassigning is exactly what an admin does when the
+    /// holder is <em>gone</em>, and refusing on liveness would block the operation at the only moment
+    /// it is needed. It is required to be a member, because a capability assigned to a name nobody
+    /// knows is held by nobody while reading as held.
+    /// </para>
+    /// </remarks>
+    [HttpPut("capabilities/{capability}")]
+    [Authorize(Policy = AuthPolicy.Admin)]
+    public async Task<IActionResult> AssignCapability(
+        string capability, [FromBody] ClusterCapabilityAssignRequest? body, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(capability))
+            return Error(StatusCodes.Status400BadRequest, "invalid_capability", "capability is required");
+
+        // An empty member id is the "deliberately nobody" write and is allowed through; anything else
+        // has to name a member this cluster knows.
+        string memberId = body?.MemberId?.Trim() ?? "";
+        if (memberId.Length > 0)
+        {
+            MemberRow? target = await members.GetByMemberIdAsync(memberId, ct).ConfigureAwait(false);
+            if (target is null)
+            {
+                return Error(StatusCodes.Status404NotFound, "member_not_found",
+                    $"no member of this cluster is called '{memberId}'");
+            }
+        }
+
+        ClusterAssignment assignment =
+            await clusterState.AssignAsync(capability, memberId, ct).ConfigureAwait(false);
+
+        return Ok(new ClusterCapabilityView(
+            assignment.Capability, assignment.MemberId, assignment.IsHeld, assignment.Version,
+            assignment.SetBy));
     }
 
     /// <summary><c>POST /api/v1/members</c> — the admin action that starts a join. The exchange itself is
@@ -116,12 +182,33 @@ public sealed class MembersController(
             member.Status, member.Enabled));
     }
 
-    /// <summary><c>DELETE /api/v1/members/{id}</c> — forget a roster row entirely, which is a different act
-    /// from disabling it.</summary>
+    /// <summary>
+    /// <c>DELETE /api/v1/members/{id}</c> — record that a member has left the cluster, which is a
+    /// different act from disabling it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The row is not deleted here. A departure has to travel, and an absence does not: anti-entropy
+    /// exists to repair a roster that is missing something, so a deleted row is handed back by the first
+    /// member that still holds it. What is recorded instead is a terminal state above the incarnation the
+    /// member last claimed, which supersedes the alive every other member holds and is reaped everywhere
+    /// once the reap window passes. Until then the roster reports the member as having left, which is the
+    /// honest answer rather than a row that vanishes here and returns in a minute.
+    /// </para>
+    /// <para>
+    /// <b>A member that is still running and still gossiping refutes this and returns.</b> Only a member
+    /// may raise its own incarnation, and it re-asserts itself above whatever was said about it — which is
+    /// what stops a live member being buried by a false report. Removing one that is still participating
+    /// is therefore a request the cluster overturns: stop it first, or disable it, which is this host's own
+    /// override and no gossip undoes.
+    /// </para>
+    /// </remarks>
     [HttpDelete("{id}")]
     [Authorize(Policy = AuthPolicy.Admin)]
     public async Task<IActionResult> Delete(string id, CancellationToken ct)
-        => await members.DeleteAsync(id, ct).ConfigureAwait(false) ? NoContent() : NotFound();
+        => await members.MarkLeftAsync(id, DateTimeOffset.UtcNow, ct).ConfigureAwait(false)
+            ? NoContent()
+            : NotFound();
 
     /// <summary><c>PATCH /api/v1/members/{id}</c> — the disable toggle. Only the enabled flag is
     /// settable.</summary>

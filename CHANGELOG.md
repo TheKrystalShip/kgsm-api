@@ -5,7 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.157.0]
+
+### Added — the cluster's capability assignments, and the deliberate failover
+
+`GET /api/v1/members/capabilities` reports which member holds each of the cluster's capabilities.
+Viewer-visible, because it is what makes a cluster legible: a member with no servers is not a broken
+node, it is the one holding the accounts, and the Cluster page has to be able to say so. It names
+members and never addresses or credentials.
+
+`PUT /api/v1/members/capabilities/{capability}` moves one, admin only. This is the failover, and it
+is a person's decision by design — nothing promotes itself, because an automatic promotion during a
+partition produces two members issuing conflicting statements about who may do what.
+
+The target must be a member and need not be reachable. Reassigning is exactly what an admin does when
+the holder is gone, so refusing on liveness would block the operation at the only moment it is needed;
+requiring membership is what stops a capability being assigned to a name nobody knows, which reads as
+held while being held by nobody. An empty member id records *deliberately nobody*, which converges as
+a decision rather than as an assignment nobody has heard yet.
+
 ## [Unreleased]
+
+### Fixed — removing a member from a running cluster now sticks (0.157.0)
+
+`DELETE /api/v1/members/{id}` deleted the roster row, and gossip exists to repair a roster that is
+missing something — so the first member that still held it handed it straight back. A member could not
+be removed from a running cluster at all.
+
+It now records a departure: a terminal state one incarnation above what the member last claimed, which
+supersedes the alive every other member holds and is reaped everywhere once the reap window passes.
+Until then the roster reports the member as having left, which is a truer answer than a row that
+disappears here and returns a minute later.
+
+A member that is still running and still gossiping refutes its own removal and returns — only a member
+may raise its own incarnation, and that is what stops a live one being buried by a false report. Stop it
+first, or disable it, which is this host's own override and no gossip undoes.
 
 ### Changed — cluster protocol 3 (0.156.1)
 

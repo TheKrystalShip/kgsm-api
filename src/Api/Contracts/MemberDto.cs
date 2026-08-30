@@ -46,6 +46,31 @@ public sealed record MemberAddedResponse(
 /// <summary>The two route versions that disagreed, so a refusal names both rather than only itself.</summary>
 public sealed record MemberVersionMismatchDetails(string Remote, string Local);
 
+/// <summary>
+/// Which member holds one of the cluster's capabilities.
+/// </summary>
+/// <remarks>
+/// A capability belongs to the cluster rather than to any member, so this is not a fact read off a
+/// roster row. <paramref name="Held"/> tells "the cluster decided nobody" apart from "nobody holds
+/// it", which are different answers an operator acts on differently.
+/// </remarks>
+/// <param name="Capability">The capability's stable name — <c>auth</c> today.</param>
+/// <param name="MemberId">The member holding it, empty when nobody does.</param>
+/// <param name="Held">Whether anybody holds it.</param>
+/// <param name="Version">The assignment's version. A reassignment supersedes a lower one.</param>
+/// <param name="SetBy">The member whose copy this came from, which is what breaks a version tie.</param>
+public sealed record ClusterCapabilityView(
+    string Capability, string MemberId, bool Held, long Version, string SetBy);
+
+/// <summary>Every capability assignment this node holds a copy of.</summary>
+public sealed record ClusterCapabilitiesResponse(IReadOnlyList<ClusterCapabilityView> Capabilities);
+
+/// <summary>
+/// The admin's reassignment. An empty member id records <em>deliberately nobody</em>, which converges
+/// as a decision rather than reading as an assignment nobody has heard yet.
+/// </summary>
+public sealed record ClusterCapabilityAssignRequest(string MemberId);
+
 /// <summary>The disable toggle. Only the flag is settable.</summary>
 public sealed record MemberPatchRequest(bool Enabled);
 

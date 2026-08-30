@@ -238,4 +238,61 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
             return Task.FromResult(response);
         }
     }
+
+    // ── removal ────────────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Delete_RecordsADepartureRatherThanDroppingTheRow()
+    {
+        // A deleted row is handed back by the first member that still holds it, because anti-entropy
+        // repairs a roster that is missing something. So removal records a terminal state that
+        // supersedes, and the row survives as a tombstone until every member has had it.
+        using WebApplicationFactory<Program> app = BuildApp();
+        using HttpClient client = app.CreateClient();
+        string token = AdminToken(app);
+
+        MembersStore members = app.Services.GetRequiredService<MembersStore>();
+        MemberRow seeded = MemberRow.New("departing", MemberKind.Node) with
+        {
+            Url = "https://departing.test",
+            MembershipState = GossipState.Alive,
+            ApiVersion = "v1",
+        };
+        await members.UpsertAsync(seeded, default);
+
+        HttpResponseMessage resp = await client.SendAsync(
+            Bearer(HttpMethod.Delete, $"/api/v1/members/{seeded.Id}", token));
+        Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
+
+        MemberRow? after = await members.GetAsync(seeded.Id, default);
+        Assert.NotNull(after);
+        Assert.Equal(GossipState.Left, after!.MembershipState);
+        // Above what the member last claimed, so it beats the alive every other member is holding.
+        Assert.True(after.Incarnation > seeded.Incarnation);
+    }
+
+    [Fact]
+    public async Task Delete_UnknownMember_Returns404()
+    {
+        using WebApplicationFactory<Program> app = BuildApp();
+        using HttpClient client = app.CreateClient();
+
+        HttpResponseMessage resp = await client.SendAsync(
+            Bearer(HttpMethod.Delete, "/api/v1/members/no-such-row", AdminToken(app)));
+
+        Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Delete_ViewerToken_Returns403()
+    {
+        using WebApplicationFactory<Program> app = BuildApp();
+        using HttpClient client = app.CreateClient();
+        string viewerToken = AuthTestFactory.MintTokenWithRow(app.Services, KgsmTier.Viewer, access: true);
+
+        HttpResponseMessage resp = await client.SendAsync(
+            Bearer(HttpMethod.Delete, "/api/v1/members/whatever", viewerToken));
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+    }
 }
