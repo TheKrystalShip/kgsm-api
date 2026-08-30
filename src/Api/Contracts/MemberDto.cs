@@ -6,7 +6,12 @@ namespace TheKrystalShip.Api.Contracts;
 /// and manage membership.
 /// </summary>
 /// <param name="Id">This node's local handle on the row.</param>
-/// <param name="Url">The address this node calls the member on.</param>
+/// <param name="Url">
+/// The address a <b>browser</b> reaches the member at — its own first browser-usable candidate,
+/// falling back to the address this node proved it can reach when the member advertises none. The
+/// two differ wherever a member sits behind a public name: this node reaches a neighbour across a
+/// switch, and a person's phone cannot.
+/// </param>
 /// <param name="Nickname">An operator-assigned label, or null.</param>
 /// <param name="MemberId">The member's own identity.</param>
 /// <param name="Kind">Node or anchor.</param>

@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the panel is given an address a browser can reach (0.165.0)
+
+`GET /api/v1/members` handed out the address **this node** proved it can reach a member at. Every
+caller of that endpoint is a browser, and the two are not the same question wherever a member sits
+behind a public name: a node reaches a neighbour across a switch, and a person's phone on mobile data
+cannot. The panel was driving a private address and reporting the member as unreachable while the
+member was perfectly healthy.
+
+It now hands over the member's own first browser-usable candidate, falling back to the proven address
+when a member advertises none — which is the only address there is, and the honest answer on a
+cluster that lives entirely on one network.
+
+Pins `TheKrystalShip.KGSM.Cluster 1.0.0-dev.16`, which stops a member's advertised address order
+being overwritten by whichever address the liveness probe last proved. Until then the two writers
+fought every round and the answer was whoever wrote last.
+
 ### Fixed — a route that does not exist is not a web page (0.164.1)
 
 The SPA shell is served for any unmatched path so a client-routed deep link boots the app. It was

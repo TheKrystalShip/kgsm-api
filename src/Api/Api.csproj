@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.164.1</Version>
+    <Version>0.165.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -161,7 +161,7 @@
     <!-- Cluster membership and durable member-to-member messaging. The outbox, the inbox, the member
          service token and the member-to-member wire all live there, so this API takes part in a cluster
          as one member among several rather than being the thing a cluster is made of. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Cluster" Version="1.0.0-dev.15" />
+    <PackageReference Include="TheKrystalShip.KGSM.Cluster" Version="1.0.0-dev.16" />
 
     <!-- The shared GET /metrics wire contract (Snapshot graph + source-gen camelCase
          JSON), built in kgsm-monitor. We deserialize the monitor scrape into these exact

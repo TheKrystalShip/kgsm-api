@@ -394,9 +394,22 @@ public sealed class MembersController(
     };
 
     private static MemberView ToView(MemberRow m) =>
-        new(m.Id, m.Url, m.Nickname, m.MemberId, m.Kind, m.Status,
+        // Every caller of this is a browser, so the address it gets is the one a browser can use —
+        // the member's own first browser-usable candidate, not the address THIS node proved it can
+        // reach. Those are different questions and a member behind a public name answers them
+        // differently: a node reaches a neighbour across a switch, and a person's phone does not.
+        //
+        // Falls back to the proven address when a member advertises no browser one, because that is
+        // the only address there is and a blank breaks a panel that is driving it. It is the honest
+        // answer on a cluster that is entirely on one network, which is most of them.
+        new(m.Id, BrowserUrl(m), m.Nickname, m.MemberId, m.Kind, m.Status,
             GossipState.Display(m.MembershipState, m.LastSeen),
             m.LatencyMs, m.LastSeen, m.ApiVersion, m.Enabled);
+
+    private static string BrowserUrl(MemberRow m) =>
+        MemberCandidates.ClientUrl(MemberCandidates.Decode(m.Candidates)) is { Length: > 0 } url
+            ? url
+            : m.Url;
 
     private static ClusterMemberView ToMemberView(MemberRow m) =>
         // A browser gets a browser-reachable address or nothing: handing the SPA one it cannot reach reads
