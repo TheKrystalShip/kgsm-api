@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a route that does not exist is not a web page (0.164.1)
+
+The SPA shell is served for any unmatched path so a client-routed deep link boots the app. It was
+also served for two things that are never a deep link, and because the shell is a `200` a caller
+could not tell "this route is gone" from "here is a web page" by status alone.
+
+`/auth/*` sits at the root beside `/api` rather than under it, so excluding only `/api` left the
+whole auth surface answering a web page for paths that do not exist. And the fallback answered any
+method, so a `POST` that matched no controller got the shell — nothing client-routed arrives as a
+`POST`, so that caller is in error and is owed an answer that says so.
+
+Both now fall through to the frozen `{error}` envelope. Measured rather than assumed: two separate
+readings of a removed endpoint reported it as still present, each from a `200` that was the shell.
+
 ### Changed — a browser talks auth to one address for the whole cluster (0.164.0)
 
 A person signs in at the auth anchor and renews there. This node issues no credential from an

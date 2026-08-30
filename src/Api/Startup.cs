@@ -1171,22 +1171,43 @@ public class Startup(IConfiguration configuration)
             endpoints.MapClusterEndpoints();
 
             // SPA fallback: a client-routed GET (deep link / refresh — no file extension, matched no
-            // controller) boots the app by returning index.html. EXCLUDE /api/* so a bogus API path stays
-            // a JSON 404 ({error} envelope, invariant #4) rather than a 200 HTML page. Asset files (with
-            // extensions) were already served by UseStaticFiles, so they never reach this :nonfile fallback.
+            // controller) boots the app by returning index.html. Asset files (with extensions) were
+            // already served by UseStaticFiles, so they never reach this :nonfile fallback.
             // .AllowAnonymous() is LOAD-BEARING: without it the endpoint inherits the global
             // RequireAuthenticatedUser fallback policy and returns 401 for the SPA shell — i.e. nobody could
             // even load the login page. The bundle is a PUBLIC static site; the DATA under /api/v1 stays gated.
+            //
+            // Two things are never the SPA shell, and both are here because the shell is a 200: a
+            // caller cannot tell "this route is gone" from "here is a web page" by status alone, and
+            // will conclude the route still exists.
+            //
+            //  - Anything under an API prefix. /auth/* is one of them: it sits at the root beside /api
+            //    rather than under it, so naming only /api leaves the whole auth surface answering 200
+            //    HTML to a path that does not exist.
+            //  - Anything that is not a GET or a HEAD. A deep link is a navigation; nothing client-routed
+            //    arrives as a POST, so a POST that matched no controller is a caller in error and is
+            //    owed an answer that says so.
+            //
+            // Both fall through to the {error} envelope (invariant #4).
             if (serveSpa)
             {
                 string indexFile = Path.Combine(spaWebRoot!, "index.html");
                 endpoints.MapFallback(async context =>
                 {
-                    if (context.Request.Path.StartsWithSegments("/api"))
+                    bool apiPath =
+                        context.Request.Path.StartsWithSegments("/api")
+                        || context.Request.Path.StartsWithSegments("/auth");
+
+                    bool navigation =
+                        HttpMethods.IsGet(context.Request.Method)
+                        || HttpMethods.IsHead(context.Request.Method);
+
+                    if (apiPath || !navigation)
                     {
                         context.Response.StatusCode = StatusCodes.Status404NotFound;
                         return;
                     }
+
                     context.Response.ContentType = "text/html; charset=utf-8";
                     await context.Response.SendFileAsync(indexFile);
                 }).AllowAnonymous();
