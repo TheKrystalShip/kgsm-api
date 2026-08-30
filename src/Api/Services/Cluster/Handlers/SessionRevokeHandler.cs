@@ -7,7 +7,7 @@ using TheKrystalShip.KGSM.Cluster.Messaging;
 namespace TheKrystalShip.Api.Services.Cluster.Handlers;
 
 /// <summary>
-/// The cluster bus's first message type (<c>docs/cluster-message-bus-plan.md §3</c>, the "sign out
+/// The cluster bus's first message type (the cluster package's <c>docs/cluster-message-bus.md §3</c>, the "sign out
 /// everywhere" customer the bus was built for). Payload: <c>{ scope: "user"|"sid"|"all",
 /// discordId?, sid? }</c>. Delegates the actual revoke to the SAME <see cref="SessionStore"/> the
 /// local <c>/auth/session/revoke</c> endpoints use — this handler is just the cluster-bus front door

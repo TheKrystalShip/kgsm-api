@@ -498,7 +498,7 @@ public sealed class ApiOptions
     public required string NodeId { get; init; }
 
 
-    // --- Cluster message bus, Phase 3 (the outbox drainer + GC — docs/cluster-message-bus-plan.md
+    // --- Cluster message bus, Phase 3 (the outbox drainer + GC — the cluster package's docs/cluster-message-bus.md
     //     §6/§7). Not `required`: like the alert `Policy` above, these carry a sane default so the many
     //     existing test-built ApiOptions literals need no update for a feature that is inert whenever
     //     this member holds no cluster secret. ---------------------------------------------------------

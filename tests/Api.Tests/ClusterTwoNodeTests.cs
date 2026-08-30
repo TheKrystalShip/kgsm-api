@@ -22,7 +22,7 @@ using TheKrystalShip.KGSM.Auth;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// Phase 4 of the cluster message bus (<c>docs/cluster-message-bus-plan.md §11</c>) — the two-node
+/// Phase 4 of the cluster message bus (the cluster package's protocol doc) — the two-node
 /// end-to-end self-validation. Phases 1–3 (envelope/inbox, unit-level drainer/backoff/TTL, GC) are each
 /// individually proven (<see cref="ClusterInboxTests"/>, <see cref="OutboxDrainerTests"/>,
 /// <see cref="ClusterTokenServiceTests"/>) but never together, wired as two real nodes talking over the

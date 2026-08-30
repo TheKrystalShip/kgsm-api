@@ -6,7 +6,7 @@
 >
 > Extends the O7 stub in `system-architecture.md §5`; companion to
 > `kgsm-api/PLAN.md` (the per-host milestone plan). The node-to-node transport it
-> rides on has its own authority: **`docs/cluster-message-bus-plan.md`** (built
+> rides on has its own authority: **the cluster package's `docs/cluster-message-bus.md`** (built
 > first — it is the foundation every peer feature depends on).
 
 ---
@@ -160,7 +160,7 @@ JWT signing key Api__SigningKey (HMAC, shared — signs user tokens)
 There is **no per-node keypair and no per-request Ed25519 signature.** The
 node-to-node surface is read-only GETs plus the message-bus inbox; TLS provides
 channel security, the service token provides membership + attribution, and the
-message-bus dedupe id (`docs/cluster-message-bus-plan.md`) provides replay safety
+message-bus dedupe id (the cluster package's `docs/cluster-message-bus.md`) provides replay safety
 where it matters. Ed25519-per-request was considered and dropped: it hardened node
 identity while user identity stayed forgeable under the shared HMAC key — an
 inconsistent, unjustified cost.
@@ -252,7 +252,7 @@ is entirely API-side — the assistant only learns the parameter.
 
 > **P-1 (foundation, its own spec) — Cluster message bus · `planned`.**
 > The transactional outbox/inbox transport. **Built first.** Everything below
-> assumes it. Authority: `docs/cluster-message-bus-plan.md`.
+> assumes it. Authority: the cluster package's `docs/cluster-message-bus.md`.
 
 ### P0 — Peer foundation (membership + trust) · `planned`
 The trust half already exists (the message-bus foundation built the
@@ -614,7 +614,7 @@ or non-2xx).
 
 ### `POST /api/v1/peers/inbox` (cluster-token authed)
 The message-bus receive endpoint — one endpoint, typed envelope. Full contract:
-`docs/cluster-message-bus-plan.md`.
+the cluster package's `docs/cluster-message-bus.md`.
 
 ---
 
