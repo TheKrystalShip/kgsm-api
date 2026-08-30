@@ -206,9 +206,32 @@ public sealed class MembersController(
     [HttpDelete("{id}")]
     [Authorize(Policy = AuthPolicy.Admin)]
     public async Task<IActionResult> Delete(string id, CancellationToken ct)
-        => await members.MarkLeftAsync(id, DateTimeOffset.UtcNow, ct).ConfigureAwait(false)
+    {
+        // A capability belongs to the cluster and outlives the member holding it, so removing that
+        // member leaves the cluster pointing at somebody who is gone — and nothing promotes itself to
+        // fill the gap, by design. For `auth` that is every sign-in in the cluster refused, with the
+        // only symptom a 503 on an anchor nobody was looking at.
+        //
+        // So the removal is refused and says which capability to move first. Reassigning does not
+        // require the target to be reachable, precisely so this is always resolvable.
+        MemberRow? row = await members.GetAsync(id, ct).ConfigureAwait(false);
+        if (row is not null)
+        {
+            IReadOnlyList<ClusterAssignment> held = [.. (await clusterState.ListAsync(ct).ConfigureAwait(false))
+                .Where(a => a.IsHeld && string.Equals(a.MemberId, row.MemberId, StringComparison.Ordinal))];
+
+            if (held.Count > 0)
+            {
+                return Error(StatusCodes.Status409Conflict, "member_holds_capability",
+                    $"{row.MemberId} holds {string.Join(", ", held.Select(a => a.Capability))} for this "
+                    + "cluster. Reassign it to another member first.");
+            }
+        }
+
+        return await members.MarkLeftAsync(id, DateTimeOffset.UtcNow, ct).ConfigureAwait(false)
             ? NoContent()
             : NotFound();
+    }
 
     /// <summary><c>PATCH /api/v1/members/{id}</c> — the disable toggle. Only the enabled flag is
     /// settable.</summary>

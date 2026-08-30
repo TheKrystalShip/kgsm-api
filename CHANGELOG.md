@@ -6,9 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [0.157.0]
+## [Unreleased]
 
-### Added — the cluster's capability assignments, and the deliberate failover
+### Fixed — removing a member that holds a capability is refused, and says which (0.158.0)
+
+A capability belongs to the cluster and outlives the member holding it, so removing that member left
+the cluster pointing at somebody who is gone — and nothing promotes itself to fill the gap, by
+design. For `auth` that is every sign-in in the cluster refused, with the only symptom a `503` on an
+anchor nobody was looking at.
+
+`DELETE /api/v1/members/{id}` now answers `409 member_holds_capability`, naming what to move first.
+Reassigning does not require the target to be reachable, precisely so this is always resolvable.
+
+### Added — the cluster's capability assignments, and the deliberate failover (0.157.0)
 
 `GET /api/v1/members/capabilities` reports which member holds each of the cluster's capabilities.
 Viewer-visible, because it is what makes a cluster legible: a member with no servers is not a broken
@@ -24,8 +34,6 @@ the holder is gone, so refusing on liveness would block the operation at the onl
 requiring membership is what stops a capability being assigned to a name nobody knows, which reads as
 held while being held by nobody. An empty member id records *deliberately nobody*, which converges as
 a decision rather than as an assignment nobody has heard yet.
-
-## [Unreleased]
 
 ### Fixed — removing a member from a running cluster now sticks (0.157.0)
 
