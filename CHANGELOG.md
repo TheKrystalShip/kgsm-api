@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a node whose cluster has an anchor answers for no account (0.166.0)
+
+This API served a complete second front door: sign-in, registration, the provider bounce, session
+refresh, and every write to an account. All of it kept working after the cluster gained an auth
+anchor, so a person could sign in here and get a session scoped to this node alone — signed in on one
+machine and a stranger on every other, which is the state one sign-in for the cluster exists to end.
+
+Both kinds of endpoint close now when cluster state names a member holding the accounts, and they
+fail for the same reason from opposite directions. A door would mint a session no other member
+accepts. A write would land in this node's **replica**, unversioned by the anchor, and be overwritten
+by the next thing the anchor publishes about that account — it would appear to work and then quietly
+stop having happened.
+
+The refusal is `503 auth_held_by_anchor` naming the holder, with `X-Kgsm-Auth-Holder` and
+`X-Kgsm-Auth-Url` so a client routes rather than reads English. `503` rather than `403` or `404`
+because the caller is not being refused: this node is saying it is not the one that answers.
+
+**A standalone install is untouched**, which is most installs — its accounts are its own and it is the
+only door there is. So is a clustered host whose cluster has no anchor: there is nowhere else to send
+anybody, and that is the same fact from here. And a holder this node cannot currently see still holds
+them, so an unsettled mesh does not reopen a second door.
+
+Reads stay open, and so does anything that **ends** a session: revoking takes authority away rather
+than granting it, and this node holds the rows for sessions it minted.
+
 ### Changed — this repo's deploy deploys this repo (0.165.1)
 
 `deploy/deploy.sh` built the sibling `kgsm-web` checkout and bundled it into `wwwroot`, so it

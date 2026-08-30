@@ -85,6 +85,7 @@ public sealed class IdentitiesController(
     /// </list>
     /// </summary>
     [Authorize(Policy = AuthPolicy.Viewer)]
+    [AnchorHoldsAuth]
     [HttpPost("/auth/reauth")]
     public async Task<IActionResult> Reauth([FromBody] ReauthRequest? body, CancellationToken ct)
     {
@@ -134,6 +135,7 @@ public sealed class IdentitiesController(
     /// </list>
     /// </summary>
     [Authorize(Policy = AuthPolicy.Viewer)]
+    [AnchorHoldsAuth]
     [HttpPost("/auth/identities/{provider}/start")]
     public async Task<IActionResult> StartLink(string provider, CancellationToken ct)
     {
@@ -189,6 +191,7 @@ public sealed class IdentitiesController(
     /// </para>
     /// </remarks>
     [AllowAnonymous]
+    [AnchorHoldsAuth]
     [HttpGet("/auth/identities/{provider}/callback")]
     public async Task<IActionResult> CompleteLink(
         string provider, [FromQuery] string? code, [FromQuery] string? state, CancellationToken ct)
@@ -275,6 +278,7 @@ public sealed class IdentitiesController(
     /// </list>
     /// </summary>
     [Authorize(Policy = AuthPolicy.Viewer)]
+    [AnchorHoldsAuth]
     [HttpDelete("/auth/identities/{credentialId}")]
     public async Task<IActionResult> Unlink(string credentialId, CancellationToken ct)
     {

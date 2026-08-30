@@ -89,6 +89,7 @@ public sealed class AuthController(
     /// <c>/start</c> and reading the refusal, so naming them here discloses nothing new.
     /// </remarks>
     [AllowAnonymous]
+    [AnchorHoldsAuth]
     [HttpGet("/auth/providers")]
     public IActionResult Providers() =>
         Ok(new AuthProvidersResponse(providers.Configured, options.AllowSelfRegistration));
@@ -100,6 +101,7 @@ public sealed class AuthController(
     /// <c>503</c> for a provider this host does not offer.
     /// </summary>
     [AllowAnonymous]
+    [AnchorHoldsAuth]
     [HttpGet("/auth/{provider}/start")]
     public IActionResult Start(string provider, [FromQuery] string? prompt)
     {
@@ -134,6 +136,7 @@ public sealed class AuthController(
     /// </list>
     /// </summary>
     [AllowAnonymous]
+    [AnchorHoldsAuth]
     [HttpGet("/auth/{provider}/callback")]
     public async Task<IActionResult> Callback(
         string provider, [FromQuery] string? code, [FromQuery] string? state, CancellationToken ct)
@@ -280,6 +283,7 @@ public sealed class AuthController(
     /// </summary>
     [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicy.Anonymous)]
+    [AnchorHoldsAuth]
     [HttpPost("/auth/login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest? body, CancellationToken ct)
     {
@@ -388,6 +392,7 @@ public sealed class AuthController(
     /// </remarks>
     [AllowAnonymous]
     [EnableRateLimiting(RateLimitPolicy.Anonymous)]
+    [AnchorHoldsAuth]
     [HttpPost("/auth/register")]
     public async Task<IActionResult> Register([FromBody] RegisterRequest? body, CancellationToken ct)
     {
@@ -727,6 +732,7 @@ public sealed class AuthController(
     /// </para>
     /// </summary>
     [AllowAnonymous]
+    [AnchorHoldsAuth]
     [HttpPost("/auth/session/refresh")]
     public async Task<IActionResult> Refresh()
     {

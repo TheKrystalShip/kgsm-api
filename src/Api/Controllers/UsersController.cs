@@ -77,6 +77,7 @@ public sealed class UsersController(
     /// </list>
     /// </summary>
     [Authorize(Policy = AuthPolicy.Admin)]
+    [AnchorHoldsAuth]
     [HttpPost("/auth/users")]
     public async Task<IActionResult> Create([FromBody] CreateUserRequest? body, CancellationToken ct)
     {
@@ -144,6 +145,7 @@ public sealed class UsersController(
     /// because they answer different questions and an access review reads for exactly one of them.
     /// </remarks>
     [Authorize(Policy = AuthPolicy.Admin)]
+    [AnchorHoldsAuth]
     [HttpPatch("/auth/users/{userId}")]
     public async Task<IActionResult> Update(string userId, [FromBody] UpdateUserRequest? body, CancellationToken ct)
     {
@@ -240,6 +242,7 @@ public sealed class UsersController(
     /// a row that should never have been created.
     /// </remarks>
     [Authorize(Policy = AuthPolicy.Admin)]
+    [AnchorHoldsAuth]
     [HttpDelete("/auth/users/{userId}")]
     public async Task<IActionResult> Delete(string userId, CancellationToken ct)
     {
@@ -283,6 +286,7 @@ public sealed class UsersController(
     /// so a forgotten password is a conversation with an admin rather than a mail round-trip.
     /// </remarks>
     [Authorize(Policy = AuthPolicy.Admin)]
+    [AnchorHoldsAuth]
     [HttpPost("/auth/users/{userId}/password")]
     public async Task<IActionResult> SetPassword(
         string userId, [FromBody] SetPasswordRequest? body, CancellationToken ct)
@@ -312,6 +316,7 @@ public sealed class UsersController(
     /// account back is how a temporary compromise becomes a permanent one.
     /// </remarks>
     [Authorize(Policy = AuthPolicy.Viewer)]
+    [AnchorHoldsAuth]
     [HttpPost("/auth/password")]
     public async Task<IActionResult> ChangeOwnPassword(
         [FromBody] ChangePasswordRequest? body, CancellationToken ct)

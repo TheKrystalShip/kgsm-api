@@ -732,6 +732,11 @@ public class Startup(IConfiguration configuration)
         // at the gossip cadence, so a reassignment or a rotation needs no restart here. A host that is
         // not in a cluster learns nothing and accepts only its own sessions, which is the whole of what
         // a standalone install has ever done.
+        // Whether this node still answers for its own accounts, or its cluster has an anchor that
+        // does. Read from cluster state rather than configured, so it follows an anchor joining or
+        // being reassigned with nothing to change here.
+        services.AddSingleton<AnchorHeldGate>();
+
         services.AddSingleton<ClusterSessionKeys>();
         services.AddSingleton<IClusterSessionKeys>(sp => sp.GetRequiredService<ClusterSessionKeys>());
         services.AddHostedService(sp => sp.GetRequiredService<ClusterSessionKeys>());
