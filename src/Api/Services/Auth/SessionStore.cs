@@ -180,6 +180,78 @@ public sealed class SessionStore(
     }
 
     /// <summary>
+    /// Whether a session has been explicitly ended here, uncached.
+    /// </summary>
+    /// <remarks>
+    /// The question a cluster session is held to, and it is the opposite of the one a local session is
+    /// held to. A session this host minted has a row, so absence means "no such session" and the
+    /// answer is a refusal. A session the cluster's anchor minted has a row here only if somebody
+    /// ended it, so absence means "nobody has ended this" and the answer is to let it through — the
+    /// signature and its own expiry are what bound it.
+    /// </remarks>
+    public async Task<bool> IsRevokedAsync(string sid, CancellationToken ct = default)
+    {
+        using IServiceScope scope = scopeFactory.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        return await db.Sessions.AsNoTracking()
+            .AnyAsync(s => s.Id == sid && s.Revoked, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Record that a session minted elsewhere in the cluster is over.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A cluster session is accepted on every member and has a real row on exactly one of them — the
+    /// anchor that minted it. So an end has to be recorded here as a fact of its own, or this host
+    /// goes on accepting the bearer for the rest of its life while its holder has signed out.
+    /// </para>
+    /// <para>
+    /// <paramref name="expires"/> is when the row may be swept, not when the session dies — the
+    /// session is already dead. It bounds the marker by the longest a bearer for it could still be
+    /// presented, so the existing sweep clears it without anything new to run.
+    /// </para>
+    /// <para>
+    /// Idempotent, and it never overwrites a row that is already here. The bus delivers at least once,
+    /// and a redelivery must not reset a revocation time or resurrect a session as unrevoked.
+    /// </para>
+    /// </remarks>
+    public async Task RecordRevocationAsync(
+        string sid, string hostId, DateTimeOffset expires, CancellationToken ct = default)
+    {
+        await _writeGate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using IServiceScope scope = scopeFactory.CreateScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            if (await db.Sessions.AnyAsync(s => s.Id == sid, ct).ConfigureAwait(false))
+                return;
+
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            db.Sessions.Add(new SessionEntry
+            {
+                Id = sid,
+                // No account is named, because none is known: the message carries a session, and
+                // inventing an owner for it would put a row in somebody's device list for a sign-in
+                // that never happened on this host.
+                UserId = "",
+                HostId = hostId,
+                Created = now,
+                LastSeen = now,
+                Expires = expires,
+                UserAgent = null,
+                Revoked = true,
+                RevokedAt = now,
+                CurrentJti = null,
+            });
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            logger.LogDebug("cluster session recorded as ended: sid={Sid}", sid);
+        }
+        finally { _writeGate.Release(); }
+    }
+
+    /// <summary>
     /// M4·c Increment 6 — the active set for <c>GET /auth/sessions</c> (a caller's own set, or, for an
     /// admin, another user's set via <c>?userId=</c>). Matches the composite index
     /// <c>ix_sessions_user (UserId, Revoked, Expires)</c> — a read, no write-gate needed. AsNoTracking

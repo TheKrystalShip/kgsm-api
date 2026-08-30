@@ -93,3 +93,38 @@ public sealed record MemberLatencyView(int? LatencyMs, string Status, DateTimeOf
 /// </summary>
 public sealed record ClusterResourcesView(
     string Id, string Label, string Status, double? CpuPct, MemCapacity? Mem, IReadOnlyList<DiskCapacity>? Disks);
+
+/// <summary>
+/// Where this cluster signs people in.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The one thing a browser holding nothing needs to know, and the reason it is unauthenticated: it is
+/// asking because it has no session yet. What an anonymous caller learns is that this cluster has an
+/// auth anchor and where to knock, which is what the sign-in page would have told them anyway. No
+/// credential, no capability, and nothing about any account.
+/// </para>
+/// <para>
+/// The three negative answers are deliberately distinguishable, because a person acts on them
+/// differently: no anchor at all, an anchor whose holder has left the cluster, and an anchor that has
+/// stated no address a browser can reach. Collapsing any of them into "sign-in is unavailable" turns
+/// a fixable configuration into a mystery.
+/// </para>
+/// </remarks>
+/// <param name="Held">
+/// Whether this node knows of a member holding the cluster's accounts. False on a standalone host,
+/// and false on a member that has not heard yet — indistinguishable here, and both mean "sign in
+/// against the member you are already pointed at".
+/// </param>
+/// <param name="MemberId">The member holding it, empty when nobody does.</param>
+/// <param name="Url">
+/// Where a person's browser signs in, or <see langword="null"/> when the holder states no
+/// browser-reachable address. Stated by the anchor about itself rather than inferred from the address
+/// members reach it at — an anchor on a LAN address behind a public vhost has two, and only one of
+/// them is a browser's.
+/// </param>
+/// <param name="Orphaned">
+/// Whether the holder is no longer in this node's roster. The cluster has an anchor on paper and
+/// nobody serving it, which reads as healthy everywhere else.
+/// </param>
+public sealed record ClusterAuthAnchor(bool Held, string MemberId, string? Url, bool Orphaned);

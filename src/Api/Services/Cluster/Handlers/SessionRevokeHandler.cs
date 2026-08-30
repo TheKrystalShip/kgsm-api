@@ -15,6 +15,12 @@ namespace TheKrystalShip.Api.Services.Cluster.Handlers;
 /// once applied.
 /// </summary>
 /// <remarks>
+/// <b>It ends two kinds of session.</b> One this host minted has a row, and revoking it is a write to
+/// that row. One the cluster's auth anchor minted has none — the sign-in happened on a different
+/// machine — so ending it here means recording that it is over, because the bearer is verified
+/// against a published key and needs no row to be accepted. The handler does both and does not have
+/// to know which it was handed.
+/// <para>
 /// <b>Idempotent by construction.</b> <see cref="SessionStore.RevokeAsync"/> and
 /// <see cref="SessionStore.RevokeAllForUserAsync"/> are themselves no-ops on an already-revoked/absent
 /// row, so replaying this handler for the same envelope (or receiving two different envelopes that
@@ -22,10 +28,12 @@ namespace TheKrystalShip.Api.Services.Cluster.Handlers;
 /// requires. A malformed-but-known-type payload (missing the field the scope needs) is logged and
 /// swallowed, never thrown — throwing here surfaces as a transient <c>500</c> and the sender retries
 /// forever against a payload that can never become valid.
+/// </para>
 /// </remarks>
 public sealed class SessionRevokeHandler(
     SessionStore sessionStore,
     ISessionValidator sessionValidator,
+    ClusterSessionRevocations clusterSessions,
     ApiOptions options,
     ILogger<SessionRevokeHandler> logger) : IClusterMessageHandler
 {
@@ -48,7 +56,20 @@ public sealed class SessionRevokeHandler(
                 }
                 // Idempotent: RevokeAsync no-ops (returns false) on an already-revoked or absent row.
                 await sessionStore.RevokeAsync(sid, ct).ConfigureAwait(false);
+
+                // A session minted by the cluster's anchor has no row here — it was never a login on
+                // this host — so there is nothing for the revoke above to act on, and this host would
+                // go on accepting its bearer. The marker is what ends it. Also a no-op when a row is
+                // already present, so the two calls together handle both kinds of session without the
+                // handler having to know which it was given.
+                await sessionStore.RecordRevocationAsync(
+                    sid,
+                    options.HostId,
+                    DateTimeOffset.UtcNow.AddDays(options.SessionsRefreshAbsoluteDays),
+                    ct).ConfigureAwait(false);
+
                 sessionValidator.Evict(sid);
+                clusterSessions.Evict(sid);
                 break;
             }
 

@@ -8,6 +8,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a session this node did not mint (0.162.0)
+
+A person signs in once, against the cluster's auth anchor, and every member accepts what they get.
+This node now verifies the anchor's ES256 signature against the key that member publishes, and
+resolves everything the session means — the tier, whether the account is switched off — from its own
+replica. Nothing on the request path leaves the machine, and this node cannot mint what it checks:
+what it holds is a public point.
+
+Two kinds of session, held to opposite questions about the same table. One this host minted has a
+row, so the row is the session and no live row means no session. One the anchor minted has no row
+here, so the only thing worth storing about it is that somebody ended it — and a `session.revoke`
+arriving over the bus records exactly that, which is what makes signing out at the anchor sign
+somebody out everywhere rather than only there.
+
+`ClusterSessionKeys` reads the keys, the audience and the issuer **through the member holding the
+`auth` capability**, refreshed at the gossip cadence. Reading them off whichever member states them
+would let any member substitute the key sessions are verified against; going through the holder means
+substituting one requires reassigning the capability, which is a visible change to cluster state. A
+reassignment or a key rotation therefore needs no restart here.
+
+A host with no cluster, or one that has not heard who holds the accounts, accepts no cluster session
+at all and serves its own exactly as a standalone install always has.
+
+### Added — where this cluster signs people in (0.162.0)
+
+`GET /api/v1/cluster/auth`, unauthenticated, names the member holding the accounts and the address a
+browser reaches it at. Unauthenticated is the point: the caller has no session, which is why it is
+asking, and what it learns is what the sign-in page it is about to be sent to would tell it.
+
+Three ways of not having an answer are kept apart, because a person acts on each differently and a
+browser cannot tell them apart: no anchor at all, a holder that has left the cluster, and a holder
+that states no browser-reachable address.
+
 ### Added — a joining node takes the cluster's accounts before it follows them (0.161.0)
 
 The stream alone is not enough. A node that joins on Tuesday only ever hears what changed after it

@@ -726,6 +726,23 @@ public class Startup(IConfiguration configuration)
         // and a host given none generates one and keeps it, so sessions outlive a restart on a machine
         // nobody handed a secret to.
         services.AddSingleton<HostSigningKey>();
+
+        // The other kind of session this host accepts: one the cluster's auth anchor minted, verified
+        // against the key it publishes. The keys are read through the capability's holder and refreshed
+        // at the gossip cadence, so a reassignment or a rotation needs no restart here. A host that is
+        // not in a cluster learns nothing and accepts only its own sessions, which is the whole of what
+        // a standalone install has ever done.
+        services.AddSingleton<ClusterSessionKeys>();
+        services.AddSingleton<IClusterSessionKeys>(sp => sp.GetRequiredService<ClusterSessionKeys>());
+        services.AddHostedService(sp => sp.GetRequiredService<ClusterSessionKeys>());
+
+        // A cluster session has no row here, so the only thing worth storing about one is that it has
+        // been ended. Same cache bound as the validator beside it, for the same reason.
+        services.AddSingleton(sp => new ClusterSessionRevocations(
+            sp.GetRequiredService<SessionStore>(),
+            sp.GetRequiredService<IMemoryCache>(),
+            TimeSpan.FromMilliseconds(sp.GetRequiredService<ApiOptions>().SessionsCacheTtlMs)));
+
         services.AddSingleton<ISessionTokenService>(sp => new SessionTokenService(
             sp.GetRequiredService<ApiOptions>().ToSessionTokenOptions()
                 with { SigningKey = sp.GetRequiredService<HostSigningKey>().Value },
@@ -826,17 +843,15 @@ public class Startup(IConfiguration configuration)
                             return;
                         }
 
-                        // M4·c — the per-request session check (cached). The sid claim is the session
-                        // registry key; the validator consults the SessionEntry row (≤5s cache) for
-                        // `Id == sid && !Revoked && Expires > now`. The escape hatch
-                        // (Api__SessionsDisabled) bypasses the whole block — the pre-M4·c stateless
-                        // posture, for debugging. D10: a pre-M4·c token (no sid claim) is REJECTED here
-                        // → 401 → relogin. That's the clean break the milestone ships — only sid-bearing
-                        // tokens pass. The check runs AFTER the access-kind gate (a refresh token never
-                        // reaches here) and AFTER the signature/payload validation (JwtBearer has already
-                        // confirmed the issuer/audience/lifetime/signing). The SSE path rides the same
-                        // event (the bearer is set by OnMessageReceived for /stream → OnTokenValidated
-                        // fires here).
+                        // The per-request session check, cached. It runs AFTER the access-kind gate (a
+                        // refresh token never reaches here) and AFTER the signature, issuer, audience
+                        // and lifetime have all been confirmed — so what is left to establish is only
+                        // whether the session behind a genuine token is still live. The SSE path rides
+                        // the same event, its bearer set by OnMessageReceived for /stream.
+                        //
+                        // Api__SessionsDisabled bypasses the whole block, which is the stateless-JWT
+                        // posture kept for debugging. A token carrying no sid is refused: a session
+                        // nothing can revoke is not one this host is willing to hold open.
                         var svc = ctx.HttpContext.RequestServices;
                         var opts = svc.GetRequiredService<ApiOptions>();
                         if (!opts.SessionsEnabled)
@@ -845,13 +860,38 @@ public class Startup(IConfiguration configuration)
                         string? sid = ctx.Principal?.FindFirst(KgsmAuthClaims.SessionId)?.Value;
                         if (string.IsNullOrEmpty(sid))
                         {
-                            ctx.Fail("no session id (pre-M4·c token)");
+                            ctx.Fail("no session id");
                             return;
                         }
 
-                        var validator = svc.GetRequiredService<ISessionValidator>();
-                        if (!await validator.IsValidAsync(sid, ctx.HttpContext.RequestAborted)
-                            .ConfigureAwait(false))
+                        if (ctx.Principal?.Identity is not ClaimsIdentity claims)
+                        {
+                            ctx.Fail("the bearer carries no claims identity");
+                            return;
+                        }
+
+                        // Two kinds of session, held to opposite questions about the same table.
+                        //
+                        // One this host minted has a row, so the row IS the session: no live row means
+                        // no session, and the check is an allow-list.
+                        //
+                        // One the cluster's auth anchor minted has no row here — the sign-in happened
+                        // on another machine — and is accepted because its signature verifies against
+                        // the key that member publishes. There is nothing to look up, so the only
+                        // thing worth storing is that somebody ended it, and the check is a deny-list.
+                        // Running the allow-list against a cluster session would refuse every one of
+                        // them, which is "sign in once" failing on every member but the anchor.
+                        if (ClusterSessionValidation.IsClusterSession(claims, opts.HostId))
+                        {
+                            if (await svc.GetRequiredService<ClusterSessionRevocations>()
+                                .IsRevokedAsync(sid, ctx.HttpContext.RequestAborted).ConfigureAwait(false))
+                            {
+                                ctx.Fail("cluster session ended");
+                                return;
+                            }
+                        }
+                        else if (!await svc.GetRequiredService<ISessionValidator>()
+                            .IsValidAsync(sid, ctx.HttpContext.RequestAborted).ConfigureAwait(false))
                         {
                             ctx.Fail("session revoked or expired");
                             return;
@@ -864,12 +904,6 @@ public class Startup(IConfiguration configuration)
                         // it — which re-derives per request — cannot disagree about the same person.
                         // A disabled account fails here, which is what makes the switch cut live
                         // sessions on every surface with no cross-service call.
-                        if (ctx.Principal?.Identity is not ClaimsIdentity claims)
-                        {
-                            ctx.Fail("the bearer carries no claims identity");
-                            return;
-                        }
-
                         if (await svc.GetRequiredService<LiveAuthority>()
                             .ApplyAsync(claims, ctx.HttpContext.RequestAborted).ConfigureAwait(false) is { } refusal)
                         {
@@ -894,10 +928,13 @@ public class Startup(IConfiguration configuration)
                     },
                 };
             });
-            // The signing key lives in the token service (derived once); share its validation rules so
-            // access tokens and refresh tokens validate identically.
+            // The signing key lives in the token service (derived once); its rules are shared so this
+            // host's access and refresh tokens validate identically, and widened so the anchor's
+            // sessions validate beside them under rules of their own.
             services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
-                .Configure<ISessionTokenService>((o, tokens) => o.TokenValidationParameters = tokens.ValidationParameters);
+                .Configure<ISessionTokenService, IClusterSessionKeys>((o, tokens, clusterKeys) =>
+                    o.TokenValidationParameters =
+                        ClusterSessionValidation.Accepting(tokens.ValidationParameters, clusterKeys));
         }
         else
         {
