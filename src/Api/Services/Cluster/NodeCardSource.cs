@@ -19,7 +19,7 @@ public sealed class NodeCardSource(
     SelfMemberCardSource inner,
     HostIdentityProvider hostIdentity,
     LeafHealthMonitor leafHealth,
-    ApiOptions options) : IMemberCardSource
+    ClusterOptions cluster) : IMemberCardSource
 {
     public async Task<MemberCard> BuildAsync(CancellationToken ct)
     {
@@ -29,7 +29,7 @@ public sealed class NodeCardSource(
             Node = new NodeFacts(
                 ApiInfo.ApiVersion,
                 hostIdentity.Build,
-                NodeCapabilities.Current(leafHealth.Current, options.ClusterEnabled)),
+                NodeCapabilities.Current(leafHealth.Current, cluster.Enabled)),
         };
     }
 }

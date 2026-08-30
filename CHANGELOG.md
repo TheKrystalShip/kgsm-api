@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the cluster secret is host-level (0.156.0)
+
+`Api__ClusterSecret` is gone. The secret lives in `/etc/kgsm/kgsm-cluster.env` as `Cluster__Secret`,
+which this unit loads before its own env file, and is read through `TheKrystalShip.KGSM.Cluster` so
+every member on the machine spells the key identically.
+
+One value the whole host shares, because a host can run more than one member of a cluster — this API,
+and later an auth anchor beside it — and a member holding a different secret is one the others cannot
+authenticate. Nothing reports that as an error: "not clustered" and "wrong secret" look the same from
+inside a member.
+
+**On upgrade, move the secret.** Take the value from `Api__ClusterSecret` in
+`/etc/kgsm-api/kgsm-api.env`, put it in `Cluster__Secret` in `/etc/kgsm/kgsm-cluster.env`, and delete
+the old key. A host that skips this starts cleanly and reports itself standalone.
+
 ### Changed — the enabled-member gate comes from the cluster package (0.155.1)
 
 Every member holds a roster, so every member answers "is this caller disabled" the same way. That

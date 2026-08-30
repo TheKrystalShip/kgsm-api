@@ -727,24 +727,6 @@
       "risk": "safe"
     },
     {
-      "key": "clusterSecret",
-      "env": "Api__ClusterSecret",
-      "label": "Cluster secret",
-      "description": "Shared secret every host in the cluster authenticates to the others with. Empty means this host is standalone.",
-      "group": "cluster",
-      "type": "secret",
-      "risk": "wiring"
-    },
-    {
-      "key": "clusterSecretPrevious",
-      "env": "Api__ClusterSecretPrevious",
-      "label": "Previous cluster secret",
-      "description": "The secret being rotated away from, still accepted so the cluster does not split apart mid-rotation.",
-      "group": "cluster",
-      "type": "secret",
-      "risk": "wiring"
-    },
-    {
       "key": "clusterGossipUrl",
       "env": "Api__ClusterGossipUrl",
       "label": "Peer URL",

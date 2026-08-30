@@ -325,8 +325,6 @@ public class LeafDescriptorSelfTests
             "Api__SigningKey",
             "KgsmAuth__Providers__discord__ClientSecret",
             "Api__AssistantRelaySecret",
-            "Api__ClusterSecret",
-            "Api__ClusterSecretPrevious",
             "Api__RawgApiKey",
         ];
 

@@ -7,6 +7,7 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Messaging;
 
 using TheKrystalShip.KGSM.Auth;
@@ -44,7 +45,8 @@ public sealed class SessionController(
     ApiOptions options,
     ApiJournal journal,
     IClusterBus clusterBus,
-    RosterClusterTargetProvider rosterTargets) : ControllerBase
+    RosterClusterTargetProvider rosterTargets,
+    ClusterOptions cluster) : ControllerBase
 {
     // The same camelCase, Z-timestamp convention every response on this API uses, so a payload the bus
     // carries and a payload a browser reads have one shape.
@@ -68,7 +70,7 @@ public sealed class SessionController(
     /// </summary>
     private async Task FanOutRevokeAllAsync(string rawDiscordId, CancellationToken ct)
     {
-        if (!options.ClusterEnabled)
+        if (!cluster.Enabled)
             return;
 
         IReadOnlyList<ClusterTarget> targets = await rosterTargets.GetEnabledTargetsAsync(ct).ConfigureAwait(false);

@@ -140,6 +140,36 @@ SHARED_AUTH
     $SUDO chown "${DEPLOY_USER}:${DEPLOY_GROUP}" "$SHARED_AUTH_FILE"
 fi
 
+# ── 2a·ii. The shared cluster secret ──────────────────────────────────────────
+# One value every member of a cluster on this host holds — this API today, an auth anchor beside it
+# later — so it is set once here rather than once per member. Seeded blank and never overwritten: a
+# re-run on a clustered host must not split it apart. Owned by the deploying user so it can be edited
+# without privilege; 0600 because it is a secret.
+if [[ ! -f "$SHARED_CLUSTER_FILE" ]]; then
+    log "seeding ${SHARED_CLUSTER_FILE} — blank, which means this host is not part of a cluster"
+    $SUDO install -d -m 0755 "$(dirname "$SHARED_CLUSTER_FILE")"
+    $SUDO install -m 0600 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" /dev/null "$SHARED_CLUSTER_FILE"
+    $SUDO tee "$SHARED_CLUSTER_FILE" >/dev/null <<'SHARED_CLUSTER'
+# ── KGSM cluster — read by every member on this host ──────────────────────────
+# The secret every member of a cluster carries. It is what proves membership: a member trusts any
+# caller bearing a service token signed with it. Generate one and copy it to every machine:
+#
+#   openssl rand -hex 32
+#
+# Blank means this host is not part of a cluster, which is a state and not a misconfiguration.
+#
+# Loaded by each member's unit BEFORE its own env file, so one member can override it deliberately —
+# but a member holding a different secret is a member the others cannot authenticate, and nothing
+# logs that as an error because "no cluster" and "wrong secret" look the same from here.
+Cluster__Secret=
+
+# Rotating: put the NEW secret above and the OLD one here, roll every member, then clear this. Both
+# are accepted while it is set, so a roll needs no downtime.
+Cluster__SecretPrevious=
+SHARED_CLUSTER
+    $SUDO chown "${DEPLOY_USER}:${DEPLOY_GROUP}" "$SHARED_CLUSTER_FILE"
+fi
+
 # ── 2b. The shared leaf-descriptor directory ──────────────────────────────────
 # Where this leaf declares its configurable surface for the Control Panel. Shared by every leaf
 # and scanned by kgsm-api, so it is created once by whichever project's setup.sh runs first and

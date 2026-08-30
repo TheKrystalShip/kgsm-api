@@ -666,8 +666,12 @@ public class Startup(IConfiguration configuration)
         services.AddKgsmCluster(new ClusterOptions
         {
             MemberId = apiOptions.NodeId,
-            Secret = apiOptions.ClusterSecret,
-            SecretPrevious = apiOptions.ClusterSecretPrevious,
+            // Host-level, from /etc/kgsm/kgsm-cluster.env, which this unit loads before its own env
+            // file. Read through the package so every member of a cluster on this machine spells the
+            // key the same way — one that spells it differently reads a blank and concludes, silently,
+            // that it is not clustered.
+            Secret = ClusterConfiguration.Secret(configuration),
+            SecretPrevious = ClusterConfiguration.SecretPrevious(configuration),
             // Beside this API's own database rather than inside it: the roster and the queues are
             // cluster state, and this API's database is operational state that is wiped whenever its
             // schema changes. Named FROM that database rather than fixed within its directory, so the

@@ -15,8 +15,8 @@ public static class NodeCapabilities
     /// <summary>
     /// The ids of every capability currently provisioned on this node — the same leaves the §4·b capability
     /// model reports (<paramref name="capabilities"/>, read from <see cref="LeafHealthMonitor.Current"/>),
-    /// plus <c>"cluster"</c> when <paramref name="clusterEnabled"/> (<see cref="ApiOptions.ClusterEnabled"/>)
-    /// is true. <c>"cluster"</c> is never a <see cref="LeafCatalog"/> entry — it has no systemd unit, so a
+    /// plus <c>"cluster"</c> when <paramref name="clusterEnabled"/> is true — this member holds a cluster
+    /// secret. <c>"cluster"</c> is never a <see cref="LeafCatalog"/> entry — it has no systemd unit, so a
     /// Services-board card would be a phantom — this is the one place it is advertised.
     /// </summary>
     public static IReadOnlyList<string> Current(HostCapabilities capabilities, bool clusterEnabled)

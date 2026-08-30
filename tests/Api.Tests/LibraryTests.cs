@@ -307,7 +307,7 @@ public sealed class LibraryAggregatorTests
         AuthDisabled = true, DisabledAuthActor = "local:test", SigningKey = "", OAuth = new KgsmAuthOptions(),
         DiscordRedirectUri = "", AuthFrontendUrl = "",
         SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
-        ClusterSecret = "", ClusterSecretPrevious = "", NodeId = "test",
+        NodeId = "test",
     };
 
     // A RawgStore over a fresh per-call on-disk temp SQLite DB (the project's "tests use a fresh temp DB"

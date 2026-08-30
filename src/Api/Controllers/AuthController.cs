@@ -12,6 +12,7 @@ using TheKrystalShip.Api.Json;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
+using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Identity;
 using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Messaging;
@@ -52,6 +53,7 @@ public sealed class AuthController(
     IClusterTokenService clusterTokens,
     IClusterMemberGate peerGate,
     MembersStore members,
+    ClusterOptions cluster,
     IHttpClientFactory httpClientFactory,
     ILogger<AuthController> logger) : ControllerBase
 {
@@ -615,7 +617,7 @@ public sealed class AuthController(
         // A disabled/unconfigured cluster has an empty roster anyway (nothing seeds rows
         // without ClusterEnabled), so this is redundant with the lookup below — kept only so the
         // "no cluster here at all" case reads as an explicit early-out rather than a roster miss.
-        if (!options.ClusterEnabled)
+        if (!cluster.Enabled)
             return Error(StatusCodes.Status404NotFound, "unknown_member", $"member '{body.NodeId}' is not in this cluster");
 
         MemberRow? peer = await members.GetByMemberIdAsync(body.NodeId, ct);

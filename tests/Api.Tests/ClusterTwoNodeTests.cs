@@ -408,7 +408,7 @@ public sealed class ClusterNodeFactory(
                 // history into every assertion about what a test just did.
                 ["Api:JournalStateRoot"] =
                     Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-state-{Guid.NewGuid():N}"),
-                ["Api:ClusterSecret"] = clusterSecret,
+                ["Cluster:Secret"] = clusterSecret,
                 // Clamped to a 250ms floor by ApiOptions.FromConfiguration regardless of what's passed.
                 ["Api:ClusterDrainMs"] = drainMs.ToString(CultureInfo.InvariantCulture),
                 // P0.5 gossip cadence — floored by ApiOptions.FromConfiguration (gossip 250ms,

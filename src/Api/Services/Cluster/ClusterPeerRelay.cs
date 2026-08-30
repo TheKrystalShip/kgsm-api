@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using TheKrystalShip.Api.Data;
 
+using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Identity;
 using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Messaging;
@@ -42,7 +43,7 @@ public sealed class ClusterPeerRelay(
     MembersStore members,
     IClusterTokenService clusterTokens,
     IHttpClientFactory httpClientFactory,
-    ApiOptions options,
+    ClusterOptions cluster,
     ILogger<ClusterPeerRelay> logger)
 {
     /// <summary>Relay a GET to peer <paramref name="peerId"/>'s <c>/peers/self/{<paramref name="leaf"/>}</c>
@@ -52,7 +53,7 @@ public sealed class ClusterPeerRelay(
     {
         // A non-cluster node has an empty roster, so this
         // reads as an explicit "unknown node," matching the vouch relay's early-out.
-        if (!options.ClusterEnabled)
+        if (!cluster.Enabled)
             return new ClusterRelayResult(ClusterRelayStatus.UnknownNode, null, null);
 
         MemberRow? peer = await members.GetAsync(peerId, ct).ConfigureAwait(false);

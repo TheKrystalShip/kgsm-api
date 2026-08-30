@@ -156,6 +156,12 @@ LEAF_DESCRIPTOR_DIR="${KGSM_LEAF_DESCRIPTOR_DIR:-/var/lib/kgsm/leaves}"
 # different surfaces. Each unit loads it before its own env file; setup.sh seeds it blank.
 SHARED_AUTH_FILE="${KGSM_SHARED_AUTH_FILE:-/etc/kgsm/kgsm-auth.env}"
 
+# The cluster secret every member on this host holds. One file rather than one copy per member: a
+# machine can run more than one member of a cluster — a node and an auth anchor — and they must all
+# hold the same secret or each concludes separately that it is not clustered. Each unit loads it
+# before its own env file; setup.sh seeds it blank.
+SHARED_CLUSTER_FILE="${KGSM_SHARED_CLUSTER_FILE:-/etc/kgsm/kgsm-cluster.env}"
+
 # Where this host keeps its KGSM accounts — the store every surface on the box reads directly, so
 # one person is one account whichever door they come through. A directory of its own rather than a
 # file under /var/lib/kgsm: SQLite writes -wal/-shm BESIDE the database, so WAL needs write

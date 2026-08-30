@@ -485,26 +485,9 @@ public sealed class ApiOptions
         _ => Environment.GetEnvironmentVariable(envName),
     };
 
-    // --- Cluster message bus (docs/cluster-message-bus-plan.md, PLAN-peers.md §3) — the shared
-    //     secret + node identity behind the cluster service token (node-to-node auth). Opt-in like
-    //     the assistant/firewall: a blank secret means this host is not part of a cluster and the
-    //     bus stays dormant (no inbox endpoint, no drainer — those land in later phases). -------------
-
-    /// <summary>
-    /// The shared cluster HMAC secret (<c>Api__ClusterSecret</c>) every node in the guild is
-    /// configured with — distinct from <see cref="SigningKey"/> (leaking one never hands over the
-    /// other's forgery). Blank ⇒ the cluster capability is not provisioned (<see cref="ClusterEnabled"/>
-    /// is <see langword="false"/>): no service token can be minted or validated on this host.
-    /// </summary>
-    public required string ClusterSecret { get; init; }
-
-    /// <summary>
-    /// The previous cluster secret (<c>Api__ClusterSecretPrevious</c>), accepted alongside
-    /// <see cref="ClusterSecret"/> during a rotation overlap window (<c>PLAN-peers.md §2</c> #9): roll
-    /// one node at a time, then drop this once every node is on the new secret. Blank ⇒ no previous
-    /// secret is accepted (the normal, non-rotating posture).
-    /// </summary>
-    public required string ClusterSecretPrevious { get; init; }
+    // --- Cluster. The secret is not here: it is host-level, shared by every member on the machine, and
+    //     read through the cluster package (Cluster__Secret). What remains is this member's own identity
+    //     and its own tuning. -----------------------------------------------------------------------
 
     /// <summary>
     /// This node's cluster identity (<c>Api__NodeId</c>) — the <c>sub</c>/<c>iss</c> a minted
@@ -514,18 +497,11 @@ public sealed class ApiOptions
     /// </summary>
     public required string NodeId { get; init; }
 
-    /// <summary>
-    /// Whether this host is part of a cluster (a non-blank <see cref="ClusterSecret"/>). When
-    /// <see langword="false"/> the cluster service token cannot be minted (<see
-    /// cref="Services.Cluster.IClusterTokenService.Mint"/> throws) and never validates — the bus,
-    /// the inbox endpoint, and every peer feature built on top of it (later phases) stay dormant.
-    /// </summary>
-    public bool ClusterEnabled => !string.IsNullOrWhiteSpace(ClusterSecret);
 
     // --- Cluster message bus, Phase 3 (the outbox drainer + GC — docs/cluster-message-bus-plan.md
-    //     §6/§7). Not `required`: like the alert `Policy` above, these carry a sane default
-    //     so the many existing test-built ApiOptions literals don't need updating for an opt-in feature
-    //     that is inert whenever ClusterEnabled is false. -----------------------------------------------
+    //     §6/§7). Not `required`: like the alert `Policy` above, these carry a sane default so the many
+    //     existing test-built ApiOptions literals need no update for a feature that is inert whenever
+    //     this member holds no cluster secret. ---------------------------------------------------------
 
     /// <summary>
     /// How often (ms) the outbox drainer ticks (<c>Api__ClusterDrainMs</c>, default 1000 = 1s,
@@ -558,8 +534,8 @@ public sealed class ApiOptions
     public int ClusterGcMs { get; init; } = 600000;
 
     // --- Cluster membership gossip (PLAN-peers.md §2·b, P0.5) — the masterless anti-entropy layer that
-    //     converges the roster ("add one, join all"). All inert whenever ClusterEnabled is false; sane
-    //     defaults so existing ApiOptions literals need no update. ------------------------------------------
+    //     converges the roster ("add one, join all"). All inert whenever this member holds no cluster
+    //     secret; sane defaults so existing ApiOptions literals need no update. ------------------------
 
     /// <summary>
     /// An address only other nodes use (<c>Api__ClusterGossipUrl</c>, <c>PLAN-peers.md §2</c> #13a) — for a
@@ -1040,11 +1016,9 @@ public sealed class ApiOptions
             // one this API would have to guess from how the host was provisioned.
             LeafDropInDir = Defaulted(s.LeafDropInDir, ""),
 
-            // Cluster message bus foundation. Blank secret => ClusterEnabled false => the cluster
-            // service token seam stays dormant. NodeId defaults to the already-resolved HostId,
-            // not Environment.MachineName a second time.
-            ClusterSecret = Defaulted(s.ClusterSecret, ""),
-            ClusterSecretPrevious = Defaulted(s.ClusterSecretPrevious, ""),
+            // This member's cluster identity. It defaults to the already-resolved HostId rather than
+            // reading the machine name a second time: a node's identity in a cluster is the same stable
+            // id its host card already carries, never a second independent name.
             NodeId = Clean(s.NodeId) ?? hostId,
 
             // The outbox drainer + GC cadence/TTL. The retention floor is computed from the

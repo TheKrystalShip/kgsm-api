@@ -336,7 +336,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
         AuthDisabled = true, DisabledAuthActor = "local:test", SigningKey = "", OAuth = new KgsmAuthOptions(),
         DiscordRedirectUri = "", AuthFrontendUrl = "",
         SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
-        ClusterSecret = "", ClusterSecretPrevious = "", NodeId = "test",
+        NodeId = "test",
     };
 
     private static RawgStore NewStore()

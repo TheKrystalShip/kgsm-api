@@ -49,7 +49,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
         {
             b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Api:ClusterSecret"] = ClusterSecret,
+                ["Cluster:Secret"] = ClusterSecret,
                 ["Api:NodeId"] = NodeId,
             }));
             if (handshakeHandler is not null)

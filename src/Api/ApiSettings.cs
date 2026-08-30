@@ -443,19 +443,10 @@ public sealed class ApiSettings
 
 
     // ── Cluster ──────────────────────────────────────────────────────
-    /// <summary>The shared cluster HMAC secret. Blank means this host is not part of a cluster.</summary>
-    /// <panel>Shared secret every host in the cluster authenticates to the others with. Empty means this
-    /// host is standalone.</panel>
-    [LeafField("clusterSecret", "Cluster secret", Group = "cluster", Type = LeafType.Secret,
-        Risk = LeafRisk.Wiring, NoDefault = true)]
-    public string? ClusterSecret { get; set; }
-
-    /// <summary>The previous cluster secret, accepted during a rotation overlap.</summary>
-    /// <panel>The secret being rotated away from, still accepted so the cluster does not split apart
-    /// mid-rotation.</panel>
-    [LeafField("clusterSecretPrevious", "Previous cluster secret", Group = "cluster",
-        Type = LeafType.Secret, Risk = LeafRisk.Wiring, NoDefault = true)]
-    public string? ClusterSecretPrevious { get; set; }
+    // The cluster secret is NOT here. It is one value every member of a cluster holds identically, and
+    // on a machine running several it comes from one shared file (Cluster__Secret in
+    // /etc/kgsm/kgsm-cluster.env) that each unit loads before its own. A copy of it on this API's own
+    // settings surface would be a second place for it to be set and a second place for it to be wrong.
 
     /// <summary>Override for a node-to-node-only address, for a topology where peers must not take the
     /// browser-reachable path. Blank offers no node-only address.</summary>

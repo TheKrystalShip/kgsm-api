@@ -162,10 +162,9 @@
       "LeafApplyCanaryMs": 15000,
 
       // ── Cluster ──
-      // The shared cluster HMAC secret. Blank means this host is not part of a cluster.
-      "ClusterSecret": "",
-      // The previous cluster secret, accepted during a rotation overlap.
-      "ClusterSecretPrevious": "",
+      // The cluster secret is not here. It is host-level, in /etc/kgsm/kgsm-cluster.env as
+      // Cluster__Secret, loaded by every member's unit before its own — one value the whole machine
+      // shares, so it is set once rather than once per member.
       // Override for a node-to-node-only address, for a topology where peers must not take the
       // browser-reachable path. Blank offers no node-only address.
       "ClusterGossipUrl": "",

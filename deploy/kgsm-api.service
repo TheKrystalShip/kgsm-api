@@ -50,6 +50,9 @@ Environment=ASPNETCORE_ENVIRONMENT=Production
 # granting the same person different authority on different surfaces, so prefer the shared file.
 # Seeded by deploy/setup.sh; optional, so a host that never provisioned it still starts.
 EnvironmentFile=-/etc/kgsm/kgsm-auth.env
+# The cluster secret every member on this host holds, before this unit's own file so a member could
+# override it deliberately — though a member on a different secret is one the others cannot reach.
+EnvironmentFile=-/etc/kgsm/kgsm-cluster.env
 EnvironmentFile=-/etc/kgsm-api/kgsm-api.env
 
 # systemd creates these owned by the service user: the DB lives under StateDirectory, the
