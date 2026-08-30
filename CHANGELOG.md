@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — an existing cluster store is upgraded rather than silently half-working (0.160.1)
+
+A `cluster.db` created before per-member facts never gained the column they added, and the gossip
+worker and the latency poller then failed every tick. The member kept answering `/health` and serving
+every request while taking no part in the mesh at all: refuting nothing said about it, learning no
+new member, and never seeing a capability reassignment. Healthy from outside, absent from the cluster.
+
+The cluster package now adds the column to the table that exists, and refuses to start on a store it
+still cannot query rather than carrying on past it.
+
+hotrod escaped this only because both its stores happen to post-date the change. Any member that has
+ever been part of a cluster was upgrade-unsafe across it.
+
+### Added — this node keeps its own copy of the cluster's accounts (0.160.0)
+
+`account.changed` and `account.removed` are applied to this node's own account store, so it can
+answer *who is this and what may they do* without leaving the machine. That is what lets serving,
+streaming and session refresh carry on while the member holding the accounts is unreachable — and it
+is why the local read stays exactly as immediate as it was.
+
+The node gains no process for it: it already has a cluster inbox, and these are handlers on it. The
+work itself is the shared auth package's `AccountReplica`, so a replica applies a change identically
+wherever it runs.
+
+**Nothing here throws.** A `500` is the only answer that keeps a message in the sender's outbox, and
+every outcome these handlers reach is permanent — a stale change never becomes newer, and a username
+conflict never resolves by being retried. Throwing would wedge the sender's queue behind a message it
+can never deliver, taking every later account change with it, including a disable. A node whose
+account store cannot be read says so and drops the message for the same reason.
+
 ### Fixed — a loopback address is never gossiped onward (0.159.1)
 
 Gossip carries a member's whole roster, not only what it says about itself — so a loopback address
