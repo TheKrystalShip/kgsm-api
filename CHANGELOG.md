@@ -8,6 +8,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — account events written elsewhere, read back here (0.167.0)
+
+A cluster whose accounts are held by an auth anchor has the anchor record every sign-in, because it is
+the only thing that witnesses one. Those lines land in the anchor's own journal, which this API
+already reads beside every other producer's — so the merge needed nothing added to find them.
+
+**The wording, the severity and the meta keys are unchanged**, because the shaping dispatches on the
+event type and knows nothing about which journal a line came from. A reader sees one unbroken series
+of `auth.signed_in` rows across the point where an anchor took the accounts over, filterable as one
+type. The producer is still established honestly — it comes from the path a line was read out of,
+which is a fact this API checks rather than a claim in a payload.
+
+The wire shapes come from `TheKrystalShip.KGSM.Auth.Journal` and are called rather than described a
+second time. Two components write these and one reads them, and a field spelled differently by one of
+the writers does not throw: it deserializes to null, and the row renders with a name missing and
+nothing reported.
+
+### Added — a run of wrong passwords is a row (0.167.0)
+
+`auth.locked_out` renders as **danger**, the only `auth.*` row that does. Every other one records
+something that worked; this is somebody working through passwords against an account that exists,
+which is what an access review is looking for and what nothing has ever recorded.
+
+The count is in the sentence, because "locked out" alone reads like somebody mistyping and six
+consecutive failures does not. What was *tried* is not on the row: a near miss in the record is a near
+miss anybody who can read the page now holds.
+
+### Added — a session that ended because its account was switched off (0.167.0)
+
+`auth.session.revoked` gains the `withdrawn` scope, which names no actor. Nobody acted at the moment
+it happened — the disable is already its own row and can be hours earlier — and this is when the
+access actually stopped, which is the question an incident review asks. The three scopes a person
+drove still read as theirs.
+
+### Fixed — approving from a notification wrote to a replica (0.167.0)
+
+The approve button on a push notification is a POST on a notifications route rather than an `/auth`
+one, so it stayed open on a node whose cluster has an auth anchor. It wrote to that node's replica:
+unversioned by the anchor, and overwritten by the next thing published about the account — reporting
+success from a lock screen for something that quietly stopped having happened.
+
+It now names the anchor and where to approve instead. The notification is still worth sending, and an
+admin answering it needs somewhere to go rather than a blank refusal.
+
 ### Changed — a node whose cluster has an anchor answers for no account (0.166.0)
 
 This API served a complete second front door: sign-in, registration, the provider bounce, session

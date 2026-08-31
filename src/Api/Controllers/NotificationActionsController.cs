@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Audit;
@@ -236,6 +237,19 @@ public sealed class NotificationActionsController(
     {
         if (tier < KgsmTier.Admin)
             return Refuse("That account is not allowed to approve accounts.");
+
+        // The accounts may not be this node's to answer for. Approving here would write to the
+        // replica: unversioned by the anchor, and overwritten by the next thing it publishes about
+        // that account — so it would report success from a lock screen and quietly stop having
+        // happened. Named rather than refused blankly, because an admin answering a notification
+        // needs somewhere to go, and the notification is still worth having sent.
+        if (await HttpContext.RequestServices.GetRequiredService<AnchorHeldGate>()
+            .HolderAsync(ct).ConfigureAwait(false) is { } elsewhere)
+        {
+            return Refuse(elsewhere.Url is { Length: > 0 } at
+                ? $"This cluster's accounts are held by '{elsewhere.MemberId}'. Approve at {at}."
+                : $"This cluster's accounts are held by '{elsewhere.MemberId}'.");
+        }
 
         KgsmUser? account;
         try

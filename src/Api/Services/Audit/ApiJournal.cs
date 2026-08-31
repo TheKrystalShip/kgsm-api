@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TheKrystalShip.KGSM.Auth.Journal;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Services;
 
@@ -41,20 +42,26 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
 {
     // ---- the types this producer owns ----------------------------------------------------------
 
-    public const string LoginEvent = "auth.signed_in";
-    public const string LogoutEvent = "auth.signed_out";
-    public const string ClusterSessionEvent = "auth.cluster.vouched";
-    public const string SessionRevokedEvent = "auth.session.revoked";
+    // The account events are NOT this producer's own vocabulary, and the names come from the shared
+    // contract rather than being spelled again here. A host that holds its own accounts records them
+    // from this API; a cluster whose accounts are held by an auth anchor has the anchor record them.
+    // A reader deserializes each into a fixed shape, so a name or a field spelled differently by one
+    // of the two writers does not throw — it simply matches nothing, or lands as a null.
+    public const string LoginEvent = AuthEvents.SignedIn;
+    public const string LogoutEvent = AuthEvents.SignedOut;
+    public const string ClusterSessionEvent = AuthEvents.ClusterVouched;
+    public const string SessionRevokedEvent = AuthEvents.SessionRevoked;
+    public const string LockedOutEvent = AuthEvents.LockedOut;
 
-    public const string UserProvisionedEvent = "user.provisioned";
-    public const string UserApprovedEvent = "user.approved";
-    public const string UserDisabledEvent = "user.disabled";
-    public const string UserTierChangedEvent = "user.tier_changed";
-    public const string UserDeletedEvent = "user.deleted";
-    public const string UserPasswordChangedEvent = "user.password_changed";
+    public const string UserProvisionedEvent = AuthEvents.UserProvisioned;
+    public const string UserApprovedEvent = AuthEvents.UserApproved;
+    public const string UserDisabledEvent = AuthEvents.UserDisabled;
+    public const string UserTierChangedEvent = AuthEvents.UserTierChanged;
+    public const string UserDeletedEvent = AuthEvents.UserDeleted;
+    public const string UserPasswordChangedEvent = AuthEvents.UserPasswordChanged;
 
-    public const string IdentityLinkedEvent = "identity.linked";
-    public const string IdentityUnlinkedEvent = "identity.unlinked";
+    public const string IdentityLinkedEvent = AuthEvents.IdentityLinked;
+    public const string IdentityUnlinkedEvent = AuthEvents.IdentityUnlinked;
 
     public const string ServiceConnectedEvent = "service.connected";
     public const string ServiceDisconnectedEvent = "service.disconnected";
@@ -82,42 +89,24 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
         string type, string? userId, string username, string identity, string? provider, string? tier,
         string? sid, string? userAgent, string? peerNode, string actor, string? origin,
         CancellationToken ct = default) =>
-        WriteAsync(type, actor, origin, w =>
-        {
-            // Null when the caller did not have the account row in hand — a sign-out holds the token's
-            // identity and nothing else, and deriving an id from the handle would record a lookup that
-            // never happened.
-            WriteNullable(w, "UserId", userId);
-            w.WriteString("Username", username);
-            w.WriteString("Identity", identity);
-            WriteNullable(w, "Provider", provider);
-            WriteNullable(w, "Tier", tier);
-            WriteNullable(w, "Sid", sid);
-            WriteNullable(w, "UserAgent", userAgent);
-
-            // Present only on a cluster vouch, and the thing that says the proof was another node's
-            // rather than this one's.
-            WriteNullable(w, "PeerNode", peerNode);
-        }, ct);
+        WriteAsync(
+            type, actor, origin,
+            AuthEventPayloads.Session(
+                // UserId is null when the caller did not have the account row in hand — a sign-out
+                // holds the token's identity and nothing else, and deriving an id from the handle
+                // would record a lookup that never happened. PeerNode is present only on a cluster
+                // vouch, and is the thing that says the proof was another node's rather than this
+                // one's.
+                userId, username, identity, provider, tier, sid, userAgent, peerNode),
+            ct);
 
     /// <summary>Records sessions being torn down before they expired.</summary>
     public Task SessionRevokedAsync(
         string scope, string userId, string username, string? sid, int? count,
         string actor, string? origin, CancellationToken ct = default) =>
-        WriteAsync(SessionRevokedEvent, actor, origin, w =>
-        {
-            w.WriteString("UserId", userId);
-            w.WriteString("Username", username);
-            w.WriteString("Scope", scope);
-
-            // A single revocation names the session; a sweep names how many it ended. Neither
-            // fabricates the other.
-            WriteNullable(w, "Sid", sid);
-            if (count is { } n)
-                w.WriteNumber("Count", n);
-            else
-                w.WriteNull("Count");
-        }, ct);
+        WriteAsync(
+            SessionRevokedEvent, actor, origin,
+            AuthEventPayloads.SessionRevoked(scope, userId, username, sid, count), ct);
 
     /// <summary>
     /// Records an account being provisioned, approved, disabled, deleted, or having its authority or
@@ -132,32 +121,17 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
         string type, string userId, string username, string? fromTier = null, string? toTier = null,
         string? fromStatus = null, string? toStatus = null, bool? byHolder = null,
         string actor = "", string? origin = null, CancellationToken ct = default) =>
-        WriteAsync(type, actor, origin, w =>
-        {
-            w.WriteString("UserId", userId);
-            w.WriteString("Username", username);
-            WriteNullable(w, "FromTier", fromTier);
-            WriteNullable(w, "ToTier", toTier);
-            WriteNullable(w, "FromStatus", fromStatus);
-            WriteNullable(w, "ToStatus", toStatus);
-
-            if (byHolder is { } held)
-                w.WriteBoolean("ByHolder", held);
-            else
-                w.WriteNull("ByHolder");
-        }, ct);
+        WriteAsync(
+            type, actor, origin,
+            AuthEventPayloads.Account(
+                userId, username, fromTier, toTier, fromStatus, toStatus, byHolder), ct);
 
     /// <summary>Records an external identity being attached to or detached from an account.</summary>
     public Task IdentityAsync(
         string type, string userId, string username, string provider, string handle,
         string actor, string? origin, CancellationToken ct = default) =>
-        WriteAsync(type, actor, origin, w =>
-        {
-            w.WriteString("UserId", userId);
-            w.WriteString("Username", username);
-            w.WriteString("Provider", provider);
-            w.WriteString("Handle", handle);
-        }, ct);
+        WriteAsync(
+            type, actor, origin, AuthEventPayloads.Identity(userId, username, provider, handle), ct);
 
     /// <summary>Records a leaf's runtime provisioning being flipped.</summary>
     public Task ServiceProvisioningAsync(

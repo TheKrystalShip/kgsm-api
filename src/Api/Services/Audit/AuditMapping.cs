@@ -1,6 +1,7 @@
 using System.Globalization;
 using TheKrystalShip.Api.Services.Alerts;
 using System.Text.Json;
+using TheKrystalShip.KGSM.Auth.Journal;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.KGSM.Core.Models;
@@ -1012,12 +1013,13 @@ public static class AuditMapping
     /// </summary>
     private const string MonitorActor = "system:monitor";
 
-    // ---- this API's own events -----------------------------------------------------------------
+    // ---- events a surface records rather than the engine ---------------------------------------
     //
-    // The Control Panel performs these itself — signing somebody in, changing an account's authority,
-    // reconfiguring a leaf — so it records the fact and shapes the sentence here, at read time, the
-    // same as for any other producer's journal. Nothing about these mappers knows they are reading
-    // this API's own writing.
+    // Nothing runs an engine command for signing somebody in, changing an account's authority or
+    // reconfiguring a leaf, so whoever performed it records the fact and the sentence is shaped here,
+    // at read time, the same as for any other producer's journal. Nothing about these mappers knows
+    // which journal a line came from — the account ones are written by this API on a host that holds
+    // its own accounts, and by the cluster's auth anchor when one holds them instead.
 
     /// <summary>Map an <c>auth.signed_in</c> / <c>auth.signed_out</c> / <c>auth.cluster.vouched</c> event.</summary>
     /// <remarks>
@@ -1079,8 +1081,15 @@ public static class AuditMapping
         // a person managing their own, which is routine.
         (string severity, string summary) = d.Scope switch
         {
-            "all" => (AuditSeverity.Info, $"{who} logged out everywhere ({count} session(s))"),
-            "admin" => (AuditSeverity.Warn, $"{who} revoked {sessions} belonging to {d.Username}"),
+            SessionRevokeScopes.All => (AuditSeverity.Info, $"{who} logged out everywhere ({count} session(s))"),
+            SessionRevokeScopes.Admin => (AuditSeverity.Warn, $"{who} revoked {sessions} belonging to {d.Username}"),
+
+            // Nobody acted at the moment this happened, so it names no actor. The account was
+            // switched off earlier — already its own row — and this is when the access actually
+            // stopped, which can be hours later and is the question an incident review asks.
+            SessionRevokeScopes.Withdrawn => (AuditSeverity.Warn,
+                $"{sessions} belonging to {d.Username} ended: the account is switched off"),
+
             _ => (AuditSeverity.Info, $"{who} revoked {sessions}"),
         };
 
@@ -1091,6 +1100,44 @@ public static class AuditMapping
         if (d.Count is { } n) meta["count"] = n.ToString(CultureInfo.InvariantCulture);
 
         return ApiWrite(d, ApiJournal.SessionRevokedEvent, severity, target: null, hostId, summary, meta);
+    }
+
+    /// <summary>
+    /// Map an <c>auth.locked_out</c> event — a run of wrong passwords locked an account.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Danger, and it is the only <c>auth.*</c> row that is.</b> Every other one records something
+    /// that worked; this one is somebody working through passwords against an account that exists.
+    /// It reads louder than a sign-in because it is the row an access review is looking for.
+    /// </para>
+    /// <para>
+    /// The account is named and the person guessing is not, because nobody authenticated — there is no
+    /// actor to name, and the actor on the envelope is the subject rather than a claim about who was
+    /// at the keyboard.
+    /// </para>
+    /// </remarks>
+    public static AuditWrite FromLockedOutEvent(AuthLockedOutData d, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string who = string.IsNullOrEmpty(d.Username) ? d.Identity : d.Username;
+
+        // How far the run got, said plainly. "Locked out" alone reads like somebody mistyping; the
+        // count is what separates that from a list being worked through.
+        string summary = $"'{who}' was locked out after {d.FailedCount} failed sign-ins";
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["failedCount"] = d.FailedCount.ToString(CultureInfo.InvariantCulture),
+            ["until"] = d.Until.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+        };
+
+        if (!string.IsNullOrEmpty(d.UserId)) meta["userId"] = d.UserId!;
+        if (!string.IsNullOrEmpty(d.Identity)) meta["identity"] = d.Identity;
+
+        return ApiWrite(d, ApiJournal.LockedOutEvent, AuditSeverity.Danger, target: null, hostId,
+            summary, meta);
     }
 
     /// <summary>Map one of the six <c>user.*</c> events to its account action.</summary>

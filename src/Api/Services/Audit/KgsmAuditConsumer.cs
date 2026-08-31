@@ -113,13 +113,19 @@ public sealed class KgsmAuditConsumer(
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>
-    /// The types this API writes to its own journal, and therefore the ones it publishes live off the
-    /// raw hook rather than through a typed handler.
+    /// The types a SURFACE writes rather than the engine, and therefore the ones published live off
+    /// the raw hook rather than through a typed handler.
     /// </summary>
+    /// <remarks>
+    /// Matched on the type alone, deliberately. The account events are written by this API on a host
+    /// that holds its own accounts and by the cluster's auth anchor when one holds them instead, and
+    /// both journals are read here — so a sign-in reaches an open browser as soon as it is recorded
+    /// whichever of the two recorded it.
+    /// </remarks>
     private static readonly HashSet<string> OwnEventTypes = new(StringComparer.Ordinal)
     {
         ApiJournal.LoginEvent, ApiJournal.LogoutEvent, ApiJournal.ClusterSessionEvent,
-        ApiJournal.SessionRevokedEvent,
+        ApiJournal.SessionRevokedEvent, ApiJournal.LockedOutEvent,
         ApiJournal.UserProvisionedEvent, ApiJournal.UserApprovedEvent, ApiJournal.UserDisabledEvent,
         ApiJournal.UserTierChangedEvent, ApiJournal.UserDeletedEvent, ApiJournal.UserPasswordChangedEvent,
         ApiJournal.IdentityLinkedEvent, ApiJournal.IdentityUnlinkedEvent,

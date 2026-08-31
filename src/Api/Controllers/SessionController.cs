@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.KGSM.Auth.Journal;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
@@ -147,7 +148,7 @@ public sealed class SessionController(
             IReadOnlyList<string> revokedSids = await sessions.RevokeAllForUserAsync(callerUserId, options.HostId, ct);
             foreach (string sid in revokedSids)
                 sessionValidator.Evict(sid);
-            await RecordAsync("all", ci, sid: null, count: revokedSids.Count,
+            await RecordAsync(SessionRevokeScopes.All, ci, sid: null, count: revokedSids.Count,
                 targetUserId: callerUserId, ct: ct);
             await FanOutRevokeAllAsync(caller.Subject, ct);
             return NoContent();
@@ -178,7 +179,7 @@ public sealed class SessionController(
         // only stamp an audit row when this call actually did something (avoid a misleading "revoke"
         // trail entry for a no-op repeat call).
         if (revoked)
-            await RecordAsync("self", ci, sid: targetSid, count: 1,
+            await RecordAsync(SessionRevokeScopes.Self, ci, sid: targetSid, count: 1,
                 targetUserId: callerUserId, ct: ct);
         return NoContent();
     }
@@ -201,7 +202,7 @@ public sealed class SessionController(
         sessionValidator.Evict(sid);
 
         if (User.Identity is ClaimsIdentity ci)
-            await RecordAsync("admin", ci, sid: sid, count: 1,
+            await RecordAsync(SessionRevokeScopes.Admin, ci, sid: sid, count: 1,
                 targetUserId: target.UserId, ct: ct);
         return NoContent();
     }
@@ -223,7 +224,7 @@ public sealed class SessionController(
             sessionValidator.Evict(sid);
 
         if (User.Identity is ClaimsIdentity ci)
-            await RecordAsync("admin", ci, sid: null, count: revokedSids.Count,
+            await RecordAsync(SessionRevokeScopes.Admin, ci, sid: null, count: revokedSids.Count,
                 targetUserId: userId, ct: ct);
 
         // userId is the provider-qualified handle; the cluster payload carries the bare subject, which

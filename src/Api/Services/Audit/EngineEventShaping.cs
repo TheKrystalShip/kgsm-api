@@ -200,13 +200,16 @@ public static class EngineEventShaping
             "host.threshold.breached" => Map<HostThresholdBreachedData>(item, d => AuditMapping.FromThresholdBreachedEvent(d, hostId)),
             "host.threshold.cleared" => Map<HostThresholdClearedData>(item, d => AuditMapping.FromThresholdClearedEvent(d, hostId)),
 
-            // kgsm-api's own journal: what the Control Panel did itself. Shaped here like any other
-            // producer's — nothing about these mappers knows the API is reading its own writing, which
-            // is what keeps one code path serving the whole merged feed.
+            // The account events: what a person's access did. Shaped here like any other producer's —
+            // nothing about these mappers knows which journal a line came from, which is what keeps
+            // one code path serving the whole merged feed whether this API wrote the line or the
+            // cluster's auth anchor did.
             ApiJournal.LoginEvent or ApiJournal.LogoutEvent or ApiJournal.ClusterSessionEvent =>
                 Map<AuthSessionEventData>(item, d => AuditMapping.FromAuthSessionEvent(d, item.Type, hostId)),
             ApiJournal.SessionRevokedEvent =>
                 Map<AuthSessionRevokedData>(item, d => AuditMapping.FromSessionRevokedEvent(d, hostId)),
+            ApiJournal.LockedOutEvent =>
+                Map<AuthLockedOutData>(item, d => AuditMapping.FromLockedOutEvent(d, hostId)),
 
             ApiJournal.UserProvisionedEvent or ApiJournal.UserApprovedEvent
                 or ApiJournal.UserDisabledEvent or ApiJournal.UserTierChangedEvent

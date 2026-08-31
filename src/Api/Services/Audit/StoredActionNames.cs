@@ -73,6 +73,7 @@ public static class StoredActionNames
         ["auth.session.revoke"] = "auth.session.revoked",
         ["auth.session.revoke.all"] = "auth.session.revoked",
         ["auth.session.revoke.admin"] = "auth.session.revoked",
+        ["auth.lockout"] = "auth.locked_out",
 
         ["user.provision"] = "user.provisioned",
         ["user.approve"] = "user.approved",
