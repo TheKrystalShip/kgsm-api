@@ -51,6 +51,7 @@ namespace TheKrystalShip.Api.Contracts;
 [JsonSerializable(typeof(ServerBackupList))]
 [JsonSerializable(typeof(CreateBackupRequest))]
 [JsonSerializable(typeof(RestoreBackupRequest))]
+[JsonSerializable(typeof(PruneBackupsRequest))]
 // Who is on it, and what may be done to them.
 [JsonSerializable(typeof(PlayersResponse))]
 [JsonSerializable(typeof(ModerationResult))]

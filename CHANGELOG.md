@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — pruning an instance's surplus backups (0.178.0)
+
+`POST /servers/{id}/backups/prune { keep }` deletes all but the newest `keep`, in one engine call. It
+holds the server's in-flight slot for the same reason delete does — it removes the bytes a restore
+would be reading — and the engine owns what surplus means, so a pinned archive is not surplus and
+nothing here decides which files go.
+
+It is a route rather than a list-then-delete-N because composing it would both re-derive that policy
+here and write N unrelated-looking rows into the audit for one act. `keep: 0` is refused: keeping none
+is a delete-all, a different act with a different blast radius, and it has to be asked for as itself.
+
 ### Changed — the wire contract is a package (0.177.0)
 
 `TheKrystalShip.KGSM.Api.Contracts` carries the DTO graph and the serialization that gives it its wire

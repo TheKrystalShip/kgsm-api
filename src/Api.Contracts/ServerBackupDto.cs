@@ -72,6 +72,22 @@ public sealed record CreateBackupRequest(string? Origin = null);
 public sealed record BackupRetentionRequest(string? Origin = null);
 
 /// <summary>
+/// The body of <c>POST /servers/{id}/backups/prune</c>: delete this instance's surplus backups,
+/// keeping the newest <paramref name="Keep"/>.
+/// </summary>
+/// <remarks>
+/// It is one engine call rather than a list followed by N deletes, and that is the reason it is a route
+/// at all. The engine decides what surplus means — pinned archives are not surplus — and it records the
+/// prune as one act; a caller composing it from deletes would both re-derive that policy and write N
+/// unrelated-looking rows into the audit.
+/// </remarks>
+/// <param name="Keep">How many of the newest backups to keep. At least 1: keeping none is a delete-all,
+/// which is a different act and is refused here rather than reached by passing zero.</param>
+/// <param name="Origin">The surface driving the write (<c>ui</c>|<c>assistant</c>|<c>discord</c>|<c>api</c>,
+/// default <c>api</c>).</param>
+public sealed record PruneBackupsRequest(int? Keep, string? Origin = null);
+
+/// <summary>
 /// The response to <c>POST /servers/{id}/backups/{backupId}/download-ticket</c>: a short-lived handle
 /// plus the URL to hand the browser.
 /// </summary>

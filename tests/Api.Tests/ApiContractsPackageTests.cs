@@ -94,6 +94,7 @@ public sealed class ApiContractsPackageTests
     [InlineData(typeof(ServerBackupList))]
     [InlineData(typeof(CreateBackupRequest))]
     [InlineData(typeof(RestoreBackupRequest))]
+    [InlineData(typeof(PruneBackupsRequest))]
     [InlineData(typeof(PlayersResponse))]
     [InlineData(typeof(ModerationResult))]
     [InlineData(typeof(List<Host>))]

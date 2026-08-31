@@ -171,6 +171,11 @@ public static class CommandVerb
     /// and settles within the request, so no job is ever handed to a caller to await.</summary>
     public const string BackupDelete = "backup_delete";
 
+    /// <summary>Delete an instance's surplus backups, keeping the newest N (Tier-1 ops —
+    /// <c>POST /servers/{id}/backups/prune</c>). NOT in <see cref="IsKnown"/>. Synchronous and slot-holding
+    /// for the same reason as <see cref="BackupDelete"/>: it removes the bytes a restore would read.</summary>
+    public const string BackupPrune = "backup_prune";
+
     public static bool IsKnown(string? verb) => verb is Start or Stop or Restart or Update;
 }
 

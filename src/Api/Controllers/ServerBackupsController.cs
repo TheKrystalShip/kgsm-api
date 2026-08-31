@@ -244,6 +244,78 @@ public sealed class ServerBackupsController(
     }
 
     /// <summary>
+    /// Delete this instance's surplus backups, keeping the newest <c>keep</c>
+    /// (<c>POST …/backups/prune</c>).
+    /// <list type="bullet">
+    /// <item><c>400</c> — <c>keep</c> missing or below 1, or a bad origin.</item>
+    /// <item><c>404</c> — unknown server id.</item>
+    /// <item><c>409</c> — a command is already in flight for this server.</item>
+    /// <item><c>503</c> — the kgsm engine is not provisioned, or it refused the prune.</item>
+    /// <item><c>204</c> — the surplus is gone.</item>
+    /// </list>
+    /// </summary>
+    /// <remarks>
+    /// One engine call, holding the server's in-flight slot for the same reason delete does: it removes
+    /// the bytes a restore would be reading. The engine owns what surplus means — a pinned archive is
+    /// not surplus — so nothing here decides which files go.
+    /// <para>
+    /// <c>keep: 0</c> is refused rather than obeyed. Keeping none is a delete-all, which is a different
+    /// act with a different blast radius, and it must be asked for as itself rather than reached by
+    /// passing a zero to a prune.
+    /// </para>
+    /// </remarks>
+    [HttpPost("prune")]
+    [Authorize(Policy = AuthPolicy.Operator)] // mutation, and an irreversible one — operator and up
+    public async Task<IActionResult> Prune(string id, [FromBody] PruneBackupsRequest? body, CancellationToken ct)
+    {
+        if (body?.Keep is not { } keep || keep < 1)
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "keep is required and must be at least 1; a prune that keeps nothing is a delete-all");
+
+        if (!TryResolveOrigin(body.Origin, out string resolvedOrigin))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "unknown origin; expected one of: ui, assistant, discord, api");
+
+        if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the kgsm engine is not provisioned on this host");
+
+        if (!await ExistsAsync(id, ct).ConfigureAwait(false))
+            return NotFound();
+
+        if (TryStart(id, CommandVerb.BackupPrune, out Job job, out IActionResult conflict) is false)
+            return conflict;
+
+        KgsmResult result;
+        try
+        {
+            result = instances.PruneBackups(id, keep, AuditPrincipal.ActorString(User), resolvedOrigin);
+        }
+        catch (Exception ex)
+        {
+            jobs.Update(job with { State = JobState.Failed, SettledAt = DateTimeOffset.UtcNow, Error = ex.Message });
+            logger.LogWarning(ex, "Failed to prune backups of {Server}", id);
+            return Error(StatusCodes.Status503ServiceUnavailable, "unavailable", "could not prune the backups");
+        }
+
+        jobs.Update(job with
+        {
+            State = result.IsSuccess ? JobState.Succeeded : JobState.Failed,
+            SettledAt = DateTimeOffset.UtcNow,
+            Error = result.IsSuccess ? null : result.Stderr?.Trim(),
+        });
+
+        if (result.IsSuccess)
+            return NoContent();
+
+        // The engine's own sentence, because it is the only part naming what it would not do.
+        string message = string.IsNullOrWhiteSpace(result.Stderr)
+            ? $"could not prune the backups (exit {result.ExitCode})"
+            : result.Stderr.Trim();
+        return Error(StatusCodes.Status503ServiceUnavailable, "unavailable", message);
+    }
+
+    /// <summary>
     /// Pin one backup (<c>POST …/{backupId}/pin</c>) or hand it back to retention
     /// (<c>POST …/{backupId}/unpin</c>). Answers inside the request — the engine rewrites one manifest,
     /// which is a metadata edit and not the archive's bytes.
