@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — one sign-out appeared on the audit page twice (0.168.0)
+
+A panel signs out at the anchor *and* at the member it is driving. Both wrote `auth.signed_out`, so a
+single sign-out produced two rows 51 milliseconds apart — and they could not be deduplicated, because
+they were honestly from different producers about the same fact.
+
+The record belongs to whoever ended the thing. A session this host minted is still recorded here,
+which is every session on a standalone install; one the cluster's auth anchor minted is not, because
+the anchor ended it and records that itself.
+
+### Fixed — signing out at a member did not end the session there (0.168.0)
+
+The revoke on `POST /auth/logout` flipped a session row, and a session the anchor minted has no row
+here — so it updated nothing while reporting success, and this host went on accepting the bearer
+until the anchor's broadcast arrived. It records the deny-list marker instead, and evicts the cluster
+revocation cache rather than only the validator's: a cluster session is held to a deny-list rather
+than to the row the validator reads, so evicting one and not the other left the bearer working for
+the length of a TTL after its holder signed out.
+
+Recording it here rather than waiting for the broadcast is the whole reason a panel signs out at the
+member it is driving as well as at the anchor.
+
 ### Added — account events written elsewhere, read back here (0.167.0)
 
 A cluster whose accounts are held by an auth anchor has the anchor record every sign-in, because it is

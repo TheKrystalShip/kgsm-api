@@ -47,6 +47,7 @@ public sealed class AuthController(
     ISessionTokenService tokens,
     SessionStore sessions,
     ISessionValidator sessionValidator,
+    ClusterSessionRevocations clusterSessions,
     ReauthGate reauth,
     ApiOptions options,
     ApiJournal journal,
@@ -825,11 +826,37 @@ public sealed class AuthController(
             // revoke must never turn a logout into an error (the client is dropping its tokens anyway,
             // and the access TTL still bounds the window) — log it, then still write the audit row.
             string? sid = SessionClaims.ReadSessionId(ci);
+            bool cluster = ClusterSessionValidation.IsClusterSession(ci, options.HostId);
+
             if (!string.IsNullOrEmpty(sid))
             {
                 try
                 {
-                    await sessions.RevokeAsync(sid, ct);
+                    if (cluster)
+                    {
+                        // A session the cluster's auth anchor minted has no row here to flip: it was
+                        // never this host's, and RevokeAsync would update nothing while reporting
+                        // success. What this host CAN hold is the fact that it is over, which is what
+                        // its bearer is checked against — and recording it here rather than waiting
+                        // for the anchor's broadcast is the whole reason a panel signs out at the
+                        // member it is driving as well as at the anchor.
+                        await sessions.RecordRevocationAsync(
+                            sid,
+                            options.HostId,
+                            DateTimeOffset.UtcNow.AddDays(options.SessionsRefreshAbsoluteDays),
+                            ct);
+
+                        // Its own cache, and not the validator's below: a cluster session is held to
+                        // a deny-list rather than to the row the validator reads, so evicting one and
+                        // not the other leaves the bearer working here for the length of a TTL after
+                        // its holder signed out.
+                        clusterSessions.Evict(sid);
+                    }
+                    else
+                    {
+                        await sessions.RevokeAsync(sid, ct);
+                    }
+
                     sessionValidator.Evict(sid);
                     reauth.Forget(sid);
                 }
@@ -838,11 +865,22 @@ public sealed class AuthController(
                     logger.LogWarning(ex, "session revoke on logout failed (non-fatal) sid={Sid}", sid);
                 }
             }
-            // The audit Meta carries the sid (forensics: links logout → the revoked session row). No
-            // userAgent here — recentLogins reads `auth.login` rows only, and logout's own UA isn't
-            // otherwise useful; keep the meta minimal for the action it's on.
-            await RecordAuthAsync(ApiJournal.LogoutEvent, id, SessionClaims.ReadTier(ci),
-                sid, null, ct);
+            // A session this host MINTED is this host's to report ending. One the cluster's auth
+            // anchor minted is not: the panel signs out at the anchor as well, the anchor is what
+            // actually ends it, and it records that itself — so writing here too puts one sign-out on
+            // the audit page twice, and the two rows cannot be deduplicated because they are honestly
+            // from different producers about the same fact.
+            //
+            // The revoke above still runs, and should: it is this host's own deny-list entry, taking
+            // effect at once rather than when the anchor's broadcast arrives.
+            if (!cluster)
+            {
+                // The audit Meta carries the sid (forensics: links logout → the revoked session row).
+                // No userAgent here — recentLogins reads sign-in rows only, and logout's own UA isn't
+                // otherwise useful; keep the meta minimal for the action it's on.
+                await RecordAuthAsync(ApiJournal.LogoutEvent, id, SessionClaims.ReadTier(ci),
+                    sid, null, ct);
+            }
         }
         return NoContent();
     }
