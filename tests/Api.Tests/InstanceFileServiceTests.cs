@@ -279,6 +279,129 @@ public sealed class InstanceFileServiceTests
     /// see <c>NetworkAggregatorTests.FakeFirewall</c> for the same pattern). Switch-on-input via the
     /// <c>On*</c> delegates; <c>Delete</c>/<c>Rename</c> are unused by this surface (Phase 3b, not wired)
     /// and throw if ever called.</summary>
+    // ===== find / search ============================================================================
+
+    /// <summary>
+    /// A walk match is addressed by its path, not its name: the whole point of walking is that the
+    /// match was not in the directory that was asked about, so a bare name would name nothing
+    /// reachable.
+    /// </summary>
+    [Fact]
+    public void Find_Ok_CarriesThePathAndBothTruncationSignals()
+    {
+        var mtime = DateTimeOffset.UtcNow;
+        var fake = new FakeInstanceFiles
+        {
+            OnFind = (_, _, _, _) => FileOpResult<FindResult>.Ok(new FindResult
+            {
+                Truncated = true,
+                ScanLimitHit = true,
+                Matches =
+                [
+                    new FindMatch("Pal/Saved/Config/LinuxServer/PalWorldSettings.ini", FileKind.File, 1024, mtime),
+                    new FindMatch("Pal/Saved/Config", FileKind.Dir, null, mtime),
+                ],
+            }),
+        };
+
+        FindResults r = new InstanceFileService(fake).Find(Instance, null, "*.ini", 200);
+
+        Assert.Equal(FileOp.Ok, r.Status);
+        Assert.True(r.Truncated);
+        Assert.True(r.Incomplete);
+        Assert.Equal("Pal/Saved/Config/LinuxServer/PalWorldSettings.ini", r.Matches[0].Name);
+        Assert.Equal(EntryKind.File, r.Matches[0].Kind);
+        Assert.Equal(1024, r.Matches[0].SizeBytes);
+        Assert.Equal(EntryKind.Dir, r.Matches[1].Kind);
+    }
+
+    /// <summary>
+    /// "More matched than I showed" and "I stopped looking" are separate all the way out. Collapsed,
+    /// the second reads as the first, and a caller concludes a file does not exist when the walk
+    /// simply never reached it.
+    /// </summary>
+    [Fact]
+    public void Find_CompleteWalk_ReportsNeitherSignal()
+    {
+        var fake = new FakeInstanceFiles
+        {
+            OnFind = (_, _, _, _) => FileOpResult<FindResult>.Ok(new FindResult { Matches = [] }),
+        };
+
+        FindResults r = new InstanceFileService(fake).Find(Instance, null, "*.ini", 200);
+
+        Assert.Equal(FileOp.Ok, r.Status);
+        Assert.False(r.Truncated);
+        Assert.False(r.Incomplete);
+        Assert.Empty(r.Matches);
+    }
+
+    /// <summary>
+    /// An unusable pattern is the caller's and is fixed by asking differently; a path that escapes the
+    /// jail is refused as not-found and never distinguished. Folding the first into the second would
+    /// tell somebody their glob is a missing directory.
+    /// </summary>
+    [Theory]
+    [InlineData(FileOpOutcome.InvalidArgument, FileOp.NotAFile)]
+    [InlineData(FileOpOutcome.NotADirectory, FileOp.NotADirectory)]
+    [InlineData(FileOpOutcome.OutOfJail, FileOp.OutOfJail)]
+    [InlineData(FileOpOutcome.InstanceUnavailable, FileOp.Unavailable)]
+    [InlineData(FileOpOutcome.NotFound, FileOp.NotFound)]
+    public void Find_Failures_MapToTheirOwnOutcome(FileOpOutcome outcome, FileOp expected)
+    {
+        var fake = new FakeInstanceFiles
+        {
+            OnFind = (_, _, _, _) => FileOpResult<FindResult>.Fail(outcome, "no"),
+        };
+
+        Assert.Equal(expected, new InstanceFileService(fake).Find(Instance, null, "*", 200).Status);
+    }
+
+    [Fact]
+    public void Search_Ok_CarriesTheLineItsFileAndItsNumber()
+    {
+        var fake = new FakeInstanceFiles
+        {
+            OnSearch = (_, _, _, _) => FileOpResult<FileSearchResult>.Ok(new FileSearchResult
+            {
+                Truncated = false,
+                ScanLimitHit = true,
+                Hits = [new SearchHit("server.properties", 12, "max-players=20")],
+            }),
+        };
+
+        SearchResults r = new InstanceFileService(fake).Search(Instance, null, "max-players", true, 100);
+
+        Assert.Equal(FileOp.Ok, r.Status);
+        Assert.False(r.Truncated);
+        Assert.True(r.Incomplete);
+        SearchLine hit = Assert.Single(r.Hits);
+        Assert.Equal("server.properties", hit.Path);
+        Assert.Equal(12, hit.Line);
+        Assert.Equal("max-players=20", hit.Text);
+    }
+
+    /// <summary>Case sensitivity is the caller's and is passed through rather than defaulted here.</summary>
+    [Fact]
+    public void Search_PassesTheCallersCapsAndCaseChoice()
+    {
+        FileSearchOptions? seen = null;
+        var fake = new FakeInstanceFiles
+        {
+            OnSearch = (_, _, _, opts) =>
+            {
+                seen = opts;
+                return FileOpResult<FileSearchResult>.Ok(new FileSearchResult());
+            },
+        };
+
+        new InstanceFileService(fake).Search(Instance, null, "x", ignoreCase: false, maxHits: 7);
+
+        Assert.NotNull(seen);
+        Assert.False(seen!.IgnoreCase);
+        Assert.Equal(7, seen.MaxHits);
+    }
+
     private sealed class FakeInstanceFiles : IInstanceFiles
     {
         public Func<string, string?, int, FileOpResult<DirListing>>? OnList;
@@ -294,13 +417,17 @@ public sealed class InstanceFileServiceTests
         public FileOpResult<FileStat> Write(string instance, string relPath, string content, WriteOptions opts) =>
             OnWrite?.Invoke(instance, relPath, content, opts) ?? FileOpResult<FileStat>.Ok(new FileStat());
 
+        public Func<string, string, string?, FindOptions?, FileOpResult<FindResult>>? OnFind;
+        public Func<string, string, string?, FileSearchOptions?, FileOpResult<FileSearchResult>>? OnSearch;
+
         public FileOpResult<FindResult> Find(
             string instance, string pattern, string? subdir, FindOptions? options = null) =>
-            throw new NotImplementedException("the file browser lists and reads; it does not search");
+            OnFind?.Invoke(instance, pattern, subdir, options) ?? FileOpResult<FindResult>.Ok(new FindResult());
 
         public FileOpResult<FileSearchResult> Search(
             string instance, string pattern, string? subdir, FileSearchOptions? options = null) =>
-            throw new NotImplementedException("the file browser lists and reads; it does not search");
+            OnSearch?.Invoke(instance, pattern, subdir, options)
+            ?? FileOpResult<FileSearchResult>.Ok(new FileSearchResult());
 
         public FileOpResult Delete(string instance, string relPath, DeleteOptions opts) =>
             throw new NotImplementedException("not wired by the file browser (Phase 3b)");

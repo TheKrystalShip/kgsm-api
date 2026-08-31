@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the reads a caller outside a browser needs (0.176.0)
+
+Four routes, each answering a question that could not be composed from the ones already here.
+
+`GET /servers/{id}/files/find?pattern=` walks the instance's tree for names matching a glob, and
+`GET /servers/{id}/files/search?pattern=` searches the contents of its text files for a regular
+expression. Both are jailed, skip archived copies under a `backups` directory, and carry
+**truncated** and **incomplete** separately — more matched than was shown invites a narrower pattern,
+while a walk that stopped on its budget must never be narrated as "there is no such file". Neither
+composes from `GET /files`: a game's own config lives at a game-specific depth (Palworld's is five
+levels down), so listing to reach it is a request per level, and looking for a setting without
+knowing its file means reading every file in the tree.
+
+`GET /hosts/{id}/ports` reports what is bound on the host and where two claimants want the same port.
+Each of the two scans carries its own state, because one can answer while the other cannot and an
+unread conflict scan reported as an empty list is invisible — no conflicts is the ordinary answer.
+Which instance declares a port is joined from the engine's own instance list, never guessed from the
+process name, which is a binary's name and not a server's.
+
+`GET /jobs/{id}` reads how an accepted command actually ended. A browser watches the `jobs` stream and
+needs nothing here; a caller acting for somebody and reporting back in one turn cannot hold a stream
+open for a start that takes half a minute. **It is read rather than inferred from run-state**: a start
+the engine refused leaves the server stopped, which is indistinguishable from a start that was never
+issued, and the reason exists only on the job.
+
+### Changed
+
+`GET /library` rows describe moderation through the same derivation as the players surface, now shared
+by two overloads rather than one — a blueprint spells an undeclared command null and an instance
+spells it empty, which the shared core absorbs.
+
 ### Added — the catalog says what a game can do to a player (0.175.0)
 
 A `GET /library` row carries `moderation`, the same `{ kick, ban, unban, targetKind }` shape the

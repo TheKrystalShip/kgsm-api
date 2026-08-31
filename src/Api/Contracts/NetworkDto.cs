@@ -90,3 +90,43 @@ public static class FirewallAvailability
     public const string Unsupported = "unsupported";
     public const string Absent = "absent";
 }
+
+/// <summary>One port this host is listening on.</summary>
+/// <param name="Port">The port number.</param>
+/// <param name="Protocol">The protocol it listens on — <c>tcp</c> or <c>udp</c>.</param>
+/// <param name="Process">The process holding the socket, or <c>null</c> when the scan could not
+/// attribute it. Null is "who holds it is unknown", never a placeholder — the port itself is measured
+/// either way.</param>
+/// <param name="Instance">The instance configured for this port, when one is. Joined from the engine's
+/// own instance list, never guessed from the process name, which is a binary's name and not a
+/// server's.</param>
+public sealed record HostPortDto(int Port, string Protocol, string? Process, string? Instance);
+
+/// <summary>Two claimants on one port, as the engine finds them.</summary>
+/// <param name="Port">The contested port.</param>
+/// <param name="Protocol">The protocol the contest is on.</param>
+/// <param name="Instance">The instance whose configuration claims the port.</param>
+/// <param name="Other">The other claimant — another instance, or a process outside KGSM.</param>
+/// <param name="OtherIsInstance">Whether <paramref name="Other"/> names another instance rather than an
+/// outside process. The two read alike and are fixed by completely different actions, so the
+/// distinction travels with the finding instead of being inferred from what the name looks like.</param>
+public sealed record PortConflictDto(
+    int Port, string Protocol, string Instance, string Other, bool OtherIsInstance);
+
+/// <summary>
+/// What is bound on the host and where two claimants collide (<c>GET /hosts/{id}/ports</c>).
+/// </summary>
+/// <param name="State"><c>available</c> or <c>unavailable</c> for the listening-port scan.</param>
+/// <param name="UsedPorts">What is listening, empty when the scan could not be read.</param>
+/// <param name="ConflictState"><c>available</c> or <c>unavailable</c> for the conflict scan.</param>
+/// <param name="Conflicts">The contested ports, empty when the scan could not be read.</param>
+/// <remarks>
+/// The two axes carry their own state because they are two scans: one can answer while the other
+/// cannot, and an unread conflict scan reported as an empty list is invisible — no conflicts is the
+/// ordinary answer, so a failure collapsing into it looks exactly like a healthy host.
+/// </remarks>
+public sealed record HostPortsDto(
+    string State,
+    IReadOnlyList<HostPortDto> UsedPorts,
+    string ConflictState,
+    IReadOnlyList<PortConflictDto> Conflicts);

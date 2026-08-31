@@ -92,6 +92,87 @@ public sealed class ServerFilesController(
     }
 
     /// <summary>
+    /// Find entries anywhere below <c>?path=</c> whose name matches <c>?pattern=</c> (a glob), or whose
+    /// path does when the pattern contains a <c>/</c>. Archived copies under a <c>backups</c> directory
+    /// are excluded — an archived config is not the file a question about the live server is about.
+    /// <list type="bullet">
+    /// <item><c>200</c> — the matches (<c>{ path, truncated, incomplete, matches[] }</c>).</item>
+    /// <item><c>400</c> — no pattern, or one that is not usable as a glob.</item>
+    /// <item><c>404</c> — unknown server id, or the path is missing / escapes the jail.</item>
+    /// <item><c>503</c> — the kgsm engine is not provisioned (or the working dir is unavailable).</item>
+    /// </list>
+    /// </summary>
+    /// <remarks>
+    /// A game's own config lives at a game-specific depth — Palworld's is five levels down — so
+    /// reaching it through <c>GET /files</c> is a request per level, which is why walking cannot be
+    /// composed from listing.
+    /// </remarks>
+    [HttpGet("find")]
+    public async Task<IActionResult> Find(
+        string id, [FromQuery] string? path, [FromQuery] string? pattern, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "pattern is required");
+
+        Jail jail = await TryResolveJail(id, ct).ConfigureAwait(false);
+        if (jail.Error is not null) return jail.Error;
+
+        FindResults result = jail.Files!.Find(id, path, pattern, options.FilesMaxEntries);
+        return result.Status switch
+        {
+            FileOp.Ok => Ok(new FileFindDto(
+                result.Path, result.Truncated, result.Incomplete, [.. result.Matches.Select(ToDto)])),
+            FileOp.NotAFile => Error(StatusCodes.Status400BadRequest, "bad_request",
+                "that is not a usable search pattern"),
+            FileOp.NotADirectory => Error(StatusCodes.Status400BadRequest, "bad_request", "not a directory"),
+            FileOp.Unavailable => Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the instance working directory is unavailable"),
+            _ => NotFound(),
+        };
+    }
+
+    /// <summary>
+    /// Search the contents of the text files below <c>?path=</c> for the regular expression
+    /// <c>?pattern=</c>, returning the matching lines. <c>?ignoreCase=</c> defaults to true. Binaries
+    /// and oversized files are skipped and archived copies are excluded, exactly as in <c>find</c>.
+    /// <list type="bullet">
+    /// <item><c>200</c> — the hits (<c>{ path, truncated, incomplete, hits[] }</c>).</item>
+    /// <item><c>400</c> — no pattern, or one that is not a valid expression.</item>
+    /// <item><c>404</c> — unknown server id, or the path is missing / escapes the jail.</item>
+    /// <item><c>503</c> — the kgsm engine is not provisioned (or the working dir is unavailable).</item>
+    /// </list>
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to finding by name, and equally uncomposable: a caller who knows the setting and
+    /// not the file would otherwise read every file in the tree to look for it.
+    /// </remarks>
+    [HttpGet("search")]
+    public async Task<IActionResult> Search(
+        string id, [FromQuery] string? path, [FromQuery] string? pattern,
+        [FromQuery] bool ignoreCase = true, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(pattern))
+            return Error(StatusCodes.Status400BadRequest, "bad_request", "pattern is required");
+
+        Jail jail = await TryResolveJail(id, ct).ConfigureAwait(false);
+        if (jail.Error is not null) return jail.Error;
+
+        SearchResults result = jail.Files!.Search(id, path, pattern, ignoreCase, options.FilesMaxEntries);
+        return result.Status switch
+        {
+            FileOp.Ok => Ok(new FileSearchDto(
+                result.Path, result.Truncated, result.Incomplete,
+                [.. result.Hits.Select(h => new FileSearchHitDto(h.Path, h.Line, h.Text))])),
+            FileOp.NotAFile => Error(StatusCodes.Status400BadRequest, "bad_request",
+                "that is not a valid search expression"),
+            FileOp.NotADirectory => Error(StatusCodes.Status400BadRequest, "bad_request", "not a directory"),
+            FileOp.Unavailable => Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
+                "the instance working directory is unavailable"),
+            _ => NotFound(),
+        };
+    }
+
+    /// <summary>
     /// Save (overwrite) an EXISTING text file — atomic write, preserving the file mode. The body is
     /// <c>{ content, etag?, origin? }</c>; an <c>etag</c> mismatch (the file changed on disk since read)
     /// returns <c>412</c>. On success, writes a <c>file.write</c> audit row (path/size/sha256 only — never

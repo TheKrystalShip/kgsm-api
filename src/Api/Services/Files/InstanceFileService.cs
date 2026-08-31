@@ -61,6 +61,24 @@ public sealed record ReadResult(
 public sealed record WriteResult(
     FileOp Status, string Path, long SizeBytes, DateTimeOffset Mtime, string? Etag);
 
+/// <summary>
+/// Result of a walk that matched entries by name. <see cref="Truncated"/> and
+/// <see cref="Incomplete"/> stay separate all the way out: the first says more matched than were
+/// returned, the second says the walk stopped before it had seen everything. Collapsed, "I stopped
+/// looking" reads as "that is all there is", which is how a caller concludes a file does not exist
+/// when it was simply never reached.
+/// </summary>
+public sealed record FindResults(
+    FileOp Status, string Path, bool Truncated, bool Incomplete, IReadOnlyList<FsEntry> Matches);
+
+/// <summary>One line a content search matched, with the file it is in and its 1-based line number.</summary>
+public sealed record SearchLine(string Path, int Line, string Text);
+
+/// <summary>Result of a content search, carrying the same two distinct truncation signals as
+/// <see cref="FindResults"/> and for the same reason.</summary>
+public sealed record SearchResults(
+    FileOp Status, string Path, bool Truncated, bool Incomplete, IReadOnlyList<SearchLine> Hits);
+
 /// <summary>The jailed, content-level file I/O for an installed instance (Tier 3 #12 — the file browser).
 /// A thin HTTP/status-mapping wrapper: all jail resolution and byte I/O live in kgsm-lib's
 /// <see cref="IInstanceFiles"/> (the single filesystem authority shared with the
@@ -84,6 +102,28 @@ public interface IInstanceFileService
     /// (<see cref="FileOp.EtagMismatch"/> on drift). Never backs up (<c>.kgsmbak</c> is off in the
     /// browser — a locked decision, unlike the assistant's writer).</summary>
     WriteResult SaveFile(string instance, string? relativePath, string content, string? ifEtag, long maxBytes);
+
+    /// <summary>
+    /// Find entries anywhere below <paramref name="relativePath"/> whose name matches
+    /// <paramref name="pattern"/> (a glob), or whose path does when the pattern contains a
+    /// <c>/</c>. Archived copies under a <c>backups</c> directory are excluded.
+    /// </summary>
+    /// <remarks>
+    /// It exists because a game's own config lives at a game-specific depth — Palworld's is five levels
+    /// down — and reaching it one directory listing at a time is a request per level.
+    /// </remarks>
+    FindResults Find(string instance, string? relativePath, string pattern, int maxResults);
+
+    /// <summary>
+    /// Search the contents of the text files below <paramref name="relativePath"/> for a regular
+    /// expression, returning the matching lines. Same walk containment as <see cref="Find"/>; binaries
+    /// and oversized files are skipped.
+    /// </summary>
+    /// <remarks>
+    /// The counterpart to finding by name: a caller often knows the setting it wants and not which file
+    /// holds it.
+    /// </remarks>
+    SearchResults Search(string instance, string? relativePath, string pattern, bool ignoreCase, int maxHits);
 }
 
 /// <summary>The default <see cref="IInstanceFileService"/> — see the interface doc for the delegation
@@ -146,11 +186,62 @@ public sealed class InstanceFileService(IInstanceFiles files) : IInstanceFileSer
         };
     }
 
+    public FindResults Find(string instance, string? relativePath, string pattern, int maxResults)
+    {
+        string norm = NormalizeDisplayPath(relativePath);
+        FileOpResult<FindResult> r = files.Find(
+            instance, pattern, relativePath, new FindOptions(MaxResults: maxResults));
+
+        return r.Outcome switch
+        {
+            FileOpOutcome.Ok => new FindResults(
+                FileOp.Ok, norm, r.Value!.Truncated, r.Value.ScanLimitHit,
+                [.. r.Value.Matches.Select(ToFsEntry)]),
+            // A pattern that cannot be compiled is the caller's, not the path's — it is the one thing
+            // here that is fixed by asking differently, so it is not folded into "not found".
+            FileOpOutcome.InvalidArgument => new FindResults(FileOp.NotAFile, norm, false, false, []),
+            FileOpOutcome.NotADirectory => new FindResults(FileOp.NotADirectory, norm, false, false, []),
+            FileOpOutcome.OutOfJail => new FindResults(FileOp.OutOfJail, norm, false, false, []),
+            FileOpOutcome.InstanceUnavailable => new FindResults(FileOp.Unavailable, norm, false, false, []),
+            _ => new FindResults(FileOp.NotFound, norm, false, false, []),
+        };
+    }
+
+    public SearchResults Search(
+        string instance, string? relativePath, string pattern, bool ignoreCase, int maxHits)
+    {
+        string norm = NormalizeDisplayPath(relativePath);
+        FileOpResult<FileSearchResult> r = files.Search(
+            instance, pattern, relativePath, new FileSearchOptions(MaxHits: maxHits, IgnoreCase: ignoreCase));
+
+        return r.Outcome switch
+        {
+            FileOpOutcome.Ok => new SearchResults(
+                FileOp.Ok, norm, r.Value!.Truncated, r.Value.ScanLimitHit,
+                [.. r.Value.Hits.Select(h => new SearchLine(h.Path, h.LineNumber, h.Line))]),
+            FileOpOutcome.InvalidArgument => new SearchResults(FileOp.NotAFile, norm, false, false, []),
+            FileOpOutcome.NotADirectory => new SearchResults(FileOp.NotADirectory, norm, false, false, []),
+            FileOpOutcome.OutOfJail => new SearchResults(FileOp.OutOfJail, norm, false, false, []),
+            FileOpOutcome.InstanceUnavailable => new SearchResults(FileOp.Unavailable, norm, false, false, []),
+            _ => new SearchResults(FileOp.NotFound, norm, false, false, []),
+        };
+    }
+
     // ---- kgsm-lib DTO → kgsm-api presentation DTO --------------------------------------------------
 
     /// <summary>A <see cref="FileKind.File"/> entry is provisionally editable (the content GET is
     /// authoritative for binary/too-large); a symlink is listed but out-of-scope (never resolved for
     /// listing); anything else (FIFO/socket/device) is never openable.</summary>
+    /// <summary>A walk match, which carries a path rather than a name — the path is what makes it
+    /// reachable, since the whole point of the walk is that it was not in the directory asked about.</summary>
+    private static FsEntry ToFsEntry(FindMatch m) => m.Kind switch
+    {
+        FileKind.Dir => new FsEntry(m.Path, EntryKind.Dir, null, m.Mtime, null, null),
+        FileKind.Symlink => new FsEntry(m.Path, EntryKind.Symlink, null, m.Mtime, false, "symlink-out-of-scope"),
+        FileKind.Special => new FsEntry(m.Path, EntryKind.Special, null, m.Mtime, false, "special"),
+        _ => new FsEntry(m.Path, EntryKind.File, m.SizeBytes, m.Mtime, true, null),
+    };
+
     private static FsEntry ToFsEntry(FileEntry e) => e.Kind switch
     {
         FileKind.Dir => new FsEntry(e.Name, EntryKind.Dir, null, e.Mtime, null, null),
