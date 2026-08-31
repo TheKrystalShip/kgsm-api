@@ -21,7 +21,7 @@
          same-version repack serves a stale dll to a consumer; a published version is immutable, and a
          change reaches a consumer only under a new number. Compatibility is additive-only — a consumer
          on an older pin ignores fields it does not know. -->
-    <Version>1.0.0-dev.4</Version>
+    <Version>1.0.0-dev.7</Version>
     <Authors>Heisenberg</Authors>
     <Description>Shared wire contract for the KGSM Control Panel API: the DTO graph plus the source-generated camelCase, ISO-8601-UTC System.Text.Json context that gives it its wire form. Referenced by kgsm-api (the producer) and consumed by any member of a cluster that calls a node, so a contract break is a compile break rather than a silent runtime mismatch.</Description>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>

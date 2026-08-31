@@ -431,6 +431,9 @@ public sealed class ServerAggregator
             StartedAt: startedAt,
             StoppedAt: stoppedAt,
             ConnectPort: ConnectPortOf(instance.Ports),
+            // The whole declaration, in the shape the ecosystem writes a port range. Projected from the
+            // structured mappings the engine already gives, so nothing here parses a port string.
+            Ports: [.. instance.Ports.Select(PortText)],
             Note: NoteOf(instance),
             LastBackup: backups.Latest,
             BackupCount: backups.Count,
@@ -505,6 +508,13 @@ public sealed class ServerAggregator
                 return m.Start;
         return null;
     }
+
+    /// <summary>A port range as <c>26900:26903/tcp</c>, a single port without its range — the one
+    /// spelling the engine, the firewall and every surface use for a port.</summary>
+    private static string PortText(PortMapping port) =>
+        port.Start == port.End
+            ? $"{port.Start}/{port.Protocol}"
+            : $"{port.Start}:{port.End}/{port.Protocol}";
 
 }
 

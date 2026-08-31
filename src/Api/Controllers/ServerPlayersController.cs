@@ -76,10 +76,16 @@ public sealed class ServerPlayersController(
         // conflate "we cannot see the players" with "this game cannot be moderated".
         ModerationCapability moderation = ModerationTargetResolver.Describe(instance);
 
-        if (!await IsObservableAsync(id, ct).ConfigureAwait(false))
-            return Ok(new PlayersResponse(PlayerDetection.Unknown, [], moderation));
+        // The mechanism travels on both branches, and it is what says why an unknown is unknown: a game
+        // that reports nothing reads `none`, while a supervisor that could not be asked reads `unknown`,
+        // and those are a property of the game and an outage respectively.
+        string mechanism = observability.MechanismFor(id);
 
-        return Ok(new PlayersResponse(PlayerDetection.Configured, history.GetRoster(id), moderation));
+        if (!await IsObservableAsync(id, ct).ConfigureAwait(false))
+            return Ok(new PlayersResponse(PlayerDetection.Unknown, [], moderation, mechanism));
+
+        return Ok(new PlayersResponse(
+            PlayerDetection.Configured, history.GetRoster(id), moderation, mechanism));
     }
 
     /// <summary>

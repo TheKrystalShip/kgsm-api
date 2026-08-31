@@ -131,6 +131,11 @@ public sealed record Server(
     // fetching the detail. Null when the instance declares no ports (honest unknown, never a fabricated 0
     // and never a guessed game default).
     int? ConnectPort = null,
+    // Every port this instance declares, canonical (`26900:26903/tcp`, a single port without its range).
+    // ConnectPort above is the first of them and answers "where do I connect"; this answers "what does
+    // this server occupy", which a firewall question, a conflict question and a health check all need and
+    // none can get from one number. Empty when the instance declares none — never a guessed default.
+    IReadOnlyList<string>? Ports = null,
     // RAWG.io cover-art + hero banner for this server's blueprint, joined from this host's cached library
     // metadata (RawgStore, keyed on the blueprint id == this server's Blueprint) — populated ONLY on the
     // GET /servers/{id} detail view, like Network; omitted on the list + the `servers` stream so those stay

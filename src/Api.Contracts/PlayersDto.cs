@@ -21,8 +21,17 @@ namespace TheKrystalShip.Api.Contracts;
 /// <param name="Moderation">Which moderation actions this game supports, so a client renders the
 /// buttons it can actually offer. It rides on this response rather than a separate call so the
 /// roster and the actions available on it can never disagree.</param>
+/// <param name="Mechanism">How presence is observed, in the supervisor's own vocabulary — <c>log</c>
+/// (matched from the game's output, so real transitions), <c>rcon</c> (polled and diffed, so churn
+/// between polls is invisible), <c>none</c>, or <c>unknown</c>. Beside <paramref name="Detection"/>
+/// rather than folded into it, because the two answer different questions: whether to render a roster
+/// at all, and what an empty one is worth. An RCON reading showing nobody cannot distinguish an empty
+/// server from one somebody joined and left between two polls.</param>
 public sealed record PlayersResponse(
-    string Detection, IReadOnlyList<RosterPlayer> Players, ModerationCapability Moderation);
+    string Detection,
+    IReadOnlyList<RosterPlayer> Players,
+    ModerationCapability Moderation,
+    string? Mechanism = null);
 
 /// <summary>
 /// A player in the permanent roster, keyed on

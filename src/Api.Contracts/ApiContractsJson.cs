@@ -57,6 +57,8 @@ namespace TheKrystalShip.Api.Contracts;
 // Who is on it, and what may be done to them.
 [JsonSerializable(typeof(PlayersResponse))]
 [JsonSerializable(typeof(ModerationResult))]
+// Readings over time.
+[JsonSerializable(typeof(MetricsHistoryResponse))]
 // The host itself.
 [JsonSerializable(typeof(List<Host>))]
 [JsonSerializable(typeof(Host))]

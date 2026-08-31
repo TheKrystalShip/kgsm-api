@@ -39,6 +39,12 @@ public sealed class PlayerObservability(IServiceProvider services, ILogger<Playe
     // The last successful reading, or null when none has landed (or the last attempt failed). Replaced
     // whole, never mutated, so a reader always sees one consistent map.
     private volatile IReadOnlyDictionary<string, bool>? _detected;
+
+    // How each instance's presence is observed, in the supervisor's own vocabulary. Held beside the
+    // boolean rather than derived from it: "observable" is what a roster build needs and is one bit,
+    // while "matched from the game's output" and "polled over RCON and diffed" differ in what an empty
+    // roster is worth — an RCON reading cannot see somebody who joined and left between two polls.
+    private volatile IReadOnlyDictionary<string, string>? _mechanism;
     private long _readAtTicks;
 
     /// <summary>
@@ -52,6 +58,24 @@ public sealed class PlayerObservability(IServiceProvider services, ILogger<Playe
         IReadOnlyDictionary<string, bool>? map = _detected;
         return map is not null && !string.IsNullOrEmpty(id)
             && map.TryGetValue(id, out bool detected) && detected;
+    }
+
+    /// <summary>
+    /// How presence is observed on this instance, as the supervisor names it — <c>log</c>,
+    /// <c>rcon</c>, <c>none</c>, or <c>unknown</c> when it could not be asked.
+    /// </summary>
+    /// <remarks>
+    /// Never collapsed into <see cref="IsObservable"/>. Both are true statements about the same
+    /// instance and neither derives the other: a client rendering buttons wants the bit, and a caller
+    /// reasoning about whether an empty roster means anything wants the mechanism.
+    /// </remarks>
+    public string MechanismFor(string id)
+    {
+        IReadOnlyDictionary<string, string>? map = _mechanism;
+        return map is not null && !string.IsNullOrEmpty(id)
+            && map.TryGetValue(id, out string? how) && !string.IsNullOrWhiteSpace(how)
+            ? how
+            : "unknown";
     }
 
     /// <summary>
@@ -82,19 +106,26 @@ public sealed class PlayerObservability(IServiceProvider services, ILogger<Playe
             if (presence is null)
             {
                 _detected = null;
+                _mechanism = null;
             }
             else
             {
                 var map = new Dictionary<string, bool>(presence.Count, StringComparer.Ordinal);
+                var how = new Dictionary<string, string>(presence.Count, StringComparer.Ordinal);
                 foreach ((string id, WatchdogInstancePresence entry) in presence)
+                {
                     map[id] = entry.IsDetected;
+                    how[id] = entry.Detection;
+                }
                 _detected = map;
+                _mechanism = how;
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogDebug(ex, "player observability: supervisor presence query failed; presence reads as unobservable until the next reading");
             _detected = null;
+            _mechanism = null;
         }
         finally
         {

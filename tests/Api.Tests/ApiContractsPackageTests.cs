@@ -98,6 +98,7 @@ public sealed class ApiContractsPackageTests
     [InlineData(typeof(PruneBackupsRequest))]
     [InlineData(typeof(PlayersResponse))]
     [InlineData(typeof(ModerationResult))]
+    [InlineData(typeof(MetricsHistoryResponse))]
     [InlineData(typeof(List<Host>))]
     [InlineData(typeof(HostPortsDto))]
     [InlineData(typeof(List<LibraryEntry>))]

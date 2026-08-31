@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — two facts a node was collapsing on its way out (0.180.0)
+
+A server row carries `ports`, every port the instance declares in the canonical `26900:26903/tcp`
+spelling. `connectPort` answers "where do I connect" and is the first of them; this answers "what does
+this server occupy", which a firewall question, a conflict question and a health check each need and
+none can get from one number.
+
+A players response carries `mechanism` — `log`, `rcon`, `none` or `unknown` — beside the existing
+`detection`. The supervisor has always reported which of them it is and this API was folding it to a
+boolean. The two answer different questions: whether to render a roster at all, and **what an empty one
+is worth**. An RCON reading showing nobody cannot tell an empty server from one somebody joined and
+left between two polls, and a caller reasoning about a quiet server needs to know which it is holding.
+`detection` is unchanged, so nothing reading it moves.
+
 ### Changed — the console's scrollback is part of the contract (0.179.0)
 
 `ConsoleScrollback` moves into the contract package. It was private to its controller, which was right
