@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.Auth.Users;
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
@@ -47,13 +48,21 @@ internal sealed class HostBootstrapper(
             return;
 
         string path = options.InitialAdminPasswordPath;
-        if (FirstAdmin.WritePasswordFile(path, FirstAdmin.DefaultUsername, password, logger))
+        if (FirstAdmin.TryWritePasswordFile(path, FirstAdmin.DefaultUsername, password, out Exception? error))
         {
             logger.LogInformation(
                 "This host had no accounts, so the administrator '{Username}' was created. Its one-time "
                 + "password is in {Path} — read it, sign in, and change it; the file is removed on that "
                 + "first sign-in.", FirstAdmin.DefaultUsername, path);
+            return;
         }
+
+        // The account exists either way and it is the account that matters, so the password is said
+        // out loud here rather than leaving a host with an administrator nobody can be.
+        logger.LogWarning(error,
+            "The first administrator's password could not be written to {Path}. It is '{Password}' for "
+            + "the account '{Username}', and is not recoverable once this line is gone.",
+            path, password, FirstAdmin.DefaultUsername);
     }
 
     public Task StopAsync(CancellationToken ct) => Task.CompletedTask;

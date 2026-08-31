@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the first administrator is bootstrapped from one place (0.169.1)
+
+`FirstAdmin` lives in `TheKrystalShip.KGSM.Auth.Users` now, beside the accounts, because a cluster's
+auth anchor bootstraps an empty store too and the two share one. Two implementations would be two
+answers to what the first account is called, what the one-time password file holds and when it is
+removed — and whichever opens an empty store first has to be the only one that acts.
+
+Behaviour here is unchanged: the same account, the same file, removed on the same first sign-in. The
+failure is reported rather than logged inside the package, so this API still says the password out
+loud in its own log when the file cannot be written.
+
 ### Changed — a node in a cluster answers for no part of an account, and says nothing about its cluster (0.169.0)
 
 Two entry paths exist and neither is above the other. A **standalone node** holds its own accounts and

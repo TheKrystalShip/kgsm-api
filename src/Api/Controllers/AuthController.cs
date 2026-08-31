@@ -341,8 +341,20 @@ public sealed class AuthController(
         // Somebody has signed in with the bootstrap administrator's password, so the file it was left
         // in is no longer the only copy of anything. Scoped to that account by name, and a no-op on
         // every host past its first sign-in.
-        FirstAdmin.ConsumePasswordFile(
-            options.InitialAdminPasswordPath, result.User!.Username, logger);
+            if (FirstAdmin.TryConsumePasswordFile(
+                    options.InitialAdminPasswordPath, result.User!.Username, out Exception? tidyError))
+            {
+                logger.LogInformation(
+                    "'{Username}' has signed in, so the initial administrator password at {Path} is gone.",
+                    result.User!.Username, options.InitialAdminPasswordPath);
+            }
+            else if (tidyError is not null)
+            {
+                // A sign-in that worked is not a failed request because a file could not be tidied away.
+                logger.LogWarning(tidyError,
+                    "The initial administrator password at {Path} could not be removed.",
+                    options.InitialAdminPasswordPath);
+            }
 
         return Ok(new LoginResult(
             minted.Access.Token, minted.Refresh.Token, KgsmTiers.ToWire(principal.Tier),
