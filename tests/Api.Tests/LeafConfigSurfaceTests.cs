@@ -338,6 +338,35 @@ public sealed class LeafConfigSurfaceTests
         Assert.Equal("Weather Watch", cfg.GetProperty("displayName").GetString());
     }
 
+    [Fact]
+    public async Task An_anchor_is_not_a_leaf_of_the_node_it_shares_a_machine_with()
+    {
+        using var f = new LeafConfigTestFactory();
+        f.InstallDescriptor("auth-anchor", """
+        {
+          "schemaVersion": 1, "id": "auth-anchor", "displayName": "Auth anchor",
+          "unit": "kgsm-auth-anchor.service", "role": "Holds the cluster's accounts.",
+          "anchor": true, "onDemand": false, "applyMode": "restart", "floorSources": [],
+          "fields": [
+            { "key": "logLevel", "env": "Logging__LogLevel__Default", "label": "Log level",
+              "description": "Severity.", "type": "enum",
+              "values": ["Debug", "Information"], "default": "Information" }
+          ]
+        }
+        """);
+
+        // An anchor serves one capability to the whole CLUSTER and is a peer of this node rather than
+        // something it hosts. Sharing a machine is a deployment coincidence, so it belongs on no node's
+        // board — it is reached as the member it is.
+        JsonElement board = await Json(Admin(f).GetAsync($"/api/v1/hosts/{Host}/services"));
+        Assert.DoesNotContain(board.GetProperty("data").EnumerateArray(),
+            s => s.GetProperty("id").GetString() == "auth-anchor");
+
+        // And the whole per-leaf surface goes with the row rather than only the row: a descriptor that
+        // still answered here would leave the anchor addressable as one of this node's leaves.
+        Assert.Equal(HttpStatusCode.NotFound, (await Admin(f).GetAsync(ConfigUrl("auth-anchor"))).StatusCode);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static string ConfigUrl(string leaf) => $"/api/v1/hosts/{Host}/services/{leaf}/config";

@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a cluster anchor is not one of this node's leaves (0.171.0)
+
+A descriptor in `/var/lib/kgsm/leaves/` may declare `anchor: true`, and `LeafDescriptorStore` then
+reports it through `Anchors` rather than through the leaf accessors every other consumer reads. So an
+auth anchor sharing a machine with a node no longer appears on that node's Services board, in its
+Overview summary, in the leaf configuration panel, or on any `/services/{leaf}` route: it serves one
+capability to the whole cluster and is a peer of the node rather than something the node hosts.
+
+The rule lives at the one read they all go through, so the board, the config surface and the per-leaf
+routes cannot answer differently about the same file. An optional leaf-level key is additive within
+`schemaVersion: 1`; a descriptor that declares nothing is a leaf, which every existing one is.
+
 ### Fixed — a node with no panel read as a broken one (0.170.0)
 
 The Control Panel is a static artifact that can be served from anywhere, so a node need not carry one

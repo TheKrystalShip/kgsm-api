@@ -107,6 +107,12 @@ public sealed class ServicesAggregator(
     /// A host that runs a leaf added after this API was built still shows it on the board — with its systemd
     /// liveness, which is universal, and no deep health, which is honest: this API has no probe for a leaf
     /// it does not know. Known leaves keep the catalog as their identity authority.
+    /// <para>
+    /// An anchor is not among them, and does not need excluding here: <see cref="LeafDescriptorStore"/>
+    /// reports leaves, and an anchor is a cluster member rather than one of this node's. Membership here
+    /// is what <see cref="Knows"/> answers, so that takes the whole per-leaf surface with it rather than
+    /// only the row.
+    /// </para>
     /// </summary>
     private IReadOnlyList<LeafDescriptor> BuildCatalog()
     {
