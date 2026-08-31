@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a node with no panel read as a broken one (0.170.0)
+
+The Control Panel is a static artifact that can be served from anywhere, so a node need not carry one
+— and a node whose web root is empty is an ordinary node. It did not read as one.
+
+**An unmatched path answered `401`.** With no fallback mapped it met the global
+`RequireAuthenticatedUser` policy, which applies to a request with no endpoint at all: "sign in and
+you will see it", about a path that does not exist. On a node whose cluster has an auth anchor that is
+doubly wrong, because signing in there is exactly what it refuses to let anybody do. It answers `404`
+now, including for a path that looks like a file — `MapFallback`'s default pattern skips those, and
+`/index.html` is precisely what somebody types when wondering whether a panel is there.
+
+**A shell that disappeared after startup answered `500`.** Whether to serve a panel is decided once at
+startup, which leaves the fallback holding a path that can stop existing — a deploy replacing the
+bundle, or an operator emptying it. Sending a file that is not there threw, so every request produced
+an unhandled exception and a stack trace. The file is checked per request now and its absence is a
+`404`, which is what it means.
+
+Neither is reached on a host that serves a panel, and nothing about that case changed.
+
 ### Changed — the first administrator is bootstrapped from one place (0.169.1)
 
 `FirstAdmin` lives in `TheKrystalShip.KGSM.Auth.Users` now, beside the accounts, because a cluster's

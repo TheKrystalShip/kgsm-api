@@ -64,11 +64,15 @@ log "publishing framework-dependent single-file (${RID}) → ${PUBLISH_DIR}"
 rm -rf "$PUBLISH_DIR"
 dotnet publish "$PROJECT_CSPROJ" -c Release -r "$RID" --no-self-contained -o "$PUBLISH_DIR"
 
-# The Control Panel is not this repo's to publish. kgsm-web builds and installs its own bundle into
-# the same wwwroot, and one artifact with one owner is what keeps a deploy of either from carrying
-# the other's half-finished work. So wwwroot is excluded from the sync below: the publish tree is
-# rebuilt from empty every deploy, and without this the prune would read "no wwwroot here" as
-# "delete the one that is there".
+# The Control Panel is not this repo's to publish, and does not have to live here at all: it is a
+# static artifact its own repo builds and installs wherever it is served from, which need not be a
+# node. So wwwroot is excluded from the sync below and this deploy neither fills it nor empties it.
+#
+# The exclusion is what makes both states survive a deploy. The publish tree is rebuilt from empty
+# every time, so without it the prune would read "no wwwroot here" as "delete whatever is there" —
+# and a host that does serve a panel would lose it to a deploy of the API. A host that serves none
+# keeps an empty directory, which this API answers 404 from rather than pretending a panel is
+# missing.
 SPA_SYNC_EXCLUDES=(--exclude='/wwwroot/')
 
 # ── 2. Refresh the unit if it changed (we own the file; systemd reads it via the symlink) ──

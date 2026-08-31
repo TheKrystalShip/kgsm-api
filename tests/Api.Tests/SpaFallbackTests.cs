@@ -69,6 +69,20 @@ public sealed class SpaFallbackTests : IDisposable
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
+    [Fact]
+    public async Task A_shell_that_has_gone_since_startup_is_missing_rather_than_broken()
+    {
+        // The bundle is a directory a deploy replaces and an operator can empty. Deciding once at
+        // startup that a panel is here leaves the fallback holding a path that can stop existing, and
+        // sending a file that is not there throws — an unhandled 500 and a stack trace per request,
+        // for a host whose only fault is no longer having a panel.
+        File.Delete(Path.Combine(_webRoot, "index.html"));
+
+        HttpResponseMessage response = await _client.GetAsync("/servers/some-instance");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
     public void Dispose()
     {
         _client.Dispose();

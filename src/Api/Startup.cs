@@ -1207,7 +1207,11 @@ public class Startup(IConfiguration configuration)
                         HttpMethods.IsGet(context.Request.Method)
                         || HttpMethods.IsHead(context.Request.Method);
 
-                    if (apiPath || !navigation)
+                    // Re-checked per request, not only at startup. The bundle is a directory a
+                    // deploy replaces and an operator can empty, and a shell that has gone since this
+                    // host started would otherwise throw out of SendFileAsync — an unhandled 500 and
+                    // a stack trace per request, for a host that simply has no panel any more.
+                    if (apiPath || !navigation || !File.Exists(indexFile))
                     {
                         context.Response.StatusCode = StatusCodes.Status404NotFound;
                         return;
@@ -1215,6 +1219,26 @@ public class Startup(IConfiguration configuration)
 
                     context.Response.ContentType = "text/html; charset=utf-8";
                     await context.Response.SendFileAsync(indexFile);
+                }).AllowAnonymous();
+            }
+            else
+            {
+                // No panel here, and saying so is the whole job. Without this an unmatched path meets
+                // the global RequireAuthenticatedUser fallback policy — which applies to a request
+                // with no endpoint at all — and answers 401: "sign in and you will see it", about a
+                // path that does not exist. On a node whose cluster has an anchor that is doubly
+                // wrong, because signing in here is exactly what it refuses to let anybody do.
+                //
+                // A node that serves no panel is an ordinary node. It should read as one.
+                //
+                // The explicit "{*path}" matters: MapFallback's default pattern is {*path:nonfile},
+                // which skips anything whose last segment looks like a file — so /index.html would
+                // match no endpoint at all and answer 401 through the same policy, which is the exact
+                // path somebody types when they wonder whether a panel is there.
+                endpoints.MapFallback("{*path}", context =>
+                {
+                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    return Task.CompletedTask;
                 }).AllowAnonymous();
             }
         });
