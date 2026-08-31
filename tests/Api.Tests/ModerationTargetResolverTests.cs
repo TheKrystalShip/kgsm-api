@@ -116,9 +116,50 @@ public sealed class ModerationTargetResolverTests
     [Fact]
     public void Describe_NullInstance_ClaimsNothing()
     {
-        ModerationCapability cap = ModerationTargetResolver.Describe(null);
+        ModerationCapability cap = ModerationTargetResolver.Describe((Instance?)null);
 
         Assert.False(cap.Kick);
         Assert.Null(cap.TargetKind);
+    }
+
+    [Fact]
+    public void Describe_NullBlueprint_ClaimsNothing()
+    {
+        ModerationCapability cap = ModerationTargetResolver.Describe((Blueprint?)null);
+
+        Assert.False(cap.Kick);
+        Assert.Null(cap.TargetKind);
+    }
+
+    /// <summary>
+    /// A blueprint and the instance installed from it declare the same templates, so the catalog and
+    /// the running server have to report the same capability — the case where they could drift is a
+    /// second derivation, which is what the shared one exists to prevent.
+    /// </summary>
+    [Fact]
+    public void Describe_BlueprintAndItsInstance_Agree()
+    {
+        var blueprint = new Blueprint
+        {
+            Name = "factorio",
+            KickCommand = "/kick {name}",
+            BanCommand = "/ban {name}",
+        };
+        // A blueprint spells an undeclared command null and an instance spells it empty, which is the
+        // one difference between the two sources and exactly what the shared derivation absorbs.
+        var instance = new Instance
+        {
+            KickCommand = blueprint.KickCommand ?? string.Empty,
+            BanCommand = blueprint.BanCommand ?? string.Empty,
+            UnbanCommand = blueprint.UnbanCommand ?? string.Empty,
+        };
+
+        ModerationCapability fromBlueprint = ModerationTargetResolver.Describe(blueprint);
+
+        Assert.Equal(ModerationTargetResolver.Describe(instance), fromBlueprint);
+        Assert.True(fromBlueprint.Kick);
+        Assert.True(fromBlueprint.Ban);
+        Assert.False(fromBlueprint.Unban);
+        Assert.Equal("name", fromBlueprint.TargetKind);
     }
 }

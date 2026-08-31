@@ -67,6 +67,30 @@ public sealed class LibraryAggregatorTests
         Assert.Empty(e.Genres);
         Assert.Empty(e.Tags);
         Assert.Null(e.RawgSlug);
+        // Declares no moderation command: every action false and no identity kind implied.
+        Assert.Equal(new ModerationCapability(false, false, false, null), e.Moderation);
+    }
+
+    /// <summary>
+    /// The catalog answers what a game can do to a player before anything of it is installed, off the
+    /// same command templates the players surface reads per instance. Without it a caller asking about
+    /// a game rather than a server concludes no game moderates anybody.
+    /// </summary>
+    [Fact]
+    public async Task Declared_moderation_commands_become_the_catalog_capability()
+    {
+        var bp = new Blueprint
+        {
+            Name = "minecraft",
+            KickCommand = "kick {name}",
+            BanCommand = "ban {name}",
+            // No unban template: the game does not lift bans from the console.
+        };
+        LibraryAggregator agg = Aggregator(new FakeBlueprints(new() { ["minecraft"] = bp }));
+
+        LibraryEntry e = Assert.Single(await agg.GetLibraryAsync(null, BaseUrl, default));
+
+        Assert.Equal(new ModerationCapability(true, true, false, "name"), e.Moderation);
     }
 
     [Fact]

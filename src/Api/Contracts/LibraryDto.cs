@@ -55,6 +55,10 @@ namespace TheKrystalShip.Api.Contracts;
 /// <param name="Tags">RAWG tags (<c>tags[].name</c>, top ~8–12); <c>[]</c> when none/unresolved.</param>
 /// <param name="RawgSlug">The blueprint's curated RAWG lookup hint (<c>metadata.rawg_slug</c>), or <c>null</c>
 /// when the blueprint declares none — the slug the backend resolves cover/metadata from.</param>
+/// <param name="Moderation">Which player-moderation actions this game supports, derived from the command
+/// templates its blueprint declares — the same shape and the same derivation the players surface reports
+/// per instance, answered here before anything is installed. A game that declares no command for an action
+/// reports it <c>false</c>, never "probably fine".</param>
 public sealed record LibraryEntry(
     string Id,
     string Name,
@@ -69,7 +73,8 @@ public sealed record LibraryEntry(
     string? Description,
     IReadOnlyList<string> Genres,
     IReadOnlyList<string> Tags,
-    string? RawgSlug);
+    string? RawgSlug,
+    ModerationCapability Moderation);
 
 /// <summary>
 /// One contiguous default port range a blueprint declares, structured (the canonical

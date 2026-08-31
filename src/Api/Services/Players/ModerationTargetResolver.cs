@@ -79,20 +79,35 @@ public static class ModerationTargetResolver
     /// <c>409</c> by pressing a button. It never claims support the blueprint did not declare — an
     /// action with no template is <see langword="false"/>, not "probably fine".
     /// </remarks>
-    public static ModerationCapability Describe(Instance? instance)
+    public static ModerationCapability Describe(Instance? instance) =>
+        instance is null
+            ? None
+            : Describe(instance.KickCommand, instance.BanCommand, instance.UnbanCommand);
+
+    /// <summary>
+    /// What moderation a game supports before anything of it is installed, read from the same
+    /// templates on the blueprint itself.
+    /// </summary>
+    /// <remarks>
+    /// An instance inherits these templates from its blueprint, so the two overloads answer the same
+    /// question about the same game at two points in its life — which is why they share a derivation
+    /// rather than each having their own reading of what a declared command means.
+    /// </remarks>
+    public static ModerationCapability Describe(Blueprint? blueprint) =>
+        blueprint is null
+            ? None
+            : Describe(blueprint.KickCommand, blueprint.BanCommand, blueprint.UnbanCommand);
+
+    /// <summary>A game that declares nothing: every action unsupported, no identity kind implied.</summary>
+    private static ModerationCapability None => new(false, false, false, null);
+
+    private static ModerationCapability Describe(string? kick, string? ban, string? unban)
     {
-        if (instance is null)
-            return new ModerationCapability(false, false, false, null);
-
-        bool kick = ModerationCommand.IsSupported(instance.KickCommand);
-        bool ban = ModerationCommand.IsSupported(instance.BanCommand);
-        bool unban = ModerationCommand.IsSupported(instance.UnbanCommand);
-
         // The kind comes off whichever command is declared — a game addresses players one way, and
         // its templates all use the same placeholder. Null when it declares no moderation at all,
         // rather than a default that would imply an identity the game never asked for.
         string? kindName = null;
-        foreach (string? template in new[] { instance.KickCommand, instance.BanCommand, instance.UnbanCommand })
+        foreach (string? template in new[] { kick, ban, unban })
         {
             if (ModerationCommand.TryGetTargetKind(template, out ModerationTargetKind k))
             {
@@ -101,7 +116,11 @@ public static class ModerationTargetResolver
             }
         }
 
-        return new ModerationCapability(kick, ban, unban, kindName);
+        return new ModerationCapability(
+            ModerationCommand.IsSupported(kick),
+            ModerationCommand.IsSupported(ban),
+            ModerationCommand.IsSupported(unban),
+            kindName);
     }
 
     /// <summary>

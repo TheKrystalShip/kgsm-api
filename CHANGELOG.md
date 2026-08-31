@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the catalog says what a game can do to a player (0.175.0)
+
+A `GET /library` row carries `moderation`, the same `{ kick, ban, unban, targetKind }` shape the
+players surface reports for a running server, derived from the same command templates and by the same
+code. Asked of the catalog it answers before anything is installed; asked of a server it answers about
+that server's own copy. A game that declares no command for an action reports it `false` — never
+"probably fine".
+
+It exists because a caller reasoning about games rather than servers had no way to know: without it,
+"can I ban somebody on this game?" has one answer for every game in the catalog, and that answer is
+wrong for the five that declare the commands.
+
 ### Added — another member may act here for somebody who never signed in (0.174.0)
 
 The cluster's assistant answers about servers on machines it does not run, and somebody asking it

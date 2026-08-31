@@ -1,5 +1,6 @@
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
+using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
@@ -173,7 +174,11 @@ public sealed class LibraryAggregator
             Genres: genres,
             Tags: tags,
             // The blueprint's curated RAWG slug, or null when it declares none (never name-guessed).
-            RawgSlug: string.IsNullOrWhiteSpace(bp.Metadata?.RawgSlug) ? null : bp.Metadata!.RawgSlug);
+            RawgSlug: string.IsNullOrWhiteSpace(bp.Metadata?.RawgSlug) ? null : bp.Metadata!.RawgSlug,
+            // What the game can do to a player, off the same templates the players surface reads per
+            // instance — so "can this game ban anyone?" has one answer whether it is asked of the
+            // catalog or of a running server.
+            Moderation: ModerationTargetResolver.Describe(bp));
     }
 
     // Build the absolute serving URL for an image slot: {base}/api/v1/library/{id}/{slot}. The base is already
