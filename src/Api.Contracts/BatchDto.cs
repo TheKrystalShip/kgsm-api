@@ -127,7 +127,7 @@ public static class BatchState
 /// Where one server stands inside a batch.
 /// </summary>
 /// <remarks>
-/// <see cref="Unknown"/> is the state that keeps the record honest across a restart. A member the
+/// <c>Unknown</c> is the state that keeps the record honest across a restart. A member the
 /// worker had started has no job record afterwards — <c>JobRegistry</c> is in memory — and the kgsm
 /// invocation was a child of the process that died. Calling that <see cref="Failed"/> would claim an
 /// outcome nobody observed, and re-running it could restart a server somebody deliberately stopped,

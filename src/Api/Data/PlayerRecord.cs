@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using TheKrystalShip.Api.Contracts;
 
 namespace TheKrystalShip.Api.Data;
 
@@ -57,17 +58,4 @@ public sealed class PlayerRecord
 
     /// <summary>Why the player was banned, or null if not banned.</summary>
     public string? BanReason { get; set; }
-}
-
-/// <summary>
-/// The closed status vocabulary for <see cref="PlayerRecord.Status"/>. Serialized as lowercase JSON
-/// via <c>[JsonStringEnumConverter]</c> — <c>"online"</c>, <c>"offline"</c>, <c>"banned"</c>, <c>"unknown"</c>.
-/// </summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
-public enum PlayerStatus
-{
-    online,
-    offline,
-    banned,
-    unknown
 }

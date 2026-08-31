@@ -20,7 +20,7 @@ namespace TheKrystalShip.Api.Contracts;
 ///     <c>starting</c> is a REAL run-state, not a job state: the window between a <c>server.started</c>
 ///     event (the process spawned) and the matching <c>server.ready</c> event (the watchdog's log-scrape
 ///     confirms the game finished booting) — the boolean status reading alone can't tell these apart (the
-///     process is genuinely "up" for both), so <see cref="Services.Aggregation.InstanceCache"/> tracks the
+///     process is genuinely "up" for both), so <c>InstanceCache</c> tracks the
 ///     window explicitly (a "starting latch") and <c>ServerAggregator.BuildServer</c> is the one place that
 ///     folds it into <c>status</c>. See <c>InstanceCache</c>'s remarks for why the periodic boolean
 ///     reconcile must never be allowed to promote <c>starting</c> back to <c>running</c> on its own.
@@ -308,7 +308,7 @@ public sealed record ServerMetricsDto(
 
 /// <summary>
 /// One instance's line in a roster metric frame (<c>metrics.roster</c> on
-/// <see cref="Realtime.StreamProtocol.ServersMetricsTopic"/>) — the live counterpart of the
+/// <c>ServersMetricsTopic</c>) — the live counterpart of the
 /// <see cref="Server.Metrics"/> + <see cref="Server.DiskBytes"/> pair a REST read hydrates from, in the
 /// same two parts and with the same meaning, so a client merges a frame onto a row field-for-field.
 /// </summary>
@@ -337,17 +337,17 @@ public sealed record ServerMetricsRow(
 public sealed record ServerMetricsRoster(IReadOnlyList<ServerMetricsRow> Servers);
 
 /// <summary>
-/// The honest run-state vocabulary (M1·b, extended with <see cref="Starting"/>). Derived from
+/// The honest run-state vocabulary (M1·b, extended with <c>Starting</c>). Derived from
 /// kgsm-lib's <c>Reading&lt;InstanceRuntimeStatus&gt;</c>: a measured reading maps its boolean
-/// <c>Status</c> to <see cref="Running"/>/<see cref="Stopped"/>; any non-measured reading
-/// (unavailable / unsupported / skipped, or a missing entry) is <see cref="Unknown"/> — the
+/// <c>Status</c> to <c>Running</c>/<c>Stopped</c>; any non-measured reading
+/// (unavailable / unsupported / skipped, or a missing entry) is <c>Unknown</c> — the
 /// status was not readable, distinct from a confident "stopped".
 /// <para>
-/// <see cref="Starting"/> is layered on top of a measured "up" (<c>Status: true</c>) reading: the
+/// <c>Starting</c> is layered on top of a measured "up" (<c>Status: true</c>) reading: the
 /// process has spawned (<c>server.started</c>) but the watchdog hasn't yet confirmed the game
 /// finished booting (<c>server.ready</c>). The boolean reading alone cannot distinguish this from
-/// <see cref="Running"/> — both observe the process as up — so it is tracked out-of-band by
-/// <see cref="Services.Aggregation.InstanceCache"/>'s starting latch, not derivable from the reading
+/// <c>Running</c> — both observe the process as up — so it is tracked out-of-band by
+/// <c>InstanceCache</c>'s starting latch, not derivable from the reading
 /// by itself. See <c>InstanceCache</c> for the latch design and its reconcile-hazard guard.
 /// </para>
 /// </summary>
@@ -377,10 +377,10 @@ public static class ServerStatus
     /// down, its desired state is still running, and crash-restart is suppressed for the duration.
     /// </summary>
     /// <remarks>
-    /// Its own word rather than <see cref="Stopped"/>, because the two are different facts about a server
+    /// Its own word rather than <c>Stopped</c>, because the two are different facts about a server
     /// and a surface answers them differently: nobody asked for a parked server to be down, nothing went
     /// wrong, and it comes back on its own. Reading it as stopped would report an outage that is not one,
-    /// and reading it as <see cref="Unknown"/> would report an absence of measurement where there is a
+    /// and reading it as <c>Unknown</c> would report an absence of measurement where there is a
     /// precise one.
     /// </remarks>
     public const string Maintenance = "maintenance";

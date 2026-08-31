@@ -57,7 +57,7 @@ public sealed class SessionController(
     private static JsonSerializerOptions BuildClusterPayloadJsonOptions()
     {
         var options = new JsonSerializerOptions();
-        Json.ApiJson.Configure(options);
+        ApiJson.Configure(options);
         return options;
     }
 

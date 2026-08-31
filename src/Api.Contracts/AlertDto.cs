@@ -61,9 +61,9 @@ public sealed record Alert(
 /// drawn inside an authenticated panel that issues the command itself.
 /// </para>
 /// </remarks>
-/// <param name="Kind">The operation, from the closed <see cref="TheKrystalShip.Api.Data.PushActionKind"/>
+/// <param name="Kind">The operation, from the closed <c>PushActionKind</c>
 /// vocabulary (e.g. <c>server.update</c>). Chosen by
-/// <see cref="TheKrystalShip.Api.Services.Actions.ConditionActions"/>, shared with the push surface so the
+/// <c>ConditionActions</c>, shared with the push surface so the
 /// two never disagree about what a condition deserves.</param>
 /// <param name="Target">What it acts on — the server id for every lifecycle kind.</param>
 public sealed record AlertAction(string Kind, string Target);

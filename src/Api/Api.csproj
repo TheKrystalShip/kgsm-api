@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.176.0</Version>
+    <Version>0.177.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -65,6 +65,13 @@
     <!-- Build-only: the attributes arrive as source and the generator as a tool, and the package
          declares no dependencies of its own. -->
     <PackageReference Include="TheKrystalShip.KGSM.ComponentConfig" Version="3.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- The wire contract, built here because this API is what produces it, and packed so a caller on
+       another machine compiles against the same records and the same serialization rather than
+       re-deriving both from a convention that lives in this repo. -->
+  <ItemGroup>
+    <ProjectReference Include="../Api.Contracts/Api.Contracts.csproj" />
   </ItemGroup>
 
   <!-- The test project drives the AlertEngine's internal Tick/timing seam directly (M6·a). -->

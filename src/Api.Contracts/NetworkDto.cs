@@ -73,7 +73,7 @@ public sealed record OpenPort(int Port, string Proto, string? App, string Server
 /// The block-level firewall availability (M6·b) — the single honest liveness signal for the ports
 /// surface, reported per-probe (the firewall is not a polled leaf). Maps from the kgsm-lib
 /// <c>IFirewallService</c> outcome: <see cref="Operational"/> = a successful <c>ListOwnedAsync</c>;
-/// <see cref="Down"/> = unreachable (<c>FirewallException</c>/timeout); <see cref="Unknown"/> = the backend
+/// <see cref="Down"/> = unreachable (<c>FirewallException</c>/timeout); <c>Unknown</c> = the backend
 /// can't enumerate (the honest <c>ListOwnedAsync</c> <c>Unknown</c>, never collapsed to empty);
 /// <see cref="Unsupported"/> = the backend doesn't support listing; <see cref="Absent"/> = not provisioned.
 /// </summary>

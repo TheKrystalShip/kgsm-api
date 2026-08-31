@@ -94,7 +94,7 @@ internal static class MetricsMapping
         return list;
     }
 
-    /// <summary>The STATIC CPU identity for the <see cref="Host"/> view (NOT the metrics tick — it's constant
+    /// <summary>The STATIC CPU identity for the <see cref="Contracts.Host"/> view (NOT the metrics tick — it's constant
     /// per frame). Null when the snapshot has no cpu-info; each field passes through 1:1 (MaxFreqGhz is already
     /// GHz from the monitor — only rounded, never re-converted).</summary>
     public static CpuInfoSample? ToCpuInfo(Snap.CpuInfo? info) =>

@@ -9,6 +9,7 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Auth;
 
 using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Api.Services.Aggregation;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -26,8 +27,12 @@ namespace TheKrystalShip.Api.Tests;
 /// </summary>
 public sealed class HostIdentityTests
 {
+    // Read off the same type the production code reads it off, so the two name one assembly by
+    // construction. Anchored to a DTO instead, this asserts the version of whichever assembly that DTO
+    // happens to live in — which is a different number the moment the contracts move to a package.
     private static readonly string ExpectedBuild =
-        typeof(ApiInfo).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
+        typeof(HostIdentityProvider).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
 
     // --- the identity card on GET /hosts -----------------------------------------------------------
 

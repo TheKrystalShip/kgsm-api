@@ -1,4 +1,3 @@
-using TheKrystalShip.Api.Data;
 
 namespace TheKrystalShip.Api.Contracts;
 
@@ -6,12 +5,12 @@ namespace TheKrystalShip.Api.Contracts;
 /// The permanent player roster response for one server —
 /// <c>GET /servers/{id}/players</c>. Returns ALL players who have ever connected, each with
 /// their current status (online/offline/banned/unknown). The roster of record lives in the
-/// <see cref="Data.PlayerRecord"/> table; this is a read of the DB-backed
-/// <see cref="Services.Players.PlayerHistoryService"/> projection.
+/// <c>PlayerRecord</c> table; this is a read of the DB-backed
+/// <c>PlayerHistoryService</c> projection.
 /// </summary>
 /// <param name="Detection"><see cref="PlayerDetection.Configured"/> when the instance declares at
 /// least one of <c>player_joined_regex</c>/<c>player_left_regex</c> (native) — presence is only ever
-/// <em>knowable</em> when some detection exists; <see cref="PlayerDetection.Unknown"/> when neither is
+/// <em>knowable</em> when some detection exists; <c>Unknown</c> when neither is
 /// configured, in which case <see cref="Players"/> is <strong>always</strong> <c>[]</c>. Never collapse
 /// "we can't see" into "nobody's here" — the UI must render "presence not available for this game",
 /// never "0 players online", on <c>unknown</c>.</param>

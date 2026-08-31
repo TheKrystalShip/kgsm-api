@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the wire contract is a package (0.177.0)
+
+`TheKrystalShip.KGSM.Api.Contracts` carries the DTO graph and the serialization that gives it its wire
+form. It is built here because this API is what produces the contract, and packed because a caller on
+another machine has to read the bytes it writes.
+
+**The serialization travels with the shapes, and that is the point.** The property names come from a
+naming policy rather than from attributes — exactly one file in the whole contract pins a
+`JsonPropertyName` — so a package shipping only the records would hand a consumer types whose
+correctness depends on it configuring the same policy, which nothing checks and nothing fails on.
+`ApiContractsJson` is a source-generated context with the policy and the ISO-8601 converter built in,
+and a test holds it byte-identical to the reflection-based options the controllers use.
+
+Nothing on the wire moves. The DTOs are the same records serialized the same way; what changes is
+where they are declared and who can compile against them.
+
+Two things stay behind deliberately. `SchedulerBoard` relays the scheduler leaf's own shape, so a
+package declaring it would make this API the owner of a contract it does not control. And the
+per-property doc references pointing into this API's services are now named in prose: a link a consumer
+cannot follow is not a link.
+
+`PlayerStatus` moved with `RosterPlayer`, which is what carries it on the wire, and its converter is
+the generic `JsonStringEnumConverter<PlayerStatus>` so the package keeps its AOT-compatible claim.
+
 ### Added — the reads a caller outside a browser needs (0.176.0)
 
 Four routes, each answering a question that could not be composed from the ones already here.

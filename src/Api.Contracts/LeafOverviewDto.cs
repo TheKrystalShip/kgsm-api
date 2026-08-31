@@ -3,20 +3,6 @@ using System.Text.Json.Serialization;
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// The scheduler leaf's whole board — every instance it supervises, with the cadence it was configured
-/// with and the outcome of what it last ran. The per-server settings surface reads ONE row of this same
-/// snapshot; this serves it entire, because "what is due next across this host" is a question no
-/// per-server view can answer.
-/// <para>
-/// Relayed as the leaf reports it. Every computed field (each window's <c>nextFireUtc</c>) is the
-/// scheduler's own arithmetic over its own clock — this API re-derives nothing, so the panel and the leaf
-/// can never disagree about when something fires. A null is the leaf's honest "not scheduled" or "hasn't
-/// run yet", never a gap this API filled in.
-/// </para>
-/// </summary>
-public sealed record SchedulerBoard(IReadOnlyList<Services.Leaves.SchedulerInstanceStatus> Data);
-
-/// <summary>
 /// One instruction for <c>POST /hosts/{id}/services/scheduler/windows/{action}</c>.
 /// </summary>
 /// <param name="Instance">The kgsm instance the window belongs to.</param>

@@ -5,11 +5,15 @@ namespace TheKrystalShip.Api.Contracts;
 /// <summary>GET/PATCH /integrations/webpush — the admin's view of the push channel. There is no
 /// <c>webhook</c> block because there is no secret to paste: the host signs with a generated VAPID
 /// pair and each browser mints its own credential.</summary>
+/// <param name="Provider">The channel's identifier, <c>webpush</c>.</param>
+/// <param name="Configured">Whether this host holds a VAPID pair to send with.</param>
+/// <param name="PublicKey">The VAPID public key, which a browser needs to subscribe. Public by design
+/// — the private half never leaves the host.</param>
+/// <param name="Enabled">Whether the admin has the channel switched on.</param>
+/// <param name="Events">Which events this channel is configured to deliver.</param>
 public sealed record WebPushIntegrationView(
     string Provider,
     bool Configured,
-    /// <summary>The VAPID public key, which a browser needs to subscribe. Public by design — the
-    /// private half never leaves the host.</summary>
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PublicKey,
     bool Enabled,
     IReadOnlyList<IntegrationEventView> Events);

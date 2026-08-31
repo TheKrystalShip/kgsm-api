@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
 using TheKrystalShip.Api.Contracts;
-using TheKrystalShip.Api.Json;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.KGSM.Core.Models;

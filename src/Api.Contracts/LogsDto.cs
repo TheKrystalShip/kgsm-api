@@ -32,8 +32,8 @@ public sealed record LogPage(IReadOnlyList<LogLine> Data, string? NextCursor);
 
 /// <summary>
 /// One configured host-log source (architecture.html §3) — the identity the frontend's source dropdown
-/// renders. Derived from the canonical <see cref="Services.Leaves.LeafCatalog"/> via
-/// <see cref="ApiOptions.LogSources"/>, so the set is stable and matches the Services board. The frontend
+/// renders. Derived from the canonical <c>LeafCatalog</c> via
+/// <c>LogSources</c>, so the set is stable and matches the Services board. The frontend
 /// uses this to populate the dropdown regardless of whether a source has recent journal entries (quiet
 /// services remain selectable).
 /// </summary>

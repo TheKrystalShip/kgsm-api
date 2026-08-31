@@ -129,7 +129,7 @@ public static class CommandVerb
     /// <c>202</c> + a job, progress on the <c>jobs</c> topic). It does NOT route through
     /// <c>ILifecycleService</c> — kgsm exposes update on <c>IInstanceService.Update</c> — so the runner has
     /// a dedicated case (mirroring install/uninstall). kgsm refuses an update on a RUNNING instance, surfaced
-    /// synchronously by <see cref="CommandGate"/> as a <c>409</c> (the engine refusal is the backstop).
+    /// synchronously by <c>CommandGate</c> as a <c>409</c> (the engine refusal is the backstop).
     /// Audited via the echo path (kgsm's <c>server.updated</c> → <c>server.update</c>), NOT a
     /// direct write.
     /// </summary>
@@ -206,7 +206,7 @@ public sealed record Job(
 public sealed record CommandAccepted(Job Job);
 
 /// <summary>
-/// The job execution lifecycle: <see cref="Queued"/> on accept, <see cref="Running"/> while the verb
+/// The job execution lifecycle: <see cref="Queued"/> on accept, <c>Running</c> while the verb
 /// executes, then a terminal <see cref="Succeeded"/>/<see cref="Failed"/> once it settles and the API
 /// has re-checked authoritative run-state.
 /// <para>

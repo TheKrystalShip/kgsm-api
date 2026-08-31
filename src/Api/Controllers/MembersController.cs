@@ -443,7 +443,7 @@ public sealed class MembersController(
     private static JsonSerializerOptions BuildDetailsJsonOptions()
     {
         var jsonOptions = new JsonSerializerOptions();
-        Json.ApiJson.Configure(jsonOptions);
+        ApiJson.Configure(jsonOptions);
         return jsonOptions;
     }
 }

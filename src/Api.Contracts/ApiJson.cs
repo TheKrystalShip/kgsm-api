@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace TheKrystalShip.Api.Json;
+namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
 /// One place that configures JSON the same way for every serialization path — MVC

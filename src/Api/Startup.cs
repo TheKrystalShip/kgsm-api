@@ -15,7 +15,6 @@ using Microsoft.EntityFrameworkCore;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Infrastructure;
-using TheKrystalShip.Api.Json;
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Alerts;

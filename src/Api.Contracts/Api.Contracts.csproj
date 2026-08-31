@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Plain records plus a source-generated JSON context: no reflection, so a consumer that
+         publishes Native-AOT stays IL2026/IL3050-clean and the JIT api uses the same types. -->
+    <IsAotCompatible>true</IsAotCompatible>
+
+    <RootNamespace>TheKrystalShip.Api.Contracts</RootNamespace>
+    <AssemblyName>TheKrystalShip.KGSM.Api.Contracts</AssemblyName>
+
+    <!-- The Control Panel API's wire contract: the DTO graph AND the serialization that gives it its
+         wire form. Both, because the property names are a naming POLICY rather than attributes — a
+         package shipping only the records would hand a consumer types whose correctness depends on it
+         configuring the same options, which nothing checks and nothing fails on. -->
+    <PackageId>TheKrystalShip.KGSM.Api.Contracts</PackageId>
+    <!-- Bump on ANY change to the DTO graph or the JSON context. NuGet caches by id+version, so a
+         same-version repack serves a stale dll to a consumer; a published version is immutable, and a
+         change reaches a consumer only under a new number. Compatibility is additive-only — a consumer
+         on an older pin ignores fields it does not know. -->
+    <Version>1.0.0-dev.2</Version>
+    <Authors>Heisenberg</Authors>
+    <Description>Shared wire contract for the KGSM Control Panel API: the DTO graph plus the source-generated camelCase, ISO-8601-UTC System.Text.Json context that gives it its wire form. Referenced by kgsm-api (the producer) and consumed by any member of a cluster that calls a node, so a contract break is a compile break rather than a silent runtime mismatch.</Description>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/TheKrystalShip/KGSM-Api</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/TheKrystalShip/KGSM-Api</RepositoryUrl>
+    <RepositoryType>GitHub</RepositoryType>
+    <NeutralLanguage>en</NeutralLanguage>
+
+    <!-- Ship the XML docs: the records carry the semantics contract (what a null means, which units a
+         figure is in), and that is most of what a consumer needs. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
+  </PropertyGroup>
+
+</Project>
