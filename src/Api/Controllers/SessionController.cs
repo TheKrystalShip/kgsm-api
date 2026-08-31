@@ -93,6 +93,7 @@ public sealed class SessionController(
     /// who copy-pastes an admin's URL from erroring on a param they can't use, at no security cost
     /// (the scope is still enforced server-side regardless of what they pass).
     /// </summary>
+    [AnchorHoldsAuth]
     [HttpGet("/auth/sessions")]
     public async Task<ActionResult<SessionsPage>> List([FromQuery] string? userId, CancellationToken ct)
     {
@@ -128,6 +129,7 @@ public sealed class SessionController(
     /// other would surprise a caller who set both by a client bug). Always <c>204</c> on success,
     /// idempotent (revoking an already-dead session is a no-op, not an error).
     /// </summary>
+    [AnchorHoldsAuth]
     [HttpPost("/auth/session/revoke")]
     public async Task<IActionResult> RevokeSelf([FromBody] RevokeRequest? body, CancellationToken ct)
     {
@@ -190,6 +192,7 @@ public sealed class SessionController(
     /// already-revoked row is a no-op, not an error). Evicts the validator cache so the target's next
     /// access 401s immediately rather than waiting for the cache TTL backstop.
     /// </summary>
+    [AnchorHoldsAuth]
     [HttpPost("/auth/sessions/{sid}/revoke")]
     [Authorize(Policy = AuthPolicy.Admin)] // cross-user power — admin only, tightening the class-level viewer gate
     public async Task<IActionResult> RevokeAdmin(string sid, CancellationToken ct)
@@ -215,6 +218,7 @@ public sealed class SessionController(
     /// when they're already out), unlike the by-sid endpoint above which 404s on a genuinely
     /// nonexistent row.
     /// </summary>
+    [AnchorHoldsAuth]
     [HttpPost("/auth/users/{userId}/sessions/revoke-all")]
     [Authorize(Policy = AuthPolicy.Admin)] // cross-user power — admin only, tightening the class-level viewer gate
     public async Task<IActionResult> RevokeAllForUser(string userId, CancellationToken ct)

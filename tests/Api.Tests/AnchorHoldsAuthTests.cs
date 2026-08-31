@@ -99,9 +99,14 @@ public sealed class AnchorHoldsAuthTests
         JsonElement body = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
         Assert.Equal("auth_held_by_anchor", body.GetProperty("error").GetProperty("code").GetString());
 
-        // A client can route on the headers rather than reading English to find out where to go.
+        // The holder's NAME, so a client can say which member answers rather than reading English.
         Assert.Equal("hotrod-auth", response.Headers.GetValues("X-Kgsm-Auth-Holder").Single());
-        Assert.Equal("https://auth.example", response.Headers.GetValues("X-Kgsm-Auth-Url").Single());
+
+        // And never its address, on the header or in the message. A member of a cluster does not tell
+        // a caller where that cluster's accounts are: a browser reaches the anchor because somebody
+        // gave it the anchor's address, not because a node it happened to find offered one.
+        Assert.False(response.Headers.Contains("X-Kgsm-Auth-Url"));
+        Assert.DoesNotContain("auth.example", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
@@ -148,6 +153,15 @@ public sealed class AnchorHoldsAuthTests
         Assert.False(response.Headers.Contains("X-Kgsm-Auth-Url"));
     }
 
+    /// <summary>The rest of the surface — reads, and everything that ends a session.</summary>
+    /// <remarks>
+    /// A member of a cluster answers for no part of an account, and that includes ending a session.
+    /// Ending one is not authenticating and this node can still do it usefully, but a node that
+    /// answered here would be a machine in the cluster with an <c>/auth</c> surface — and the rule is
+    /// about the surface existing at all, not about which half of it is dangerous. A sign-out reaches
+    /// every member over the durable bus instead, which is where it already reached the ones the
+    /// panel was not driving.
+    /// </remarks>
     [Theory]
     [InlineData("GET", "/auth/session")]
     [InlineData("GET", "/auth/sessions")]
@@ -155,7 +169,7 @@ public sealed class AnchorHoldsAuthTests
     [InlineData("GET", "/auth/users")]
     [InlineData("POST", "/auth/logout")]
     [InlineData("POST", "/auth/session/revoke")]
-    public async Task Reading_who_you_are_and_ending_a_session_stay_open(string method, string path)
+    public async Task A_clustered_node_answers_for_no_part_of_an_account(string method, string path)
     {
         await using var node = new ClusterNodeFactory("node-a", "host-a", Secret);
         await AnchorIn(node, "hotrod-auth", "https://auth.example");
@@ -165,8 +179,83 @@ public sealed class AnchorHoldsAuthTests
 
         HttpResponseMessage response = await client.SendAsync(Request(new HttpMethod(method), path));
 
-        // Whatever else they answer, they are not refused by the gate: revoking takes authority away
-        // rather than granting it, and a read of your own session is not a door.
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    }
+
+    /// <summary>
+    /// The same surface on a machine that holds its own accounts.
+    /// </summary>
+    /// <remarks>
+    /// <b>The invariant the whole gate exists to protect.</b> Most installs are one machine: the
+    /// accounts are its own, it is the only door there is, and every one of these has to keep working
+    /// exactly as it always has. A change that closed them here would lock somebody out of their own
+    /// server, and would do it on the deployment nobody is watching a cluster page for.
+    /// </remarks>
+    [Theory]
+    [InlineData("GET", "/auth/session")]
+    [InlineData("GET", "/auth/sessions")]
+    [InlineData("GET", "/auth/identities")]
+    [InlineData("GET", "/auth/users")]
+    [InlineData("GET", "/auth/providers")]
+    [InlineData("POST", "/auth/logout")]
+    [InlineData("POST", "/auth/session/revoke")]
+    [InlineData("POST", "/auth/login")]
+    [InlineData("POST", "/auth/register")]
+    [InlineData("POST", "/auth/password")]
+    [InlineData("POST", "/auth/session/refresh")]
+    [InlineData("POST", "/auth/users")]
+    public async Task A_standalone_node_still_answers_for_all_of_it(string method, string path)
+    {
+        await using var node = new ClusterNodeFactory("node-a", "host-a", Secret);
+        using HttpClient client = node.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
+            "Bearer", AuthTestFactory.MintTokenWithRow(node.Services, KgsmTier.Admin, access: true));
+
+        HttpResponseMessage response = await client.SendAsync(Request(new HttpMethod(method), path));
+
+        // Whatever each answers on its own terms, none of them is refused by the gate.
         Assert.NotEqual(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_node_in_an_anchored_cluster_mints_nothing_on_a_peer_s_word()
+    {
+        // Its own test because the vouch is the one door here that takes a body it validates before
+        // any filter runs, so an empty one is refused for the wrong reason and proves nothing.
+        await using var node = new ClusterNodeFactory("node-a", "host-a", Secret);
+        await AnchorIn(node, "hotrod-auth", "https://auth.example");
+        using HttpClient client = node.CreateClient();
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/auth/cluster-session")
+        {
+            Content = new StringContent(
+                """{"discordId":"1","username":"somebody","displayName":"Somebody","tier":"viewer"}""",
+                Encoding.UTF8, "application/json"),
+        };
+
+        HttpResponseMessage response = await client.SendAsync(request);
+
+        // A node minting its own session because a peer asserted somebody is the thing an anchor
+        // exists to replace. Where one holds the accounts there is nothing for a peer to assert that
+        // its signature does not already say, and a second minting path is a second way to become
+        // anybody.
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task A_clustered_node_serves_no_route_that_names_its_cluster_s_anchor()
+    {
+        await using var node = new ClusterNodeFactory("node-a", "host-a", Secret);
+        await AnchorIn(node, "hotrod-auth", "https://auth.example");
+        using HttpClient client = node.CreateClient();
+
+        // There is no unauthenticated route here that hands back an anchor's address. Announcing what
+        // a cluster contains is the anchor's own job, precisely because a client that has reached one
+        // has already been given the right address — where a node offering the same answer would be a
+        // way to find a cluster's authority from any machine in it.
+        HttpResponseMessage response = await client.GetAsync("/api/v1/cluster/auth");
+
+        Assert.NotEqual(HttpStatusCode.OK, response.StatusCode);
+        Assert.DoesNotContain("auth.example", await response.Content.ReadAsStringAsync());
     }
 }

@@ -41,6 +41,7 @@ public sealed class UsersController(
 {
     /// <summary><c>GET /auth/users</c> — every account on this host, oldest first (admin).</summary>
     [Authorize(Policy = AuthPolicy.Admin)]
+    [AnchorHoldsAuth]
     [HttpGet("/auth/users")]
     public async Task<IActionResult> List(CancellationToken ct)
     {
@@ -58,6 +59,7 @@ public sealed class UsersController(
 
     /// <summary><c>GET /auth/users/{userId}</c> — one account (admin).</summary>
     [Authorize(Policy = AuthPolicy.Admin)]
+    [AnchorHoldsAuth]
     [HttpGet("/auth/users/{userId}")]
     public async Task<IActionResult> Get(string userId, CancellationToken ct)
     {

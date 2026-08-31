@@ -60,6 +60,7 @@ public sealed class IdentitiesController(
     /// <c>GET /auth/identities</c> — the caller's sign-in methods, and what else this host offers.
     /// </summary>
     [Authorize(Policy = AuthPolicy.Viewer)]
+    [AnchorHoldsAuth]
     [HttpGet("/auth/identities")]
     public async Task<IActionResult> List(CancellationToken ct)
     {

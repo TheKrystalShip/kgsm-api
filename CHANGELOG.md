@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a node in a cluster answers for no part of an account, and says nothing about its cluster (0.169.0)
+
+Two entry paths exist and neither is above the other. A **standalone node** holds its own accounts and
+is signed in to directly — unchanged in every particular, and the invariant the whole gate exists to
+protect: most installs are one machine, it is the only door there is, and closing it would lock
+somebody out of their own server. A **cluster** is entered at its auth anchor, which then tells the
+client what the cluster contains.
+
+So on a node whose cluster has an anchor, the whole `/auth` surface now answers `503
+auth_held_by_anchor` — including the reads, sign-out, the revokes, and the peer vouch. Ending a
+session is not authenticating and this node could still do it usefully, but the rule is about the
+surface existing at all rather than about which half of it is dangerous. A sign-out reaches every
+member over the durable bus instead, which is where it already reached the ones a panel was not
+driving.
+
+**The node no longer says where the anchor is.** `X-Kgsm-Auth-Url` is gone from the refusal, the
+message names the holder without an address, and `GET /api/v1/cluster/auth` is removed. A browser
+reaches an anchor because somebody gave it the anchor's address, not because a node it happened to
+find offered one — otherwise any machine in a cluster is a way to discover that cluster's authority.
+The holder's *name* is still on `X-Kgsm-Auth-Holder`: a name is not an address, and it says this door
+is not the one without being a way to find the one.
+
+A panel deployed anywhere therefore starts knowing about no cluster and no node, and learns what a
+cluster contains from the anchor it signed in at — never from a list of its own, which would be a
+second answer able to disagree about which machines exist.
+
 ### Fixed — one sign-out appeared on the audit page twice (0.168.0)
 
 A panel signs out at the anchor *and* at the member it is driving. Both wrote `auth.signed_out`, so a

@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 
 using TheKrystalShip.Api.Contracts;
-using TheKrystalShip.KGSM.Auth.Sessions;
 using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Membership;
 
@@ -26,13 +25,19 @@ namespace TheKrystalShip.Api.Services.Auth;
 /// </remarks>
 public sealed class AnchorHeldGate(
     ClusterStateStore clusterState,
-    MembersStore members,
     ClusterOptions cluster)
 {
-    /// <summary>Where a person should go instead, when it is not here.</summary>
+    /// <summary>
+    /// Who holds the cluster's accounts, when it is not this member.
+    /// </summary>
+    /// <remarks>
+    /// A name and deliberately no address. A member of a cluster does not tell a caller where that
+    /// cluster's accounts are — a browser reaches the anchor because somebody gave it the anchor's
+    /// address, not because a node it happened to find offered one. Carrying the address here at all
+    /// would make putting it back on a response a one-line change nobody would question.
+    /// </remarks>
     /// <param name="MemberId">The member holding the cluster's accounts.</param>
-    /// <param name="Url">The address a browser signs in at, when the holder states one.</param>
-    public sealed record Elsewhere(string MemberId, string? Url);
+    public sealed record Elsewhere(string MemberId);
 
     /// <summary>
     /// The member holding the cluster's accounts, or <see langword="null"/> when this node holds its
@@ -53,15 +58,11 @@ public sealed class AnchorHeldGate(
         if (holder is null || string.Equals(holder, cluster.MemberId, StringComparison.Ordinal))
             return null;
 
-        MemberRow? row = await members.GetByMemberIdAsync(holder, ct).ConfigureAwait(false);
-
-        // A holder this node has an assignment for but no roster row for is still the holder. The
-        // accounts are not this node's to answer for merely because it cannot currently see who does.
-        string? url = row?.Read(ClusterAuthFacts.SignInUrl);
-        if (string.IsNullOrWhiteSpace(url))
-            url = string.IsNullOrWhiteSpace(row?.Url) ? null : row.Url;
-
-        return new Elsewhere(holder, url);
+        // The roster is deliberately not consulted. A holder this node has an assignment for but no
+        // roster row for is still the holder — the accounts are not this node's to answer for merely
+        // because it cannot currently see who does — and there is now nothing on that row this
+        // answer needs.
+        return new Elsewhere(holder);
     }
 }
 
@@ -103,21 +104,17 @@ public sealed class AnchorHoldsAuthAttribute : ActionFilterAttribute
             return;
         }
 
-        // Named on a header as well as in the message, so a client can route to the member that can
-        // actually answer rather than reading English to find out. The same header the anchor sets
-        // when it is standing by, for the same reason.
+        // The holder's NAME, and never its address. A member of a cluster does not tell a caller
+        // where that cluster's accounts are: a browser reaches the anchor because somebody gave it
+        // the anchor's address, not because a node it happened to find offered one. A name is not an
+        // address — it says this door is not the one, without being a way to discover the one.
         context.HttpContext.Response.Headers["X-Kgsm-Auth-Holder"] = elsewhere.MemberId;
-        if (elsewhere.Url is { Length: > 0 } url)
-            context.HttpContext.Response.Headers["X-Kgsm-Auth-Url"] = url;
 
         // 503 rather than 404 or 403: the door exists and this is not a refusal of the caller. It is
-        // this node saying it is not the one that answers, which is a different fact and the one that
-        // tells somebody where to go.
+        // this node saying it is not the one that answers, which is a different fact from either.
         context.Result = new ObjectResult(new ErrorEnvelope(new ErrorBody(
             "auth_held_by_anchor",
-            elsewhere.Url is { Length: > 0 } at
-                ? $"This cluster's accounts are held by '{elsewhere.MemberId}'. Sign in at {at}."
-                : $"This cluster's accounts are held by '{elsewhere.MemberId}'.")))
+            $"This cluster's accounts are held by '{elsewhere.MemberId}'.")))
         {
             StatusCode = StatusCodes.Status503ServiceUnavailable,
         };

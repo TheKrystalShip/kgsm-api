@@ -509,6 +509,7 @@ public sealed class AuthController(
     /// </para>
     /// </summary>
     [AllowAnonymous]
+    [AnchorHoldsAuth]
     [HttpPost("/auth/cluster-session")]
     public async Task<IActionResult> ClusterSession([FromBody] ClusterSessionRequest? body, CancellationToken ct)
     {
@@ -611,6 +612,7 @@ public sealed class AuthController(
     /// <c>auth.cluster_session</c> for the minted session; this initiator is a pass-through relay.
     /// </summary>
     [Authorize(Policy = AuthPolicy.Viewer)]
+    [AnchorHoldsAuth]
     [HttpPost("/auth/cluster-session/request")]
     public async Task<IActionResult> RequestClusterSession([FromBody] ClusterVouchRequest? body, CancellationToken ct)
     {
@@ -790,6 +792,7 @@ public sealed class AuthController(
     /// this is the login-time snapshot, NOT a fresh live fetch — we keep no Discord token to re-fetch with.
     /// </summary>
     [Authorize]
+    [AnchorHoldsAuth]
     [HttpGet("/auth/session")]
     public ActionResult<SessionResponse> Session()
     {
@@ -814,6 +817,7 @@ public sealed class AuthController(
     /// (no bearer) can't be attributed, so it simply returns 204 with no revoke and no row.
     /// </summary>
     [AllowAnonymous]
+    [AnchorHoldsAuth]
     [HttpPost("/auth/logout")]
     public async Task<IActionResult> Logout(CancellationToken ct)
     {
