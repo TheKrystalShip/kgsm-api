@@ -11,6 +11,7 @@ using TheKrystalShip.Api.Services.Integrations.WebPush;
 using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.KGSM.Auth.Cluster;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;

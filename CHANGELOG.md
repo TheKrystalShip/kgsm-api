@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the member half of identity comes from a package (0.173.0)
+
+Verifying a session the anchor minted, refusing the doors it holds, applying `account.*` and
+`session.revoke`, and taking the first full copy of the cluster's accounts are what *every* member
+does, not what this API does. All of it moves to `TheKrystalShip.KGSM.Auth.Cluster`, so the assistant
+and the bot reach the same implementation instead of growing their own.
+
+Nothing this API does changes. It supplies the two things that were always its own: `UserDirectory`
+answers for its account store through `IReplicatedAccounts`, and `ClusterSessionStore` adapts
+`SessionStore` to `IClusterSessionAuthority` — an adapter rather than an interface bolted on, because
+the one thing the two surfaces differ in is the host id every session write is scoped to, which the
+cluster contract has no concept of. `AnchorHoldsAuthAttribute` keeps the MVC half and the error
+envelope; the decision and the refusal's vocabulary come from the package.
+
 ### Changed — an anchor is described in its own directory (0.172.0)
 
 `/var/lib/kgsm/leaves/` holds the components this NODE runs, and an anchor is not one: it serves one

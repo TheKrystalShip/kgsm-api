@@ -16,6 +16,7 @@ using TheKrystalShip.KGSM.Cluster.Storage;
 using TheKrystalShip.KGSM.Cluster.Messaging;
 
 using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Tests;
 

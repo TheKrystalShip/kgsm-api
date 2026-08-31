@@ -15,6 +15,7 @@ using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
 
 using TheKrystalShip.KGSM.Auth.Sessions;
+using TheKrystalShip.KGSM.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Controllers;
 

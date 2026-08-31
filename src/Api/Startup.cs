@@ -43,6 +43,7 @@ using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Discord;
 
 using TheKrystalShip.KGSM.Auth.Sessions;
+using TheKrystalShip.KGSM.Auth.Cluster;
 using TheKrystalShip.KGSM.Lifecycle;
 
 namespace TheKrystalShip.Api;
@@ -692,20 +693,34 @@ public class Startup(IConfiguration configuration)
             ReapMs = apiOptions.ClusterReapMs,
         });
 
-        // session.revoke is this API's one message type, and it is registered rather than built in:
-        // the package dispatches by type and knows nothing about sessions.
-        services.AddSingleton<IClusterMessageHandler, Services.Cluster.Handlers.SessionRevokeHandler>();
+        // session.revoke is registered rather than built in: the transport dispatches by type and
+        // knows nothing about sessions, and the handler is every member's rather than this API's. The
+        // retention is how long a record of an ended session is worth keeping — the longest a bearer
+        // for it could still be presented, which is a refresh token's life.
+        services.AddSingleton<IClusterSessionAuthority>(sp => new ClusterSessionStore(
+            sp.GetRequiredService<SessionStore>(), sp.GetRequiredService<ApiOptions>()));
+
+        services.AddSingleton<IClusterMessageHandler>(sp => new SessionRevokeHandler(
+            sp.GetRequiredService<IClusterSessionAuthority>(),
+            sp.GetRequiredService<ISessionValidator>(),
+            sp.GetRequiredService<ClusterSessionRevocations>(),
+            TimeSpan.FromDays(sp.GetRequiredService<ApiOptions>().SessionsRefreshAbsoluteDays),
+            sp.GetRequiredService<ILogger<SessionRevokeHandler>>()));
 
         // This node's own copy of the cluster's accounts. It is what lets authority be resolved here
         // rather than by asking the member that holds them — so a demotion lands on the next request
         // and an outage over there costs this node nothing it serves. The replica itself lives on
         // UserDirectory, which already owns this host's answer to a store it cannot read.
-        services.AddSingleton<IClusterMessageHandler, Services.Cluster.Handlers.AccountReplicationHandler>();
-        services.AddSingleton<IClusterMessageHandler, Services.Cluster.Handlers.AccountRemovalHandler>();
+        // The replica the handlers apply to is this host's account store, which UserDirectory already
+        // owns along with its whole answer to a store it cannot read.
+        services.AddSingleton<IReplicatedAccounts>(sp => sp.GetRequiredService<UserDirectory>());
+
+        services.AddSingleton<IClusterMessageHandler, AccountReplicationHandler>();
+        services.AddSingleton<IClusterMessageHandler, AccountRemovalHandler>();
 
         // The first full copy. The stream alone would leave a node holding only what changed after it
         // joined, resolving everybody who existed before that as a stranger.
-        services.AddHostedService<Services.Cluster.AccountSnapshotWorker>();
+        services.AddHostedService<AccountSnapshotWorker>();
 
         // The roster-backed fan-out target list. A durable, identity-carrying message goes only to members
         // this node has authenticated first-hand — never to one it has merely heard about — or the outbox
@@ -744,7 +759,7 @@ public class Startup(IConfiguration configuration)
         // A cluster session has no row here, so the only thing worth storing about one is that it has
         // been ended. Same cache bound as the validator beside it, for the same reason.
         services.AddSingleton(sp => new ClusterSessionRevocations(
-            sp.GetRequiredService<SessionStore>(),
+            sp.GetRequiredService<IClusterSessionAuthority>(),
             sp.GetRequiredService<IMemoryCache>(),
             TimeSpan.FromMilliseconds(sp.GetRequiredService<ApiOptions>().SessionsCacheTtlMs)));
 

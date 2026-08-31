@@ -1,5 +1,6 @@
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.KGSM.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Services.Auth;
 
@@ -52,7 +53,7 @@ public sealed record AccountStanding(string? AccountId, KgsmTier Tier, string St
 /// because a use that skipped the check is a bug in the caller and should read like one.
 /// </para>
 /// </remarks>
-public sealed class UserDirectory
+public sealed class UserDirectory : IReplicatedAccounts
 {
     private readonly SqliteUserStore? _store;
     private readonly LocalSignInService? _signIn;
