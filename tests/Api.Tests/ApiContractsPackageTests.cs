@@ -87,6 +87,7 @@ public sealed class ApiContractsPackageTests
     [InlineData(typeof(FileSearchDto))]
     [InlineData(typeof(SaveFileRequest))]
     [InlineData(typeof(SaveFileResultDto))]
+    [InlineData(typeof(ConsoleScrollback))]
     [InlineData(typeof(ServerConfig))]
     [InlineData(typeof(ServerConfigPatch))]
     [InlineData(typeof(ServerSettings))]

@@ -41,6 +41,8 @@ namespace TheKrystalShip.Api.Contracts;
 [JsonSerializable(typeof(FileSearchDto))]
 [JsonSerializable(typeof(SaveFileRequest))]
 [JsonSerializable(typeof(SaveFileResultDto))]
+// What the server printed.
+[JsonSerializable(typeof(ConsoleScrollback))]
 // Its configuration and its settings.
 [JsonSerializable(typeof(ServerConfig))]
 [JsonSerializable(typeof(ServerConfigPatch))]

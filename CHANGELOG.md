@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the console's scrollback is part of the contract (0.179.0)
+
+`ConsoleScrollback` moves into the contract package. It was private to its controller, which was right
+while the only reader was a browser holding the shape by hand; it is not once a caller on another
+machine has to read what a server printed in order to say anything about its health.
+
 ### Added — pruning an instance's surplus backups (0.178.0)
 
 `POST /servers/{id}/backups/prune { keep }` deletes all but the newest `keep`, in one engine call. It

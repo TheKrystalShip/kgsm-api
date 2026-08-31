@@ -232,18 +232,6 @@ public sealed class ServerConsoleController(ILogger<ServerConsoleController> log
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
 
-    /// <summary>
-    /// The scrollback shape: <c>{ "lines": [...], "start": N, "end": N, "hasEarlier": bool }</c>. The
-    /// offsets are the byte range of the run's log these lines came from; <c>start</c> is the cursor a
-    /// caller passes back as <c>?before=</c> to read what precedes them, and <c>hasEarlier</c> says
-    /// whether there is anything there — a watchdog too old to report the range answers 0/0/false, so a
-    /// caller offers no way back rather than one that would re-serve the same lines.
-    /// </summary>
-    private sealed record ConsoleScrollback(IReadOnlyList<string> Lines, long Start, long End, bool HasEarlier)
-    {
-        public static ConsoleScrollback Empty { get; } = new(Array.Empty<string>(), 0, 0, false);
-    }
-
     /// <summary>The 202 body: <c>{ "accepted": true }</c> — delivered to the console input (effect is async, on the WS).</summary>
     private sealed record ConsoleInputAccepted(bool Accepted);
 }
