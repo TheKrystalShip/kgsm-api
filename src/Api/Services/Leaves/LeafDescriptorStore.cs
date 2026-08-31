@@ -27,23 +27,16 @@ public sealed class LeafDescriptorStore(ApiOptions options, ILogger<LeafDescript
     private DateTime _loadedUtc = DateTime.MinValue;
 
     /// <summary>
-    /// Every LEAF descriptor installed on this host. An anchor's is not among them: an anchor serves one
-    /// capability to the whole cluster and is a peer of this node rather than something it hosts — sharing
-    /// a machine is a deployment coincidence, and the target topology puts it on another one. The rule
-    /// lives here, at the one read every consumer goes through, so the services board, the config surface
-    /// and the per-leaf routes cannot answer differently about the same file.
+    /// Every leaf descriptor installed on this host — the components this NODE runs. An anchor is not
+    /// among them and needs no excluding: it serves one capability to the whole cluster and is a peer of
+    /// this node rather than something it hosts, so it is described in its own directory and this scan
+    /// never sees it.
     /// </summary>
-    public IReadOnlyCollection<LeafConfigDescriptor> All =>
-        Snapshot().Values.Where(d => !d.Anchor).ToList();
+    public IReadOnlyCollection<LeafConfigDescriptor> All => Snapshot().Values.ToList();
 
-    /// <summary>The descriptor for a leaf, or null when it has not shipped one — or is an anchor's.</summary>
+    /// <summary>The descriptor for a leaf, or null when it has not shipped one.</summary>
     public LeafConfigDescriptor? For(string? leafId) =>
-        leafId is not null && Snapshot().TryGetValue(leafId, out LeafConfigDescriptor? d) && !d.Anchor ? d : null;
-
-    /// <summary>The anchors this host happens to run, by the same scan. Nothing reads them as leaves; a
-    /// surface about a cluster MEMBER asks for one here rather than through the leaf accessors above.</summary>
-    public IReadOnlyCollection<LeafConfigDescriptor> Anchors =>
-        Snapshot().Values.Where(d => d.Anchor).ToList();
+        leafId is not null && Snapshot().TryGetValue(leafId, out LeafConfigDescriptor? d) ? d : null;
 
     /// <summary>Drop the cache so the next read rescans. For tests and for an explicit refresh.</summary>
     public void Invalidate()

@@ -108,10 +108,9 @@ public sealed class ServicesAggregator(
     /// liveness, which is universal, and no deep health, which is honest: this API has no probe for a leaf
     /// it does not know. Known leaves keep the catalog as their identity authority.
     /// <para>
-    /// An anchor is not among them, and does not need excluding here: <see cref="LeafDescriptorStore"/>
-    /// reports leaves, and an anchor is a cluster member rather than one of this node's. Membership here
-    /// is what <see cref="Knows"/> answers, so that takes the whole per-leaf surface with it rather than
-    /// only the row.
+    /// An anchor is never among them. It serves one capability to the whole cluster and is a peer of this
+    /// node rather than something it hosts, so it is described in its own directory that this scan does
+    /// not read — and it is reached as the member it is, not as one of this node's services.
     /// </para>
     /// </summary>
     private IReadOnlyList<LeafDescriptor> BuildCatalog()

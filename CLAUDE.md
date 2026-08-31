@@ -192,13 +192,13 @@ what is installed. A leaf with no descriptor there reports its capability `absen
 different claim from a row that is perpetually down. A pinned path wins, for a leaf that does not sit
 where its package puts it, and a key set to an empty string still means off.
 
-**`deploy/kgsm-api.leaf.json` is generated, not written.** `TheKrystalShip.KGSM.LeafConfig` rewrites
-it on every build from `[LeafField]` attributes and `<panel>` doc tags on `ApiSettings` — so edit the
+**`deploy/kgsm-api.leaf.json` is generated, not written.** `TheKrystalShip.KGSM.ComponentConfig` rewrites
+it on every build from `[ConfigField]` attributes and `<panel>` doc tags on `ApiSettings` — so edit the
 settings class, never the JSON, and commit what the build produces. A settings key nothing describes
 fails the build naming it; `AllowedHosts` is declared exempt, because host filtering belongs to the
 framework rather than to this API's configuration surface. This API is the one leaf
 whose descriptor says `readOnly` — applying a change here means restarting the process serving the
-request. Mechanism: `../kgsm-leafconfig/README.md`.
+request. Mechanism: `../kgsm-componentconfig/README.md`.
 
 Two consequences worth knowing: **secrets are declared blank here and set for real only in the
 root-owned `/etc/kgsm-api/kgsm-api.env`**, and the boolean knobs take **`true`/`false` only** — the

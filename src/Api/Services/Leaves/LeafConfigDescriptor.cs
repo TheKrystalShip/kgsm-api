@@ -36,12 +36,6 @@ public sealed record LeafConfigDescriptor(
     IReadOnlyList<LeafFloorSource> FloorSources,
     IReadOnlyList<LeafConfigGroup> Groups,
     IReadOnlyList<LeafConfigFieldDef> Fields,
-    /// <summary>The component declaring that it is a cluster ANCHOR rather than one of this node's
-    /// leaves. An anchor serves one capability to the whole cluster and is a peer of the node it happens
-    /// to sit beside, so it belongs on no node's service board — it is reached as the member it is. It
-    /// still ships a descriptor, because what it can be configured with is worth describing wherever
-    /// that is read.</summary>
-    bool Anchor = false,
     /// <summary>The leaf declaring that its configuration can be read here but not changed here — the one
     /// case being this API itself, which cannot restart itself to apply a change without killing the
     /// request that asked for it. Distinct from an unwired host: no amount of provisioning changes it.</summary>
@@ -230,7 +224,7 @@ public static class LeafConfigDescriptorParser
         return new LeafConfigDescriptor(
             raw.SchemaVersion, raw.Id!, raw.DisplayName!, raw.Unit!, raw.Role!,
             raw.OnDemand, applyMode, floors, groups, fields,
-            Anchor: raw.Anchor, ReadOnly: raw.ReadOnly, ReadOnlyReason: raw.ReadOnlyReason);
+            ReadOnly: raw.ReadOnly, ReadOnlyReason: raw.ReadOnlyReason);
     }
 
     private static bool Required(string? value, string what, ref string? error)
@@ -254,7 +248,6 @@ public static class LeafConfigDescriptorParser
         IReadOnlyList<RawFloorSource>? FloorSources,
         IReadOnlyList<RawGroup>? Groups,
         IReadOnlyList<RawField>? Fields,
-        bool Anchor = false,
         bool ReadOnly = false,
         string? ReadOnlyReason = null);
 

@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — an anchor is described in its own directory (0.172.0)
+
+`/var/lib/kgsm/leaves/` holds the components this NODE runs, and an anchor is not one: it serves one
+capability to the whole cluster and is a peer of the node rather than something the node hosts. An
+anchor is described in `/var/lib/kgsm/anchors/`, which this API does not read — so there is nothing
+here to filter, and nothing to forget to filter.
+
+Needs `kgsm-auth` 1.13.0, which is the deploy that moves the file.
+
 ### Changed — a cluster anchor is not one of this node's leaves (0.171.0)
 
 A descriptor in `/var/lib/kgsm/leaves/` may declare `anchor: true`, and `LeafDescriptorStore` then

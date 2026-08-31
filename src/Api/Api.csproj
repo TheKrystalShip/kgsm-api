@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.171.0</Version>
+    <Version>0.172.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -57,14 +57,14 @@
          file entirely — is deliberately NOT suppressed. -->
     <NoWarn>$(NoWarn);CS1573;CS1574;CS1587;CS1734</NoWarn>
 
-    <LeafSettingsFile>kgsm-api.settings.json</LeafSettingsFile>
-    <LeafDescriptorFile>$(MSBuildProjectDirectory)/../../deploy/kgsm-api.leaf.json</LeafDescriptorFile>
+    <ComponentSettingsFile>kgsm-api.settings.json</ComponentSettingsFile>
+    <ComponentDescriptorFile>$(MSBuildProjectDirectory)/../../deploy/kgsm-api.leaf.json</ComponentDescriptorFile>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- Build-only: the attributes arrive as source and the generator as a tool, and the package
          declares no dependencies of its own. -->
-    <PackageReference Include="TheKrystalShip.KGSM.LeafConfig" Version="2.2.0" PrivateAssets="all" />
+    <PackageReference Include="TheKrystalShip.KGSM.ComponentConfig" Version="3.0.0" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- The test project drives the AlertEngine's internal Tick/timing seam directly (M6·a). -->
