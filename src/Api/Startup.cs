@@ -846,7 +846,28 @@ public class Startup(IConfiguration configuration)
         string defaultScheme = apiOptions.AuthEnabled
             ? JwtBearerDefaults.AuthenticationScheme
             : DisabledAuthHandler.SchemeName;
-        AuthenticationBuilder authBuilder = services.AddAuthentication(defaultScheme);
+        // One door with two kinds of caller behind it. A person presents a session; another member of
+        // this cluster presents its own service token and names the person it is acting for, because
+        // that person may never have signed in here at all — they asked the cluster's assistant
+        // something in Discord, and the assistant runs on a different machine.
+        //
+        // Which handler answers is decided by the acting header, not by trying one and falling back:
+        // the two establish trust in completely different ways, and a fallback would mean a failed
+        // member-acting call quietly re-examined as a session.
+        const string routingScheme = "KgsmCaller";
+        AuthenticationBuilder authBuilder = services.AddAuthentication(routingScheme);
+
+        authBuilder.AddPolicyScheme(routingScheme, routingScheme, o =>
+            o.ForwardDefaultSelector = context =>
+                context.Request.Headers.ContainsKey(MemberActing.ActingHandleHeader)
+                    ? MemberActing.Scheme
+                    : defaultScheme);
+
+        // Registered whether or not this host is clustered. Without a cluster secret the token check
+        // refuses every caller, which is the correct answer for a member-to-member call on a machine
+        // that is in no cluster.
+        authBuilder.AddScheme<AuthenticationSchemeOptions, MemberActingHandler>(
+            MemberActing.Scheme, displayName: null, configureOptions: null);
         if (apiOptions.AuthEnabled)
         {
             authBuilder.AddJwtBearer(options =>

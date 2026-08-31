@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — another member may act here for somebody who never signed in (0.174.0)
+
+The cluster's assistant answers about servers on machines it does not run, and somebody asking it
+something in Discord holds no session anywhere. So a member calls this node **as a member**, with
+`X-Kgsm-Acting` naming the person as a `provider:subject` handle, and this node decides what that
+person may do by resolving the handle against its own replica of the cluster's accounts.
+
+**The caller asserts who, never what.** No tier crosses the wire in either direction, so a compromised
+member can act as somebody it names and never above what that person actually holds — narrower than a
+shared secret that forwards an authority along with an identity, and the same boundary every
+member-to-member call already sits on. Which member asserted it is stamped as a claim, because who
+somebody is and who vouched for them are different facts; the audit's actor stays the person.
+
+A person this node has no account for is **refused rather than provisioned**: that is what a username
+collision looks like from the far end, and creating an account from an assertion would let any member
+create one here. A disabled account cannot be acted for at all.
+
+Its own authentication scheme, selected by the header rather than by trying one and falling back —
+what proves the caller, what identifies the person and where the tier comes from are all different,
+and a fallback would mean a failed member-acting call quietly re-examined as a session. No user
+credential travels, so a person's session never leaves the member it was presented to.
+
 ### Changed — the member half of identity comes from a package (0.173.0)
 
 Verifying a session the anchor minted, refusing the doors it holds, applying `account.*` and

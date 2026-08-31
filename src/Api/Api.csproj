@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.173.0</Version>
+    <Version>0.174.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -163,8 +163,8 @@
     <!-- The host's accounts. Deliberately NOT on this API's EF context: the store is a shared host
          file the assistant reads too, and this API's own database is wiped whenever its schema
          changes. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Auth.Users" Version="1.4.0-dev.5" />
-    <PackageReference Include="TheKrystalShip.KGSM.Auth.Cluster" Version="1.0.0-dev.1" />
+    <PackageReference Include="TheKrystalShip.KGSM.Auth.Users" Version="1.4.0-dev.6" />
+    <PackageReference Include="TheKrystalShip.KGSM.Auth.Cluster" Version="1.0.0-dev.3" />
 
     <!-- Cluster membership and durable member-to-member messaging. The outbox, the inbox, the member
          service token and the member-to-member wire all live there, so this API takes part in a cluster
