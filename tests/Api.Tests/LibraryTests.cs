@@ -314,7 +314,7 @@ public sealed class LibraryAggregatorTests
     private static ApiOptions TestOptions() => new()
     {
         HostId = "test", HostLabel = "test",
-        MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "", AssistantRelaySecret = "", RelaySecretPath = "",
+        MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "",
         FirewallSocketPath = "", SchedulerSocketPath = "", BotSocketPath = "", KgsmPath = "", KgsmJournalDir = "/var/lib/kgsm/events",
         EventJournalDir = "",
         JournalStateRoot = "",

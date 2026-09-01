@@ -31,8 +31,6 @@ public class LeafEndpointResolutionTests : IDisposable
         var s = new ApiSettings
         {
             LeafDescriptorDir = _leaves,
-            // Resolving the relay secret creates the file; keep it inside this test's own directory.
-            RelaySecretPath = Path.Combine(_leaves, "relay-secret"),
         };
         configure?.Invoke(s);
         return ApiOptions.FromSettings(s);
@@ -120,7 +118,6 @@ public class LeafEndpointResolutionTests : IDisposable
         var s = new ApiSettings
         {
             LeafDescriptorDir = "/proc/self/mem/not-a-directory",
-            RelaySecretPath = Path.Combine(_leaves, "relay-secret"),
         };
 
         ApiOptions o = ApiOptions.FromSettings(s);

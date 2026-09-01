@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — the assistant is reached directly, not through this API (0.183.0)
+
+The Control Panel talks to the assistant on the assistant's own origin, carrying the session it already
+holds — its own on a node's leaf, the cluster's on an anchor. Nothing called the relay this API served,
+so the turn, confirm, conversation, memory and review routes go, and with them the shared secret that
+authenticated them and the identity and tier that rode alongside it.
+
+What a caller may assert is now the same question everywhere in the cluster: who, never what. A surface
+that forwards a person names them on `X-Kgsm-Acting` and authenticates as a member, and the receiver
+resolves what they may do from its own accounts.
+
+The assistant capability is still probed and still reported: a liveness check needs no identity, and the
+Services board's answer about whether the assistant is up does not depend on being able to ask it
+anything.
+
+
 ### Changed — one cluster reaches one answer about who somebody is (0.182.0)
 
 Deciding a member-acting call — validate the caller's token, refuse a disabled member, resolve the

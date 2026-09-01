@@ -43,11 +43,6 @@
       // Public origin browsers reach the assistant on. There is no resolving this one — a loopback
       // address is not a browser route — so blank reports no browser route and means it.
       "AssistantPublicUrl": "",
-      // Shared secret for the assistant turn relay (X-Relay-Secret). Blank takes the host's own, which
-      // the first surface to look for it mints in /var/lib/kgsm/auth/relay-secret.
-      "AssistantRelaySecret": "",
-      // Where that secret is kept. The first surface to look for it creates it.
-      "RelaySecretPath": "/var/lib/kgsm/auth/relay-secret",
       "FirewallSocketPath": null,
       "SchedulerSocketPath": null,
       "SchedulerControlSocketPath": null,

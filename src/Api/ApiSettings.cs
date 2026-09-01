@@ -89,21 +89,6 @@ public sealed class ApiSettings
         NoDefault = true)]
     public string? AssistantPublicUrl { get; set; }
 
-    /// <summary>Shared secret for the assistant turn relay (X-Relay-Secret). Blank sends none.</summary>
-    /// <panel>Shared secret letting this API ask the assistant on a signed-in user's behalf. It has to
-    /// match the assistant's own relay secret.</panel>
-    [ConfigField("assistantRelaySecret", "Assistant relay secret", Group = "leaves",
-        Type = ConfigType.Secret, Risk = ConfigRisk.Wiring, NoDefault = true)]
-    public string? AssistantRelaySecret { get; set; }
-
-    /// <summary>File the host's relay secret is kept in, read when no secret is set here.</summary>
-    /// <panel>Where this host keeps the secret its surfaces prove themselves to each other with. The
-    /// first surface to look for it creates it, so nothing has to be typed in; point this elsewhere on
-    /// a host that keeps its state somewhere other than /var/lib.</panel>
-    [ConfigField("relaySecretPath", "Relay secret file", Group = "leaves", Type = ConfigType.Path,
-        Risk = ConfigRisk.Wiring)]
-    public string? RelaySecretPath { get; set; }
-
     /// <summary>kgsm-firewall control socket. Blank reports the ports surface absent.</summary>
     /// <panel>The firewall authority's socket. Empty means port state is reported as unknown rather than
     /// assumed closed.</panel>

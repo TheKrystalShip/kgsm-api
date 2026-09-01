@@ -174,25 +174,6 @@
       "risk": "wiring"
     },
     {
-      "key": "assistantRelaySecret",
-      "env": "Api__AssistantRelaySecret",
-      "label": "Assistant relay secret",
-      "description": "Shared secret letting this API ask the assistant on a signed-in user's behalf. It has to match the assistant's own relay secret.",
-      "group": "leaves",
-      "type": "secret",
-      "risk": "wiring"
-    },
-    {
-      "key": "relaySecretPath",
-      "env": "Api__RelaySecretPath",
-      "label": "Relay secret file",
-      "description": "Where this host keeps the secret its surfaces prove themselves to each other with. The first surface to look for it creates it, so nothing has to be typed in; point this elsewhere on a host that keeps its state somewhere other than /var/lib.",
-      "group": "leaves",
-      "type": "path",
-      "default": "/var/lib/kgsm/auth/relay-secret",
-      "risk": "wiring"
-    },
-    {
       "key": "firewallSocket",
       "env": "Api__FirewallSocketPath",
       "label": "Firewall socket",

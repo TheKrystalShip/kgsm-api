@@ -90,21 +90,7 @@ public sealed class ApiOptions
     /// </summary>
     public string? AssistantPublicUrl { get; init; }
 
-    /// <summary>
-    /// Shared secret for the M7 assistant turn relay (<c>Api__AssistantRelaySecret</c>) — the
-    /// API presents it as <c>X-Relay-Secret</c> so the co-located assistant trusts the forwarded
-    /// end-user identity (it must match the assistant's <c>Assistant:Relay:Secret</c>). Empty ⇒ no
-    /// secret is sent; if the assistant requires one the relay is refused (its 401 → our 502).
-    /// <strong>Shared external config</strong>, like the Discord app — not a process dependency.
-    /// </summary>
-    public required string AssistantRelaySecret { get; init; }
 
-    /// <summary>
-    /// Where this host keeps the secret above (<c>Api__RelaySecretPath</c>, default
-    /// <see cref="KgsmRelaySecret.DefaultPath"/>). The assistant and the Discord bot resolve the same
-    /// file, which is what lets three co-located surfaces share a secret nobody was asked for.
-    /// </summary>
-    public required string RelaySecretPath { get; init; }
 
     /// <summary>
     /// kgsm-firewall control socket (M6·b). Empty ⇒ the firewall/ports surface is not provisioned
@@ -912,7 +898,6 @@ public sealed class ApiOptions
         // Same reason: the optional leaves' endpoints are resolved against the descriptor directory,
         // which is a sibling property.
         string leafDescriptorDir = BlankFallback(s.LeafDescriptorDir, DefaultLeafDescriptorDir);
-        string relaySecretPath = BlankFallback(s.RelaySecretPath, KgsmRelaySecret.DefaultPath);
 
         return new ApiOptions
         {
@@ -936,11 +921,6 @@ public sealed class ApiOptions
             AssistantBaseUrl = LeafEndpoint(s.AssistantBaseUrl, "http://127.0.0.1:5180", "assistant", leafDescriptorDir),
             // The browser route is opt-in and has no sensible default — a loopback URL is not one.
             AssistantPublicUrl = Clean(s.AssistantPublicUrl),
-            // The relay secret is host-local and machine-generatable, so a blank one is resolved
-            // rather than owed: KgsmRelaySecret hands back what this host already minted, or mints it.
-            // The assistant on the other end of the relay resolves the same file the same way.
-            AssistantRelaySecret = KgsmRelaySecret.Resolve(s.AssistantRelaySecret, relaySecretPath),
-            RelaySecretPath = relaySecretPath,
             FirewallSocketPath = LeafEndpoint(s.FirewallSocketPath, "/run/kgsm-firewall/firewall.sock", "firewall", leafDescriptorDir),
             SchedulerSocketPath = LeafEndpoint(s.SchedulerSocketPath, "/run/kgsm-scheduler/status.sock", "scheduler", leafDescriptorDir),
             SchedulerControlSocketPath = LeafEndpoint(s.SchedulerControlSocketPath, "/run/kgsm-scheduler/control.sock", "scheduler", leafDescriptorDir),
