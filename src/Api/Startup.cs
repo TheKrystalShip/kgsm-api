@@ -867,6 +867,13 @@ public class Startup(IConfiguration configuration)
                     ? MemberActing.Scheme
                     : defaultScheme);
 
+        // The decision itself is the shared package's, so every member reaches the same answer about who
+        // somebody is; the handler here is the ASP.NET half — reading the request and shaping the ticket.
+        services.AddSingleton<MemberActingResolver>(sp => new MemberActingResolver(
+            sp.GetRequiredService<IClusterTokenService>(),
+            sp.GetRequiredService<IClusterMemberGate>(),
+            sp.GetRequiredService<UserDirectory>()));
+
         // Registered whether or not this host is clustered. Without a cluster secret the token check
         // refuses every caller, which is the correct answer for a member-to-member call on a machine
         // that is in no cluster.

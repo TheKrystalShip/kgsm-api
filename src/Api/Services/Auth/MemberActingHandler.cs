@@ -7,7 +7,7 @@ using Microsoft.Extensions.Options;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Cluster;
 using TheKrystalShip.KGSM.Auth.Users;
-using TheKrystalShip.KGSM.Cluster.Identity;
+using TheKrystalShip.KGSM.Cluster;
 
 namespace TheKrystalShip.Api.Services.Auth;
 
@@ -37,86 +37,51 @@ public sealed class MemberActingHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,
     ILoggerFactory loggerFactory,
     UrlEncoder encoder,
-    IClusterTokenService tokens,
-    IClusterMemberGate members,
-    UserDirectory users,
+    MemberActingResolver resolver,
     ApiOptions api)
     : AuthenticationHandler<AuthenticationSchemeOptions>(options, loggerFactory, encoder)
 {
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
         string? handle = Request.Headers[MemberActing.ActingHandleHeader].FirstOrDefault();
+
+        // No handle at all is not this scheme's call to refuse — another one may authenticate it.
         if (string.IsNullOrWhiteSpace(handle))
             return AuthenticateResult.NoResult();
 
-        string? presented = Bearer();
-        if (presented is null)
-            return AuthenticateResult.Fail("a member-acting call must present a member service token");
+        MemberActingResult result = await resolver.ResolveAsync(
+            handle, ClusterRequest.ExtractBearerToken(Request), Context.RequestAborted);
 
-        ClusterPrincipal? caller = await tokens.ValidateAsync(presented);
-        if (caller is null || string.IsNullOrEmpty(caller.MemberId))
-            return AuthenticateResult.Fail("the member service token is not valid here");
-
-        // The disable-list, which is the one local override to the shared-secret trust boundary. A
-        // member somebody has switched off must not act for anybody, however good its token is.
-        if (!await members.IsEnabledAsync(caller.MemberId))
-            return AuthenticateResult.Fail($"member '{caller.MemberId}' is disabled here");
-
-        if (!KgsmActor.TryParse(handle, out _, out _))
-            return AuthenticateResult.Fail("the acting handle is not a 'provider:subject' handle");
-
-        if (!users.Available)
-            return AuthenticateResult.Fail("this node's account store is unavailable");
-
-        KgsmUser? person;
-        try
+        if (!result.Succeeded)
         {
-            person = await users.Store.FindByCredentialAsync(handle, Context.RequestAborted);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "could not resolve '{Handle}' against this node's accounts", handle);
-            return AuthenticateResult.Fail("this node's account store could not be read");
+            // Said at information level with the caller named, because this is what a username collision
+            // looks like from the far end: a person who exists in the cluster and resolves to nobody here,
+            // with everything else healthy. Every other refusal is ordinary and stays out of the log.
+            if (result.Refusal == MemberActingRefusal.NoSuchAccount)
+                Logger.LogInformation(
+                    "member '{Member}' acted for '{Handle}', which is not an account on this node",
+                    result.ActingMember, result.Handle);
+
+            return AuthenticateResult.Fail(result.Failure ?? "the member-acting call was refused");
         }
 
-        if (person is null)
-        {
-            // Said at information level with the caller named, because this is what a username
-            // collision looks like from the far end: a person who exists in the cluster and resolves
-            // to nobody here, with everything else healthy.
-            Logger.LogInformation(
-                "member '{Member}' acted for '{Handle}', which is not an account on this node",
-                caller.MemberId, handle);
-            return AuthenticateResult.Fail("no account here matches the acting handle");
-        }
+        KgsmUser person = result.Person!;
 
-        if (person.Status == UserStatus.Disabled)
-            return AuthenticateResult.Fail("that account is disabled here");
-
-        // The tier, from this node's own replica and nowhere else. It is read here rather than left to
-        // LiveAuthority because that runs on the session path; this is the same rule applied at the
-        // only point this scheme has.
+        // The tier is the one the resolver read from this node's own replica. It is carried as a claim
+        // rather than re-derived here, so the whole scheme has exactly one place authority comes from.
         Claim[] claims =
         [
-            new("sub", handle),
+            new("sub", result.Handle!),
             new(KgsmAuthClaims.Tier, KgsmTiers.ToWire(person.Tier)),
             new(KgsmAuthClaims.Host, api.HostId),
             new(KgsmAuthClaims.TokenKind, KgsmTokenKind.Access),
             new(KgsmAuthClaims.Username, person.Username),
             new(KgsmAuthClaims.Display, person.DisplayName),
-            new(MemberActing.ActingMemberClaim, caller.MemberId),
+            new(MemberActing.ActingMemberClaim, result.ActingMember!),
         ];
 
         var identity = new ClaimsIdentity(claims, MemberActing.Scheme, "sub", roleType: null);
         return AuthenticateResult.Success(
             new AuthenticationTicket(new ClaimsPrincipal(identity), MemberActing.Scheme));
-    }
-
-    private string? Bearer()
-    {
-        string header = Request.Headers.Authorization.ToString();
-        return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
-            ? header["Bearer ".Length..].Trim()
-            : null;
     }
 }

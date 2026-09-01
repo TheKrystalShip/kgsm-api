@@ -53,7 +53,7 @@ public sealed record AccountStanding(string? AccountId, KgsmTier Tier, string St
 /// because a use that skipped the check is a bug in the caller and should read like one.
 /// </para>
 /// </remarks>
-public sealed class UserDirectory : IReplicatedAccounts
+public sealed class UserDirectory : IReplicatedAccounts, IMemberAccounts
 {
     private readonly SqliteUserStore? _store;
     private readonly LocalSignInService? _signIn;
@@ -106,6 +106,17 @@ public sealed class UserDirectory : IReplicatedAccounts
     /// <summary>The accounts. Only valid while <see cref="Available"/>.</summary>
     public IUserStore Store =>
         _store ?? throw new InvalidOperationException("The KGSM account store is unavailable.");
+
+    /// <summary>
+    /// The accounts a member-acting call is resolved against, absent rather than throwing.
+    /// </summary>
+    /// <remarks>
+    /// Explicit, because the two contracts differ where it matters: reaching for the store in ordinary
+    /// code is a bug when there is none, while a member-acting call has to tell an unreadable store apart
+    /// from a person this node does not have — one is an outage and the other is a refusal, and an
+    /// exception would collapse them.
+    /// </remarks>
+    IUserStore? IMemberAccounts.Store => _store;
 
     /// <summary>Username-and-password sign-in. Only valid while <see cref="Available"/>.</summary>
     public LocalSignInService SignIn =>

@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — one cluster reaches one answer about who somebody is (0.182.0)
+
+Deciding a member-acting call — validate the caller's token, refuse a disabled member, resolve the
+`provider:subject` handle against this node's own replica, read the tier from it — moves to
+`MemberActingResolver` in `TheKrystalShip.KGSM.Auth.Cluster`. The handler here is now the ASP.NET half:
+it reads the request and shapes the ticket, and decides nothing.
+
+The assistant becomes a second receiver of this scheme, and two implementations of "how a member acts for
+a person" would be two surfaces disagreeing about who somebody is — the one disagreement identity cannot
+survive. It is the same split the rest of the member-auth surface already took: the decision is shared,
+the response shape is not.
+
+The header spellings move with it, to `TheKrystalShip.KGSM.Cluster`. A surface that only ever *sends* an
+acting handle needs the spelling and nothing about accounts, and making it take the whole account stack
+for a string constant is the coupling worth avoiding.
+
+Nothing about what this node accepts changes.
+
+
 ### Added — a member says when its own wire carries an identity assertion in clear (0.181.0)
 
 A member-to-member call names the account it acts for, and the node at the far end resolves that

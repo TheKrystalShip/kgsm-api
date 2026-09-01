@@ -10,6 +10,7 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Cluster;
 using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Identity;
 
 using Xunit;
