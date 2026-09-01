@@ -60,6 +60,14 @@ public sealed class ApiSettings
     [ConfigField("publicBaseUrl", "Public base URL", Group = "identity", NoDefault = true)]
     public string? PublicBaseUrl { get; set; }
 
+    /// <summary>The host part players connect to for servers on this node. Blank reports none, and a
+    /// surface falls back to the address it reached this api at.</summary>
+    /// <panel>The address players type to join servers on this host, without a port. Set it when players
+    /// reach this host at a different address than the panel does. Empty means surfaces use the address
+    /// they reached this host at.</panel>
+    [ConfigField("connectHost", "Player connect host", Group = "identity", NoDefault = true)]
+    public string? ConnectHost { get; set; }
+
 
     // ── Leaf connections ──────────────────────────────────────────────────────
     /// <summary>kgsm-monitor metrics socket. Blank reports the metrics capability absent.</summary>

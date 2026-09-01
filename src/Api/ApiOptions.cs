@@ -221,6 +221,15 @@ public sealed class ApiOptions
     public required string PublicBaseUrl { get; init; }
 
     /// <summary>
+    /// The bare host players connect to for servers on this node (<c>Api__ConnectHost</c>, e.g.
+    /// <c>play.example.com</c>) — no scheme, no port; the port is each server's own <c>ConnectPort</c>.
+    /// Blank (the default) ⇒ the <c>Server.ConnectHost</c> field is omitted and a surface falls back to the
+    /// address it reached this api at. Distinct from <see cref="PublicBaseUrl"/> on purpose: that is where
+    /// the PANEL is reached, this is where the GAMES are, and a node behind a gateway differs in both.
+    /// </summary>
+    public required string ConnectHost { get; init; }
+
+    /// <summary>
     /// Base URL the Steam library-capsule cover (<c>{base}/{appId}/library_600x900.jpg</c> — the 2:3 portrait
     /// art Steam shows in the library view) is fetched from (<c>Api__SteamCdnBaseUrl</c>). Default: Steam's
     /// public store-asset CDN. Any trailing slash is trimmed. <strong>Steam is the cover authority</strong> —
@@ -955,6 +964,9 @@ public sealed class ApiOptions
             RawgApiKey = Defaulted(s.RawgApiKey, ""),
             RawgCacheDir = BlankFallback(s.RawgCacheDir, DefaultCacheDir(s.DbPath)),
             PublicBaseUrl = Defaulted(s.PublicBaseUrl, "").TrimEnd('/'),
+            // Trimmed only. A scheme or port left in here is a misconfiguration that shows up in the
+            // address players are handed, which is where it should be noticed rather than quietly repaired.
+            ConnectHost = Defaulted(s.ConnectHost, "").Trim().TrimEnd('/'),
 
             // Steam library-capsule cover (the 2:3 portrait). The cover AUTHORITY, decoupled from RAWG: keyless,
             // so it defaults ON (BlankFallback keeps a concrete CDN base even if the declared default is blank).

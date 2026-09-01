@@ -131,6 +131,14 @@ public sealed record Server(
     // fetching the detail. Null when the instance declares no ports (honest unknown, never a fabricated 0
     // and never a guessed game default).
     int? ConnectPort = null,
+    // The player-facing connect HOST — the address a player actually types, read from this node's own
+    // configuration (`Api__ConnectHost`). It rides the list, the `servers` stream and the detail view for
+    // the same reason ConnectPort does: `host:port` has to be renderable and copyable from a list row
+    // alone. Null when this node declares none, and a surface then falls back to the origin it reached
+    // this api at — which is the CONTROL-PLANE address and only coincidentally the one players use, so a
+    // node reached differently than it is played on sets this and stops the two being conflated. Never
+    // derived from the request, never guessed.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ConnectHost = null,
     // Every port this instance declares, canonical (`26900:26903/tcp`, a single port without its range).
     // ConnectPort above is the first of them and answers "where do I connect"; this answers "what does
     // this server occupy", which a firewall question, a conflict question and a health check all need and

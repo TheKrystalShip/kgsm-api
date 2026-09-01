@@ -136,6 +136,15 @@
       "risk": "safe"
     },
     {
+      "key": "connectHost",
+      "env": "Api__ConnectHost",
+      "label": "Player connect host",
+      "description": "The address players type to join servers on this host, without a port. Set it when players reach this host at a different address than the panel does. Empty means surfaces use the address they reached this host at.",
+      "group": "identity",
+      "type": "string",
+      "risk": "safe"
+    },
+    {
       "key": "monitorSocket",
       "env": "Api__MonitorSocketPath",
       "label": "Monitor socket",

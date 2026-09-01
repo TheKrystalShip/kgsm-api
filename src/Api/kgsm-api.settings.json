@@ -27,6 +27,9 @@
       "NodeId": "",
       // Public base URL absolute cover/hero URLs are built from. Blank derives it from the request.
       "PublicBaseUrl": "",
+      // The host part players connect to for servers on this node. Blank reports none, and a surface
+      // falls back to the address it reached this api at.
+      "ConnectHost": "",
 
       // ── Leaf connections ──
       // kgsm-monitor metrics socket. Blank reports the metrics capability absent.

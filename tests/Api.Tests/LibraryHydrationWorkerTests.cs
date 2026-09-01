@@ -316,7 +316,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
 
     private static ApiOptions TestOptions(string cacheDir) => new()
     {
-        HostId = "test", HostLabel = "test",
+        HostId = "test", HostLabel = "test", ConnectHost = "",
         MonitorSocketPath = "", WatchdogSocketPath = "", AssistantBaseUrl = "",
         FirewallSocketPath = "", SchedulerSocketPath = "", BotSocketPath = "", KgsmPath = "/usr/bin/kgsm", KgsmJournalDir = "/var/lib/kgsm/events",
         EventJournalDir = "",

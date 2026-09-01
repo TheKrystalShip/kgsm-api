@@ -161,7 +161,8 @@ public sealed class ServerAggregator
         Server server = BuildServer(id, instance, _cache.Statuses, _backups.Readings,
             metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
             IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability), _updateLag.Lookup,
-            _runTimes.Lookup, BlueprintMinRamOf(_blueprints), _phases.ParkedLookup);
+            _runTimes.Lookup, BlueprintMinRamOf(_blueprints), _phases.ParkedLookup,
+            _options.ConnectHost);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -220,7 +221,7 @@ public sealed class ServerAggregator
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
                 _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById,
                 OnlinePlayersOf(_players, _observability), _updateLag.Lookup, _runTimes.Lookup,
-                BlueprintMinRamOf(_blueprints), _phases.ParkedLookup));
+                BlueprintMinRamOf(_blueprints), _phases.ParkedLookup, _options.ConnectHost));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -282,7 +283,8 @@ public sealed class ServerAggregator
         Func<string, DateTimeOffset?>? updateAvailableSince = null,
         Func<string, Availability.RunTimes>? runTimes = null,
         Func<string, int?>? blueprintMinRamMb = null,
-        Func<string, bool>? isParked = null)
+        Func<string, bool>? isParked = null,
+        string? connectHost = null)
     {
         string? libraryState = LibraryStateOf(instance);
 
@@ -431,6 +433,9 @@ public sealed class ServerAggregator
             StartedAt: startedAt,
             StoppedAt: stoppedAt,
             ConnectPort: ConnectPortOf(instance.Ports),
+            // This node's configured player-facing host, or null when it declares none. Blank is
+            // normalised here rather than at each caller so every surface gets the same honest unknown.
+            ConnectHost: string.IsNullOrWhiteSpace(connectHost) ? null : connectHost,
             // The whole declaration, in the shape the ecosystem writes a port range. Projected from the
             // structured mappings the engine already gives, so nothing here parses a port string.
             Ports: [.. instance.Ports.Select(PortText)],

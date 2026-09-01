@@ -545,6 +545,43 @@ public sealed class ServerAggregatorBuildServerTests
         Assert.Null(s.StoppedAt);
     }
 
+    // ── The player-facing connect host ────────────────────────────────────────
+    // ConnectHost answers "what address does a player type", which is only the same question as "where
+    // is this api reached" while the panel and the games share one address. These pin that the node's own
+    // declaration is carried through untouched, and that not declaring one is an honest null a surface can
+    // fall back on rather than a fabricated address.
+
+    [Fact]
+    public void ConnectHost_Declared_IsCarriedOntoTheDto()
+    {
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses: Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            connectHost: "play.example.com");
+
+        Assert.Equal("play.example.com", s.ConnectHost);
+    }
+
+    [Fact]
+    public void ConnectHost_NotDeclared_IsNull()
+    {
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses: Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob);
+
+        Assert.Null(s.ConnectHost);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ConnectHost_Blank_IsNull_NeverAnEmptyAddress(string declared)
+    {
+        // A blank reaching the DTO would compose ":25565" on every surface that renders host:port.
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses: Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            connectHost: declared);
+
+        Assert.Null(s.ConnectHost);
+    }
     private static Dictionary<string, Reading<InstanceRuntimeStatus>> Up(string id) => new()
     {
         [id] = Reading<InstanceRuntimeStatus>.Measured(new InstanceRuntimeStatus { InstanceName = id, Status = true }),
