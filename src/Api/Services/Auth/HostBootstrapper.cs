@@ -1,4 +1,6 @@
 using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.KGSM.Cluster;
+
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
@@ -13,6 +15,7 @@ namespace TheKrystalShip.Api.Services.Auth;
 /// </remarks>
 internal sealed class HostBootstrapper(
     ApiOptions options,
+    ClusterOptions cluster,
     UserDirectory users,
     HostSigningKey signingKey,
     ILogger<HostBootstrapper> logger) : IHostedService
@@ -27,6 +30,21 @@ internal sealed class HostBootstrapper(
         // Nothing to bootstrap into. UserDirectory has already said why, loudly.
         if (!users.Available)
             return;
+
+        // A member of a cluster takes its accounts from the member holding them, so the account it
+        // needs is already somebody's. Minting a local one here would not merely be redundant: an
+        // account store is empty exactly once, at the moment a member is about to be given the
+        // cluster's accounts, and the name this creates is the name the holder's own administrator
+        // almost certainly has. Usernames are unique, resolution is by credential handle, and a
+        // replicated account cannot take a name a local one already holds — so the local account
+        // would shadow the cluster's permanently, on the one member where nobody would look for it.
+        if (cluster.Enabled)
+        {
+            logger.LogInformation(
+                "This host is a member of a cluster, so its administrator comes from the member holding "
+                + "the accounts rather than being created here.");
+            return;
+        }
 
         string? password;
         try

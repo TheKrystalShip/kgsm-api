@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a member of a cluster takes its administrator from the cluster (0.184.0)
+
+A host with a cluster secret no longer creates one for itself. The account it needs belongs to the
+member holding the cluster's accounts, and it is given a copy on joining.
+
+Creating one locally is worse than redundant. An account store is empty exactly once — the moment
+before a member is handed the cluster's accounts — and the name this creates is the name a holder's own
+administrator almost certainly has. A username is unique and resolution is by credential handle, so a
+replicated account can never take a name a local one already holds: the local account shadows the
+cluster's for good, on the single member where nobody thinks to look for it, and a demotion made at the
+holder never reaches that machine.
+
+A standalone host is unchanged and still gets an administrator and a one-time password file on its
+first start.
+
 ### Removed — the assistant is reached directly, not through this API (0.183.0)
 
 The Control Panel talks to the assistant on the assistant's own origin, carrying the session it already

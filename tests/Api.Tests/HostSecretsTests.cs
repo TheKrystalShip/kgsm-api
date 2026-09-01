@@ -2,6 +2,9 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Runtime.Versioning;
 
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -160,6 +163,38 @@ public class FirstAdminTests : IClassFixture<AuthTestFactory>
         LoginResult? session = await response.Content.ReadFromJsonAsync<LoginResult>();
         Assert.Equal("admin", session!.Tier);
 
+        Assert.False(File.Exists(options.InitialAdminPasswordPath));
+    }
+
+    /// <summary>
+    /// A member of a cluster gets no administrator of its own, and no password file.
+    /// </summary>
+    /// <remarks>
+    /// The account it needs belongs to the member holding the cluster's accounts, and it is given one
+    /// on joining. Minting a local one is worse than redundant: an account store is empty exactly once,
+    /// which is the moment before a member is handed the cluster's accounts, and the name this creates
+    /// is the name a holder's own administrator almost certainly has. A username is unique and a
+    /// replicated account cannot take one a local account already holds, so the local one shadows the
+    /// cluster's for good — on the single member where nobody thinks to look for it.
+    /// </remarks>
+    [Fact]
+    public async Task AMemberOfAClusterTakesItsAdministratorFromTheCluster()
+    {
+        using var member = new AuthTestFactory();
+        using WebApplicationFactory<Program> clustered = member.WithWebHostBuilder(
+            b => b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["Cluster:Secret"] = "first-admin-test-cluster-secret",
+                    ["Api:NodeId"] = "first-admin-test-member",
+                })));
+
+        clustered.CreateClient();
+
+        IUserStore store = clustered.Services.GetRequiredService<UserDirectory>().Store;
+        Assert.Null(await store.FindByUsernameAsync(FirstAdmin.DefaultUsername));
+
+        ApiOptions options = clustered.Services.GetRequiredService<ApiOptions>();
         Assert.False(File.Exists(options.InitialAdminPasswordPath));
     }
 
