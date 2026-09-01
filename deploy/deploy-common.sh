@@ -302,3 +302,95 @@ PY
         install -m 0644 "$LEAF_DESCRIPTOR" "$dst"
     fi
 }
+
+# ── The member wire ───────────────────────────────────────────────────────────
+
+# Whether this machine is part of a cluster. Read rather than configured: a deploy that had to be
+# told would be a second place to say it, and the two would drift from what the service itself reads.
+host_is_clustered() {
+    [[ -r "$SHARED_CLUSTER_FILE" ]] || return 1
+    grep -qE '^[[:space:]]*Cluster__Secret[[:space:]]*=[[:space:]]*[^[:space:]]' "$SHARED_CLUSTER_FILE"
+}
+
+# One setting's value out of the env file, blank when unset. Trailing whitespace and surrounding
+# quotes go, because systemd strips them and a check that did not would refuse a working config.
+env_setting() {
+    [[ -r "$ENV_FILE" ]] || return 0
+    sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$ENV_FILE" \
+        | tail -n1 | sed -E 's/[[:space:]]+$//; s/^"(.*)"$/\1/; s/^'\''(.*)'\''$/\1/'
+}
+
+# Whether an address points back at whoever reads it. A loopback listener is unreachable from another
+# machine, so nothing it carries crosses a network.
+url_is_loopback() {
+    local host="${1#*://}"; host="${host%%/*}"
+    # A bracketed IPv6 literal carries colons of its own, so the brackets come off before the port
+    # does — splitting on the first colon turns [::1]:8097 into "[", which is nobody's loopback.
+    case "$host" in
+        \[*\]*) host="${host#[}"; host="${host%%]*}" ;;
+        *)        host="${host%%:*}" ;;
+    esac
+    case "$host" in
+        localhost|127.*|::1|0:0:0:0:0:0:0:1) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# A member of a cluster carries identity assertions between machines: a call names the account it
+# acts for, and the node at the far end resolves that account's authority itself. That header is an
+# identity assertion, so it does not cross a network in clear — which makes a plain-http listener on
+# anything but loopback, and a plain-http address offered to other members, both refusals rather than
+# warnings.
+#
+# The pattern this asks for is TLS terminated in front of a loopback bind: nginx holds the
+# certificate, the service binds 127.0.0.1, and one certificate lifecycle serves every member on the
+# machine instead of one inside each component.
+#
+# A machine with no cluster secret is not a member and is not checked. Its API answers whoever is on
+# its own network, which is the standalone deployment this must not disturb.
+#
+# The limit, stated because it decides where this can be relied on: a host provisioned from the
+# package manager never runs this script, so the same rule is stated again by the service at startup.
+assert_member_wire_is_encrypted() {
+    host_is_clustered || return 0
+
+    local problem=0 urls url public gossip
+    urls="$(env_setting 'Api__Urls')"
+
+    local IFS=';'
+    for url in $urls; do
+        url="${url#"${url%%[![:space:]]*}"}"
+        [[ -n "$url" ]] || continue
+        case "$url" in
+            https://*) continue ;;
+            http://*) ;;
+            *) continue ;;
+        esac
+        url_is_loopback "$url" && continue
+        # :80 answers the certificate challenge and redirects everything else, so it serves no API
+        # surface and carries nothing. Every other plain-http listener does.
+        [[ "${url##*:}" == "80" ]] && continue
+        err "${url} serves this API in clear on an address other machines can reach."
+        problem=1
+    done
+    unset IFS
+
+    local setting
+    for setting in Api__PublicBaseUrl Api__ClusterGossipUrl; do
+        local value; value="$(env_setting "$setting")"
+        [[ -n "$value" ]] || continue
+        case "$value" in http://*) ;; *) continue ;; esac
+        url_is_loopback "$value" && continue
+        err "${setting}=${value} offers other members a plain-http address."
+        problem=1
+    done
+
+    if (( problem )); then
+        err ""
+        err "this machine is a member of a cluster, and a member-to-member call names the account it"
+        err "acts for. Put TLS in front of a loopback bind: point Api__Urls at 127.0.0.1, terminate"
+        err "TLS in nginx, and state the https address the panel and other members reach it at."
+        err "config: ${ENV_FILE}"
+        return 1
+    fi
+}

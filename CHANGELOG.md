@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a member says when its own wire carries an identity assertion in clear (0.181.0)
+
+A member-to-member call names the account it acts for, and the node at the far end resolves that
+account's authority from its own replica. That header is an identity assertion, so a plain-http
+listener on anything but loopback, and a plain-http address offered to other members, are now both
+reported.
+
+`deploy.sh` refuses either before it builds, naming the setting and the fix. `:80` is exempt: it
+answers the certificate challenge and redirects everything else, so it serves no API surface.
+
+`MemberWireAdvisory` says the same thing once at startup, as a warning it serves through. That is the
+only form the rule takes on a node installed from the package manager, which never runs the deploy
+script — and a member that exited over a readable header would take a working node down on an upgrade,
+trading a bad header for an unreachable machine.
+
+Neither checks a machine with no cluster secret: it answers whoever is on its own network, which is
+what a standalone install is. The default addressing is on the wrong side of the rule — `Api__Urls`
+falls back to `http://0.0.0.0:8080` — so a member that was never told where to listen is reported.
+
 ### Added — two facts a node was collapsing on its way out (0.180.0)
 
 A server row carries `ports`, every port the instance declares in the canonical `26900:26903/tcp`

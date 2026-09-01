@@ -45,6 +45,7 @@ trap 'on_err "$LINENO"' ERR
 refuse_root
 require_setup
 [[ -f "$PROJECT_CSPROJ" ]] || { err "project not found: $PROJECT_CSPROJ"; exit 1; }
+assert_member_wire_is_encrypted || exit 1
 
 # Framework-dependent single-file: the host must have the .NET 10 + ASP.NET Core SHARED runtime
 # (we deliberately do NOT bundle it — that keeps the artifact ~9 MB instead of ~90 MB). Verify it

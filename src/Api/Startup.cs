@@ -692,6 +692,11 @@ public class Startup(IConfiguration configuration)
             ReapMs = apiOptions.ClusterReapMs,
         });
 
+        // Says once, at startup, whether this member's own addressing carries an identity assertion in
+        // clear. Registered after the package, so ClusterOptions is resolvable; a host with no secret is
+        // not a member and it says nothing.
+        services.AddHostedService<Services.Cluster.MemberWireAdvisory>();
+
         // session.revoke is registered rather than built in: the transport dispatches by type and
         // knows nothing about sessions, and the handler is every member's rather than this API's. The
         // retention is how long a record of an ended session is worth keeping — the longest a bearer
