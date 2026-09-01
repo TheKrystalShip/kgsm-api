@@ -67,6 +67,17 @@ namespace TheKrystalShip.Api.Contracts;
 [JsonSerializable(typeof(List<LibraryEntry>))]
 // What happened.
 [JsonSerializable(typeof(AuditPage))]
+// What a component IS, how it is configured, and what it has logged. Registered because these are
+// the shapes a component serves ABOUT ITSELF: an anchor is a peer of every node rather than something
+// one of them hosts, so nothing next door can answer for it and it renders its own surface through
+// this contract. A Native-AOT component reaches for a source-generated context and has no reflection
+// to fall back on, so a shape that is not here is a shape it cannot write.
+[JsonSerializable(typeof(ServicesSnapshot))]
+[JsonSerializable(typeof(ComponentService))]
+[JsonSerializable(typeof(ComponentConfigView))]
+[JsonSerializable(typeof(ComponentConfigUpdate))]
+[JsonSerializable(typeof(ComponentConfigApplyResult))]
+[JsonSerializable(typeof(LogPage))]
 // And the one shape every refusal arrives in.
 [JsonSerializable(typeof(ErrorEnvelope))]
 public sealed partial class ApiContractsJson : JsonSerializerContext;

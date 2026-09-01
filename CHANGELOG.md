@@ -8,6 +8,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the config and services contract is a COMPONENT's, not a leaf's (0.186.0, Api.Contracts 1.0.0-dev.9)
+
+The same shape describes a service a node runs and an anchor that is a peer of every node, because the
+panel renders both through one set of controls. `component` is the word the ecosystem already uses for
+that — a leaf and an anchor are two identity attributes over one shared body — and a leaf is not a
+cluster member, so the naming follows it rather than the cluster.
+
+    LeafConfig            -> ComponentConfigView      LeafConfigFieldType -> ComponentConfigFieldType
+    LeafConfigField       -> ComponentConfigField     LeafConfigRisk      -> ComponentConfigRisk
+    LeafConfigGroupDto    -> ComponentConfigGroup     LeafConfigSource    -> ComponentConfigSource
+    LeafConfigUpdate      -> ComponentConfigUpdate    LeafConfigOutcome   -> ComponentConfigOutcome
+    LeafConfigHealth      -> ComponentConfigHealth    LeafService         -> ComponentService
+    LeafConfigApplyResult -> ComponentConfigApplyResult
+                                                     LeafServiceHealth   -> ComponentServiceHealth
+
+The root is `ComponentConfigView` rather than a bare `ComponentConfig`, because
+`TheKrystalShip.KGSM.ComponentConfig` is a namespace this API already imports for the descriptor
+attributes, and a type of that name is ambiguous in any file holding both.
+
+**One wire name moves**: the config surface's `leaf` is now `id`. It is the component's own short id,
+which is what its descriptor already calls the same field, so the wire and the file it is projected
+from stop using two words for one thing. Routes are untouched — `{leaf}` in
+`/hosts/{id}/services/{leaf}/config` is a binding name and the URL only ever carried the value.
+
+### Added — the contract can be served by a component that is not this API
+
+`ApiContractsJson` registers `ServicesSnapshot`, `ComponentService`, `ComponentConfigView`,
+`ComponentConfigUpdate`, `ComponentConfigApplyResult` and `LogPage`. This API never needed them there
+— it is JIT and serializes through the reflection-based `ApiJson` — but a Native-AOT component
+answering for its own configuration and its own journal reaches for the source-generated context and
+has no reflection to fall back on. Without the registration it receives the records and can write none
+of them, which is why the one component serving its own surface today hand-rolled a second copy.
+
+
+### Added — a node declares the address players connect to (0.185.0)
+
+`Api__ConnectHost` is the host part a player types to reach servers on this node. It rides the `Server`
+DTO as `connectHost` on the list, the `servers` stream and the detail view — the same three places
+`connectPort` rides, so `host:port` stays renderable and copyable from a list row alone.
+
+Blank is the default and reports null, which is what a surface falls back on: the address it reached
+this API at. That address answers a different question — where the control plane is reached, not where
+the game is — and the two coincide only while one machine serves both on one name. A node behind a
+gateway, or one whose players are handed a cluster-wide name, declares this and the two stop being
+conflated.
+
+A blank never composes an address. It is normalised to null where the DTO is built, so every surface
+gets the same honest unknown rather than one of them rendering `:25565`.
+
 ### Changed — a member of a cluster takes its administrator from the cluster (0.184.0)
 
 A host with a cluster secret no longer creates one for itself. The account it needs belongs to the

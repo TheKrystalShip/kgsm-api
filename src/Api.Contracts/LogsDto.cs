@@ -10,8 +10,9 @@ namespace TheKrystalShip.Api.Contracts;
 /// <param name="Id">The opaque journald <c>__CURSOR</c> of this entry — also the keyset pagination cursor
 /// (pass the page's <see cref="LogPage.NextCursor"/> back as <c>?cursor=</c> to walk older).</param>
 /// <param name="At">When the line was logged (from <c>__REALTIME_TIMESTAMP</c>; ISO-8601 UTC <c>Z</c>).</param>
-/// <param name="Source">The friendly leaf id the line came from (<c>watchdog|monitor|assistant|firewall|
-/// api|bot</c>) — mapped from the journal's <c>_SYSTEMD_UNIT</c> via the configured source map.</param>
+/// <param name="Source">The component the line came from, by its short id (<c>watchdog</c>,
+/// <c>monitor</c>, <c>api</c>, …) — mapped from the journal's <c>_SYSTEMD_UNIT</c> via the configured
+/// source map. A component reading its own journal answers with its own id.</param>
 /// <param name="Level">Display weight mapped from the syslog <c>PRIORITY</c> (<see cref="LogLineLevel"/>):
 /// <c>error|warn|info|debug</c>.</param>
 /// <param name="Text">The rendered log message (<c>MESSAGE</c>).</param>

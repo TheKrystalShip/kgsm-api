@@ -89,7 +89,7 @@ public sealed class ServicesPump(
                         if (UnitStateEqual(prev, next) && nextHealth == prevHealth)
                             continue; // no change → no emit
 
-                        LeafService svc = BuildLeafService(leaf, next, caps, registry);
+                        ComponentService svc = BuildLeafService(leaf, next, caps, registry);
                         hub.Publish(topic, StreamProtocol.ServiceEntityKey(leaf.Id),
                             new StreamMessage(topic, StreamProtocol.ServicePatch, svc));
                     }
@@ -106,20 +106,20 @@ public sealed class ServicesPump(
         catch (OperationCanceledException) { /* app stopping */ }
     }
 
-    /// <summary>Build a full <see cref="LeafService"/> for a leaf — the same shape the REST endpoint returns.</summary>
-    internal static LeafService BuildLeafService(
+    /// <summary>Build a full <see cref="ComponentService"/> for a leaf — the same shape the REST endpoint returns.</summary>
+    internal static ComponentService BuildLeafService(
         LeafDescriptor leaf, UnitState st, HostCapabilities caps, LeafRegistry registry)
     {
         return BuildLeafService(leaf, st, caps, registry is null ? null : id => registry.IsProvisioned(id));
     }
 
-    /// <summary>Build a full <see cref="LeafService"/> for a leaf — the same shape the REST endpoint returns.
+    /// <summary>Build a full <see cref="ComponentService"/> for a leaf — the same shape the REST endpoint returns.
     /// Accepts a provisioned-resolver function for testability (avoids needing a real <see cref="LeafRegistry"/>
     /// in unit tests).</summary>
-    internal static LeafService BuildLeafService(
+    internal static ComponentService BuildLeafService(
         LeafDescriptor leaf, UnitState st, HostCapabilities caps, Func<string, bool>? isProvisioned)
     {
-        return new LeafService(
+        return new ComponentService(
             Id: leaf.Id,
             DisplayName: leaf.DisplayName,
             Role: leaf.Role,
@@ -163,9 +163,9 @@ public sealed class ServicesPump(
         _ => null,
     };
 
-    private static LeafServiceHealth? HealthFor(LeafDescriptor leaf, HostCapabilities caps) => leaf.Health switch
+    private static ComponentServiceHealth? HealthFor(LeafDescriptor leaf, HostCapabilities caps) => leaf.Health switch
     {
-        LeafHealthSource.SelfApi => new LeafServiceHealth(CapabilityStatus.Operational, null),
+        LeafHealthSource.SelfApi => new ComponentServiceHealth(CapabilityStatus.Operational, null),
         LeafHealthSource.Metrics => FromCapability(caps.Metrics),
         LeafHealthSource.Assistant => FromCapability(caps.Assistant),
         LeafHealthSource.Watchdog => FromCapability(caps.Watchdog),
@@ -174,6 +174,6 @@ public sealed class ServicesPump(
         _ => null,
     };
 
-    private static LeafServiceHealth? FromCapability(Capability c) =>
-        c.Provisioned ? new LeafServiceHealth(c.Status, c.Message) : null;
+    private static ComponentServiceHealth? FromCapability(Capability c) =>
+        c.Provisioned ? new ComponentServiceHealth(c.Status, c.Message) : null;
 }

@@ -32,11 +32,11 @@ public sealed class ServicesAggregator(
         IReadOnlyDictionary<string, UnitState> states = await systemd.ReadAsync(units, ct).ConfigureAwait(false);
         HostCapabilities caps = health.Current;
 
-        var rows = new List<LeafService>(Catalog.Count + 1) { await EngineRowAsync(ct).ConfigureAwait(false) };
+        var rows = new List<ComponentService>(Catalog.Count + 1) { await EngineRowAsync(ct).ConfigureAwait(false) };
         foreach (LeafDescriptor leaf in Catalog)
         {
             UnitState st = states.TryGetValue(leaf.Unit, out UnitState? s) ? s : UnitState.Unknown;
-            rows.Add(new LeafService(
+            rows.Add(new ComponentService(
                 Id: leaf.Id,
                 DisplayName: leaf.DisplayName,
                 Role: leaf.Role,
@@ -67,7 +67,7 @@ public sealed class ServicesAggregator(
     /// <see cref="Knows"/> stays false for it, so no per-leaf endpoint (config, restart, commands) ever
     /// treats it as a unit-backed leaf.
     /// </summary>
-    private async Task<LeafService> EngineRowAsync(CancellationToken ct)
+    private async Task<ComponentService> EngineRowAsync(CancellationToken ct)
     {
         string state = "not-installed";
         if (options.KgsmProvisioned)
@@ -77,7 +77,7 @@ public sealed class ServicesAggregator(
             catch (Exception ex) when (ex is not OperationCanceledException) { info = null; }
             state = info is null ? "unavailable" : "available";
         }
-        return new LeafService(
+        return new ComponentService(
             Id: "kgsm",
             DisplayName: "KGSM",
             Role: "The game-server engine — blueprints, instances, libraries, config & events",
@@ -130,10 +130,10 @@ public sealed class ServicesAggregator(
         ];
     }
 
-    private static LeafServiceHealth? HealthFor(LeafDescriptor leaf, HostCapabilities caps) => leaf.Health switch
+    private static ComponentServiceHealth? HealthFor(LeafDescriptor leaf, HostCapabilities caps) => leaf.Health switch
     {
         // We are answering this request, so the api is reachable by definition.
-        LeafHealthSource.SelfApi => new LeafServiceHealth(CapabilityStatus.Operational, null),
+        LeafHealthSource.SelfApi => new ComponentServiceHealth(CapabilityStatus.Operational, null),
         LeafHealthSource.Metrics => FromCapability(caps.Metrics),
         LeafHealthSource.Assistant => FromCapability(caps.Assistant),
         LeafHealthSource.Watchdog => FromCapability(caps.Watchdog),
@@ -145,6 +145,6 @@ public sealed class ServicesAggregator(
     // A capability the api probes → a health row, EXCEPT when it isn't provisioned to probe it (absent):
     // then there is no health signal at all (null), which the frontend renders distinctly from a probed
     // 'down'/'unknown'. Never fabricated from liveness.
-    private static LeafServiceHealth? FromCapability(Capability c) =>
-        c.Provisioned ? new LeafServiceHealth(c.Status, c.Message) : null;
+    private static ComponentServiceHealth? FromCapability(Capability c) =>
+        c.Provisioned ? new ComponentServiceHealth(c.Status, c.Message) : null;
 }

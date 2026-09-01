@@ -143,7 +143,7 @@ public static class StreamProtocol
     public const string CapabilitiesPatch = "capabilities.patch";
 
     /// <summary>A leaf service's state changed on the <see cref="HostServicesTopic"/>: <c>data</c> is a full
-    /// <see cref="Contracts.LeafService"/> element (the same shape the REST <c>GET /hosts/{id}/services</c>
+    /// <see cref="Contracts.ComponentService"/> element (the same shape the REST <c>GET /hosts/{id}/services</c>
     /// returns) — merged by the client by <c>id</c>. Emitted when systemd state, health, or provisioning
     /// flips for any leaf in the <see cref="Leaves.LeafCatalog"/>.</summary>
     public const string ServicePatch = "service.patch";

@@ -51,7 +51,7 @@ public sealed class ServicesProvisioningController(
 
         // Return the refreshed Services-board row for this leaf (Provisioned now reflects the flip).
         ServicesSnapshot snapshot = await services.SnapshotAsync(ct);
-        LeafService? row = snapshot.Data.FirstOrDefault(s => string.Equals(s.Id, leaf, StringComparison.Ordinal));
+        ComponentService? row = snapshot.Data.FirstOrDefault(s => string.Equals(s.Id, leaf, StringComparison.Ordinal));
         return row is null ? NotFound() : Ok(row);
     }
 
@@ -62,7 +62,7 @@ public sealed class ServicesProvisioningController(
     {
         if (!IsThisHost(id))
             return NotFound();
-        LeafConfig? cfg = await config.GetConfigAsync(leaf, ct);
+        ComponentConfigView? cfg = await config.GetConfigAsync(leaf, ct);
         return cfg is null ? NotFound() : Ok(cfg);
     }
 
@@ -70,12 +70,12 @@ public sealed class ServicesProvisioningController(
     /// health-canary → auto-rollback). Unknown key / bad value → 400; secrets are write-only + redacted in the
     /// audit. 404 when the leaf is not a config target.</summary>
     [HttpPut("{leaf}/config")]
-    public async Task<IActionResult> PutConfig(string id, string leaf, [FromBody] LeafConfigUpdate? body, CancellationToken ct)
+    public async Task<IActionResult> PutConfig(string id, string leaf, [FromBody] ComponentConfigUpdate? body, CancellationToken ct)
     {
         if (!IsThisHost(id) || !catalog.IsConfigTarget(leaf))
             return NotFound();
 
-        body ??= new LeafConfigUpdate(null, null);
+        body ??= new ComponentConfigUpdate(null, null);
         string? actor = AuditPrincipal.ActorString(User);
         LeafConfigApplyResponse resp = await config.ApplyAsync(leaf, body, actor, AuditOrigin.Api, ct);
         if (resp.ErrorMessage is not null)

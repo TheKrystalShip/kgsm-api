@@ -309,9 +309,9 @@ public class LeafDescriptorSelfTests
 
             Assert.False(string.IsNullOrWhiteSpace(OptionalStr(f, "label")), $"{key}: no label");
             Assert.False(string.IsNullOrWhiteSpace(OptionalStr(f, "description")), $"{key}: no description");
-            Assert.Contains(Str(f, "type"), LeafConfigFieldType.All);
-            Assert.Contains(OptionalStr(f, "risk") ?? LeafConfigRisk.Safe,
-                new[] { LeafConfigRisk.Safe, LeafConfigRisk.Wiring, LeafConfigRisk.Destructive });
+            Assert.Contains(Str(f, "type"), ComponentConfigFieldType.All);
+            Assert.Contains(OptionalStr(f, "risk") ?? ComponentConfigRisk.Safe,
+                new[] { ComponentConfigRisk.Safe, ComponentConfigRisk.Wiring, ComponentConfigRisk.Destructive });
         }
     }
 
@@ -330,7 +330,7 @@ public class LeafDescriptorSelfTests
         foreach (string env in mustBeSecret)
         {
             JsonElement f = Fields().Single(x => Str(x, "env") == env);
-            Assert.Equal(LeafConfigFieldType.Secret, Str(f, "type"));
+            Assert.Equal(ComponentConfigFieldType.Secret, Str(f, "type"));
             Assert.False(f.TryGetProperty("default", out _), $"{env}: a secret must not carry a default");
         }
     }
@@ -341,8 +341,8 @@ public class LeafDescriptorSelfTests
         foreach (JsonElement f in Fields())
         {
             string key = Str(f, "key");
-            bool numeric = Str(f, "type") is LeafConfigFieldType.Int or LeafConfigFieldType.Duration
-                or LeafConfigFieldType.Float;
+            bool numeric = Str(f, "type") is ComponentConfigFieldType.Int or ComponentConfigFieldType.Duration
+                or ComponentConfigFieldType.Float;
 
             if (!numeric)
             {

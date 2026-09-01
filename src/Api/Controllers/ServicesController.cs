@@ -37,7 +37,7 @@ public sealed class ServicesController(
     /// enough to finish what you are in the middle of without turning "not now" into a reschedule.</summary>
     private const int DefaultPostponeMinutes = 60;
 
-    /// <summary><c>GET /hosts/{id}/services</c> → <c>{ data:[LeafService] }</c> in catalog order. Per-host
+    /// <summary><c>GET /hosts/{id}/services</c> → <c>{ data:[ComponentService] }</c> in catalog order. Per-host
     /// api: the only valid <c>{id}</c> is this host (unknown ⇒ 404, mirroring the other host surfaces).</summary>
     [HttpGet]
     public async Task<ActionResult<ServicesSnapshot>> GetServices(string id, CancellationToken ct)
@@ -736,7 +736,7 @@ public sealed class ServicesController(
     private static async Task<(IReadOnlyList<SpeechModelFile> Models, string Voice, int? IdleMinutes)>
         ConfiguredAsync(LeafConfigService config, CancellationToken ct)
     {
-        LeafConfig? surface = null;
+        ComponentConfigView? surface = null;
         try
         {
             surface = await config.GetConfigAsync("speech", ct).ConfigureAwait(false);

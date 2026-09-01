@@ -3,35 +3,48 @@ using System.Text.Json.Serialization;
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// One configurable leaf's config surface (the leaf-runtime-config feature) — the per-leaf settable-key
-/// manifest joined with the currently-stored overrides. Returned by <c>GET /hosts/{id}/services/{leaf}/config</c>
-/// and embedded in <see cref="LeafConfigApplyResult.Config"/>. Schema-agnostic: the API only ever knows the
-/// manifest's keys (it writes <c>EnvName=value</c> overrides), never the leaf's own config schema.
+/// One component's configuration surface — its settable-key manifest joined with the overrides in force.
 /// </summary>
-public sealed record LeafConfig(
-    string Leaf,
+/// <remarks>
+/// <para>
+/// A COMPONENT, not a leaf. The same shape describes a service a node runs and an anchor that is a peer
+/// of every node, because the panel renders both through one set of controls and a second shape would
+/// mean a second renderer to keep in agreement with the first. What differs is who answers: a node
+/// serves this for each of its leaves at <c>GET /hosts/{id}/services/{leaf}/config</c>, and an anchor
+/// serves its own on its own origin.
+/// </para>
+/// <para>
+/// Schema-agnostic. Whoever serves it knows the manifest's keys and writes <c>EnvName=value</c>
+/// overrides; it never knows the component's own configuration schema.
+/// </para>
+/// </remarks>
+/// <param name="Id">The component's stable short id — <c>monitor</c>, <c>assistant</c>, <c>auth-anchor</c>.
+/// The same id its descriptor declares, so the wire and the file it is projected from agree.</param>
+public sealed record ComponentConfigView(
+    string Id,
     string DisplayName,
     string Unit,
-    IReadOnlyList<LeafConfigField> Fields,
-    // Display sections, ascending by Order. Empty for a leaf whose surface renders flat.
-    IReadOnlyList<LeafConfigGroupDto> Groups,
-    // Whether a PUT would be accepted. False when this host has not wired the leaf for config delivery —
-    // the surface is still readable, so the panel shows the values and explains why they are locked.
+    IReadOnlyList<ComponentConfigField> Fields,
+    // Display sections, ascending by Order. Empty for a component whose surface renders flat.
+    IReadOnlyList<ComponentConfigGroup> Groups,
+    // Whether a PUT would be accepted. False when this host has not wired the component for config
+    // delivery — the surface is still readable, so the panel shows the values and explains why they
+    // are locked.
     bool Editable,
     // Why editing is unavailable; null when Editable.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? EditableReason,
-    // How a change takes effect: restart (the leaf is bounced) or reload.
+    // How a change takes effect: restart (the process is bounced) or reload.
     string ApplyMode,
-    // Whether this leaf's surface came from its own shipped descriptor. False means the leaf has not shipped
-    // one yet and only the keys this API historically knew are exposed — the panel can say so rather than
-    // implying the short list is the whole surface.
+    // Whether this surface came from the component's own shipped descriptor. False means whoever is
+    // serving it holds none and only the keys it already knew are exposed — the panel can say so
+    // rather than implying the short list is the whole surface.
     bool FromDescriptor);
 
 /// <summary>A display section on a leaf's config page.</summary>
-public sealed record LeafConfigGroupDto(string Id, string Label, int Order);
+public sealed record ComponentConfigGroup(string Id, string Label, int Order);
 
 /// <summary>
-/// One settable config field. <see cref="Key"/> is the stable id used in <see cref="LeafConfigUpdate"/>;
+/// One settable config field. <see cref="Key"/> is the stable id used in <see cref="ComponentConfigUpdate"/>;
 /// <see cref="EnvName"/> is the env var the override writes (info only). Honesty: <see cref="Default"/> is
 /// the leaf's coded default as its own descriptor declares it, and <see cref="Floor"/> what the host's
 /// deploy files set — either is null when there is genuinely none, and <see cref="Source"/> says
@@ -39,7 +52,7 @@ public sealed record LeafConfigGroupDto(string Id, string Label, int Order);
 /// <strong>always null</strong> (write-only), surfaced instead as <see cref="Set"/> + an optional last-4
 /// <see cref="Fingerprint"/>.
 /// </summary>
-public sealed record LeafConfigField(
+public sealed record ComponentConfigField(
     string Key,
     string EnvName,
     string Label,
@@ -66,12 +79,12 @@ public sealed record LeafConfigField(
     // What the leaf is actually running with: override → floor → default. Null for a secret (never echoed)
     // and null when Source is "unknown".
     string? Effective = null,
-    // Which tier Effective came from — a LeafConfigSource value. "unknown" when a declared floor source could
+    // Which tier Effective came from — a ComponentConfigSource value. "unknown" when a declared floor source could
     // not be read; that is never quietly downgraded to "default".
-    string Source = LeafConfigSource.Unknown,
+    string Source = ComponentConfigSource.Unknown,
     // Presentation + safety metadata from the descriptor.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Group = null,
-    string Risk = LeafConfigRisk.Safe,
+    string Risk = ComponentConfigRisk.Safe,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Unit = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Min = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Max = null,
@@ -83,13 +96,13 @@ public sealed record LeafConfigField(
 /// (string-encoded; coerced by the manifest field's type); <see cref="Reset"/> deletes overrides (reverts
 /// those keys to the deploy-floor). An unknown key in either is a <c>400</c>.
 /// </summary>
-public sealed record LeafConfigUpdate(
+public sealed record ComponentConfigUpdate(
     IReadOnlyDictionary<string, string>? Values,
     IReadOnlyList<string>? Reset);
 
 /// <summary>The post-apply leaf health (the canary verdict). <see cref="Status"/> is the capability
 /// vocabulary subset <c>operational|down|unknown</c>; <see cref="Message"/> is an optional honest line.</summary>
-public sealed record LeafConfigHealth(
+public sealed record ComponentConfigHealth(
     string Status,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Message);
 
@@ -98,14 +111,14 @@ public sealed record LeafConfigHealth(
 /// <c>applied|rolled_back|unchanged</c>; <see cref="Config"/> is the refetched manifest+overrides so the SPA
 /// re-renders without a second round-trip; <see cref="Message"/> is an honest human line.
 /// </summary>
-public sealed record LeafConfigApplyResult(
+public sealed record ComponentConfigApplyResult(
     string Outcome,
-    LeafConfigHealth Health,
+    ComponentConfigHealth Health,
     string Message,
-    LeafConfig Config);
+    ComponentConfigView Config);
 
-/// <summary>The field-type vocabulary for a <see cref="LeafConfigField"/>.</summary>
-public static class LeafConfigFieldType
+/// <summary>The field-type vocabulary for a <see cref="ComponentConfigField"/>.</summary>
+public static class ComponentConfigFieldType
 {
     public const string String = "string";
     public const string Int = "int";
@@ -134,7 +147,7 @@ public static class LeafConfigFieldType
 /// How dangerous a field is to change. This never blocks an edit — every key is editable; it changes how the
 /// panel presents one, and <see cref="Wiring"/> additionally triggers the post-apply reachability check.
 /// </summary>
-public static class LeafConfigRisk
+public static class ComponentConfigRisk
 {
     /// <summary>The failure mode is the leaf doing its job differently.</summary>
     public const string Safe = "safe";
@@ -150,7 +163,7 @@ public static class LeafConfigRisk
 }
 
 /// <summary>Which tier a field's effective value came from. Never guessed.</summary>
-public static class LeafConfigSource
+public static class ComponentConfigSource
 {
     /// <summary>An override this API stores and renders.</summary>
     public const string Override = "override";
@@ -166,8 +179,8 @@ public static class LeafConfigSource
     public const string Unknown = "unknown";
 }
 
-/// <summary>The apply outcomes for a <see cref="LeafConfigApplyResult"/>.</summary>
-public static class LeafConfigOutcome
+/// <summary>The apply outcomes for a <see cref="ComponentConfigApplyResult"/>.</summary>
+public static class ComponentConfigOutcome
 {
     public const string Applied = "applied";
     public const string RolledBack = "rolled_back";
@@ -175,7 +188,7 @@ public static class LeafConfigOutcome
 
     /// <summary>
     /// The change was applied and the leaf restarted cleanly, but this API can no longer reach it — the
-    /// signature of a <see cref="LeafConfigRisk.Wiring"/> change. Reported rather than auto-reverted: the
+    /// signature of a <see cref="ComponentConfigRisk.Wiring"/> change. Reported rather than auto-reverted: the
     /// change was asked for, and a silent revert would be a lie about what is running.
     /// </summary>
     public const string AppliedUnreachable = "applied_unreachable";

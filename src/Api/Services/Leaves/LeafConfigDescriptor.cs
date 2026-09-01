@@ -171,20 +171,20 @@ public static class LeafConfigDescriptorParser
             }
 
             string type = f.Type ?? "";
-            if (!LeafConfigFieldType.All.Contains(type, StringComparer.Ordinal))
+            if (!ComponentConfigFieldType.All.Contains(type, StringComparer.Ordinal))
             {
                 error = $"field '{f.Key}': unknown type '{type}'";
                 return null;
             }
 
-            string risk = f.Risk ?? LeafConfigRisk.Safe;
-            if (!LeafConfigRisk.All.Contains(risk, StringComparer.Ordinal))
+            string risk = f.Risk ?? ComponentConfigRisk.Safe;
+            if (!ComponentConfigRisk.All.Contains(risk, StringComparer.Ordinal))
             {
                 error = $"field '{f.Key}': unknown risk '{risk}'";
                 return null;
             }
 
-            if (type == LeafConfigFieldType.Enum && (f.Values is null || f.Values.Count == 0))
+            if (type == ComponentConfigFieldType.Enum && (f.Values is null || f.Values.Count == 0))
             {
                 error = $"field '{f.Key}': an enum needs values";
                 return null;

@@ -179,14 +179,14 @@ public sealed class ServicesPumpTests
     [Fact]
     public void BuildLeafService_provisioned_true_when_resolver_returns_true()
     {
-        LeafService svc = ServicesPump.BuildLeafService(MonitorLeaf, Active, ColdCaps, id => true);
+        ComponentService svc = ServicesPump.BuildLeafService(MonitorLeaf, Active, ColdCaps, id => true);
         Assert.True(svc.Provisioned);
     }
 
     [Fact]
     public void BuildLeafService_provisioned_false_when_resolver_returns_false()
     {
-        LeafService svc = ServicesPump.BuildLeafService(MonitorLeaf, Active, ColdCaps, id => false);
+        ComponentService svc = ServicesPump.BuildLeafService(MonitorLeaf, Active, ColdCaps, id => false);
         Assert.False(svc.Provisioned);
     }
 
@@ -194,7 +194,7 @@ public sealed class ServicesPumpTests
     public void BuildLeafService_provisioned_null_when_resolver_is_null()
     {
         // If isProvisioned func is null, provisionable leaves get null (safe degrade)
-        LeafService svc = ServicesPump.BuildLeafService(MonitorLeaf, Active, ColdCaps, (Func<string, bool>?)null);
+        ComponentService svc = ServicesPump.BuildLeafService(MonitorLeaf, Active, ColdCaps, (Func<string, bool>?)null);
         Assert.Null(svc.Provisioned);
     }
 
@@ -203,7 +203,7 @@ public sealed class ServicesPumpTests
     [Fact]
     public void BuildLeafService_produces_valid_dto_for_every_catalog_leaf()
     {
-        // Verify that BuildLeafService produces a valid LeafService for every leaf in the catalog
+        // Verify that BuildLeafService produces a valid ComponentService for every leaf in the catalog
         foreach (LeafDescriptor leaf in LeafCatalog.Default)
         {
             var svc = Build(leaf, Active, ColdCaps);
@@ -327,6 +327,6 @@ public sealed class ServicesPumpTests
     // --- Helpers ---
 
     /// <summary>Shorthand for BuildLeafService without needing a real LeafRegistry.</summary>
-    private static LeafService Build(LeafDescriptor leaf, UnitState st, HostCapabilities caps) =>
+    private static ComponentService Build(LeafDescriptor leaf, UnitState st, HostCapabilities caps) =>
         ServicesPump.BuildLeafService(leaf, st, caps, (Func<string, bool>?)null);
 }

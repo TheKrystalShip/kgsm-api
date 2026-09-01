@@ -6,9 +6,9 @@ namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>The result of an apply request: either a validation error (→ controller 400 envelope) or the
 /// applied/rolled-back/unchanged outcome.</summary>
-public sealed record LeafConfigApplyResponse(LeafConfigApplyResult? Result, string? ErrorMessage, bool IsConflict = false)
+public sealed record LeafConfigApplyResponse(ComponentConfigApplyResult? Result, string? ErrorMessage, bool IsConflict = false)
 {
-    public static LeafConfigApplyResponse Ok(LeafConfigApplyResult r) => new(r, null);
+    public static LeafConfigApplyResponse Ok(ComponentConfigApplyResult r) => new(r, null);
     public static LeafConfigApplyResponse BadRequest(string message) => new(null, message);
 
     /// <summary>The request is well-formed but this host cannot deliver it (the leaf has no override
@@ -17,8 +17,8 @@ public sealed record LeafConfigApplyResponse(LeafConfigApplyResult? Result, stri
 }
 
 /// <summary>
-/// The leaf-runtime-config apply broker (Phase 2): builds the <see cref="LeafConfig"/> read view (manifest ⋈
-/// overrides) and applies a <see cref="LeafConfigUpdate"/> with the <strong>write → render → restart →
+/// The leaf-runtime-config apply broker (Phase 2): builds the <see cref="ComponentConfigView"/> read view (manifest ⋈
+/// overrides) and applies a <see cref="ComponentConfigUpdate"/> with the <strong>write → render → restart →
 /// health-canary → auto-rollback</strong> algorithm. Schema-agnostic: it only writes the manifest's
 /// <c>KEY=value</c> overrides, never touches a leaf's own config.
 /// </summary>
@@ -47,7 +47,7 @@ public sealed class LeafConfigService(
 
     /// <summary>Build the read view for a leaf (manifest ⋈ stored overrides), or null when it is not a config
     /// target.</summary>
-    public async Task<LeafConfig?> GetConfigAsync(string leafId, CancellationToken ct)
+    public async Task<ComponentConfigView?> GetConfigAsync(string leafId, CancellationToken ct)
     {
         if (!catalog.IsConfigTarget(leafId))
             return null;
@@ -57,7 +57,7 @@ public sealed class LeafConfigService(
     /// <summary>Apply a config update with the canary/rollback algorithm. The caller has already 404'd a
     /// non-config-target leaf.</summary>
     public async Task<LeafConfigApplyResponse> ApplyAsync(
-        string leafId, LeafConfigUpdate update, string? actor, string? origin, CancellationToken ct)
+        string leafId, ComponentConfigUpdate update, string? actor, string? origin, CancellationToken ct)
     {
         LeafConfigIdentity? identity = catalog.Identity(leafId);
         if (identity is null || catalog.For(leafId) is null)
@@ -118,10 +118,10 @@ public sealed class LeafConfigService(
 
             if (changedKeys.Count == 0)
             {
-                LeafConfig unchangedCfg = await BuildConfigAsync(leafId, ct).ConfigureAwait(false);
-                LeafConfigHealth h = await SingleHealthAsync(leafId, ct).ConfigureAwait(false);
-                return LeafConfigApplyResponse.Ok(new LeafConfigApplyResult(
-                    LeafConfigOutcome.Unchanged, h, "No changes to apply.", unchangedCfg));
+                ComponentConfigView unchangedCfg = await BuildConfigAsync(leafId, ct).ConfigureAwait(false);
+                ComponentConfigHealth h = await SingleHealthAsync(leafId, ct).ConfigureAwait(false);
+                return LeafConfigApplyResponse.Ok(new ComponentConfigApplyResult(
+                    ComponentConfigOutcome.Unchanged, h, "No changes to apply.", unchangedCfg));
             }
 
             List<LeafOverrideRow> targetRows = target.Values.ToList();
@@ -138,16 +138,16 @@ public sealed class LeafConfigService(
                 // The unit is up. A wiring change can still have severed this API's link to it — the canary
                 // cannot see that, so check it explicitly and report honestly rather than claiming success.
                 string? severed = await CheckReachabilityAsync(leafId, changedFields, ct).ConfigureAwait(false);
-                string outcome = severed is null ? LeafConfigOutcome.Applied : LeafConfigOutcome.AppliedUnreachable;
+                string outcome = severed is null ? ComponentConfigOutcome.Applied : ComponentConfigOutcome.AppliedUnreachable;
 
                 await AuditAsync(leaf, outcome, changedKeys, actor, origin, ct).ConfigureAwait(false);
-                LeafConfig cfg = await BuildConfigAsync(leafId, ct).ConfigureAwait(false);
+                ComponentConfigView cfg = await BuildConfigAsync(leafId, ct).ConfigureAwait(false);
 
                 if (severed is null)
                 {
-                    return LeafConfigApplyResponse.Ok(new LeafConfigApplyResult(
-                        LeafConfigOutcome.Applied,
-                        new LeafConfigHealth(CapabilityStatus.Operational, null),
+                    return LeafConfigApplyResponse.Ok(new ComponentConfigApplyResult(
+                        ComponentConfigOutcome.Applied,
+                        new ComponentConfigHealth(CapabilityStatus.Operational, null),
                         $"Applied {changedKeys.Count} change(s); {leaf.DisplayName} is healthy.",
                         cfg));
                 }
@@ -155,9 +155,9 @@ public sealed class LeafConfigService(
                 // Deliberately NOT auto-reverted: the change was asked for, and silently undoing it would
                 // misreport what is running. Reset stays available and needs nothing from the leaf.
                 logger.LogWarning("config applied to {Leaf} but it is no longer reachable from this API", leafId);
-                return LeafConfigApplyResponse.Ok(new LeafConfigApplyResult(
-                    LeafConfigOutcome.AppliedUnreachable,
-                    new LeafConfigHealth(CapabilityStatus.Down, severed),
+                return LeafConfigApplyResponse.Ok(new ComponentConfigApplyResult(
+                    ComponentConfigOutcome.AppliedUnreachable,
+                    new ComponentConfigHealth(CapabilityStatus.Down, severed),
                     $"Applied {changedKeys.Count} change(s) and {leaf.DisplayName} restarted cleanly, but this "
                         + $"API can no longer reach it. {severed} Resetting restores the previous "
                         + "configuration and works even while the leaf is unreachable.",
@@ -172,13 +172,13 @@ public sealed class LeafConfigService(
             await unitController.RestartAsync(leaf.Unit, ct).ConfigureAwait(false);
             bool postHealthy = await PollHealthyAsync(leafId, options.LeafApplyCanaryMs, ct).ConfigureAwait(false);
 
-            await AuditAsync(leaf, LeafConfigOutcome.RolledBack, changedKeys, actor, origin, ct)
+            await AuditAsync(leaf, ComponentConfigOutcome.RolledBack, changedKeys, actor, origin, ct)
                 .ConfigureAwait(false);
-            LeafConfig rolledCfg = await BuildConfigAsync(leafId, ct).ConfigureAwait(false);
+            ComponentConfigView rolledCfg = await BuildConfigAsync(leafId, ct).ConfigureAwait(false);
             int seconds = Math.Max(1, options.LeafApplyCanaryMs / 1000);
-            return LeafConfigApplyResponse.Ok(new LeafConfigApplyResult(
-                LeafConfigOutcome.RolledBack,
-                new LeafConfigHealth(
+            return LeafConfigApplyResponse.Ok(new ComponentConfigApplyResult(
+                ComponentConfigOutcome.RolledBack,
+                new ComponentConfigHealth(
                     postHealthy ? CapabilityStatus.Operational : CapabilityStatus.Down,
                     postHealthy ? null : $"{leaf.DisplayName} did not recover after rollback."),
                 $"Change rejected — {leaf.DisplayName} failed its health check within {seconds}s; "
@@ -203,14 +203,14 @@ public sealed class LeafConfigService(
         }
     }
 
-    private async Task<LeafConfigHealth> SingleHealthAsync(string leafId, CancellationToken ct)
+    private async Task<ComponentConfigHealth> SingleHealthAsync(string leafId, CancellationToken ct)
     {
         bool healthy = await probe.IsHealthyAsync(leafId, ct).ConfigureAwait(false);
-        return new LeafConfigHealth(healthy ? CapabilityStatus.Operational : CapabilityStatus.Down, null);
+        return new ComponentConfigHealth(healthy ? CapabilityStatus.Operational : CapabilityStatus.Down, null);
     }
 
     /// <summary>
-    /// After a successful apply, whether a <see cref="LeafConfigRisk.Wiring"/> change severed this API's link
+    /// After a successful apply, whether a <see cref="ComponentConfigRisk.Wiring"/> change severed this API's link
     /// to the leaf. Returns null when nothing is wrong OR when there is no signal — an absence of evidence is
     /// never reported as a break.
     /// </summary>
@@ -218,7 +218,7 @@ public sealed class LeafConfigService(
         string leafId, IReadOnlyList<LeafConfigFieldDef> changed, CancellationToken ct)
     {
         List<LeafConfigFieldDef> wiring =
-            [.. changed.Where(f => string.Equals(f.Risk, LeafConfigRisk.Wiring, StringComparison.Ordinal))];
+            [.. changed.Where(f => string.Equals(f.Risk, ComponentConfigRisk.Wiring, StringComparison.Ordinal))];
         if (wiring.Count == 0)
             return null;
 
@@ -226,7 +226,7 @@ public sealed class LeafConfigService(
         // another, and this API cannot change its own configuration here. Name both sides.
         foreach (LeafConfigFieldDef field in wiring.Where(f => f.PairedApiKey is not null))
         {
-            LeafConfigField? current = (await BuildConfigAsync(leafId, ct).ConfigureAwait(false))
+            ComponentConfigField? current = (await BuildConfigAsync(leafId, ct).ConfigureAwait(false))
                 .Fields.FirstOrDefault(x => string.Equals(x.Key, field.Key, StringComparison.Ordinal));
             string? leafValue = current?.Effective;
             string? apiValue = options.ResolvedByEnvName(field.PairedApiKey!);
@@ -268,7 +268,7 @@ public sealed class LeafConfigService(
         }
     }
 
-    private async Task<LeafConfig> BuildConfigAsync(string leafId, CancellationToken ct)
+    private async Task<ComponentConfigView> BuildConfigAsync(string leafId, CancellationToken ct)
     {
         IReadOnlyList<LeafConfigFieldDef> fields = catalog.For(leafId)!;
         LeafConfigIdentity identity = catalog.Identity(leafId)!;
@@ -281,7 +281,7 @@ public sealed class LeafConfigService(
 
         bool editable = catalog.IsEditable(leafId, out string? reason);
 
-        var fieldDtos = new List<LeafConfigField>(fields.Count);
+        var fieldDtos = new List<ComponentConfigField>(fields.Count);
         foreach (LeafConfigFieldDef f in fields)
         {
             bool overridden = byKey.TryGetValue(f.Key, out LeafOverrideRow? row);
@@ -290,17 +290,17 @@ public sealed class LeafConfigService(
             // override → floor → default, and honest 'unknown' when a declared floor source was unreadable
             // (an unreadable floor could be setting this key; falling through to the default would invent it).
             string source =
-                overridden ? LeafConfigSource.Override
-                : floorHas ? LeafConfigSource.Floor
-                : !floor.Complete ? LeafConfigSource.Unknown
-                : f.Default is not null ? LeafConfigSource.Default
-                : LeafConfigSource.Unknown;
+                overridden ? ComponentConfigSource.Override
+                : floorHas ? ComponentConfigSource.Floor
+                : !floor.Complete ? ComponentConfigSource.Unknown
+                : f.Default is not null ? ComponentConfigSource.Default
+                : ComponentConfigSource.Unknown;
 
             string? effective = source switch
             {
-                LeafConfigSource.Override => row!.Value,
-                LeafConfigSource.Floor => floorValue,
-                LeafConfigSource.Default => f.Default,
+                ComponentConfigSource.Override => row!.Value,
+                ComponentConfigSource.Floor => floorValue,
+                ComponentConfigSource.Default => f.Default,
                 _ => null,
             };
 
@@ -308,7 +308,7 @@ public sealed class LeafConfigService(
             {
                 // Write-only. Never echo the value — including from the floor, where the real secret lives.
                 // The provenance tier is still reported: knowing a secret is set is not knowing the secret.
-                fieldDtos.Add(new LeafConfigField(
+                fieldDtos.Add(new ComponentConfigField(
                     f.Key, f.EnvName, f.Label, f.Description, f.Type, f.Enum,
                     IsSecret: true, Overridden: overridden, Value: null, Default: null,
                     Set: overridden || floorHas, Fingerprint: overridden ? Fingerprint(row!.Value) : null,
@@ -318,7 +318,7 @@ public sealed class LeafConfigService(
             }
             else
             {
-                fieldDtos.Add(new LeafConfigField(
+                fieldDtos.Add(new ComponentConfigField(
                     f.Key, f.EnvName, f.Label, f.Description, f.Type, f.Enum,
                     IsSecret: false, Overridden: overridden,
                     Value: overridden ? row!.Value : null, Default: f.Default,
@@ -331,10 +331,10 @@ public sealed class LeafConfigService(
 
         var groups = identity.Groups
             .OrderBy(g => g.Order)
-            .Select(g => new LeafConfigGroupDto(g.Id, g.Label, g.Order))
+            .Select(g => new ComponentConfigGroup(g.Id, g.Label, g.Order))
             .ToList();
 
-        return new LeafConfig(
+        return new ComponentConfigView(
             leafId, identity.DisplayName, identity.Unit, fieldDtos, groups,
             Editable: editable, EditableReason: editable ? null : reason,
             ApplyMode: identity.ApplyMode, FromDescriptor: identity.FromDescriptor);
@@ -367,7 +367,7 @@ public sealed class LeafConfigService(
         string v = (raw ?? "").Replace("\r", "").Replace("\n", "").Trim();
         if (v.Length == 0)
         {
-            if (field.Type == LeafConfigFieldType.Csv)
+            if (field.Type == ComponentConfigFieldType.Csv)
                 return true; // an empty list, stored as an empty override the leaf reads as "none"
 
             error = $"value for '{field.Key}' cannot be empty (use reset to clear an override)";
@@ -376,8 +376,8 @@ public sealed class LeafConfigService(
 
         switch (field.Type)
         {
-            case LeafConfigFieldType.Int:
-            case LeafConfigFieldType.Duration:
+            case ComponentConfigFieldType.Int:
+            case ComponentConfigFieldType.Duration:
                 if (!long.TryParse(v, NumberStyles.Integer, CultureInfo.InvariantCulture, out long n))
                 {
                     error = $"'{field.Key}' must be an integer";
@@ -390,7 +390,7 @@ public sealed class LeafConfigService(
                 value = n.ToString(CultureInfo.InvariantCulture);
                 return true;
 
-            case LeafConfigFieldType.Float:
+            case ComponentConfigFieldType.Float:
                 if (!double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out double d)
                     || double.IsNaN(d) || double.IsInfinity(d))
                 {
@@ -404,7 +404,7 @@ public sealed class LeafConfigService(
                 value = d.ToString("R", CultureInfo.InvariantCulture);
                 return true;
 
-            case LeafConfigFieldType.Bool:
+            case ComponentConfigFieldType.Bool:
                 switch (v.ToLowerInvariant())
                 {
                     case "true" or "1" or "yes" or "on": value = "true"; return true;
@@ -414,7 +414,7 @@ public sealed class LeafConfigService(
                         return false;
                 }
 
-            case LeafConfigFieldType.Enum:
+            case ComponentConfigFieldType.Enum:
                 string? match = field.Enum?.FirstOrDefault(e => string.Equals(e, v, StringComparison.OrdinalIgnoreCase));
                 if (match is null)
                 {

@@ -3,10 +3,11 @@ using System.Text.Json.Serialization;
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// One KGSM leaf service on the host — its static identity + the live systemd state, plus the optional
-/// deep-health probe where the api has one. The Services board (<c>GET /hosts/{id}/services</c>) renders one
-/// of these per leaf. Honesty: an unmeasured field is omitted (<c>null</c>), never a fabricated default; a
-/// not-installed leaf reports <c>state:"not-installed"</c> rather than being hidden.
+/// One KGSM component on a host — its static identity and the live systemd state, plus the optional
+/// deep-health probe where the api has one. The Services board (<c>GET /hosts/{id}/services</c>) renders
+/// one of these per leaf the node runs. Honesty: an unmeasured field is omitted (<c>null</c>), never a
+/// fabricated default; a component that is not installed reports <c>state:"not-installed"</c> rather
+/// than being hidden.
 /// </summary>
 /// <param name="Id">Stable short id (<c>watchdog</c>) — the frontend key.</param>
 /// <param name="DisplayName">Human label.</param>
@@ -33,7 +34,7 @@ namespace TheKrystalShip.Api.Contracts;
 /// cgroup is excluded — which is why this is not systemd's unit-wide <c>MemoryCurrent</c>.</param>
 /// <param name="Health">The api's deep-health view where it probes this leaf (null when it has no probe —
 /// distinct from a probed <c>down</c>/<c>unknown</c>).</param>
-public sealed record LeafService(
+public sealed record ComponentService(
     string Id,
     string DisplayName,
     string Role,
@@ -46,17 +47,17 @@ public sealed record LeafService(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] DateTimeOffset? Since,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MainPid,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? MemoryBytes,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LeafServiceHealth? Health);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ComponentServiceHealth? Health);
 
 /// <summary>
 /// The api's live deep-health view of a leaf, present only where the api actually probes it (the capability
 /// model + the api itself). <see cref="Status"/> mirrors the capability vocabulary
 /// (<c>operational|degraded|down|unknown</c>); a leaf with no probe carries a <c>null</c> health on the
-/// <see cref="LeafService"/> rather than a fabricated one.
+/// <see cref="ComponentService"/> rather than a fabricated one.
 /// </summary>
-public sealed record LeafServiceHealth(
+public sealed record ComponentServiceHealth(
     string Status,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Message);
 
-/// <summary>The Services board payload — one row per configured leaf, in catalog order.</summary>
-public sealed record ServicesSnapshot(IReadOnlyList<LeafService> Data);
+/// <summary>The Services board payload — one row per component the node runs, in catalog order.</summary>
+public sealed record ServicesSnapshot(IReadOnlyList<ComponentService> Data);

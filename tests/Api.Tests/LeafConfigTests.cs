@@ -28,7 +28,7 @@ public sealed class LeafConfigTests
         using var f = new LeafConfigTestFactory();
         JsonElement cfg = await Json(Admin(f).GetAsync($"/api/v1/hosts/{Host}/services/monitor/config"));
 
-        Assert.Equal("monitor", cfg.GetProperty("leaf").GetString());
+        Assert.Equal("monitor", cfg.GetProperty("id").GetString());
         Assert.Equal(MonitorUnit, cfg.GetProperty("unit").GetString());
         JsonElement[] fields = cfg.GetProperty("fields").EnumerateArray().ToArray();
 

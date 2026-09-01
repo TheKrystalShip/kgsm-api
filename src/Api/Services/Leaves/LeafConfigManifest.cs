@@ -8,7 +8,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// </summary>
 /// <param name="Key">The stable id used on the wire + in a PUT (e.g. <c>logLevel</c>).</param>
 /// <param name="EnvName">The env var the override file writes (<c>Logging__LogLevel__Default</c>).</param>
-/// <param name="Type">A <see cref="LeafConfigFieldType"/> value.</param>
+/// <param name="Type">A <see cref="ComponentConfigFieldType"/> value.</param>
 /// <param name="Enum">The allowed values when <see cref="Type"/> is <c>enum</c>; else null.</param>
 public sealed record LeafConfigFieldDef(
     string Key,
@@ -19,7 +19,7 @@ public sealed record LeafConfigFieldDef(
     IReadOnlyList<string>? Enum = null)
 {
     /// <summary>A secret (write-only) field — masked on read, never logged.</summary>
-    public bool IsSecret => Type == LeafConfigFieldType.Secret;
+    public bool IsSecret => Type == ComponentConfigFieldType.Secret;
 
     /// <summary>The display section this field belongs to (a <see cref="LeafConfigGroup"/> id), or null.</summary>
     public string? Group { get; init; }
@@ -38,9 +38,9 @@ public sealed record LeafConfigFieldDef(
     /// <summary>Display suffix (<c>ms</c>, <c>days</c>, <c>MB</c>). Presentation only.</summary>
     public string? Unit { get; init; }
 
-    /// <summary>A <see cref="LeafConfigRisk"/> value. Never blocks an edit — it changes how the panel
+    /// <summary>A <see cref="ComponentConfigRisk"/> value. Never blocks an edit — it changes how the panel
     /// presents one, and <c>wiring</c> additionally triggers the post-apply reachability check.</summary>
-    public string Risk { get; init; } = LeafConfigRisk.Safe;
+    public string Risk { get; init; } = ComponentConfigRisk.Safe;
 
     /// <summary>The kgsm-api setting that has to agree with this one (e.g. this leaf's socket path and the
     /// API's view of it). Checked after an apply; a disagreement is reported, never silently tolerated.</summary>
@@ -76,7 +76,7 @@ public static class LeafConfigManifest
         EnvName: "Logging__LogLevel__Default",
         Label: "Log level",
         Description: "Minimum severity this leaf logs (the standard .NET logging-level override).",
-        Type: LeafConfigFieldType.Enum,
+        Type: ComponentConfigFieldType.Enum,
         Enum: LogLevels);
 
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<LeafConfigFieldDef>> ByLeaf =
@@ -87,24 +87,24 @@ public static class LeafConfigManifest
                 LogLevelField(),
                 new("intervalMs", "KGSM_MONITOR_INTERVAL_MS", "Sample interval (ms)",
                     "How often the monitor samples host & per-server metrics, in milliseconds.",
-                    LeafConfigFieldType.Int),
+                    ComponentConfigFieldType.Int),
             ],
             [ProvisionableLeaf.Watchdog] =
             [
                 LogLevelField(),
                 new("pollIntervalMs", "KGSM_WATCHDOG_POLL_INTERVAL_MS", "Supervision poll interval (ms)",
                     "How often the watchdog reconciles its supervised instances, in milliseconds.",
-                    LeafConfigFieldType.Int),
+                    ComponentConfigFieldType.Int),
             ],
             [ProvisionableLeaf.Assistant] =
             [
                 LogLevelField(),
                 new("ragEnabled", "Rag__Enabled", "Knowledge base (RAG)",
                     "Enable retrieval-augmented context so the assistant can search its knowledge base.",
-                    LeafConfigFieldType.Bool),
+                    ComponentConfigFieldType.Bool),
                 new("webSearchApiKey", "WebSearch__ApiKey", "Web search API key",
                     "Tavily API key enabling the assistant's web-search tool. Write-only — never shown again.",
-                    LeafConfigFieldType.Secret),
+                    ComponentConfigFieldType.Secret),
             ],
             // Firewall: log level only — no other env key on kgsm-firewall is confirmed safe to expose yet.
             [ProvisionableLeaf.Firewall] =
