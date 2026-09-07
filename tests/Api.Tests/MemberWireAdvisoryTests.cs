@@ -19,7 +19,7 @@ public class MemberWireAdvisoryTests
 {
     [Fact]
     public void A_loopback_bind_with_an_https_address_says_nothing() =>
-        Assert.Empty(Warnings(urls: "http://127.0.0.1:8080", publicBaseUrl: "https://hotbox.example.com"));
+        Assert.Empty(Warnings(urls: "http://127.0.0.1:8080", publicBaseUrl: "https://node-b.example.com"));
 
     [Fact]
     public void A_wildcard_bind_in_clear_is_reported()
@@ -41,7 +41,7 @@ public class MemberWireAdvisoryTests
     public void A_plain_http_address_offered_to_other_members_is_reported()
     {
         string warning = Assert.Single(
-            Warnings(urls: "http://127.0.0.1:8080", publicBaseUrl: "http://192.168.1.129:8080"));
+            Warnings(urls: "http://127.0.0.1:8080", publicBaseUrl: "http://192.168.1.200:8080"));
         Assert.Contains("Api__PublicBaseUrl", warning);
     }
 
@@ -65,7 +65,7 @@ public class MemberWireAdvisoryTests
     private static IReadOnlyList<string> Warnings(
         string? urls, string? publicBaseUrl = null, string? gossipUrl = null, string secret = "shared")
     {
-        var settings = new Dictionary<string, string?> { ["Api:HostId"] = "hotbox" };
+        var settings = new Dictionary<string, string?> { ["Api:HostId"] = "node-b" };
         if (urls is not null) settings["Api:Urls"] = urls;
         if (publicBaseUrl is not null) settings["Api:PublicBaseUrl"] = publicBaseUrl;
         if (gossipUrl is not null) settings["Api:ClusterGossipUrl"] = gossipUrl;
@@ -74,7 +74,7 @@ public class MemberWireAdvisoryTests
             new ConfigurationBuilder().AddInMemoryCollection(settings).Build());
 
         var logger = new CapturingLogger();
-        new MemberWireAdvisory(options, new ClusterOptions { MemberId = "hotbox", Secret = secret, StorePath = ":memory:" }, logger)
+        new MemberWireAdvisory(options, new ClusterOptions { MemberId = "node-b", Secret = secret, StorePath = ":memory:" }, logger)
             .StartAsync(CancellationToken.None).GetAwaiter().GetResult();
         return logger.Warnings;
     }

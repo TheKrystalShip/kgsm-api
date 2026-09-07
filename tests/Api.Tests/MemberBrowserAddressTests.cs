@@ -56,11 +56,11 @@ public sealed class MemberBrowserAddressTests
 
         // What this node proved is the LAN address, because that is the path between them. What the
         // member says a browser should use is the public name, and it says it first.
-        await Learn(node, "hotbox", provenUrl: "http://192.168.1.129:8080",
-            new MemberCandidate("https://hotbox.example", true),
-            new MemberCandidate("http://192.168.1.129:8080", true));
+        await Learn(node, "node-b", provenUrl: "http://192.168.1.200:8080",
+            new MemberCandidate("https://node-b.example", true),
+            new MemberCandidate("http://192.168.1.200:8080", true));
 
-        Assert.Equal("https://hotbox.example", await UrlFor(node, "hotbox"));
+        Assert.Equal("https://node-b.example", await UrlFor(node, "node-b"));
     }
 
     [Fact]
@@ -68,11 +68,11 @@ public sealed class MemberBrowserAddressTests
     {
         await using var node = new ClusterNodeFactory("node-a", "host-a", Secret);
 
-        await Learn(node, "hotbox", provenUrl: "http://10.0.0.9:8080",
+        await Learn(node, "node-b", provenUrl: "http://10.0.0.9:8080",
             new MemberCandidate("http://10.0.0.9:8080", false),
-            new MemberCandidate("https://hotbox.example", true));
+            new MemberCandidate("https://node-b.example", true));
 
-        Assert.Equal("https://hotbox.example", await UrlFor(node, "hotbox"));
+        Assert.Equal("https://node-b.example", await UrlFor(node, "node-b"));
     }
 
     [Fact]
