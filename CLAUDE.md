@@ -272,7 +272,7 @@ exactly one correct access path:
   and is never a browser address; the two are separate settings because conflating them hands a
   browser an address it cannot reach.
 
-- **Speech** → the leaf's own published client (`TheKrystalShip.KGSM.Speech`) wrapped in
+- **Speech** → the leaf's own published client (`TheKrystalShip.Speech`) wrapped in
   **`Services/Leaves/SpeechLeafClient.cs`**, serving `GET /hosts/{id}/services/speech/status`.
   `Api__SpeechSocketPath` defaults to the standard path rather than being opt-in: systemd binds the
   socket whether or not the daemon runs, so the file's presence *is* the provisioning check.

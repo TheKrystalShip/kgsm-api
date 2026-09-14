@@ -1,10 +1,10 @@
-using TheKrystalShip.KGSM.Speech;
+using TheKrystalShip.Speech;
 
 namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>
 /// The kgsm-speech leaf, as this API reaches it — through the leaf's own published client
-/// (<c>TheKrystalShip.KGSM.Speech</c>), never by hand-rolling its wire format.
+/// (<c>TheKrystalShip.Speech</c>), never by hand-rolling its wire format.
 /// </summary>
 /// <remarks>
 /// <para>

@@ -7,7 +7,7 @@ using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
-using TheKrystalShip.KGSM.Speech;
+using TheKrystalShip.Speech;
 
 namespace TheKrystalShip.Api.Controllers;
 

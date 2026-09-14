@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the speech leaf is read through `TheKrystalShip.Speech` (0.187.0)
+
+The wire contract and its client belong to no product: the daemon this API talks to is kgsm-speech,
+and the same protocol serves anything else that listens or speaks. `SpeechLeafClient` consumes the
+neutral package, which is the one that moves when the protocol does.
+
 ### Changed — the config and services contract is a COMPONENT's, not a leaf's (0.186.0, Api.Contracts 1.0.0-dev.9)
 
 The same shape describes a service a node runs and an anchor that is a peer of every node, because the
