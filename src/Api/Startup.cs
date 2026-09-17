@@ -162,14 +162,25 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<HostIdentityProvider>();
         services.AddSingleton<HostSettingsStore>();
         services.AddSingleton<HostAggregator>();
-        // Always register the watchdog client (lazy, configured-or-default socket) so a runtime "connect
-        // watchdog" arms it without a restart — provisioning is now the registry's flag, not the client's
-        // presence. A blank configured socket falls back to the standard path; consumers (LeafHealthMonitor,
-        // AlertEngine, ConsoleBridgeManager) gate on provisioning before using it, so a down socket is inert.
-        services.AddKgsmWatchdogClient(o =>
-            o.SocketPath = string.IsNullOrWhiteSpace(apiOptions.WatchdogSocketPath)
+        // The watchdog client is always registered, so a runtime "connect watchdog" arms it without a
+        // restart, and it is gated on the registry's provisioning flag inside the client every consumer
+        // resolves (ProvisionedWatchdogClient): while unprovisioned, no call reaches the socket, whichever
+        // consumer makes it. A blank configured socket is armed at the standard path.
+        services.AddSingleton<IWatchdogClient>(sp =>
+        {
+            ILogger<WatchdogClient> clientLogger = sp.GetRequiredService<ILogger<WatchdogClient>>();
+            LeafRegistry registry = sp.GetRequiredService<LeafRegistry>();
+            string livePath = string.IsNullOrWhiteSpace(apiOptions.WatchdogSocketPath)
                 ? "/run/kgsm-watchdog/control.sock"
-                : apiOptions.WatchdogSocketPath);
+                : apiOptions.WatchdogSocketPath;
+
+            return new ProvisionedWatchdogClient(
+                () => registry.IsProvisioned(ProvisionableLeaf.Watchdog),
+                new WatchdogClient(new WatchdogClientOptions { SocketPath = livePath }, clientLogger),
+                new WatchdogClient(
+                    new WatchdogClientOptions { SocketPath = ProvisionedWatchdogClient.UnprovisionedSocketPath },
+                    clientLogger));
+        });
 
         // M1·b — the servers join. kgsm-lib is the engine chokepoint (base, not a leaf): registered
         // when the engine is provisioned (it is, by default, at the packaged path). IInstanceService
@@ -471,6 +482,10 @@ public class Startup(IConfiguration configuration)
         // starts them. Registered before the monitor that consumes it.
         services.AddSingleton<LeafDegradationTracker>();
         services.AddHostedService(sp => sp.GetRequiredService<LeafDegradationTracker>());
+
+        // And what those reports are worth telling somebody: a fault that stands, and the recovery the leaf
+        // itself reports. Always on, like LeafHealthWatcher, for the same reason.
+        services.AddHostedService<LeafDegradationWatcher>();
 
         services.AddSingleton<LeafHealthMonitor>();
         services.AddHostedService(sp => sp.GetRequiredService<LeafHealthMonitor>());

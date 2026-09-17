@@ -87,6 +87,8 @@ public static class NotificationCatalog
         new("server_empty", "Server sitting empty", "A running server has had nobody connected to it for a while."),
         new("leaf_down", "Service went down", "A KGSM service on this host stopped answering its health check and stayed that way."),
         new("leaf_up", "Service came back", "A KGSM service that was down is answering again."),
+        new("leaf_degraded", "Service degraded", "A KGSM service on this host reported that part of its job stopped working and stayed that way."),
+        new("leaf_recovered", "Service recovered", "A KGSM service reported that a part that had stopped working is working again."),
         new("restart_soon", "Scheduled restart due", "A running server is minutes away from its scheduled restart."),
         new("awaiting_approval", "Account awaiting approval", "Somebody signed in for the first time and cannot do anything until an admin approves them (user.provisioned)."),
         new("reactor_offer", "Reactor offer", "A reactor rule staged an action and is waiting for somebody to confirm or dismiss it (reactor.proposed)."),
@@ -226,6 +228,14 @@ public static class DerivedNotificationAction
 
     /// <summary>A leaf that had been reported down is answering again.</summary>
     public const string LeafUp = "leaf.up";
+
+    /// <summary>A leaf's own report that part of its job stopped working, once it has stood for longer than a
+    /// flap (<c>LeafDegradationWatcher</c>). The leaf wrote the fault; that it is worth telling somebody is
+    /// this API's reading of it.</summary>
+    public const string LeafDegraded = "leaf.component.degraded";
+
+    /// <summary>A leaf's own report that an announced fault is fixed.</summary>
+    public const string LeafRecovered = "leaf.component.recovered";
 
     /// <summary>A running server is inside the warning window before a maintenance window that will
     /// interrupt the people on it (<c>ScheduledRestartWatcher</c>).</summary>

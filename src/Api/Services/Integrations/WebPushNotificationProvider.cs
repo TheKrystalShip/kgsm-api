@@ -333,6 +333,8 @@ public sealed class WebPushNotificationProvider(
             case "restart_soon": return $"{server} restarts shortly";
             case "leaf_down": return "A service went down";
             case "leaf_up": return "A service came back";
+            case "leaf_degraded": return "A service is degraded";
+            case "leaf_recovered": return "A service recovered";
             case "awaiting_approval": return "Someone is waiting to be let in";
         }
 

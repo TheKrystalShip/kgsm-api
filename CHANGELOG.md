@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a service's own fault report reaches people (0.188.0)
+
+`LeafDegradationWatcher` turns what each leaf's journal says about itself into two notification
+events, `leaf_degraded` and `leaf_recovered`, on the same bus as `leaf_down`. The message is the leaf's
+own sentence. The case that needs it is the watchdog's `upnp-router` component: a router whose UPnP
+service goes silent leaves every server running and unreachable from the internet, and the Services
+board was the only place that showed it.
+
+- A fault is announced after standing for a minute, so a flap stays quiet.
+- A recovery is announced only when the leaf reported one (`LeafStateReport.Recovered`, kgsm-lib 8.9.0).
+  A fault wiped by the leaf restarting is forgotten quietly, and a later report of it is news; a fault
+  the midnight segment stopped mentioning is held until its recovery arrives.
+- A fault that predates this process is adopted rather than announced, so a redeploy during an outage
+  does not repeat it.
+
+`LeafDegradationTracker.Reports` carries every producer's whole report; `Current` is unchanged.
+
+### Fixed — an unprovisioned watchdog is never dialed (0.188.0)
+
+`ProvisionedWatchdogClient` is the `IWatchdogClient` every consumer resolves. It asks the registry on
+every call and, while the watchdog is unprovisioned, answers through a client pointed at a socket that
+cannot exist — the same answers a down watchdog gives. Seven consumers (the run-time and phase indexes,
+presence, the idle watcher, player history, the services and console controllers) reached the socket
+without checking provisioning.
+
+The test suite measured why it matters: its hosts provision no watchdog, yet reached the live daemon from
+every background service, exhausted its file descriptors, and the daemon took valheim and Ketchup down
+with it. The test assembly also sets `Api__WatchdogSocketPath` to an impossible path
+(`NoLiveWatchdog`), so a host that configures no watchdog of its own cannot find the real one. A full run
+now moves the live daemon's descriptor count by a handful.
+
 ### Changed — the speech leaf is read through `TheKrystalShip.Speech` (0.187.0)
 
 The wire contract and its client belong to no product: the daemon this API talks to is kgsm-speech,

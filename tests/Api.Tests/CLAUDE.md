@@ -4,6 +4,12 @@ The API's test project — **xUnit + `WebApplicationFactory`**. It boots the **r
 in-process and replaces only the external dependency at the seam. Run with `dotnet test kgsm-api.slnx` (or this `.csproj`). net10, not under the
 Api's `TreatWarningsAsErrors`.
 
+**This suite runs on the host it tests against, so no test host may reach a live leaf.** `NoLiveWatchdog`
+points `Api__WatchdogSocketPath` at a path that cannot exist for the whole run, beneath any fixture's own
+setting. A host that dialed the real watchdog from its background services once exhausted the daemon's
+file descriptors and took running game servers down; a new always-on client for another leaf needs the
+same treatment before the suite runs on a live machine.
+
 ## How it works (the pattern to follow)
 
 - **`AuthTestFactory : WebApplicationFactory<Program>`** boots the real app with **auth ON** + a known

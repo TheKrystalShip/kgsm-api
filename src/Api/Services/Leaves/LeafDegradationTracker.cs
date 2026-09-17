@@ -48,6 +48,20 @@ public sealed class LeafDegradationTracker(
     private volatile IReadOnlyDictionary<string, IReadOnlyCollection<string>> _current =
         new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal);
 
+    private volatile IReadOnlyDictionary<string, LeafStateReport>? _reports;
+
+    /// <summary>
+    /// Every producer's whole report from the last reading, keyed by producer id — or null before the
+    /// first reading has been taken.
+    /// </summary>
+    /// <remarks>
+    /// Null is not empty: a consumer that acts on changes would read the first real reading as every
+    /// fault on the host appearing at once. A producer whose journal says nothing is present with an
+    /// empty report, because what it last said about a component it no longer mentions is exactly what a
+    /// consumer tracking recoveries has to be able to ask.
+    /// </remarks>
+    public IReadOnlyDictionary<string, LeafStateReport>? Reports => _reports;
+
     /// <summary>
     /// The components each producer currently reports broken, keyed by producer id.
     /// </summary>
@@ -100,6 +114,7 @@ public sealed class LeafDegradationTracker(
     internal void Refresh()
     {
         var next = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal);
+        var reports = new Dictionary<string, LeafStateReport>(StringComparer.Ordinal);
         bool changed = false;
 
         try
@@ -112,10 +127,11 @@ public sealed class LeafDegradationTracker(
                 if (source.Producer == JournalProducer.Kgsm)
                     continue;
 
-                IReadOnlyCollection<string> degraded = LeafState.DegradedComponents(source.Directory);
+                LeafStateReport report = LeafState.Read(source.Directory);
+                reports[source.Producer] = report;
 
-                if (degraded.Count > 0)
-                    next[source.Producer] = degraded;
+                if (report.Degraded.Count > 0)
+                    next[source.Producer] = [.. report.Degraded.Select(d => d.Component)];
 
                 if (Moved(source))
                     changed = true;
@@ -131,6 +147,7 @@ public sealed class LeafDegradationTracker(
         }
 
         _current = next;
+        _reports = reports;
 
         if (changed)
             logger.LogDebug("leaf self-reports changed: {Count} leaf/leaves report a fault", next.Count);

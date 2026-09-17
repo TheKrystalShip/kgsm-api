@@ -232,6 +232,9 @@ exactly one correct access path:
 - **Engine** (instances, run-state, config, lifecycle commands) → **only via `kgsm-lib`**
   (`TheKrystalShip.KGSM`, the single C#↔engine chokepoint; it reaches the watchdog via
   `IWatchdogClient`). **Never shell out to `kgsm.sh` or open the watchdog socket directly.**
+  The `IWatchdogClient` every consumer resolves is `ProvisionedWatchdogClient`: it asks `LeafRegistry`
+  on every call and never dials the socket while the watchdog is unprovisioned, so a consumer needs no
+  provisioning check of its own to stay off a daemon this host has not connected.
   Consumed as a versioned `PackageReference` from the org's GitHub Packages feed. It backs
   `GET /servers` (`IInstanceService.GetAll` + `GetAllStatuses(fast:true)`) and the write
   path (`ILifecycleService.Start/Stop/Restart`, run off-request by the `CommandRunner` in its own DI
