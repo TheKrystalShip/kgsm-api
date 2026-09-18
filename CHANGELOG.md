@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a node is reached at the name its cluster serves it at (0.193.0)
+
+In a cluster with a DNS anchor, `Api__PublicBaseUrl` is left unset: the node advertises its own
+`<name>.nodes.<zone>` to the cluster as soon as its site serves the name on its certificate, ahead of
+every address it was reflected at. URLs the API builds for itself use the address the request arrived
+on. `deploy/setup.sh` installs no host vhost — the node's names are served from the site it generates,
+and the proxy rules in `kgsm-api.locations` are included by those blocks alone. Takes
+`TheKrystalShip.KGSM.Cluster 1.0.0-dev.20` and `TheKrystalShip.KGSM.Dns 0.2.0-dev.7`.
+
 ### Added — a server shows which other members' servers want its ports (0.192.0)
 
 `portCollisions` on the server DTO (`TheKrystalShip.KGSM.Api.Contracts 1.0.0-dev.11`): every game

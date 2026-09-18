@@ -130,7 +130,7 @@
       "key": "publicBaseUrl",
       "env": "Api__PublicBaseUrl",
       "label": "Public base URL",
-      "description": "Externally reachable address of this panel, used where a link has to work from outside the host. Empty means links are built from the incoming request instead.",
+      "description": "Externally reachable address of this node, used where a link has to work from outside the host. Leave empty in a cluster with a DNS anchor, which names the node; links are then built from the incoming request.",
       "group": "identity",
       "type": "string",
       "risk": "safe"

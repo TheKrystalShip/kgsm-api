@@ -54,9 +54,13 @@ public sealed class ApiSettings
     [ConfigField("nodeId", "Cluster node id", Group = "identity", Risk = ConfigRisk.Wiring, NoDefault = true)]
     public string? NodeId { get; set; }
 
-    /// <summary>Public base URL absolute cover/hero URLs are built from. Blank derives it from the request.</summary>
-    /// <panel>Externally reachable address of this panel, used where a link has to work from outside the
-    /// host. Empty means links are built from the incoming request instead.</panel>
+    /// <summary>
+    /// The address this node is advertised at and absolute cover/hero URLs are built from. Blank
+    /// advertises the node name its cluster's DNS anchor serves it at, and builds links from the request.
+    /// </summary>
+    /// <panel>Externally reachable address of this node, used where a link has to work from outside the
+    /// host. Leave empty in a cluster with a DNS anchor, which names the node; links are then built from
+    /// the incoming request.</panel>
     [ConfigField("publicBaseUrl", "Public base URL", Group = "identity", NoDefault = true)]
     public string? PublicBaseUrl { get; set; }
 

@@ -1,5 +1,4 @@
-# kgsm-api — how a request to this API is handled, included by every server block that serves it: the
-# host vhost in /etc/nginx/conf.d/kgsm-api.conf, and each block this node generates in
+# kgsm-api — how a request to this API is handled, included by every block this node generates in
 # /var/lib/kgsm/nginx/kgsm-api.conf for the names its cluster's DNS anchor gave it.
 #
 # The generated blocks carry only a name and its certificate; everything about where a request goes is

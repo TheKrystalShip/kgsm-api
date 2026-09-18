@@ -47,11 +47,6 @@ HEALTH_TRIES="${HEALTH_TRIES:-30}"
 # Leave empty for a project that is not a leaf (nothing is installed and nothing is asserted).
 LEAF_DESCRIPTOR="${REPO_DIR}/deploy/${PROJECT}.leaf.json"
 
-# This project's own nginx server block, installed into /etc/nginx/conf.d/ by setup.sh when the
-# host runs nginx. Each leaf ships its own vhost; the :80 ACME block and the certificate
-# lifecycle are host-level and belong to no leaf.
-NGINX_FRAGMENT="${REPO_DIR}/deploy/nginx/kgsm-api.conf"
-
 # The leaf id kgsm-api knows this project by — the descriptor's "id", its filename stem in the
 # discovery dir, and the {leaf} segment of the API's config route. Usually the project name minus
 # the kgsm- prefix, but NOT always: kgsm-llm ships the leaf "assistant". State it, don't derive it.
@@ -102,8 +97,7 @@ health_probe() {
 # Serving this node's cluster names. The API keeps a key and a certificate per name in a directory of its
 # own, writes one generated site into the directory every KGSM component's sites live in, and reloads
 # the web server through a grant that allows exactly that. The generated site includes this component's
-# proxy rules — the same file the host vhost includes — which are reviewable content installed from the
-# repo and written by nothing at runtime.
+# proxy rules, which are reviewable content installed from the repo and written by nothing at runtime.
 TLS_DIR="/var/lib/kgsm/tls/${PROJECT}"
 SITES_DIR="/var/lib/kgsm/nginx"
 LOCATIONS_SRC="${REPO_DIR}/deploy/nginx/${PROJECT}.locations"

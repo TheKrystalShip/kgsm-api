@@ -194,32 +194,11 @@ if [[ ! -d "$KGSM_AUTH_DIR" ]]; then
     $SUDO install -d -m 0700 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" "$KGSM_AUTH_DIR"
 fi
 
-# ── 2c. The public vhost fragment ─────────────────────────────────────────────
-# This leaf's own nginx server block, if the host runs nginx as its public multiplexer. Each leaf
-# ships and installs its own fragment: a leaf owns its vhost and appears or disappears independently
-# of the others, while the :80 ACME block and the certificate lifecycle stay host-level — a leaf that
-# claimed those would make every other leaf on the box depend on it.
-#
-# Skipped cleanly when nginx is not installed, so a host that reaches its services some other way
-# provisions exactly as before. Root-owned like the rest of /etc/nginx, which is why it lives here and
-# not in deploy.sh.
-#
-# The serving pieces go in first: the host vhost includes the proxy rules they install.
+# ── 2c. Serving the node's name ───────────────────────────────────────────────
+# The node is reached at the name the cluster's DNS anchor gives it, served from the site this API
+# generates. Root-owned like the rest of /etc/nginx, which is why it lives here and not in deploy.sh;
+# skipped cleanly when nginx is not installed.
 setup_serving
-
-if [[ -n "${NGINX_FRAGMENT:-}" && -f "$NGINX_FRAGMENT" && -d /etc/nginx/conf.d ]]; then
-    log "installing the nginx vhost → /etc/nginx/conf.d/$(basename "$NGINX_FRAGMENT")"
-    $SUDO install -m 0644 -o root -g root "$NGINX_FRAGMENT" "/etc/nginx/conf.d/$(basename "$NGINX_FRAGMENT")"
-    # Validate before reloading: a bad fragment must fail here, loudly, rather than at the next
-    # reload for an unrelated reason — by which point nobody would connect the two.
-    if $SUDO nginx -t >/dev/null 2>&1; then
-        $SUDO systemctl reload nginx 2>/dev/null || true
-    else
-        log "WARNING: nginx -t failed after installing the fragment — NOT reloading; run 'sudo nginx -t' to see why"
-    fi
-elif [[ -n "${NGINX_FRAGMENT:-}" && -f "$NGINX_FRAGMENT" ]]; then
-    log "nginx is not installed on this host — skipping the vhost fragment"
-fi
 
 # ── 3. The user-owned unit directory ──────────────────────────────────────────
 if [[ ! -d "$UNIT_DIR" ]]; then
