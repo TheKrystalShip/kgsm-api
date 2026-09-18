@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a server shows which other members' servers want its ports (0.192.0)
+
+`portCollisions` on the server DTO (`TheKrystalShip.KGSM.Api.Contracts 1.0.0-dev.11`): every game
+server on another cluster member reached at the same public address that declares one of this server's
+ports on the same protocol, as the cluster's DNS anchor measured it — the other server's name, its
+member and the ports both want (`25565/tcp`, `2456:2458/udp`). Empty for none; null standing alone, in
+a cluster with no DNS anchor, and when the anchor could not tell. It rides the list, the stream and the
+detail, and a change to it is a stream patch. Taken through `TheKrystalShip.KGSM.Dns 0.2.0-dev.6`.
+
 ### Added — every game server on this node has a name players connect through (0.191.0)
 
 In a cluster with a DNS anchor, this node tells the anchor every instance the engine reports, with its

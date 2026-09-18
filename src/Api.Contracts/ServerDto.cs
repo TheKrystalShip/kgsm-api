@@ -144,6 +144,11 @@ public sealed record Server(
     // that does not resolve yet; null standing alone, in a cluster with no DNS anchor, and while it waits.
     // Where it is present it is the host a player connects to, ahead of ConnectHost.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PublishedHost = null,
+    // Other members' game servers reached at the same public address that declare one of this server's
+    // ports on the same protocol, as the cluster's DNS anchor measured them. Behind one router only one of
+    // them can be reached on that port. Empty when there are none; null when nobody could tell — a node
+    // standing alone, a cluster with no DNS anchor, or an anchor that could not resolve a host involved.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<PortCollision>? PortCollisions = null,
     // Every port this instance declares, canonical (`26900:26903/tcp`, a single port without its range).
     // ConnectPort above is the first of them and answers "where do I connect"; this answers "what does
     // this server occupy", which a firewall question, a conflict question and a health check all need and
@@ -291,6 +296,15 @@ public sealed record ServerNote(
     string Body,
     string? UpdatedBy,
     DateTimeOffset? UpdatedAt);
+
+/// <summary>
+/// Another member's game server wanting one of this server's ports at the same public address.
+/// </summary>
+/// <param name="Name">That server's cluster name (<c>minecraft-2.play.&lt;zone&gt;</c>).</param>
+/// <param name="Member">The cluster member it runs on.</param>
+/// <param name="Port">The ports both declare, in the ecosystem's canonical spelling: <c>25565/tcp</c>, or
+/// <c>2456:2458/udp</c> for a range.</param>
+public sealed record PortCollision(string Name, string Member, string Port);
 
 /// <summary>
 /// One server's resource sample, mapped 1:1 from the monitor's <c>ServerMetrics</c> with its native

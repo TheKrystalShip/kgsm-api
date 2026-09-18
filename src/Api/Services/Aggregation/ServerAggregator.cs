@@ -86,6 +86,23 @@ public sealed class ServerAggregator
         id => observability.IsObservable(id) ? players.OnlineCount(id) : null;
 
     /// <summary>
+    /// A server's port collisions as the cluster's DNS anchor last reported them, in the DTO's shape:
+    /// empty for none, null when the anchor could not tell or has said nothing about this server.
+    /// </summary>
+    /// <remarks>
+    /// Static and shaped as a Func so <see cref="Realtime.DomainPump"/> composes the identical rule, and a
+    /// stream frame cannot disagree with the REST read about the same server.
+    /// </remarks>
+    internal static Func<string, IReadOnlyList<PortCollision>?> PortCollisionsOf(DnsNameBook names) =>
+        id => names.GameCollisions(id) is { } collisions
+            ? [.. collisions.Select(c => new PortCollision(
+                c.Name, c.Member,
+                c.Start == c.End
+                    ? string.Create(CultureInfo.InvariantCulture, $"{c.Start}/{c.Protocol}")
+                    : string.Create(CultureInfo.InvariantCulture, $"{c.Start}:{c.End}/{c.Protocol}")))]
+            : null;
+
+    /// <summary>
     /// A blueprint's advisory <c>min_ram_mb</c>, or null when it declares none — the fallback half of
     /// what a start is expected to cost.
     /// </summary>
@@ -166,7 +183,7 @@ public sealed class ServerAggregator
             metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
             IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability), _updateLag.Lookup,
             _runTimes.Lookup, BlueprintMinRamOf(_blueprints), _phases.ParkedLookup,
-            _options.ConnectHost, _names.GameName);
+            _options.ConnectHost, _names.GameName, PortCollisionsOf(_names));
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -225,7 +242,7 @@ public sealed class ServerAggregator
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
                 _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById,
                 OnlinePlayersOf(_players, _observability), _updateLag.Lookup, _runTimes.Lookup,
-                BlueprintMinRamOf(_blueprints), _phases.ParkedLookup, _options.ConnectHost, _names.GameName));
+                BlueprintMinRamOf(_blueprints), _phases.ParkedLookup, _options.ConnectHost, _names.GameName, PortCollisionsOf(_names)));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -289,7 +306,8 @@ public sealed class ServerAggregator
         Func<string, int?>? blueprintMinRamMb = null,
         Func<string, bool>? isParked = null,
         string? connectHost = null,
-        Func<string, string?>? publishedHost = null)
+        Func<string, string?>? publishedHost = null,
+        Func<string, IReadOnlyList<PortCollision>?>? portCollisions = null)
     {
         string? libraryState = LibraryStateOf(instance);
 
@@ -444,6 +462,9 @@ public sealed class ServerAggregator
             // The cluster's name for this server, once the provider carries it — read from what the DNS
             // anchor last told this node, never composed here.
             PublishedHost: publishedHost?.Invoke(id),
+            // What the DNS anchor measured about this server's ports against other members behind the
+            // same public address; null standing alone or when the anchor could not tell.
+            PortCollisions: portCollisions?.Invoke(id),
             // The whole declaration, in the shape the ecosystem writes a port range. Projected from the
             // structured mappings the engine already gives, so nothing here parses a port string.
             Ports: [.. instance.Ports.Select(PortText)],

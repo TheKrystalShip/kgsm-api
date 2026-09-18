@@ -140,7 +140,8 @@ public sealed class DomainPump(
                             // GET can never disagree about what a start is expected to cost.
                             ServerAggregator.BlueprintMinRamOf(blueprints),
                             connectHost: options.ConnectHost,
-                            publishedHost: names.GameName);
+                            publishedHost: names.GameName,
+                            portCollisions: ServerAggregator.PortCollisionsOf(names));
 
                     if (!primed)
                     {
@@ -212,5 +213,11 @@ public sealed class DomainPump(
         || a.OnlinePlayers != b.OnlinePlayers
         // Set once, when the cluster's DNS anchor publishes the server's name, and cleared when it is
         // released — carried so an open server page shows the name without a reload.
-        || a.PublishedHost != b.PublishedHost;
+        || a.PublishedHost != b.PublishedHost
+        // Moves when a server on another member behind the same address takes or gives up one of this
+        // one's ports — rare, and exactly what an admin looking at the server needs to see arrive.
+        || !SameCollisions(a.PortCollisions, b.PortCollisions);
+
+    private static bool SameCollisions(IReadOnlyList<PortCollision>? a, IReadOnlyList<PortCollision>? b) =>
+        a is null ? b is null : b is not null && a.SequenceEqual(b);
 }

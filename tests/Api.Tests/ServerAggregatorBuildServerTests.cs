@@ -597,6 +597,35 @@ public sealed class ServerAggregatorBuildServerTests
     }
 
     [Fact]
+    public void PortCollisions_AreTheAnchorsReport_InTheCanonicalPortSpelling()
+    {
+        var book = new TheKrystalShip.KGSM.Dns.Member.DnsNameBook();
+        book.Replace([
+            new TheKrystalShip.KGSM.Dns.Messages.DnsNameEntry(
+                "factorio.play.example.com", "game", "factorio-1", "published", "",
+                [
+                    new TheKrystalShip.KGSM.Dns.Messages.DnsCollision("factorio-2.play.example.com", "node-b", 34197, 34197, "udp"),
+                    new TheKrystalShip.KGSM.Dns.Messages.DnsCollision("valheim.play.example.com", "node-b", 2456, 2458, "udp"),
+                ]),
+            new TheKrystalShip.KGSM.Dns.Messages.DnsNameEntry(
+                "terraria.play.example.com", "game", "terraria-1", "published", "", []),
+        ]);
+        Func<string, IReadOnlyList<PortCollision>?> lookup = ServerAggregator.PortCollisionsOf(book);
+
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses: Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            portCollisions: lookup);
+
+        Assert.Equal(
+            [new PortCollision("factorio-2.play.example.com", "node-b", "34197/udp"),
+             new PortCollision("valheim.play.example.com", "node-b", "2456:2458/udp")],
+            s.PortCollisions);
+        // Told none is an empty list; never told is null — the anchor had nothing to say about it.
+        Assert.Empty(lookup("terraria-1")!);
+        Assert.Null(lookup("minecraft-1"));
+    }
+
+    [Fact]
     public void PublishedHost_NoneYet_IsNull()
     {
         Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses: Up("factorio-1"),
