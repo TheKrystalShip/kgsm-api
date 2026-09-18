@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — this node is named by the cluster's DNS anchor (0.189.0)
+
+`Api__PublicHost` states where this node is reached from the internet — normally the dynamic-DNS name
+its network keeps pointed at a changing home address. In a cluster where a member holds the `dns`
+capability, this node tells that member the host and keeps the names it answers with
+(`TheKrystalShip.KGSM.Dns`); the anchor publishes `<name>.nodes.<zone>` as an alias of the host. Blank
+states no host, and the node is named without being published. A node that is not in a cluster, or in
+one nobody holds `dns` in, does nothing new.
+
+It is a separate setting from `Api__ConnectHost`, which is the address a surface shows players.
+
 ### Added — a service's own fault report reaches people (0.188.0)
 
 `LeafDegradationWatcher` turns what each leaf's journal says about itself into two notification

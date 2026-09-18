@@ -30,6 +30,9 @@
       // The host part players connect to for servers on this node. Blank reports none, and a surface
       // falls back to the address it reached this api at.
       "ConnectHost": "",
+      // Where this node is reached from the internet — normally its network's dynamic-DNS name. The
+      // cluster's DNS anchor publishes this node's name as an alias of it. Blank states no host.
+      "PublicHost": "",
 
       // ── Leaf connections ──
       // kgsm-monitor metrics socket. Blank reports the metrics capability absent.

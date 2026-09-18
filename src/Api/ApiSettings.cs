@@ -68,6 +68,14 @@ public sealed class ApiSettings
     [ConfigField("connectHost", "Player connect host", Group = "identity", NoDefault = true)]
     public string? ConnectHost { get; set; }
 
+    /// <summary>Where this node is reached from the internet, as the cluster's DNS anchor names it.</summary>
+    /// <panel>Where this host is reached from the internet — normally the dynamic-DNS name its network
+    /// keeps pointed at a changing home address, such as example.ddns.net. In a cluster with a DNS
+    /// anchor, this node's name is published as an alias of it, so an address change moves nothing in
+    /// the cluster. A fixed public address works too. Empty means this node is named and not published.</panel>
+    [ConfigField("publicHost", "Public host", Group = "identity", NoDefault = true)]
+    public string? PublicHost { get; set; }
+
 
     // ── Leaf connections ──────────────────────────────────────────────────────
     /// <summary>kgsm-monitor metrics socket. Blank reports the metrics capability absent.</summary>

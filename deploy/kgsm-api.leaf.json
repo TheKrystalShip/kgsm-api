@@ -145,6 +145,15 @@
       "risk": "safe"
     },
     {
+      "key": "publicHost",
+      "env": "Api__PublicHost",
+      "label": "Public host",
+      "description": "Where this host is reached from the internet — normally the dynamic-DNS name its network keeps pointed at a changing home address, such as example.ddns.net. In a cluster with a DNS anchor, this node's name is published as an alias of it, so an address change moves nothing in the cluster. A fixed public address works too. Empty means this node is named and not published.",
+      "group": "identity",
+      "type": "string",
+      "risk": "safe"
+    },
+    {
       "key": "monitorSocket",
       "env": "Api__MonitorSocketPath",
       "label": "Monitor socket",

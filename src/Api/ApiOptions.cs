@@ -230,6 +230,14 @@ public sealed class ApiOptions
     public required string ConnectHost { get; init; }
 
     /// <summary>
+    /// Where this node is reached from the internet (<c>Api__PublicHost</c>): normally its network's
+    /// dynamic-DNS name, or a fixed public address. Stated to the cluster's DNS anchor, which publishes
+    /// this node's name as an alias of it. Blank states no host, and the anchor names the node without
+    /// publishing it. Distinct from <see cref="ConnectHost"/>, which is what a surface shows players.
+    /// </summary>
+    public required string PublicHost { get; init; }
+
+    /// <summary>
     /// Base URL the Steam library-capsule cover (<c>{base}/{appId}/library_600x900.jpg</c> — the 2:3 portrait
     /// art Steam shows in the library view) is fetched from (<c>Api__SteamCdnBaseUrl</c>). Default: Steam's
     /// public store-asset CDN. Any trailing slash is trimmed. <strong>Steam is the cover authority</strong> —
@@ -967,6 +975,7 @@ public sealed class ApiOptions
             // Trimmed only. A scheme or port left in here is a misconfiguration that shows up in the
             // address players are handed, which is where it should be noticed rather than quietly repaired.
             ConnectHost = Defaulted(s.ConnectHost, "").Trim().TrimEnd('/'),
+            PublicHost = Defaulted(s.PublicHost, "").Trim().TrimEnd('.'),
 
             // Steam library-capsule cover (the 2:3 portrait). The cover AUTHORITY, decoupled from RAWG: keyless,
             // so it defaults ON (BlankFallback keeps a concrete CDN base even if the declared default is blank).

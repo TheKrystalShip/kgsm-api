@@ -22,6 +22,7 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 using TheKrystalShip.KGSM.Cluster;
+using TheKrystalShip.KGSM.Dns.Member;
 using TheKrystalShip.KGSM.Cluster.Identity;
 using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Messaging;
@@ -711,6 +712,12 @@ public class Startup(IConfiguration configuration)
         // clear. Registered after the package, so ClusterOptions is resolvable; a host with no secret is
         // not a member and it says nothing.
         services.AddHostedService<Services.Cluster.MemberWireAdvisory>();
+
+        // This node's name. The cluster's DNS anchor names every node and holds the only credential for
+        // the zone; this node tells it where the node is reached and keeps the answer. The host is
+        // this node's own, never the cluster's — a fact about the network it sits on. Inert with no
+        // secret, and with nobody holding the dns capability there is nobody to tell.
+        services.AddKgsmDnsMember(apiOptions.PublicHost);
 
         // session.revoke is registered rather than built in: the transport dispatches by type and
         // knows nothing about sessions, and the handler is every member's rather than this API's. The
