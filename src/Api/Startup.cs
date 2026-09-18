@@ -713,11 +713,13 @@ public class Startup(IConfiguration configuration)
         // not a member and it says nothing.
         services.AddHostedService<Services.Cluster.MemberWireAdvisory>();
 
-        // This node's name. The cluster's DNS anchor names every node and holds the only credential for
-        // the zone; this node tells it where the node is reached and keeps the answer. The host is
-        // this node's own, never the cluster's — a fact about the network it sits on. Inert with no
-        // secret, and with nobody holding the dns capability there is nobody to tell.
-        services.AddKgsmDnsMember(apiOptions.PublicHost);
+        // This node's name, and the certificate it is served with. The cluster's DNS anchor names every
+        // node and holds the only credential for the zone; this node tells it where the node is reached,
+        // keeps the name it answers with, and asks it for a certificate against a key that never leaves
+        // this machine. The host is this node's own, never the cluster's — a fact about the network it
+        // sits on. Inert with no secret, and with nobody holding the dns capability there is nobody to
+        // tell; on a host not set up to serve generated sites the name is kept and nothing is served.
+        services.AddKgsmDnsMember(apiOptions.PublicHost, "kgsm-api");
 
         // session.revoke is registered rather than built in: the transport dispatches by type and
         // knows nothing about sessions, and the handler is every member's rather than this API's. The

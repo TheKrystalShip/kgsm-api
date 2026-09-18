@@ -203,6 +203,10 @@ fi
 # Skipped cleanly when nginx is not installed, so a host that reaches its services some other way
 # provisions exactly as before. Root-owned like the rest of /etc/nginx, which is why it lives here and
 # not in deploy.sh.
+#
+# The serving pieces go in first: the host vhost includes the proxy rules they install.
+setup_serving
+
 if [[ -n "${NGINX_FRAGMENT:-}" && -f "$NGINX_FRAGMENT" && -d /etc/nginx/conf.d ]]; then
     log "installing the nginx vhost → /etc/nginx/conf.d/$(basename "$NGINX_FRAGMENT")"
     $SUDO install -m 0644 -o root -g root "$NGINX_FRAGMENT" "/etc/nginx/conf.d/$(basename "$NGINX_FRAGMENT")"

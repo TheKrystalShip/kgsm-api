@@ -1,0 +1,19 @@
+// 47-@PROJECT@-nginx-reload.rules — lets @PROJECT@ reload the web server after it writes its site.
+//
+// Rendered from @PROJECT@/deploy/polkit/47-@PROJECT@-nginx-reload.rules.in and installed by
+// deploy/setup.sh. A component writes its generated site under /var/lib/kgsm/nginx/ and needs the web
+// server to load it; this grants '@SVC_USER@' exactly that — `reload` on nginx.service — and nothing
+// else: not start, not stop, not any other unit.
+//
+// Managed by setup.sh — re-run it rather than hand-editing the installed copy.
+polkit.addRule(function(action, subject) {
+    if (subject.user !== "@SVC_USER@") {
+        return;
+    }
+
+    if (action.id === "org.freedesktop.systemd1.manage-units"
+        && action.lookup("unit") === "nginx.service"
+        && action.lookup("verb") === "reload") {
+        return polkit.Result.YES;
+    }
+});

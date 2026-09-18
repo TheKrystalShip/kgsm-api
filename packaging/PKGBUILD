@@ -11,7 +11,7 @@
 # upgrades without rebuilding this and a node can run the API headless.
 
 pkgname=kgsm-api
-pkgver=0.156.0
+pkgver=0.190.0
 pkgrel=1
 pkgdesc="KGSM Control Panel API — the per-host aggregator for the panel and other surfaces"
 arch=('x86_64')
@@ -104,6 +104,19 @@ package() {
         install -Dm644 "${srcdir}/50-${leaf}-override.conf" \
             "${pkgdir}/usr/lib/systemd/system/${unit}.d/50-kgsm-api-override.conf"
     done
+
+    # Serving this node's cluster names: the proxy rules every generated block includes, this
+    # component's one-line include of the site it generates, the directories it keeps them in, and the
+    # grant that lets the service account reload the web server and do nothing else to it. Inert where
+    # nginx is not installed — the include lands in a directory nothing reads.
+    install -Dm644 "${repo}/deploy/nginx/kgsm-api.locations" "${pkgdir}/etc/nginx/kgsm/kgsm-api.locations"
+    install -Dm644 "${repo}/deploy/nginx/kgsm-api.sites.conf" "${pkgdir}/etc/nginx/conf.d/00-kgsm-api-sites.conf"
+    install -Dm644 "${repo}/deploy/kgsm-api.serving.tmpfiles" "${pkgdir}/usr/lib/tmpfiles.d/kgsm-api-serving.conf"
+    sed -e "s|@PROJECT@|kgsm-api|g" -e "s|@SVC_USER@|kgsm|g" \
+        "${repo}/deploy/polkit/47-kgsm-api-nginx-reload.rules.in" \
+        > "${srcdir}/47-kgsm-api-nginx-reload.rules"
+    install -Dm644 "${srcdir}/47-kgsm-api-nginx-reload.rules" \
+        "${pkgdir}/usr/share/polkit-1/rules.d/47-kgsm-api-nginx-reload.rules"
 
     install -Dm644 "${repo}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 }

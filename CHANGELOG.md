@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — this node serves its cluster name over HTTPS (0.190.0)
+
+A node named by the cluster's DNS anchor keeps a certificate for that name and serves it. The key is
+generated on this machine and never leaves it: the node sends the anchor a signing request, the anchor
+has it issued through the zone it holds the credential for, and the chain comes back over the bus. The
+node writes one generated site, `/var/lib/kgsm/nginx/kgsm-api.conf`, with a server block per name it
+holds a certificate for, reloads the web server through a grant that allows nothing else, and checks the
+certificate served over a real TLS handshake. A certificate is renewed once it is into the last third of
+its lifetime.
+
+- **The proxy rules are one file**, `deploy/nginx/kgsm-api.locations`, included by the host vhost and
+  by every generated block alike.
+- **The package carries the serving pieces**: the rules, this component's include of its generated
+  site, the directories (`tmpfiles.d`), and the reload grant for the `kgsm` service account. A host
+  provisioned from a checkout gets the same from `deploy/setup.sh`.
+- A host with no web server keeps its name and serves nothing.
+
 ### Added — this node is named by the cluster's DNS anchor (0.189.0)
 
 `Api__PublicHost` states where this node is reached from the internet — normally the dynamic-DNS name

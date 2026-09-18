@@ -1,0 +1,11 @@
+# kgsm-api — the directories this node serves its cluster names from.
+#
+# Where every component keeps its keys, owned like the /var/lib/kgsm it sits in. Declared rather than
+# left for the line below to create, because an implied parent is made root-owned, and systemd-tmpfiles
+# refuses to walk from a kgsm-owned directory into a root-owned one.
+d /var/lib/kgsm/tls 0755 kgsm kgsm -
+# Its keys and certificates, readable by the service account alone; the web server reads them as root.
+d /var/lib/kgsm/tls/kgsm-api 0700 kgsm kgsm -
+# The sites KGSM components generate, shared by every component on the machine and each writing only its
+# own file. Setgid so a file keeps the directory's group whichever component writes it.
+d /var/lib/kgsm/nginx 2775 kgsm kgsm -

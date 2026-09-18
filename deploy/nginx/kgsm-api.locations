@@ -1,0 +1,35 @@
+# kgsm-api — how a request to this API is handled, included by every server block that serves it: the
+# host vhost in /etc/nginx/conf.d/kgsm-api.conf, and each block this node generates in
+# /var/lib/kgsm/nginx/kgsm-api.conf for the names its cluster's DNS anchor gave it.
+#
+# The generated blocks carry only a name and its certificate; everything about where a request goes is
+# here, installed with the component and written by nothing at runtime.
+
+# nginx defaults to 1m. The file browser's PUT /servers/{id}/files carries whole game configs, and a 413
+# there would look like a broken editor rather than a proxy limit.
+client_max_body_size 32m;
+
+location / {
+    proxy_pass         http://127.0.0.1:8097;
+    proxy_http_version 1.1;
+
+    # Host travels unchanged, so the app needs no X-Forwarded-Host to reconstruct it — one fewer header
+    # it has to trust. The scheme and the client address DO have to be forwarded: without them the app
+    # sees a plain-http request from loopback and writes its OAuth state cookie without Secure, which
+    # keeps working and is exactly why it would go unnoticed.
+    proxy_set_header   Host              $host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header   X-Forwarded-Proto $scheme;
+    proxy_set_header   Connection        '';
+
+    # SSE (/api/v1/stream, the assistant turn relay): stream frames through as they arrive. The app
+    # already sends X-Accel-Buffering: no, which nginx honours; this makes it explicit rather than
+    # dependent on a header staying in place upstream.
+    proxy_buffering    off;
+    proxy_cache        off;
+
+    # A blueprint finalize relays for MINUTES behind heartbeats. The 60s default would cut it mid-run
+    # and surface as a mysteriously failed save.
+    proxy_read_timeout 3600s;
+}
