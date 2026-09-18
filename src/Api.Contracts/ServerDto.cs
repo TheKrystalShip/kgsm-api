@@ -139,6 +139,11 @@ public sealed record Server(
     // node reached differently than it is played on sets this and stops the two being conflated. Never
     // derived from the request, never guessed.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ConnectHost = null,
+    // The name the cluster's DNS anchor published for this server (`factorio.play.<zone>`), an alias of this
+    // node's own name. Present only once the provider carries it, so a surface never hands a player a name
+    // that does not resolve yet; null standing alone, in a cluster with no DNS anchor, and while it waits.
+    // Where it is present it is the host a player connects to, ahead of ConnectHost.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PublishedHost = null,
     // Every port this instance declares, canonical (`26900:26903/tcp`, a single port without its range).
     // ConnectPort above is the first of them and answers "where do I connect"; this answers "what does
     // this server occupy", which a firewall question, a conflict question and a health check all need and

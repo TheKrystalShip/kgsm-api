@@ -36,6 +36,7 @@ public sealed class DomainPump(
     Services.Availability.UpdateLagIndex updateLag,
     Services.Availability.RunTimesIndex runTimes,
     Services.Library.BlueprintCache blueprints,
+    TheKrystalShip.KGSM.Dns.Member.DnsNameBook names,
     ApiOptions options,
     ILogger<DomainPump> logger)
     : BackgroundService
@@ -138,7 +139,8 @@ public sealed class DomainPump(
                             // Composed from the SAME helper the REST read uses, so a stream frame and a
                             // GET can never disagree about what a start is expected to cost.
                             ServerAggregator.BlueprintMinRamOf(blueprints),
-                            connectHost: options.ConnectHost);
+                            connectHost: options.ConnectHost,
+                            publishedHost: names.GameName);
 
                     if (!primed)
                     {
@@ -207,5 +209,8 @@ public sealed class DomainPump(
         || a.LastBackup != b.LastBackup
         || a.BackupCount != b.BackupCount
         || a.ActiveJob != b.ActiveJob
-        || a.OnlinePlayers != b.OnlinePlayers;
+        || a.OnlinePlayers != b.OnlinePlayers
+        // Set once, when the cluster's DNS anchor publishes the server's name, and cleared when it is
+        // released — carried so an open server page shows the name without a reload.
+        || a.PublishedHost != b.PublishedHost;
 }

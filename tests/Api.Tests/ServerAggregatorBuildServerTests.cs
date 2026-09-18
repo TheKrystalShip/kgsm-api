@@ -582,6 +582,30 @@ public sealed class ServerAggregatorBuildServerTests
 
         Assert.Null(s.ConnectHost);
     }
+
+    [Fact]
+    public void PublishedHost_IsTheClusterNameForThisServer_BesideTheConfiguredHost()
+    {
+        // The name is looked up by instance id, so another server's name can never land on this one.
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses: Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            connectHost: "home.example.com",
+            publishedHost: id => id == "factorio-1" ? "factorio.play.example.com" : "other.play.example.com");
+
+        Assert.Equal("factorio.play.example.com", s.PublishedHost);
+        Assert.Equal("home.example.com", s.ConnectHost);
+    }
+
+    [Fact]
+    public void PublishedHost_NoneYet_IsNull()
+    {
+        Server s = ServerAggregator.BuildServer("factorio-1", TestInstance, statuses: Up("factorio-1"),
+            NoBackupReadings, NoMetrics, "host-1", isStarting: _ => false, activeJob: NoActiveJob,
+            publishedHost: _ => null);
+
+        Assert.Null(s.PublishedHost);
+    }
+
     private static Dictionary<string, Reading<InstanceRuntimeStatus>> Up(string id) => new()
     {
         [id] = Reading<InstanceRuntimeStatus>.Measured(new InstanceRuntimeStatus { InstanceName = id, Status = true }),

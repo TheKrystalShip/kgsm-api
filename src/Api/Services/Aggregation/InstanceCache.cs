@@ -98,6 +98,7 @@ public sealed class InstanceCache : IHostedService, IDisposable
     private IReadOnlyDictionary<string, Reading<InstanceRuntimeStatus>> _statuses =
         new Dictionary<string, Reading<InstanceRuntimeStatus>>();
     private bool _engineRead = true;
+    private volatile bool _loaded;
     private PeriodicTimer? _timer;
     private CancellationToken _stoppingToken = CancellationToken.None;
 
@@ -136,6 +137,13 @@ public sealed class InstanceCache : IHostedService, IDisposable
     /// "couldn't read" from "genuinely empty" (the 503/skip-tick decision) check this.
     /// </summary>
     public bool EngineRead => _engineRead;
+
+    /// <summary>
+    /// Whether the roster has ever been read from the engine, or the engine is known not to be
+    /// configured. Until then the roster is the empty placeholder the cache starts with, which is no
+    /// statement about what is installed — a caller that acts on an empty roster checks this first.
+    /// </summary>
+    public bool Loaded => _loaded;
 
     /// <summary>
     /// Trigger an immediate, non-blocking refresh. Returns <c>false</c> if a refresh is already in
@@ -382,6 +390,7 @@ public sealed class InstanceCache : IHostedService, IDisposable
                 _logger.LogWarning(
                     "kgsm engine is not configured (Api__KgsmPath is empty) — instance cache stays empty.");
             _engineRead = true; // honest empty roster, not a failed read
+            _loaded = true;
             return;
         }
 
@@ -411,6 +420,7 @@ public sealed class InstanceCache : IHostedService, IDisposable
             _roster = roster;
             _statuses = statuses;
             _engineRead = true;
+            _loaded = true;
 
             _logger.LogDebug("Instance cache refreshed: {Count} instance(s).", roster.Count);
         }

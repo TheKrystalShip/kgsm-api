@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — every game server on this node has a name players connect through (0.191.0)
+
+In a cluster with a DNS anchor, this node tells the anchor every instance the engine reports, with its
+blueprint and ports, and the anchor names each `<game>.play.<zone>` as an alias of this node's own
+name. The list is read from the instance cache, which re-reads the engine on every install and
+uninstall event, so a server installed through the CLI — or while this API was stopped — is named
+without anything else watching for it. A cache that has never read the engine sends nothing, because an
+empty list releases every name. Taken through `TheKrystalShip.KGSM.Dns 0.2.0-dev.5`.
+
+- **`publishedHost` on the server DTO** (`TheKrystalShip.KGSM.Api.Contracts 1.0.0-dev.10`): the name,
+  present only once the provider carries it. The list, the `servers` stream and the detail view all
+  carry it, and a change to it is a stream patch.
+
 ### Added — this node serves its cluster name over HTTPS (0.190.0)
 
 A node named by the cluster's DNS anchor keeps a certificate for that name and serves it. The key is

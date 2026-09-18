@@ -721,6 +721,11 @@ public class Startup(IConfiguration configuration)
         // tell; on a host not set up to serve generated sites the name is kept and nothing is served.
         services.AddKgsmDnsMember(apiOptions.PublicHost, "kgsm-api");
 
+        // Every game server on this node gets a name players connect through, an alias of the node's own.
+        // The anchor is told the engine's whole instance list whenever it changes, and only ever from a
+        // successful read — an instance missing from what it is told loses its name.
+        services.AddKgsmDnsGameNames<Services.Cluster.EngineInstanceSource>();
+
         // session.revoke is registered rather than built in: the transport dispatches by type and
         // knows nothing about sessions, and the handler is every member's rather than this API's. The
         // retention is how long a record of an ended session is worth keeping — the longest a bearer

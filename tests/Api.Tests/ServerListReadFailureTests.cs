@@ -9,6 +9,8 @@ using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
+using TheKrystalShip.KGSM.Dns.Member;
+using TheKrystalShip.KGSM.Dns.Messages;
 
 using TheKrystalShip.KGSM.Auth;
 
@@ -42,6 +44,53 @@ public sealed class ServerListReadFailureTests
 
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         Assert.Equal("[]", (await res.Content.ReadAsStringAsync()).Trim());
+    }
+
+    // The cluster's DNS anchor releases the name of every instance missing from what it is told, so the
+    // same distinction decides whether this node's game names survive a failed engine read.
+    [Fact]
+    public async Task FailedRosterRead_tells_the_dns_anchor_nothing()
+    {
+        await using var factory = new RosterFactory(roster: null);
+        factory.CreateClient();   // starts the host, and with it the cache's first read
+
+        IDnsInstanceSource source = factory.Services.GetRequiredService<IDnsInstanceSource>();
+
+        Assert.Null(await source.ReadAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task GenuinelyEmptyRoster_tells_the_dns_anchor_there_are_none()
+    {
+        await using var factory = new RosterFactory(roster: new());
+        factory.CreateClient();
+
+        IDnsInstanceSource source = factory.Services.GetRequiredService<IDnsInstanceSource>();
+
+        Assert.Empty((await source.ReadAsync(CancellationToken.None))!);
+    }
+
+    [Fact]
+    public async Task Roster_tells_the_dns_anchor_each_instance_with_its_game_and_ports()
+    {
+        var roster = new Dictionary<string, Instance>
+        {
+            ["factorio-1"] = new Instance
+            {
+                Blueprint = "factorio",
+                Ports = [new PortMapping { Start = 34197, End = 34197, Protocol = "udp" }],
+            },
+        };
+        await using var factory = new RosterFactory(roster);
+        factory.CreateClient();
+
+        IReadOnlyList<DnsInstance> read =
+            (await factory.Services.GetRequiredService<IDnsInstanceSource>().ReadAsync(CancellationToken.None))!;
+
+        DnsInstance only = Assert.Single(read);
+        Assert.Equal("factorio-1", only.Instance);
+        Assert.Equal("factorio", only.Blueprint);
+        Assert.Equal(new DnsPort(34197, 34197, "udp"), Assert.Single(only.Ports));
     }
 
     private static HttpClient Viewer(AuthTestFactory factory)

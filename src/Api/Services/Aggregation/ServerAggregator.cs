@@ -6,6 +6,7 @@ using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
+using TheKrystalShip.KGSM.Dns.Member;
 using Snap = TheKrystalShip.KGSM.Monitor.Contracts;
 
 namespace TheKrystalShip.Api.Services.Aggregation;
@@ -38,6 +39,7 @@ public sealed class ServerAggregator
     private readonly Availability.RunTimesIndex _runTimes;
     private readonly Availability.SupervisionPhaseIndex _phases;
     private readonly Library.BlueprintCache _blueprints;
+    private readonly DnsNameBook _names;
     private readonly ILogger<ServerAggregator> _logger;
 
     public ServerAggregator(
@@ -54,6 +56,7 @@ public sealed class ServerAggregator
         Availability.RunTimesIndex runTimes,
         Availability.SupervisionPhaseIndex phases,
         Library.BlueprintCache blueprints,
+        DnsNameBook names,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
@@ -69,6 +72,7 @@ public sealed class ServerAggregator
         _runTimes = runTimes;
         _phases = phases;
         _blueprints = blueprints;
+        _names = names;
         _logger = logger;
     }
 
@@ -162,7 +166,7 @@ public sealed class ServerAggregator
             metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
             IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability), _updateLag.Lookup,
             _runTimes.Lookup, BlueprintMinRamOf(_blueprints), _phases.ParkedLookup,
-            _options.ConnectHost);
+            _options.ConnectHost, _names.GameName);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -221,7 +225,7 @@ public sealed class ServerAggregator
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
                 _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById,
                 OnlinePlayersOf(_players, _observability), _updateLag.Lookup, _runTimes.Lookup,
-                BlueprintMinRamOf(_blueprints), _phases.ParkedLookup, _options.ConnectHost));
+                BlueprintMinRamOf(_blueprints), _phases.ParkedLookup, _options.ConnectHost, _names.GameName));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -284,7 +288,8 @@ public sealed class ServerAggregator
         Func<string, Availability.RunTimes>? runTimes = null,
         Func<string, int?>? blueprintMinRamMb = null,
         Func<string, bool>? isParked = null,
-        string? connectHost = null)
+        string? connectHost = null,
+        Func<string, string?>? publishedHost = null)
     {
         string? libraryState = LibraryStateOf(instance);
 
@@ -436,6 +441,9 @@ public sealed class ServerAggregator
             // This node's configured player-facing host, or null when it declares none. Blank is
             // normalised here rather than at each caller so every surface gets the same honest unknown.
             ConnectHost: string.IsNullOrWhiteSpace(connectHost) ? null : connectHost,
+            // The cluster's name for this server, once the provider carries it — read from what the DNS
+            // anchor last told this node, never composed here.
+            PublishedHost: publishedHost?.Invoke(id),
             // The whole declaration, in the shape the ecosystem writes a port range. Projected from the
             // structured mappings the engine already gives, so nothing here parses a port string.
             Ports: [.. instance.Ports.Select(PortText)],
