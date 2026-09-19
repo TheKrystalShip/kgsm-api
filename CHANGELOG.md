@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a removed member stays listed as departed for seven days (0.194.0)
+
+Takes `TheKrystalShip.KGSM.Cluster 1.0.0-dev.21`: a member removed from the cluster keeps its `left`
+row for seven days rather than five minutes, so a member that was down when the removal was made still
+learns it — the cluster's DNS anchor releases the removed node's names from that row. The Cluster page
+shows it as `left` for that time and connects to it no more than before.
+
+Takes `TheKrystalShip.KGSM.Dns 0.2.0-dev.10` as well: the node states where it is reached and its game
+servers again the moment its incarnation rises — how it refutes being taken for gone — and asks the
+anchor for its names rather than waiting to be told them at a name it may not be serving, so a node
+named again after a removal, or one that has just joined, serves its name as soon as it is given one.
+
 ### Changed — a node is reached at the name its cluster serves it at (0.193.0)
 
 In a cluster with a DNS anchor, `Api__PublicBaseUrl` is left unset: the node advertises its own
