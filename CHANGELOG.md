@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — an admin can renew a node's certificate from the cluster's DNS page (0.195.0)
+
+Takes `TheKrystalShip.KGSM.Dns 0.2.0-dev.14`: when the DNS anchor asks this node to renew the
+certificate for a name it holds and has published (its `<name>.nodes.` name), the node requests a new
+one straight away instead of waiting for the certificate's own renewal window.
+
 ### Changed — a removed member stays listed as departed for seven days (0.194.0)
 
 Takes `TheKrystalShip.KGSM.Cluster 1.0.0-dev.21`: a member removed from the cluster keeps its `left`
