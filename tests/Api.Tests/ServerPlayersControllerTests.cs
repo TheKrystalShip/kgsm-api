@@ -271,7 +271,7 @@ public sealed class ServerPlayersControllerTests
             [JoinOnly] = new Instance
             {
                 Name = JoinOnly, BlueprintFile = "valheim.bp.yaml",
-                PlayerJoinedRegex = @"Got character ZDOID from (?<name>.+?) : (?<key>\d+):\d+",
+                PlayerJoinedRegex = @"Got character ZDOID from (?<name>.+?) : (?!0:0)(?<key>-?\d+):\d+",
                 PlayerLeftRegex = "",
             },
             // Deliberately no player regexes: its presence is polled over RCON, which is a fact
