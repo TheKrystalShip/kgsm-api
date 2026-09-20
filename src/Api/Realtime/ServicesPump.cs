@@ -28,10 +28,10 @@ public sealed class ServicesPump(
     SystemdReader systemd,
     LeafHealthMonitor health,
     LeafRegistry registry,
+    ServicesAggregator services,
     ApiOptions options,
     ILogger<ServicesPump> logger) : BackgroundService
 {
-    private readonly IReadOnlyList<LeafDescriptor> _catalog = LeafCatalog.Default;
 
     // Previous tick's systemd readings, keyed by unit name.
     private Dictionary<string, UnitState> _last = new(StringComparer.Ordinal);
@@ -61,7 +61,11 @@ public sealed class ServicesPump(
                         continue;
                     }
 
-                    IReadOnlyList<string> units = _catalog.Select(l => l.Unit).ToList();
+                    // Re-read each tick rather than held: which leaves this node runs is answered from the
+                    // descriptor directory, so a leaf deployed while this runs joins the stream on its own.
+                    // The same list the REST board reports, so the two cannot disagree about what exists.
+                    IReadOnlyList<LeafDescriptor> catalog = services.Catalog();
+                    IReadOnlyList<string> units = catalog.Select(l => l.Unit).ToList();
                     IReadOnlyDictionary<string, UnitState> states =
                         await systemd.ReadAsync(units, stoppingToken).ConfigureAwait(false);
                     HostCapabilities caps = health.Current;
@@ -70,13 +74,13 @@ public sealed class ServicesPump(
                     if (!_primed)
                     {
                         _last = new Dictionary<string, UnitState>(states, StringComparer.Ordinal);
-                        _lastHealth = BuildHealthIndex(_catalog, caps);
+                        _lastHealth = BuildHealthIndex(catalog, caps);
                         _primed = true;
                         continue;
                     }
 
                     // Diff each leaf against the previous tick.
-                    foreach (LeafDescriptor leaf in _catalog)
+                    foreach (LeafDescriptor leaf in catalog)
                     {
                         states.TryGetValue(leaf.Unit, out UnitState? next);
                         _last.TryGetValue(leaf.Unit, out UnitState? prev);
@@ -95,7 +99,7 @@ public sealed class ServicesPump(
                     }
 
                     _last = new Dictionary<string, UnitState>(states, StringComparer.Ordinal);
-                    _lastHealth = BuildHealthIndex(_catalog, caps);
+                    _lastHealth = BuildHealthIndex(catalog, caps);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {

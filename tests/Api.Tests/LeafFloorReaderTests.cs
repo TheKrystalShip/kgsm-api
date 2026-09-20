@@ -25,10 +25,12 @@ public sealed class LeafFloorReaderTests : IDisposable
             {
                 ["Api:LeafOverridesDir"] = Path.Combine(_dir, "overrides"),
                 ["Api:LeafDescriptorDir"] = Path.Combine(_dir, "no-descriptors"),
+                ["Api:AnchorDescriptorDir"] = Path.Combine(_dir, "no-anchors"),
             })
             .Build());
         var catalog = new LeafConfigCatalog(
-            new LeafDescriptorStore(options, NullLogger<LeafDescriptorStore>.Instance), options);
+            new LeafDescriptorStore(options, NullLogger<LeafDescriptorStore>.Instance),
+            new AnchorDescriptorStore(options, NullLogger<AnchorDescriptorStore>.Instance), options);
         return new LeafFloorReader(
             options,
             new LeafOverrideRenderer(options, catalog, NullLogger<LeafOverrideRenderer>.Instance),

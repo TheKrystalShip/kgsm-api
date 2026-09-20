@@ -96,6 +96,14 @@ directory**, so a leaf that joins the ecosystem later becomes configurable, and 
 board, with no rebuild here. `LeafConfigManifest` is the built-in fallback for a leaf that has not
 shipped a descriptor yet, not the authority. Format: `../leaf-config-descriptor.md`.
 
+**An anchor sharing this machine is not one of this node's services.** Leaf-or-anchor is a deployment
+choice, so the same component is a leaf on one host and an anchor on another, and only the descriptor it
+installed here says which. `AnchorDescriptorStore` scans `/var/lib/kgsm/anchors/`
+(`Api__AnchorDescriptorDir`) for **ids alone** — the one fact this API needs — and subtracts them: an
+anchored component is absent from the Services board and its stream, is not addressable as a leaf, and
+has no configuration surface here, not even the keys `LeafConfigManifest` knows by name. It owns its own
+configuration and journal and is reached at its own address, as the cluster member it is.
+
 **What a leaf answers to comes from the leaf too.** A leaf that takes typed commands ships a manifest
 into `commands/` **below** the descriptor directory — one level down because the descriptor scan globs
 `*.json` at the top and would read it as a malformed descriptor. `LeafCommandStore` scans that

@@ -25,10 +25,12 @@ public sealed class LeafOverrideRendererTests : IDisposable
                 // No descriptors installed → the catalog falls back to the built-in manifest, which is
                 // exactly the mapping these tests pin.
                 ["Api:LeafDescriptorDir"] = Path.Combine(_dir, "no-descriptors"),
+                ["Api:AnchorDescriptorDir"] = Path.Combine(_dir, "no-anchors"),
             })
             .Build());
         var catalog = new LeafConfigCatalog(
-            new LeafDescriptorStore(opts, NullLogger<LeafDescriptorStore>.Instance), opts);
+            new LeafDescriptorStore(opts, NullLogger<LeafDescriptorStore>.Instance),
+            new AnchorDescriptorStore(opts, NullLogger<AnchorDescriptorStore>.Instance), opts);
         _renderer = new LeafOverrideRenderer(opts, catalog, NullLogger<LeafOverrideRenderer>.Instance);
     }
 

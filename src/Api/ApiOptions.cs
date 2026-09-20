@@ -449,6 +449,15 @@ public sealed class ApiOptions
     public required string LeafDescriptorDir { get; init; }
 
     /// <summary>
+    /// Directory the anchor config descriptors are read from (<c>Api__AnchorDescriptorDir</c>, default
+    /// <c>/var/lib/kgsm/anchors</c>). A component declaring <c>[Anchor]</c> installs <c>&lt;name&gt;.json</c>
+    /// here. This API reads it for one fact — which components on this host are anchors — and subtracts
+    /// them from the node's services: an anchor owns its own configuration and journal and is reached as
+    /// the cluster member it is. Format: <c>tks/leaf-config-descriptor.md</c>.
+    /// </summary>
+    public required string AnchorDescriptorDir { get; init; }
+
+    /// <summary>
     /// One unit-file directory to search instead of systemd's own (<c>Api__LeafDropInDir</c>). Blank —
     /// the default — searches every root systemd does, in its order, which is what makes a packaged
     /// unit in <c>/usr/lib/systemd/system</c> and a deployed one in <c>/etc/systemd/system</c> both
@@ -1013,6 +1022,7 @@ public sealed class ApiOptions
             LeafOverridesDir = BlankFallback(s.LeafOverridesDir, "/var/lib/kgsm-api/leaf-overrides"),
             LeafApplyCanaryMs = Math.Max(2000, s.LeafApplyCanaryMs ?? 15000),
             LeafDescriptorDir = leafDescriptorDir,
+            AnchorDescriptorDir = BlankFallback(s.AnchorDescriptorDir, DefaultAnchorDescriptorDir),
             // Blank on purpose: SystemdUnitPaths then searches every root systemd reads, rather than
             // one this API would have to guess from how the host was provisioned.
             LeafDropInDir = Defaulted(s.LeafDropInDir, ""),
@@ -1098,6 +1108,9 @@ public sealed class ApiOptions
 
     /// <summary>Where a leaf's package installs its config descriptor on a standard install.</summary>
     public const string DefaultLeafDescriptorDir = "/var/lib/kgsm/leaves";
+
+    /// <summary>Where an anchor's package installs its config descriptor on a standard install.</summary>
+    public const string DefaultAnchorDescriptorDir = "/var/lib/kgsm/anchors";
 
     /// <summary>
     /// Resolves one optional leaf's endpoint. A pinned value always wins; otherwise the leaf's

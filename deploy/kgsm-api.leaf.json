@@ -705,6 +705,16 @@
       "risk": "wiring"
     },
     {
+      "key": "anchorDescriptorDir",
+      "env": "Api__AnchorDescriptorDir",
+      "label": "Anchor descriptor directory",
+      "description": "Where an anchor sharing this machine publishes what it is. Read for one thing: a component described here is a peer of this node rather than one of its services, so it is left off the services board. Pointing it elsewhere makes this node claim the anchors it runs beside.",
+      "group": "leafconfig",
+      "type": "path",
+      "default": "/var/lib/kgsm/anchors",
+      "risk": "wiring"
+    },
+    {
       "key": "leafDropInDir",
       "env": "Api__LeafDropInDir",
       "label": "Drop-in directory",

@@ -431,6 +431,14 @@ public sealed class ApiSettings
         Risk = ConfigRisk.Wiring)]
     public string? LeafDescriptorDir { get; set; }
 
+    /// <summary>Shared directory the anchor config descriptors are discovered in.</summary>
+    /// <panel>Where an anchor sharing this machine publishes what it is. Read for one thing: a component
+    /// described here is a peer of this node rather than one of its services, so it is left off the
+    /// services board. Pointing it elsewhere makes this node claim the anchors it runs beside.</panel>
+    [ConfigField("anchorDescriptorDir", "Anchor descriptor directory", Group = "leafconfig",
+        Type = ConfigType.Path, Risk = ConfigRisk.Wiring)]
+    public string? AnchorDescriptorDir { get; set; }
+
     /// <summary>One unit-file directory to search instead of systemd's own roots. Blank searches all
     /// of them, in systemd's order.</summary>
     /// <panel>One directory to look for unit files and their drop-ins in, instead of everywhere systemd

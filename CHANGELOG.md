@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — an anchor is not one of this node's services (0.197.0)
+
+Leaf-or-anchor is a deployment choice, so the same component is a node's leaf on one machine and the
+cluster's anchor on another. `Api__AnchorDescriptorDir` (default `/var/lib/kgsm/anchors`) is read for
+one fact — which components this host describes as anchors — and they are subtracted: absent from the
+Services board and from its realtime stream, unaddressable as a leaf, and with no configuration surface
+here. An anchor owns its own configuration and journal and answers at its own address, as the cluster
+member it is.
+
+Without it a node claimed the assistant it merely shares a machine with, and offered the handful of
+keys this API knew by name in place of the descriptor the component publishes — a surface disclosed as
+partial and attributed to the component rather than to where it was being read from.
+
 ### Fixed — a segment's crash hole stops flooding the log (0.196.1)
 
 `TheKrystalShip.KGSM.Lib` 8.9.1. A run of NUL bytes is the hole a filesystem leaves where it had

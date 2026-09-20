@@ -32,8 +32,13 @@ public sealed record LeafConfigIdentity(
 /// package installs per leaf and its <c>deploy/setup-leaf-config.sh</c> installs on a host deployed from a
 /// checkout. Without it an apply would render a file nothing reads and then fail at the restart, so the API
 /// reports the surface as locked, with the reason, instead of accepting a write it cannot honour.</para>
+/// <para><b>An anchor has no config surface here.</b> A component this host describes as an anchor owns its
+/// own configuration and answers for it at its own address, because it is a peer of this node rather than
+/// something it hosts. This API neither reads that descriptor nor offers the keys it once knew by name for
+/// the same component — a short list presented as a leaf's surface would be a node claiming to configure a
+/// member of the cluster.</para>
 /// </remarks>
-public sealed class LeafConfigCatalog(LeafDescriptorStore descriptors, ApiOptions options)
+public sealed class LeafConfigCatalog(LeafDescriptorStore descriptors, AnchorDescriptorStore anchors, ApiOptions options)
 {
     /// <summary>The drop-in kgsm-api's own setup installs per configurable leaf. Its presence is the
     /// checkable fact that this host can actually deliver an override to that unit.</summary>
@@ -41,7 +46,9 @@ public sealed class LeafConfigCatalog(LeafDescriptorStore descriptors, ApiOption
 
     /// <summary>True when this leaf has a config surface at all (readable; not necessarily editable).</summary>
     public bool IsConfigTarget(string? leafId) =>
-        leafId is not null && (descriptors.For(leafId) is not null || LeafConfigManifest.IsConfigTarget(leafId));
+        leafId is not null
+        && !anchors.Ids.Contains(leafId)
+        && (descriptors.For(leafId) is not null || LeafConfigManifest.IsConfigTarget(leafId));
 
     /// <summary>The settable fields for a leaf, or null when it has no config surface.</summary>
     public IReadOnlyList<LeafConfigFieldDef>? For(string leafId) =>
@@ -54,6 +61,9 @@ public sealed class LeafConfigCatalog(LeafDescriptorStore descriptors, ApiOption
     /// <summary>The leaf's config identity, or null when it has no config surface.</summary>
     public LeafConfigIdentity? Identity(string leafId)
     {
+        if (anchors.Ids.Contains(leafId))
+            return null;
+
         LeafConfigDescriptor? d = descriptors.For(leafId);
         if (d is not null)
             return new LeafConfigIdentity(d.Id, d.DisplayName, d.Unit, d.ApplyMode, d.OnDemand, true, d.Groups, d);

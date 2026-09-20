@@ -4,8 +4,8 @@ using TheKrystalShip.Api.Services.Engine;
 namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>
-/// Builds the Services board payload (<c>GET /hosts/{id}/services</c>) by joining two axes for each leaf in
-/// the <see cref="LeafCatalog"/>:
+/// Builds the Services board payload (<c>GET /hosts/{id}/services</c>) by joining two axes for each leaf
+/// this node runs (<see cref="Catalog"/>):
 /// <list type="bullet">
 ///   <item><b>Liveness</b> — systemd's own view via <see cref="SystemdReader"/> (universal: every leaf has a
 ///   unit). This is the spine.</item>
@@ -22,18 +22,19 @@ public sealed class ServicesAggregator(
     LeafHealthMonitor health,
     LeafRegistry registry,
     LeafDescriptorStore descriptors,
+    AnchorDescriptorStore anchors,
     EngineInfoService engine,
     ApiOptions options)
 {
     public async Task<ServicesSnapshot> SnapshotAsync(CancellationToken ct)
     {
-        IReadOnlyList<LeafDescriptor> Catalog = BuildCatalog();
-        IReadOnlyList<string> units = Catalog.Select(l => l.Unit).ToList();
+        IReadOnlyList<LeafDescriptor> catalog = Catalog();
+        IReadOnlyList<string> units = catalog.Select(l => l.Unit).ToList();
         IReadOnlyDictionary<string, UnitState> states = await systemd.ReadAsync(units, ct).ConfigureAwait(false);
         HostCapabilities caps = health.Current;
 
-        var rows = new List<ComponentService>(Catalog.Count + 1) { await EngineRowAsync(ct).ConfigureAwait(false) };
-        foreach (LeafDescriptor leaf in Catalog)
+        var rows = new List<ComponentService>(catalog.Count + 1) { await EngineRowAsync(ct).ConfigureAwait(false) };
+        foreach (LeafDescriptor leaf in catalog)
         {
             UnitState st = states.TryGetValue(leaf.Unit, out UnitState? s) ? s : UnitState.Unknown;
             rows.Add(new ComponentService(
@@ -100,31 +101,33 @@ public sealed class ServicesAggregator(
     /// and one that is not, is not.
     /// </summary>
     public bool Knows(string leafId) =>
-        BuildCatalog().Any(l => string.Equals(l.Id, leafId, StringComparison.Ordinal));
+        Catalog().Any(l => string.Equals(l.Id, leafId, StringComparison.Ordinal));
 
     /// <summary>
-    /// The built-in catalog, plus any leaf that shipped a config descriptor this API has never heard of.
-    /// A host that runs a leaf added after this API was built still shows it on the board — with its systemd
-    /// liveness, which is universal, and no deep health, which is honest: this API has no probe for a leaf
-    /// it does not know. Known leaves keep the catalog as their identity authority.
+    /// The leaves this node runs: the built-in catalog, less anything this host describes as an anchor,
+    /// plus any leaf that shipped a config descriptor this API has never heard of. A host that runs a leaf
+    /// added after this API was built still shows it on the board — with its systemd liveness, which is
+    /// universal, and no deep health, which is honest: this API has no probe for a leaf it does not know.
+    /// Known leaves keep the catalog as their identity authority.
     /// <para>
-    /// An anchor is never among them. It serves one capability to the whole cluster and is a peer of this
-    /// node rather than something it hosts, so it is described in its own directory that this scan does
-    /// not read — and it is reached as the member it is, not as one of this node's services.
+    /// <b>An anchor is subtracted by name.</b> Leaf-or-anchor is a deployment choice, so the same component
+    /// is a leaf on one host and an anchor on another, and only the descriptor it installed here says
+    /// which. An anchor serves one capability to the whole cluster and is a peer of this node rather than
+    /// something it hosts: it is reached as the member it is, and a node that happens to share a machine
+    /// with one says nothing about it.
     /// </para>
     /// </summary>
-    private IReadOnlyList<LeafDescriptor> BuildCatalog()
+    public IReadOnlyList<LeafDescriptor> Catalog()
     {
-        List<LeafConfigDescriptor> unknown =
-            [.. descriptors.All.Where(d => !LeafCatalog.Default.Any(l => string.Equals(l.Id, d.Id, StringComparison.Ordinal)))];
-
-        if (unknown.Count == 0)
-            return LeafCatalog.Default;
+        IReadOnlySet<string> anchored = anchors.Ids;
+        IReadOnlyCollection<LeafConfigDescriptor> installed = descriptors.All;
 
         return
         [
-            .. LeafCatalog.Default,
-            .. unknown
+            .. LeafCatalog.Default.Where(l => !anchored.Contains(l.Id)),
+            .. installed
+                .Where(d => !LeafCatalog.Default.Any(l => string.Equals(l.Id, d.Id, StringComparison.Ordinal)))
+                .Where(d => !anchored.Contains(d.Id))
                 .OrderBy(d => d.Id, StringComparer.Ordinal)
                 .Select(d => new LeafDescriptor(d.Id, d.Unit, d.DisplayName, d.Role, d.OnDemand, LeafHealthSource.None)),
         ];

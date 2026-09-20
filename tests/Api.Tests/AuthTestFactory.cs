@@ -90,6 +90,11 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 // is true in a test that never mentioned the assistant.
                 ["Api:LeafDescriptorDir"] =
                     Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-leaves-{Guid.NewGuid():N}"),
+                // And the directory that says which components are ANCHORS here. The default is the
+                // machine's real /var/lib/kgsm/anchors, and a component described there is subtracted from
+                // the services board — so a developer's own host would decide which leaves a test sees.
+                ["Api:AnchorDescriptorDir"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-anchors-{Guid.NewGuid():N}"),
                 // Never the default. /var/lib/kgsm/auth/users.db is the HOST's real account store, shared
                 // with every KGSM service on the box, and opening it CREATES it — so an unpinned test
                 // run would hand the operator a live accounts file that nobody made. Same rule that

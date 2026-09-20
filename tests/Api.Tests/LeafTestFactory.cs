@@ -26,6 +26,10 @@ public class LeafTestFactory : AuthTestFactory
     /// (<c>/var/lib/kgsm/leaves</c>, <c>/etc/systemd/system</c>), so leaving them alone would make these
     /// tests read whatever this machine happens to have deployed. Isolate them.</summary>
     public string DescriptorDir { get; }
+
+    /// <summary>Where this host describes its anchors. Pinned away from the machine's real one so a
+    /// component the developer's own box anchors cannot decide which leaves a test sees.</summary>
+    public string AnchorDir { get; }
     public string DropInDir { get; }
 
     /// <param name="monitorSocket">Non-blank to model a host whose config DOES provide the monitor — the
@@ -37,6 +41,7 @@ public class LeafTestFactory : AuthTestFactory
         string id = Guid.NewGuid().ToString("N");
         OverridesDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-ovr-{id}");
         DescriptorDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-desc-{id}");
+        AnchorDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-anchor-{id}");
         DropInDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-dropin-{id}");
 
         // The config-target leaves are "wired" by default here — the apply path refuses a leaf with no
@@ -55,6 +60,13 @@ public class LeafTestFactory : AuthTestFactory
     {
         Directory.CreateDirectory(DescriptorDir);
         File.WriteAllText(Path.Combine(DescriptorDir, leafId + ".json"), json);
+    }
+
+    /// <summary>Describe a component as an anchor on this host, as that component's own deploy would.</summary>
+    public void InstallAnchorDescriptor(string componentId, string json)
+    {
+        Directory.CreateDirectory(AnchorDir);
+        File.WriteAllText(Path.Combine(AnchorDir, componentId + ".json"), json);
     }
 
     /// <summary>Install a command manifest for a leaf, as that leaf's own deploy would — one directory below
@@ -93,6 +105,7 @@ public class LeafTestFactory : AuthTestFactory
                 ["Api:FirewallSocketPath"] = "",
                 ["Api:LeafOverridesDir"] = OverridesDir,
                 ["Api:LeafDescriptorDir"] = DescriptorDir,
+                ["Api:AnchorDescriptorDir"] = AnchorDir,
                 ["Api:LeafDropInDir"] = DropInDir,
                 // Keep the canary short so a rollback test doesn't wait 15s.
                 ["Api:LeafApplyCanaryMs"] = "2000",

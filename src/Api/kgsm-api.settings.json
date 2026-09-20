@@ -157,6 +157,8 @@
       "LeafOverridesDir": "/var/lib/kgsm-api/leaf-overrides",
       // Shared directory the leaf config descriptors are discovered in.
       "LeafDescriptorDir": "/var/lib/kgsm/leaves",
+      // Shared directory the anchor config descriptors are discovered in.
+      "AnchorDescriptorDir": "/var/lib/kgsm/anchors",
       // One unit-file directory to search instead of systemd's own roots. Blank searches all of them.
       "LeafDropInDir": "",
       // How long a leaf's health is watched after a config restart before the change is declared good. Floor 2000.
