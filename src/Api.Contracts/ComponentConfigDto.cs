@@ -192,4 +192,16 @@ public static class ComponentConfigOutcome
     /// change was asked for, and a silent revert would be a lie about what is running.
     /// </summary>
     public const string AppliedUnreachable = "applied_unreachable";
+
+    /// <summary>
+    /// The override was written and the restart that would put it in force was refused — by polkit, or by a
+    /// systemd that would not take the job. The component is still running on the values it started with.
+    /// <para>
+    /// Distinct from <see cref="Applied"/> because it is the opposite claim about what is running, and a
+    /// person reading "applied" would stop looking. A component serving its own surface is where this
+    /// arises: it queues its own restart and cannot watch the result, so whether the job was accepted is
+    /// the whole of what it can honestly report.
+    /// </para>
+    /// </summary>
+    public const string WrittenNotApplied = "written_not_applied";
 }

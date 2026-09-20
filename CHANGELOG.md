@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a word for a change that is written and not in force (Api.Contracts 1.0.0-dev.12)
+
+`ComponentConfigOutcome.WrittenNotApplied` (`written_not_applied`). A component that serves its own
+configuration restarts itself to pick a change up, and the restart can be refused — the override file
+is on disk and the process is still running the values it had. That is the opposite claim to
+`Applied` about what is running, and the contract had no way to say it, so a surface reporting the
+result had to either call it applied or infer it from a connection that closed.
+
 ### Changed — an anchor is not one of this node's services (0.197.0)
 
 Leaf-or-anchor is a deployment choice, so the same component is a node's leaf on one machine and the
