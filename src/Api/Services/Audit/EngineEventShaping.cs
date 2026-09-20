@@ -400,6 +400,20 @@ public static class EngineEventShaping
         _ => reason,
     };
 
+    /// <summary>
+    /// The row for an event no mapper here composes a sentence for.
+    /// </summary>
+    /// <remarks>
+    /// <b>A dotted name is the producer's own and travels as it was written.</b> The name is the event's
+    /// whole identity — it is what the panel's icon trie walks and what its category filter groups on —
+    /// so a leaf minting a name this build has never heard of renders under its own namespace with
+    /// nothing added here. An undotted name is an older engine spelling with no namespace of its own
+    /// (<c>instance_backup_created</c>), and <c>engine.</c> is the namespace it is read under.
+    /// <para>
+    /// The raw type is carried in <c>meta</c> only where the action does not already print it, so a row
+    /// never shows one fact twice.
+    /// </para>
+    /// </remarks>
     private static AuditRecord GenericShape(EventHistoryEntry item, string hostId)
     {
         AuditActor actor = AuditMapping.ParseActor(item.Actor);
@@ -408,12 +422,14 @@ public static class EngineEventShaping
             ? null
             : new AuditTarget(AuditTargetKind.Server, item.Instance, item.Instance);
 
+        bool namespaced = item.Type.Contains('.', StringComparison.Ordinal);
+
         return new AuditRecord(
             item.Id, item.Ts, origin, actor,
-            $"engine.{item.Type}", AuditSeverity.Info, target,
+            namespaced ? item.Type : $"engine.{item.Type}", AuditSeverity.Info, target,
             item.Instance, hostId,
             string.IsNullOrEmpty(item.Instance) ? item.Type : $"{item.Type} — {item.Instance}",
-            new Dictionary<string, string> { ["eventType"] = item.Type });
+            namespaced ? null : new Dictionary<string, string> { ["eventType"] = item.Type });
     }
 
     // Build a meta dict from non-empty pairs (a blank value is omitted, never stored as ""). Null if

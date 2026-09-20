@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a leaf's event reaches the audit under its own name (0.196.0)
+
+An event no mapper here composes a sentence for keeps the dotted name its producer wrote. The name is
+the event's whole identity — it is what the panel's icon trie walks and what its category filter groups
+on — so a leaf minting a name this build has never heard of renders under its own namespace with
+nothing added here, which is the whole point of an open vocabulary. An older engine spelling has no
+namespace of its own (`instance_backup_created`), and `engine.` is the one it is read under. The raw
+type rides `meta` only where the action does not already print it, so a row never shows one fact twice.
+
 ### Changed — an admin can renew a node's certificate from the cluster's DNS page (0.195.0)
 
 Takes `TheKrystalShip.KGSM.Dns 0.2.0-dev.14`: when the DNS anchor asks this node to renew the

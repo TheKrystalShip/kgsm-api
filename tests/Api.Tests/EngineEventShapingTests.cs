@@ -159,8 +159,8 @@ public sealed class EngineEventShapingTests
 
     // The read-back half of the update-available echo. Both paths that turn this event into a row — the
     // live push and this one — have to name the same action, or the row a client saw over SSE and the row
-    // it finds in GET /audit are two different facts. Shaping it generically (engine.server.*) is what
-    // that looks like when only one of the two is wired.
+    // it finds in GET /audit are two different facts. Falling to the generic shape is what that looks
+    // like when only one of the two is wired: the name survives, the sentence and the meta do not.
     [Fact]
     public void Shape_UpdateAvailable_ShapesToServerUpdateAvailable_CarryingBothVersions()
     {
@@ -211,7 +211,7 @@ public sealed class EngineEventShapingTests
     [InlineData("server.restart.started")]
     [InlineData("server.restart.finished")]
     // The install brackets, which the local skip-list never named and the generic fallback shaped into
-    // rows nobody wanted: an install produced a dozen "engine.server.install.files_created" lines beside it.
+    // rows nobody wanted: an install produced a dozen "server.install.files_created" lines beside it.
     [InlineData("server.install.created")]
     [InlineData("server.install.files_created")]
     [InlineData("server.install.directories_created")]
@@ -453,8 +453,11 @@ public sealed class EngineEventShapingTests
     }
 
     // --- an unclassified event type is never dropped — an honest generic fallback, no fabricated field -
+    // A dotted name is the producer's whole identity and travels as written: the panel's icon trie and
+    // category filter both read that name's own hierarchy, so an event added inside a namespace that
+    // already exists renders under it with nothing added anywhere downstream.
     [Fact]
-    public void Shape_UnmappedType_GenericFallback_NeverDropsIt()
+    public void Shape_UnmappedType_KeepsTheProducersOwnName()
     {
         var item = new EventHistoryEntry(
             "evt_unknown1", Ts, "server.some_future_thing", "mc", null, "discord:haru", "ui", null,
@@ -464,26 +467,53 @@ public sealed class EngineEventShapingTests
 
         Assert.NotNull(shaped);
         Assert.Equal("evt_unknown1", shaped!.Id);
-        Assert.Equal("engine.server.some_future_thing", shaped.Action);
+        Assert.Equal("server.some_future_thing", shaped.Action);
         Assert.Equal(AuditSeverity.Info, shaped.Severity);
         Assert.Equal("mc", shaped.ServerId);
         Assert.Equal("ui", shaped.Origin);
         Assert.Equal("haru", shaped.Actor.Name);
         Assert.NotNull(shaped.Target);
         Assert.Equal("mc", shaped.Target!.Id);
-        // literal fact only, nothing fabricated
-        Assert.Equal("server.some_future_thing", shaped.Meta!["eventType"]);
+        // The action already prints the name, so nothing restates it as a chip beside it.
+        Assert.Null(shaped.Meta);
     }
 
+    // A leaf's own vocabulary reaches the feed under that leaf's namespace, with the sentence, the
+    // weight and the outcome it stamped — no mapper here, and no release here either.
     [Fact]
-    public void Shape_UnmappedType_NoInstance_NoTarget_NullActorOrigin_NeverFabricated()
+    public void Shape_LeafEvent_CarriesItsNamespaceAndWhatTheProducerStamped()
+    {
+        var item = new EventHistoryEntry(
+            "evt_dns1", Ts, "dns.certificate.failed", null, null, "system:dns", "system", "hotrod",
+            Data(new { Name = "walter.nodes.example.com", Member = "hotrod" }),
+            Producer: "kgsm-dns",
+            Severity: "warn", Outcome: "failure",
+            Summary: "could not get a certificate for walter.nodes.example.com — rate limited");
+
+        AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
+
+        Assert.NotNull(shaped);
+        Assert.Equal("dns.certificate.failed", shaped!.Action);
+        Assert.Equal(AuditSeverity.Warn, shaped.Severity);
+        Assert.Equal("failure", shaped.Outcome);
+        Assert.Equal("could not get a certificate for walter.nodes.example.com — rate limited", shaped.Summary);
+        Assert.Null(shaped.ServerId);
+        Assert.Null(shaped.Target);
+    }
+
+    // An older engine spelling has no namespace of its own, so `engine.` is the one it is read under —
+    // and the raw type stays on the row, because the action no longer prints it verbatim.
+    [Fact]
+    public void Shape_UndottedType_ReadsUnderTheEngineNamespace()
     {
         var item = new EventHistoryEntry("evt_host1", Ts, "some_future_host_event", null, null, null, null, null, null);
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
         Assert.NotNull(shaped);
-        Assert.Null(shaped!.Target);
+        Assert.Equal("engine.some_future_host_event", shaped!.Action);
+        Assert.Equal("some_future_host_event", shaped.Meta!["eventType"]);
+        Assert.Null(shaped.Target);
         Assert.Null(shaped.ServerId);
         Assert.Null(shaped.Origin);
         Assert.Equal(ActorKind.System, shaped.Actor.Kind); // ParseActor's defensive fallback for no actor
