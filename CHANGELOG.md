@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a segment's crash hole stops flooding the log (0.196.1)
+
+`TheKrystalShip.KGSM.Lib` 8.9.1. A run of NUL bytes is the hole a filesystem leaves where it had
+recorded a segment as longer without having written the bytes; the event appended against one is read
+rather than discarded with the zeros, and a line that genuinely cannot be read is described once
+instead of on every query that walks past it. Measured here at 146,000 identical entries in a day,
+from three segments an unclean shutdown holed.
+
 ### Changed — a leaf's event reaches the audit under its own name (0.196.0)
 
 An event no mapper here composes a sentence for keeps the dotted name its producer wrote. The name is
