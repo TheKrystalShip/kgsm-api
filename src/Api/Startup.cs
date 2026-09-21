@@ -631,6 +631,7 @@ public class Startup(IConfiguration configuration)
         // path this API can no longer reach.
         services.AddSingleton<LeafDescriptorStore>();
         services.AddSingleton<AnchorDescriptorStore>();
+        services.AddSingleton<LeafSurfaceRelay>();
         services.AddSingleton<LeafCommandStore>();
         services.AddSingleton<LeafConfigCatalog>();
         services.AddSingleton<LeafOverrideStore>();
@@ -1133,7 +1134,8 @@ public class Startup(IConfiguration configuration)
                                  ?? false);
                   })
                   .AllowAnyHeader()
-                  .AllowAnyMethod()));
+                  .AllowAnyMethod()
+                  .SetPreflightMaxAge(TimeSpan.FromHours(24))));
     }
 
     public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ILoggerFactory loggerFactory)

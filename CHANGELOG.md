@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — CORS preflight responses cached for 24 hours (0.198.0)
+
+`Access-Control-Max-Age` is set on the CORS policy so the browser caches OPTIONS preflight
+responses instead of re-preflighting every cross-origin request. Each GET previously triggered
+a parallel OPTIONS, doubling request volume.
+
+### Changed — SSE keepalive sent every 10 seconds (0.198.0)
+
+The heartbeat interval on `StreamConnection` is halved from 20s to 10s. The previous interval
+matched the session recheck cadence, and streams were dropping at the keepalive boundary and
+reconnecting immediately — each reconnection cascading a full store rehydration across every
+cluster node.
+
 ### Added — a word for a change that is written and not in force (Api.Contracts 1.0.0-dev.12)
 
 `ComponentConfigOutcome.WrittenNotApplied` (`written_not_applied`). A component that serves its own

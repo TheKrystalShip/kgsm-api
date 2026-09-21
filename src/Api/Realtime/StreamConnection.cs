@@ -50,7 +50,7 @@ namespace TheKrystalShip.Api.Realtime;
 public sealed class StreamConnection
 {
     private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
-    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(10);
     // The lag bound for an OPEN stream — how long a revoked session keeps its live channel, and how
     // long a tier changed out of this process keeps its old reach. Its own constant, not the
     // heartbeat's: retuning the keepalive cadence must not silently move either.
