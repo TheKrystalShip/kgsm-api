@@ -21,6 +21,15 @@ matched the session recheck cadence, and streams were dropping at the keepalive 
 reconnecting immediately — each reconnection cascading a full store rehydration across every
 cluster node.
 
+### Fixed — cluster session streams no longer torn down at the first recheck (0.198.1)
+
+A stream opened with a cluster session (minted by the auth anchor, carrying a host claim
+that differs from this node's) was rechecked against the local session registry, which has no
+row for it — the sign-in happened on another machine. The recheck always returned "not found"
+and ended the connection at the first20-second tick. The recheck now mirrors the initial
+[Authorize] gate: cluster sessions are checked against the deny-list (`ClusterSessionRevocations`),
+local sessions against the local registry.
+
 ### Added — a word for a change that is written and not in force (Api.Contracts 1.0.0-dev.12)
 
 `ComponentConfigOutcome.WrittenNotApplied` (`written_not_applied`). A component that serves its own

@@ -7,6 +7,7 @@ using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Auth;
 
 using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Cluster;
 using TheKrystalShip.KGSM.Auth.Sessions;
 
 namespace TheKrystalShip.Api.Controllers;
@@ -34,6 +35,7 @@ namespace TheKrystalShip.Api.Controllers;
 public sealed class StreamController(
     StreamHub hub,
     ISessionValidator sessions,
+    ClusterSessionRevocations clusterRevocations,
     UserDirectory users,
     ApiOptions options,
     IHostApplicationLifetime lifetime,
@@ -74,10 +76,19 @@ public sealed class StreamController(
         // makes 401s within 5s. `sid` is absent on an auth-disabled host's synthetic principal → no
         // probe, and the stream behaves exactly as before. The validator is a singleton that opens its
         // own DI scope per cache miss, so holding it for the connection's lifetime is safe.
+        //
+        // Cluster sessions (minted by the auth anchor, carrying a host claim that differs from this
+        // node's) have no row in the local session registry — the sign-in happened on another
+        // machine. The initial [Authorize] gate routes them through ClusterSessionRevocations (a
+        // deny-list); the stream recheck does the same here rather than querying the local DB, which
+        // would always say "not found" and tear the stream down at the first recheck tick.
         string? sid = ci is not null ? SessionClaims.ReadSessionId(ci) : null;
+        bool isCluster = ci is not null && ClusterSessionValidation.IsClusterSession(ci, options.HostId);
         Func<CancellationToken, ValueTask<bool>>? sessionAlive = string.IsNullOrEmpty(sid)
             ? null
-            : async (ct) => await sessions.IsValidAsync(sid, ct).ConfigureAwait(false);
+            : isCluster
+                ? async (ct) => !await clusterRevocations.IsRevokedAsync(sid, ct).ConfigureAwait(false)
+                : async (ct) => await sessions.IsValidAsync(sid, ct).ConfigureAwait(false);
 
         // The account this connection is authenticated as, so a change to it can be addressed here,
         // and the re-read that keeps its authority current for as long as it streams. Both need a real
