@@ -21,7 +21,7 @@ matched the session recheck cadence, and streams were dropping at the keepalive 
 reconnecting immediately — each reconnection cascading a full store rehydration across every
 cluster node.
 
-### Fixed — cluster session streams no longer torn down at the first recheck (0.198.2)
+### Fixed — cluster session streams no longer torn down at the first recheck (0.198.1)
 
 A stream opened with a cluster session (minted by the auth anchor, carrying a host claim
 that differs from this node's) was rechecked against the local session registry, which has no
