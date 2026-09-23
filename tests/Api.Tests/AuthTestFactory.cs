@@ -127,6 +127,15 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 // its real auth anchor, and a clustered test node with an empty roster would introduce
                 // itself to it. A test about the local join names its own target.
                 ["Api:LocalAnchorUrl"] = "",
+                // Never the default. /var/lib/kgsm/cluster/auth-provider.json is what the leaves on the
+                // machine running the suite verify sessions against, and a test node knowing a stand-in
+                // anchor would rewrite it — or, knowing none, remove it.
+                ["Api:HostProviderFilePath"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-provider-{Guid.NewGuid():N}.json"),
+                // Never the default either: /etc/kgsm/cluster-founded describes the machine running the
+                // suite. A test about the local join writes its own.
+                ["Cluster:FoundedPath"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-founded-{Guid.NewGuid():N}"),
             });
         });
 

@@ -15,11 +15,12 @@ namespace TheKrystalShip.Api.Services.Auth;
 /// would.
 /// </para>
 /// <para>
-/// <b>Only while the roster is empty.</b> A node that knows any member has been joined to a cluster by
-/// someone, and whether that cluster's anchor runs here is not this node's to decide. So a node joined
-/// to a cluster run elsewhere never asks, and neither does one whose local anchor stays off because the
-/// machine did not found its cluster: there the introduction is simply unanswered, and retried at a slow
-/// cadence until an admin adds the node somewhere.
+/// <b>Only on the machine that founded the cluster, and only while the roster is empty.</b> A machine
+/// that did not found the cluster it is in — one given another cluster's secret, including a founding
+/// machine that has since taken one — is joined by an admin adding it; the anchor beside it holds
+/// nothing there, and introducing itself would put that anchor in the roster as a member nobody asked
+/// for. A node that knows any member has been joined to a cluster by someone, and whether that
+/// cluster's anchor runs here is not this node's to decide.
 /// </para>
 /// </remarks>
 public sealed class LocalAnchorJoin(
@@ -37,6 +38,14 @@ public sealed class LocalAnchorJoin(
     {
         if (!cluster.Enabled || string.IsNullOrEmpty(options.LocalAnchorUrl))
             return;
+
+        if (!ClusterFounding.IsFoundedHere(cluster))
+        {
+            logger.LogInformation(
+                "this machine did not found the cluster it is in, so this node waits for an admin to add "
+                + "it rather than introducing itself to the auth anchor at {Url}", options.LocalAnchorUrl);
+            return;
+        }
 
         bool saidUnanswered = false;
         using var timer = new PeriodicTimer(RetryInterval);

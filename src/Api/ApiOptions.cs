@@ -1,6 +1,7 @@
 using TheKrystalShip.KGSM.Events;
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Cluster;
 using TheKrystalShip.KGSM.Auth.Sessions;
 using TheKrystalShip.KGSM.Auth.Users;
 
@@ -655,6 +656,16 @@ public sealed class ApiOptions
     public string LocalAnchorUrl { get; init; } = "http://127.0.0.1:8098";
 
     /// <summary>
+    /// Where this node writes who signs the cluster's sessions for the leaves on its machine
+    /// (<c>Api__HostProviderFilePath</c>, default <c>/var/lib/kgsm/cluster/auth-provider.json</c>).
+    /// </summary>
+    /// <remarks>
+    /// A leaf joins no cluster and cannot read the holder itself, so it verifies against what this node
+    /// read through the holder. This node is the one writer on its machine.
+    /// </remarks>
+    public string HostProviderFilePath { get; init; } = HostProviderFile.DefaultPath;
+
+    /// <summary>
     /// The address a browser reaches this API on, scheme and authority only — the origin of
     /// <see cref="PublicBaseUrl"/> when one is configured. Null otherwise; a caller then says so
     /// rather than inventing one, and a panel served by this API on its own origin needs none.
@@ -829,6 +840,7 @@ public sealed class ApiOptions
             SessionsCacheTtlMs = Math.Max(500, s.SessionsCacheTtlMs ?? 5000),
             // Defaulted, not BlankFallback: an empty value is the deliberate "never join locally".
             LocalAnchorUrl = Defaulted(s.LocalAnchorUrl, "http://127.0.0.1:8098").Trim(),
+            HostProviderFilePath = BlankFallback(s.HostProviderFilePath, HostProviderFile.DefaultPath),
         };
     }
 

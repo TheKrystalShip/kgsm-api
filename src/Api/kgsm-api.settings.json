@@ -102,6 +102,8 @@
       "SessionsCacheTtlMs": 5000,
       // This machine's own auth anchor, joined while this node knows no member. Empty turns it off.
       "LocalAnchorUrl": "http://127.0.0.1:8098",
+      // Who signs the cluster's sessions, written for the services on this machine that are not members.
+      "HostProviderFilePath": "/var/lib/kgsm/cluster/auth-provider.json",
 
       // ── Game library & cover art ──
       // RAWG.io API key. Blank no-ops the hydration worker.

@@ -649,6 +649,12 @@ public class Startup(IConfiguration configuration)
             // that it is not clustered.
             Secret = ClusterConfiguration.Secret(configuration),
             SecretPrevious = ClusterConfiguration.SecretPrevious(configuration),
+            // Whether this machine founded the cluster decides whether this node introduces itself to
+            // the anchor beside it. A deployment reads the one record kgsm-base writes; the key exists so
+            // a test reads its own.
+            FoundedPath = configuration["Cluster:FoundedPath"] is { Length: > 0 } founded
+                ? founded
+                : ClusterFounding.DefaultPath,
             // Beside this API's own database rather than inside it: the roster and the queues are
             // cluster state, and this API's database is operational state that is wiped whenever its
             // schema changes. Named FROM that database rather than fixed within its directory, so the
@@ -739,6 +745,14 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<ClusterSessionKeys>();
         services.AddSingleton<IClusterSessionKeys>(sp => sp.GetRequiredService<ClusterSessionKeys>());
         services.AddHostedService(sp => sp.GetRequiredService<ClusterSessionKeys>());
+
+        // What this node verifies sessions with, written for the leaves on its machine: a leaf joins no
+        // cluster and cannot read the holder itself, so it accepts exactly what this node accepts.
+        services.AddHostedService(sp => new HostProviderFileWriter(
+            sp.GetRequiredService<ClusterSessionKeys>(),
+            sp.GetRequiredService<ClusterOptions>(),
+            apiOptions.HostProviderFilePath,
+            sp.GetRequiredService<ILogger<HostProviderFileWriter>>()));
 
         // Who holds the accounts, by name. It is what a browser asking this node how to sign in is told,
         // and what the startup report says when nobody does.
@@ -1002,7 +1016,15 @@ public class Startup(IConfiguration configuration)
         string? spaWebRoot = env.WebRootPath;
         bool serveSpa = !string.IsNullOrEmpty(spaWebRoot) && File.Exists(Path.Combine(spaWebRoot, "index.html"));
         if (serveSpa)
+        {
             startupLog.LogInformation("Serving the Control Panel SPA from {WebRoot} (same-origin).", spaWebRoot);
+
+            // The panel served here is a client of the cluster's sign-in provider, announced over gossip
+            // so the provider sends people back to it with nobody registering it. A node serving no
+            // panel announces nothing, and the provider sends nobody here.
+            app.ApplicationServices.GetRequiredService<SelfPublications>()
+                .Publish(ClusterClientAnnouncement.FactKey, PanelClient.Announcement.ToJson());
+        }
 
         // FIRST, before anything reads the scheme or the caller's address: rewrite the request from
         // what the proxy sent us into what the client actually asked for. Everything downstream — the
@@ -1078,6 +1100,15 @@ public class Startup(IConfiguration configuration)
             // guard, so two members cannot come to disagree about what the protocol is.
             endpoints.MapClusterEndpoints();
 
+            // Who signs the sessions this node accepts (RFC 9728). A browser surface this origin served
+            // asks here and is sent to the provider it names, so it needs no build per cluster and no
+            // address to remember. Public by design: the provider is reached by browsers, so its name is
+            // in public DNS already. Readable from any origin, because a panel served from somewhere with
+            // no member behind it asks whichever member a person gives it.
+            endpoints.MapGet(ProtectedResourceMetadata.Path, ProtectedResourceDocumentAsync)
+                .AllowAnonymous()
+                .RequireCors(policy => policy.AllowAnyOrigin().WithMethods("GET"));
+
             // SPA fallback: a client-routed GET (deep link / refresh — no file extension, matched no
             // controller) boots the app by returning index.html. Asset files (with extensions) were
             // already served by UseStaticFiles, so they never reach this :nonfile fallback.
@@ -1145,5 +1176,29 @@ public class Startup(IConfiguration configuration)
                 }).AllowAnonymous();
             }
         });
+    }
+
+    /// <summary>
+    /// The document naming this node's sign-in provider, or <c>503 no_issuer</c> while it knows of none
+    /// a browser can be sent to.
+    /// </summary>
+    /// <remarks>
+    /// The resource is the origin the document was asked for at — what a client compares it against —
+    /// read after the forwarded headers have been applied. The issuer is the one this node verifies
+    /// sessions against, read through the holder, never configured here. The route's own CORS policy
+    /// admits any origin without credentials: nothing here depends on who is asking.
+    /// </remarks>
+    private static async Task ProtectedResourceDocumentAsync(HttpContext context)
+    {
+        string resource = $"{context.Request.Scheme}://{context.Request.Host}{context.Request.PathBase}";
+        string? issuer = context.RequestServices.GetRequiredService<IClusterSessionKeys>().Issuer;
+        string? document = ProtectedResourceMetadata.Document(resource, issuer);
+
+        context.Response.Headers.CacheControl = "no-cache";
+        context.Response.StatusCode = document is null
+            ? StatusCodes.Status503ServiceUnavailable
+            : StatusCodes.Status200OK;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(document ?? ProtectedResourceMetadata.NoProvider);
     }
 }

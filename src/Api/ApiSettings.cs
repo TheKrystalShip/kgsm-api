@@ -279,6 +279,15 @@ public sealed class ApiSettings
     [ConfigField("localAnchorUrl", "Local auth anchor", Group = "auth", Risk = ConfigRisk.Wiring)]
     public string? LocalAnchorUrl { get; set; }
 
+    /// <summary>Where this node records who signs the cluster's sessions, for this machine's leaves. Blank falls back to /var/lib/kgsm/cluster/auth-provider.json.</summary>
+    /// <panel>The file this node keeps saying who signs the cluster's sessions — the issuer and its
+    /// keys — for services on this machine that are not members themselves, such as an assistant
+    /// running beside this node. They accept only what this file names, so pointing it somewhere else
+    /// leaves them accepting nobody.</panel>
+    [ConfigField("hostProviderFilePath", "Sign-in record for this machine", Group = "auth", Type = ConfigType.Path,
+        Risk = ConfigRisk.Wiring)]
+    public string? HostProviderFilePath { get; set; }
+
 
     // ── Game library & cover art ──────────────────────────────────────────────────────
     /// <summary>RAWG.io API key. Blank no-ops the hydration worker.</summary>

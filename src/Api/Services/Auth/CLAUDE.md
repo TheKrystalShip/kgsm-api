@@ -56,6 +56,20 @@ the local "what you must not break."
   routed to `MemberActingHandler`, which checks the member's service token (signed with the cluster
   secret) and resolves the named person against this node's own replica. The routing is by header, not
   by trying one scheme and falling back, because the two establish trust in unrelated ways.
+- **`/.well-known/oauth-protected-resource` names the provider** (RFC 9728): the issuer this node
+  verifies against, read through the holder, and only when it is a URL — `503 no_issuer` otherwise.
+  Anonymous and readable from any origin without credentials, by its own route-level CORS policy,
+  because a panel served with no member behind it asks whichever member a person names.
+- **The panel this node serves is a client of the provider, by announcement.** When the bundle is in
+  the web root, this node publishes `auth.client` (`PanelClient`: paths only, `/signed-in` and `/`),
+  which the provider joins to the browser address the roster hands out for this node. A node serving
+  no panel announces nothing.
+- **This node writes the host file its machine's leaves verify against** (`HostProviderFileWriter`,
+  `Api__HostProviderFilePath`, `/var/lib/kgsm/cluster/auth-provider.json`), from its own read through the
+  holder. It is the one writer on the machine.
+- **It introduces itself to the anchor beside it only on the machine that founded the cluster**, and
+  only while it knows no member (`LocalAnchorJoin`, `ClusterFounding.IsFoundedHere`). A machine holding
+  another cluster's secret is joined by an admin; the anchor beside it holds nothing there.
 - **`/auth/*` says which member signs people in.** `SignInElsewhereController` answers every `/auth`
   path `503` with the holder's **name** on `X-Kgsm-Auth-Holder` (`auth_held_by_anchor`), or
   `auth_holder_unknown` when none is known — never an address, and never the SPA's HTML.

@@ -441,6 +441,16 @@
       "risk": "wiring"
     },
     {
+      "key": "hostProviderFilePath",
+      "env": "Api__HostProviderFilePath",
+      "label": "Sign-in record for this machine",
+      "description": "The file this node keeps saying who signs the cluster's sessions — the issuer and its keys — for services on this machine that are not members themselves, such as an assistant running beside this node. They accept only what this file names, so pointing it somewhere else leaves them accepting nobody.",
+      "group": "auth",
+      "type": "path",
+      "default": "/var/lib/kgsm/cluster/auth-provider.json",
+      "risk": "wiring"
+    },
+    {
       "key": "rawgApiKey",
       "env": "Api__RawgApiKey",
       "label": "RAWG API key",

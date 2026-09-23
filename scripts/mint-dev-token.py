@@ -22,7 +22,8 @@ The private key is read at runtime from the anchor's state directory and never w
 Claim shape mirrors SessionTokenService.Mint exactly:
   iss=<anchor issuer>  aud=<cluster id>  sub=local:<usr_ id>
   tier=<tier>  host=<cluster id>  tkn=access  sid=sid_<hex>  jti=<hex>  uname  disp  scope
-  iat/nbf/exp standard.  Header: alg=ES256, kid=<the published key's id>.
+  iat/nbf/exp standard.  Header: alg=ES256, kid=<the key's RFC 7638 thumbprint>, which is the id the
+  anchor publishes it under.
 
 Usage
 -----
@@ -77,16 +78,16 @@ def read_private_key(path: str):
         sys.exit(f"error: {path} is not readable (0600, owned by the service user) — run as that user")
 
 
-def read_kid(published: str) -> str:
-    """The key id the anchor publishes for its current key — what a member matches a token on."""
-    try:
-        with open(published, "r", encoding="utf-8") as fh:
-            keys = json.load(fh).get("keys") or []
-    except (FileNotFoundError, PermissionError, json.JSONDecodeError) as e:
-        sys.exit(f"error: could not read the published key set at {published}: {e}")
-    if not keys or not keys[0].get("kid"):
-        sys.exit(f"error: {published} names no key")
-    return keys[0]["kid"]
+def key_id(key) -> str:
+    """The id the anchor publishes the key under — its RFC 7638 thumbprint, what a member matches a
+    token on. Derived from the key itself, so it cannot disagree with the key the token is signed with."""
+    numbers = key.public_key().public_numbers()
+    coordinate = lambda i: b64url(i.to_bytes(32, "big"))
+    canonical = json.dumps({"crv": "P-256", "kty": "EC", "x": coordinate(numbers.x), "y": coordinate(numbers.y)},
+                           separators=(",", ":"), sort_keys=True)
+    digest = hashes.Hash(hashes.SHA256())
+    digest.update(canonical.encode("ascii"))
+    return b64url(digest.finalize())
 
 
 def read_account(users_db: str, username: str):
@@ -133,8 +134,6 @@ def main() -> None:
     ap.add_argument("--ttl", default="12h", help="lifetime: 30m / 12h / 7d (default 12h)")
     ap.add_argument("--key", default="/var/lib/kgsm-auth-anchor/session-signing.pem",
                     help="the anchor's private signing key")
-    ap.add_argument("--published", default="/var/lib/kgsm/cluster/auth-public-key.json",
-                    help="the key set the anchor publishes, for the key id")
     ap.add_argument("--anchor-env", action="append",
                     help="an EnvironmentFile the anchor loads, for a configured cluster id or issuer. "
                          "Repeatable; a later file wins, as systemd loads them. Default: the host's "
@@ -161,7 +160,7 @@ def main() -> None:
     key = read_private_key(args.key)
     if not isinstance(key, ec.EllipticCurvePrivateKey):
         sys.exit(f"error: {args.key} is not an EC key")
-    kid = read_kid(args.published)
+    kid = key_id(key)
 
     user_id, username, display_name = read_account(args.users_db, args.account)
     now = int(time.time())

@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the node names its sign-in provider and announces its panel (0.200.0)
+
+`GET /.well-known/oauth-protected-resource` (RFC 9728) names the issuer this node verifies sessions
+against, read through the holder of `auth`, when that issuer is a URL, and answers `503 no_issuer`
+otherwise. Anonymous, readable from any origin, never with credentials: a browser surface this origin
+served finds its provider here.
+
+A node serving the Control Panel announces it as a client of the provider — the `auth.client` fact,
+paths `/signed-in` and `/` — so the provider registers the panel at the address the roster hands out
+for this node with no operator step. `/signed-in` is served by the panel's fallback.
+
+The node keeps `/var/lib/kgsm/cluster/auth-provider.json` (`Api__HostProviderFilePath`) saying who signs
+the cluster's sessions, for the services on its machine that are not members.
+
+### Changed — only a founding machine's node introduces itself to its anchor (0.200.0)
+
+A node introduces itself to the auth anchor beside it only when `/etc/kgsm/cluster-founded` names the
+secret it holds. On a machine given another cluster's secret it waits for an admin to add it. With the
+cluster store discarding a different cluster's state (kgsm-cluster 1.0.0-dev.22), a founding machine
+joins another cluster by taking its secret, with nothing cleared by hand.
+
+`scripts/mint-dev-token.py` derives the key id from the anchor's key rather than reading a published
+file.
+
 ### Changed — this API signs nobody in; every session is the auth anchor's (0.199.0)
 
 **Breaking.** kgsm-api accepts only sessions its cluster's auth anchor (`kgsm-auth-anchor`) minted,

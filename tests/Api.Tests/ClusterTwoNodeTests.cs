@@ -241,6 +241,8 @@ public sealed class ClusterTwoNodeTests
         // stands in for the anchor, reached through the same handshake an admin's paste would use.
         const string secret = "two-node-local-join-secret";
         string dbA = NewDbPath("a-localjoin"), dbB = NewDbPath("b-localjoin");
+        string founded = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-founded-{Guid.NewGuid():N}");
+        File.WriteAllText(founded, ClusterFounding.Fingerprint(secret) + "\n");
         try
         {
             await using var factoryB = new ClusterNodeFactory("node-b", "host-b", secret, dbPath: dbB);
@@ -249,7 +251,11 @@ public sealed class ClusterTwoNodeTests
                 "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
             using WebApplicationFactory<Program> nodeA = factoryA.WithWebHostBuilder(builder =>
                 builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
-                    new Dictionary<string, string?> { ["Api:LocalAnchorUrl"] = "http://node-b" })));
+                    new Dictionary<string, string?>
+                    {
+                        ["Api:LocalAnchorUrl"] = "http://node-b",
+                        ["Cluster:FoundedPath"] = founded,
+                    })));
 
             MembersStore membersA = nodeA.Services.GetRequiredService<MembersStore>();
             bool joined = await PollUntilAsync(
@@ -258,7 +264,41 @@ public sealed class ClusterTwoNodeTests
 
             Assert.True(joined, "a node with an empty roster never introduced itself to its local anchor");
         }
-        finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
+        finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); DeleteBestEffort(founded); }
+    }
+
+    [Fact]
+    public async Task ANodeOnAMachineThatDidNotFoundItsClusterWaitsToBeAdded()
+    {
+        // A machine given another cluster's secret — joining, or a founding machine that has moved — is
+        // joined by an admin. Introducing itself would put the anchor beside it, which holds nothing in
+        // this cluster, in the roster as a member nobody asked for.
+        const string secret = "two-node-joined-machine-secret";
+        string dbA = NewDbPath("a-notfounded"), dbB = NewDbPath("b-notfounded");
+        string founded = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-founded-{Guid.NewGuid():N}");
+        File.WriteAllText(founded, ClusterFounding.Fingerprint("the cluster this machine left") + "\n");
+        try
+        {
+            await using var factoryB = new ClusterNodeFactory("node-b", "host-b", secret, dbPath: dbB);
+            HttpMessageHandler handlerToB = factoryB.Server.CreateHandler();
+            await using var factoryA = new ClusterNodeFactory(
+                "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
+            using WebApplicationFactory<Program> nodeA = factoryA.WithWebHostBuilder(builder =>
+                builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
+                    new Dictionary<string, string?>
+                    {
+                        ["Api:LocalAnchorUrl"] = "http://node-b",
+                        ["Cluster:FoundedPath"] = founded,
+                    })));
+
+            MembersStore membersA = nodeA.Services.GetRequiredService<MembersStore>();
+            bool joined = await PollUntilAsync(
+                async () => (await membersA.ListAsync(CancellationToken.None)).Count > 0,
+                TimeSpan.FromSeconds(3));
+
+            Assert.False(joined, "a node whose machine did not found its cluster introduced itself anyway");
+        }
+        finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); DeleteBestEffort(founded); }
     }
 
     // ── 5. Disable-list gate, cross-node (P0 §9 checklist item 3) ────────────────────────────────────
