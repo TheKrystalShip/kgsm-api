@@ -18,9 +18,9 @@
 #   it -> metrics flips back 'operational' + ticks resume. Degrade AND recover gracefully, capability set fixed.
 #   M4·a (§3·f): auth is ON by default. The M0–M3 checks above run under Api__AuthDisabled=true (the
 #   dev escape hatch — synthetic admin), then a dedicated AUTH-ENABLED instance proves the no-token
-#   sweep: every protected endpoint 401s with the frozen envelope, /health + /api/v1 stay open, and the
-#   login endpoint 503s until Discord is configured (the M4·b live half). The full 401/403/tier matrix +
-#   the callback/refresh/session flow are proven in-process by tests/Api.Tests (the Discord seam faked).
+#   sweep: every protected endpoint 401s with the frozen envelope, /health + /api/v1 stay open, and any
+#   /auth path answers 503 — this node signs nobody in. The full 401/403/tier matrix against anchor-signed
+#   sessions is proven in-process by tests/Api.Tests (the anchor stood in for by a signer).
 #   The ports surface degrade path (no firewall configured here): `open_ports` is refused as an unknown
 #   verb (there is no on-demand open), the server DETAIL `network` block reports firewall:"absent" +
 #   reachable:null (reserved) + every required open:null (never fabricated false), the list OMITS network
@@ -136,8 +136,8 @@ start_api() {
 }
 stop_api() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
 
-# start_api_auth — launch with auth ENABLED (the escape hatch unset for this child only), Discord
-# unconfigured (ephemeral signing key). Used by the M4·a no-token sweep.
+# start_api_auth — launch with auth ENABLED (the escape hatch unset for this child only) and no cluster
+# secret, so no anchor is known and nothing can authenticate. Used by the no-token sweep.
 start_api_auth() {
   env -u Api__AuthDisabled \
     Api__Urls="$BASE" Api__DbPath="$DB" \
@@ -1574,20 +1574,18 @@ req GET /api/v1;       V=$CODE
 [[ "$H" == 200 && "$V" == 200 ]] && ok "/health + /api/v1 stay open under auth (200/200)" \
   || bad "open endpoints under auth (health=$H meta=$V)"
 
-# 33. The login endpoint 503s until Discord is configured (the M4·b live half) — honest "unconfigured",
-#     not a 404/500. JWT validation + tier gating (above) are enforced regardless.
-req GET /auth/discord/start
-[[ "$CODE" == 503 ]] && grep -q '"code":"auth_unconfigured"' <<<"$BODY" \
-  && ok "/auth/discord/start -> 503 auth_unconfigured (login needs Discord cfg; M4·b)" \
-  || bad "/auth/discord/start 503 (code=$CODE body=$BODY)"
+# 33. This node signs nobody in: any /auth path is a 503 that says which member does, or — with no
+#     cluster secret, as here — that no member holds the accounts. Never a 404 and never the SPA.
+req GET /auth/login
+[[ "$CODE" == 503 ]] && grep -q '"code":"auth_holder_unknown"' <<<"$BODY" \
+  && ok "/auth/* -> 503 auth_holder_unknown (this node signs nobody in; no anchor known)" \
+  || bad "/auth/* 503 (code=$CODE body=$BODY)"
 
-# Coverage note: the 401/403/tier matrix (viewer/operator/admin), the callback verdict (ok/denied/
-# invalid/upstream-error), refresh rotation, the session snapshot, and the SSE stream's bearer-header
-# auth (incl. the regression test locking that a bare ?access_token= query param — the removed WS-era
-# hack — no longer authenticates) are proven deterministically in tests/Api.Tests with the Discord seam
-# faked. The real discord.com code exchange + bot-token role lookup are the M4·b LIVE half (validated
-# once on the trusted host when the Discord app / bot token / guild / role-map are supplied).
-echo "  (note: tier matrix + callback/refresh/session are in tests/Api.Tests; live OAuth is M4·b)"
+# Coverage note: the 401/403/tier matrix (viewer/operator/admin) against anchor-signed sessions, the
+# ended-session deny-list, a symmetric or sid-less token refused, and the SSE stream's bearer-header auth
+# (incl. the regression test locking that a bare ?access_token= query param authenticates nothing) are
+# proven deterministically in tests/Api.Tests with the anchor stood in for by a signer.
+echo "  (note: the tier matrix against anchor sessions is in tests/Api.Tests)"
 
 stop_api
 

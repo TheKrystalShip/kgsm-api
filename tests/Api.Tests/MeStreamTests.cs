@@ -11,14 +11,18 @@ using TheKrystalShip.Api;
 
 using TheKrystalShip.Api.Realtime;
 
+using Microsoft.Extensions.DependencyInjection;
+
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.KGSM.Cluster.Messaging;
 
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// The <c>me</c> topic end to end, through the real pipeline: an admin changes what somebody may do,
-/// and that person's open stream hears it on the connection it already holds.
+/// The <c>me</c> topic end to end, through the real pipeline: an admin changes what somebody may do at
+/// the auth anchor, replication delivers it, and that person's open stream hears it on the connection
+/// it already holds.
 /// </summary>
 /// <remarks>
 /// Every case here uses an identity of its own (<see cref="FakeDiscordResolver.IdentityFor"/>), because
@@ -40,12 +44,36 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
         frame.GetProperty("topic").GetString() == StreamProtocol.MeTopic
         && frame.GetProperty("type").GetString() == StreamProtocol.MePatch;
 
-    private Task<HttpResponseMessage> Retier(string token, string userId, string body) =>
-        Bearer(token).PatchAsync($"/auth/users/{userId}",
-            new StringContent(body, Encoding.UTF8, "application/json"));
+    /// <summary>
+    /// What an admin's change at the auth anchor arrives here as: an <c>account.changed</c> message,
+    /// handed to the handler this node registers for it exactly as the cluster bus would.
+    /// </summary>
+    private async Task Retier(string userId, KgsmTier tier, UserStatus? status = null)
+    {
+        SqliteUserStore replica = AuthTestFactory.ReplicaOf(factory.Services);
+        KgsmUser account = (await replica.FindByIdAsync(userId))!;
+        KgsmUser changed = account with
+        {
+            Tier = tier,
+            TierSource = TierSource.Granted,
+            Status = status ?? account.Status,
+            Updated = DateTimeOffset.UtcNow,
+        };
+        var change = new AccountChange(
+            ReplicatedAccount.From(changed, await replica.ListCredentialsAsync(userId)),
+            DateTimeOffset.UtcNow.UtcTicks);
+
+        var envelope = new ClusterEnvelope(
+            Guid.NewGuid().ToString("N"), "account.changed", "test-anchor", DateTimeOffset.UtcNow,
+            JsonSerializer.SerializeToElement(change, AccountReplicationJson.Default.AccountChange));
+
+        IClusterMessageHandler handler = factory.Services.GetServices<IClusterMessageHandler>()
+            .Single(h => h.Type == "account.changed");
+        await handler.HandleAsync(envelope, CancellationToken.None);
+    }
 
     /// <summary>
-    /// The feature: a tier changed in the Users tab lands on the affected person's open panel, with no
+    /// The feature: a tier changed at the anchor lands on the affected person's open panel, with no
     /// reload and no poll. The frame carries the wire vocabulary <c>GET /me</c> answers in, so the
     /// client merges it over what it hydrated.
     /// </summary>
@@ -53,9 +81,7 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
     public async Task ARetierReachesTheAffectedAccountsOpenStream()
     {
         KgsmIdentity watcher = FakeDiscordResolver.IdentityFor("me-stream-watcher");
-        KgsmIdentity admin = FakeDiscordResolver.IdentityFor("me-stream-admin");
         string watcherToken = factory.AccessTokenFor(watcher, KgsmTier.Viewer);
-        string adminToken = factory.AccessTokenFor(admin, KgsmTier.Admin);
         string watcherId = factory.AccountOf(watcher)!.UserId;
 
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
@@ -63,8 +89,7 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(stream);
 
-        using HttpResponseMessage patch = await Retier(adminToken, watcherId, """{"tier":"operator"}""");
-        Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
+        await Retier(watcherId, KgsmTier.Operator);
 
         JsonElement? frame = await frames.WaitForFrame(IsMePatch, Deadline);
         Assert.NotNull(frame);
@@ -83,21 +108,18 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
     {
         KgsmIdentity subject = FakeDiscordResolver.IdentityFor("me-stream-subject");
         KgsmIdentity bystander = FakeDiscordResolver.IdentityFor("me-stream-bystander");
-        KgsmIdentity admin = FakeDiscordResolver.IdentityFor("me-stream-admin2");
         factory.AccessTokenFor(subject, KgsmTier.Viewer);
         string bystanderToken = factory.AccessTokenFor(bystander, KgsmTier.Viewer);
-        string adminToken = factory.AccessTokenFor(admin, KgsmTier.Admin);
         string subjectId = factory.AccountOf(subject)!.UserId;
 
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
             factory.CreateClient(), "/api/v1/stream?topics=me", bystanderToken);
         using SseFrameReader frames = await SseTestHelpers.Frames(stream);
 
-        using HttpResponseMessage patch = await Retier(adminToken, subjectId, """{"tier":"operator"}""");
-        Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
+        await Retier(subjectId, KgsmTier.Operator);
 
         // Prove silence, the way the operator-topic drop is proven: one bounded wait with nothing
-        // matching. A frame for somebody else would have been enqueued by the time the PATCH returned.
+        // matching. A frame for somebody else would have been enqueued by the time the handler returned.
         Assert.Null(await frames.WaitForFrame(IsMePatch, TimeSpan.FromSeconds(1)));
     }
 
@@ -110,9 +132,7 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
     public async Task APendingCallerStreamsForItsOwnStandingAndHearsTheApproval()
     {
         KgsmIdentity pending = FakeDiscordResolver.IdentityFor("me-stream-pending");
-        KgsmIdentity admin = FakeDiscordResolver.IdentityFor("me-stream-admin3");
         string pendingToken = factory.AccessTokenFor(pending, KgsmTier.None, UserStatus.Pending);
-        string adminToken = factory.AccessTokenFor(admin, KgsmTier.Admin);
         string pendingId = factory.AccountOf(pending)!.UserId;
 
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
@@ -120,9 +140,7 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(stream);
 
-        using HttpResponseMessage patch = await Retier(
-            adminToken, pendingId, """{"tier":"viewer","status":"active"}""");
-        Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
+        await Retier(pendingId, KgsmTier.Viewer, UserStatus.Active);
 
         JsonElement? frame = await frames.WaitForFrame(IsMePatch, Deadline);
         Assert.NotNull(frame);
@@ -159,9 +177,7 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
     public async Task ADemotionStripsAnOperatorTopicFromTheLiveConnection()
     {
         KgsmIdentity op = FakeDiscordResolver.IdentityFor("me-stream-operator");
-        KgsmIdentity admin = FakeDiscordResolver.IdentityFor("me-stream-admin4");
         string opToken = factory.AccessTokenFor(op, KgsmTier.Operator);
-        string adminToken = factory.AccessTokenFor(admin, KgsmTier.Admin);
         string opId = factory.AccountOf(op)!.UserId;
 
         string logs = StreamProtocol.HostLogsTopic(AuthTestFactory.HostId);
@@ -173,13 +189,49 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
         var hub = (StreamHub)factory.Services.GetService(typeof(StreamHub))!;
         Assert.True(hub.HasSubscribers(logs), "the operator's subscription never reached the hub");
 
-        using HttpResponseMessage patch = await Retier(adminToken, opId, """{"tier":"viewer"}""");
-        Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
+        await Retier(opId, KgsmTier.Viewer);
 
         JsonElement? frame = await frames.WaitForFrame(IsMePatch, Deadline);
         Assert.NotNull(frame);
         Assert.Equal(KgsmTiers.Viewer, frame!.Value.GetProperty("data").GetProperty("tier").GetString());
         Assert.False(hub.HasSubscribers(logs), "a demoted reader kept an operator-only subscription");
+    }
+
+    /// <summary>
+    /// An account removed at the anchor holds nothing, on the connection it already has: re-gated to
+    /// nothing and told it is no longer known here, the same answer <c>GET /me</c> gives for it.
+    /// </summary>
+    [Fact]
+    public async Task ARemovedAccountLosesItsReachOnTheLiveConnection()
+    {
+        KgsmIdentity gone = FakeDiscordResolver.IdentityFor("me-stream-removed");
+        string token = factory.AccessTokenFor(gone, KgsmTier.Operator);
+        string goneId = factory.AccountOf(gone)!.UserId;
+
+        string logs = StreamProtocol.HostLogsTopic(AuthTestFactory.HostId);
+        using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
+            factory.CreateClient(), $"/api/v1/stream?topics=me,{logs}", token);
+        Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
+        using SseFrameReader frames = await SseTestHelpers.Frames(stream);
+
+        var hub = (StreamHub)factory.Services.GetService(typeof(StreamHub))!;
+        Assert.True(hub.HasSubscribers(logs), "the operator's subscription never reached the hub");
+
+        var envelope = new ClusterEnvelope(
+            Guid.NewGuid().ToString("N"), "account.removed", "test-anchor", DateTimeOffset.UtcNow,
+            JsonSerializer.SerializeToElement(
+                new AccountRemoval(goneId, DateTimeOffset.UtcNow.UtcTicks),
+                AccountReplicationJson.Default.AccountRemoval));
+        await factory.Services.GetServices<IClusterMessageHandler>()
+            .Single(h => h.Type == "account.removed")
+            .HandleAsync(envelope, CancellationToken.None);
+
+        JsonElement? frame = await frames.WaitForFrame(IsMePatch, Deadline);
+        Assert.NotNull(frame);
+        JsonElement data = frame!.Value.GetProperty("data");
+        Assert.Equal(KgsmTiers.None, data.GetProperty("tier").GetString());
+        Assert.Equal("unknown", data.GetProperty("status").GetString());
+        Assert.False(hub.HasSubscribers(logs), "a removed account kept an operator-only subscription");
     }
 
     /// <summary>

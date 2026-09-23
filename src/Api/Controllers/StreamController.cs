@@ -34,7 +34,6 @@ namespace TheKrystalShip.Api.Controllers;
 [Authorize]
 public sealed class StreamController(
     StreamHub hub,
-    ISessionValidator sessions,
     ClusterSessionRevocations clusterRevocations,
     UserDirectory users,
     ApiOptions options,
@@ -74,21 +73,16 @@ public sealed class StreamController(
         // the CONNECT; nothing in the framework re-runs it on a request that lasts hours, so without
         // this a revoked session keeps its live channel until the tab closes while every REST call it
         // makes 401s within 5s. `sid` is absent on an auth-disabled host's synthetic principal → no
-        // probe, and the stream behaves exactly as before. The validator is a singleton that opens its
-        // own DI scope per cache miss, so holding it for the connection's lifetime is safe.
+        // probe.
         //
-        // Cluster sessions (minted by the auth anchor, carrying a host claim that differs from this
-        // node's) have no row in the local session registry — the sign-in happened on another
-        // machine. The initial [Authorize] gate routes them through ClusterSessionRevocations (a
-        // deny-list); the stream recheck does the same here rather than querying the local DB, which
-        // would always say "not found" and tear the stream down at the first recheck tick.
+        // Every session here was minted by the auth anchor and has no row on this node, so what is
+        // re-asked is the deny-list the bus fills when somebody ends one — the same question the
+        // [Authorize] gate asked at connect. The revocation cache is a singleton that opens its own DI
+        // scope per miss, so holding it for the connection's lifetime is safe.
         string? sid = ci is not null ? SessionClaims.ReadSessionId(ci) : null;
-        bool isCluster = ci is not null && ClusterSessionValidation.IsClusterSession(ci, options.HostId);
         Func<CancellationToken, ValueTask<bool>>? sessionAlive = string.IsNullOrEmpty(sid)
             ? null
-            : isCluster
-                ? async (ct) => !await clusterRevocations.IsRevokedAsync(sid, ct).ConfigureAwait(false)
-                : async (ct) => await sessions.IsValidAsync(sid, ct).ConfigureAwait(false);
+            : async (ct) => !await clusterRevocations.IsRevokedAsync(sid, ct).ConfigureAwait(false);
 
         // The account this connection is authenticated as, so a change to it can be addressed here,
         // and the re-read that keeps its authority current for as long as it streams. Both need a real

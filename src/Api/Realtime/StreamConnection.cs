@@ -42,10 +42,9 @@ namespace TheKrystalShip.Api.Realtime;
 /// every re-check tick. A tier that has moved is applied in place: the connection's own
 /// <see cref="Tier"/> becomes the new one, every subscription above it is dropped
 /// (<see cref="ApplyTier"/>), and a <c>me.patch</c> tells the reader. This is the backstop, not the
-/// fast path — a change made through this API's own endpoints reaches the connection at once through
-/// <see cref="StreamHub.AuthorityChanged"/> — and it is what covers the writers this API never sees:
-/// the account store is a shared host file that the assistant, the bot and the <c>kgsm-api user</c>
-/// command all write.</para>
+/// fast path — a change replicated from the auth anchor reaches the connection at once through
+/// <see cref="StreamHub.AuthorityChanged"/> — and it is what covers a push that was lost or a change
+/// that reached the replica some other way.</para>
 /// </remarks>
 public sealed class StreamConnection
 {

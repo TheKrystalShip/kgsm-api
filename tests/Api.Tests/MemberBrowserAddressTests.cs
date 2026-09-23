@@ -39,7 +39,7 @@ public sealed class MemberBrowserAddressTests
     {
         using HttpClient client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", AuthTestFactory.MintTokenWithRow(factory.Services, KgsmTier.Admin, access: true));
+            "Bearer", AuthTestFactory.MintAccessOn(factory.Services, KgsmTier.Admin));
 
         JsonElement body = JsonDocument.Parse(
             await (await client.GetAsync("/api/v1/members")).Content.ReadAsStringAsync()).RootElement;

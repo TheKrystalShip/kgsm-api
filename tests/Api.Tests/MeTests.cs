@@ -88,8 +88,7 @@ public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFac
     [Fact]
     public async Task WrongSignature_401()
     {
-        string forged = TestTokens.MintAccessWithKey(
-            "a-totally-different-signing-key", AuthTestFactory.HostId, KgsmTier.Admin);
+        string forged = TestTokens.MintByAnUnpublishedAnchor(KgsmTier.Admin);
         HttpResponseMessage resp = await Client(forged).GetAsync("/api/v1/me");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }

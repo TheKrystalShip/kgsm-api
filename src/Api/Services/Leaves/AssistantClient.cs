@@ -3,7 +3,6 @@ using System.Net.Sockets;
 
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Discord;
 using TheKrystalShip.Kgsm.Assistant.Relay;
 
 namespace TheKrystalShip.Api.Services.Leaves;

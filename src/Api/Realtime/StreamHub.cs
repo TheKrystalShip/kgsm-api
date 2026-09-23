@@ -138,10 +138,9 @@ public sealed class StreamHub
     /// showing it.
     /// </para>
     /// <para>
-    /// Every write that changes what an account may do calls this. The connection's own re-check is
-    /// the backstop for the writers this process never sees — the account store is a shared host file
-    /// — and answers within its own interval; this is what makes an admin's change in the Users tab
-    /// land on the affected person's open panel at once.
+    /// Every account change replicated from the auth anchor calls this once the replica has applied
+    /// it, so an admin's change lands on the affected person's open panel at once. The connection's
+    /// own re-check is the backstop, and answers within its own interval.
     /// </para>
     /// </remarks>
     public void AuthorityChanged(string accountId, KgsmTier tier, string status)

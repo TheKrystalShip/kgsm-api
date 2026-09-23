@@ -8,6 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — this API signs nobody in; every session is the auth anchor's (0.199.0)
+
+**Breaking.** kgsm-api accepts only sessions its cluster's auth anchor (`kgsm-auth-anchor`) minted,
+verified against the key the anchor publishes, and holds no sign-in of its own. Every install runs an
+anchor — a machine on its own is a cluster of one — so there is one door, one session format and one
+code path everywhere.
+
+Gone from this API: `/auth/login`, `/auth/register`, the provider start and callback, the session
+refresh, `/auth/session`, `/auth/logout`, the peer cluster-session vouch, `/auth/identities` and
+`/auth/reauth`, `/auth/users` and `/auth/password`, `/auth/sessions` and the revoke endpoints; the
+HS256 signing key and its generated file; the local session registry; the first-admin bootstrap; the
+`kgsm-api user` CLI; the Discord application settings; the credential-door rate limiter; and the
+notification button that approved a waiting account, since approving is a write only the anchor makes.
+The settings `Api__SigningKey`, `Api__DiscordRedirectUri`, `Api__AuthFrontendUrl`,
+`Api__PendingUserCap`, `Api__PendingUserTtlDays`, `Api__AllowSelfRegistration`,
+`Api__AnonymousRateLimit`, `Api__ReauthWindowMinutes`, `Api__SessionsDisabled`, `Api__SessionsGcMs` and
+`Api__SessionsRefreshAbsoluteDays` bind to nothing.
+
+What stays: the JwtBearer pipeline, now through `ClusterSessionValidation.Accepting(IClusterSessionKeys)`
+(Auth.Sessions 2.2.0-dev.3) — ES256 only; the ended-session deny-list the bus fills, on its own
+`ended_sessions` table; authority from the account replica on every request; member-acting calls; and
+the dev escape hatch. Every `/auth` path answers `503` naming the member that holds the accounts, or
+saying none does, and `AuthAnchorReport` writes the same to the log. A replicated account change or
+removal re-gates the person's open streams at once. `ApiOptions.PublicOrigin` comes from
+`Api__PublicBaseUrl`, and the VAPID contact falls back to `Api__PublicHost`.
+
+A node that knows no member introduces itself to the anchor on its own machine
+(`Api__LocalAnchorUrl`, default `http://127.0.0.1:8098`; empty turns it off), because on a fresh cluster
+of one nobody can sign in to add it until it has. A node with any member never asks.
+
+The package depends on `kgsm-auth-anchor`, and `deploy/setup.sh` founds a cluster of one on a host with
+no secret, recording it in `/etc/kgsm/cluster-founded`. `scripts/mint-dev-token.py` signs a dev session
+with the anchor's key.
+
 ### Changed — CORS preflight responses cached for 24 hours (0.198.0)
 
 `Access-Control-Max-Age` is set on the CORS policy so the browser caches OPTIONS preflight

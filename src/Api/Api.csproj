@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.198.3</Version>
+    <Version>0.199.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -158,18 +158,15 @@
          than two that can come to disagree about who someone is. -->
     <PackageReference Include="TheKrystalShip.Kgsm.Assistant.Relay" Version="1.1.0" />
     <PackageReference Include="TheKrystalShip.KGSM.Auth" Version="3.3.0" />
-    <PackageReference Include="TheKrystalShip.KGSM.Auth.Discord" Version="4.0.0" />
-    <PackageReference Include="TheKrystalShip.KGSM.Auth.Sessions" Version="2.2.0-dev.2" />
+    <PackageReference Include="TheKrystalShip.KGSM.Auth.Sessions" Version="2.2.0-dev.3" />
 
-    <!-- The shape of an account event, shared with whoever else writes one. This API records them on
-         a host that holds its own accounts; a cluster's auth anchor records them when one holds them
-         instead. A reader deserializes into a fixed shape, so a field spelled differently by one of
-         the two writers lands as a null rather than an error — which is why the shape is called from
-         here rather than described a second time. -->
+    <!-- The shape of an account event. The cluster's auth anchor writes them and this API reads them
+         into audit rows; a reader deserializes into a fixed shape, so the names are taken from the
+         writer's own package rather than spelled a second time. -->
     <PackageReference Include="TheKrystalShip.KGSM.Auth.Journal" Version="1.0.0" />
-    <!-- The host's accounts. Deliberately NOT on this API's EF context: the store is a shared host
-         file the assistant reads too, and this API's own database is wiped whenever its schema
-         changes. -->
+    <!-- This node's replica of the cluster's accounts. Deliberately NOT on this API's EF context: the
+         replica is a shared machine file other services read too, and this API's own database is
+         wiped whenever its schema changes. -->
     <PackageReference Include="TheKrystalShip.KGSM.Auth.Users" Version="1.4.0-dev.6" />
     <PackageReference Include="TheKrystalShip.KGSM.Auth.Cluster" Version="1.0.0-dev.5" />
 

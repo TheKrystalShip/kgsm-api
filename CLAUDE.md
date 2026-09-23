@@ -17,8 +17,11 @@ its leaves + this API. The API aggregates **only its own host's** leaves; cross-
 > live project is `src/Api/`, built per `PLAN.md`.
 
 **Status:** `PLAN.md` is the authority for what's built vs planned, per milestone.
-**Auth is ON by default** — `Api__AuthDisabled=true` is the explicit, loudly-logged
-dev escape hatch (synthetic admin). Trust `PLAN.md`'s per-milestone status, not assumptions.
+**This API signs nobody in.** Every session it accepts is minted by the cluster's auth anchor
+(`kgsm-auth-anchor`), which every install runs — a machine on its own is a cluster of one — and is
+verified here against the key that anchor publishes. **Auth is ON by default** — `Api__AuthDisabled=true`
+is the explicit, loudly-logged dev escape hatch (synthetic admin). Trust `PLAN.md`'s per-milestone
+status, not assumptions.
 
 ## Read first (sources of truth)
 
@@ -32,7 +35,8 @@ dev escape hatch (synthetic admin). Trust `PLAN.md`'s per-milestone status, not 
 - **`docs/m0-aot-spike-findings.md`** — why the runtime/stack is what it is (below).
 - **Directory-local `CLAUDE.md` guides** — the locked decisions + "what you must not break"
   for the subsystems with the densest invariants (auto-loaded when you work in them):
-  `src/Api/Services/Auth/` (the auth seam, stateless JWT, secure-by-default tiers),
+  `src/Api/Services/Auth/` (accepting the anchor's sessions, the ended-session deny-list, authority
+  from the replica, secure-by-default tiers),
   `src/Api/Realtime/` (the SSE stream protocol), `src/Api/Services/Commands/` (the gate→job→verify write
   path), and `tests/Api.Tests/` (the WebApplicationFactory + faked-seam test pattern).
 
@@ -139,8 +143,8 @@ Note the two polkit rules are separate on purpose: `48-kgsm-api-deploy.rules` le
 an **auth-ENABLED** no-token sweep. The domain checks run under `Api__AuthDisabled=true` (the
 escape hatch — synthetic admin) so they exercise the contracts unchanged; a dedicated
 auth-enabled instance then proves the no-token sweep (every protected endpoint `401`s with the
-frozen envelope, `/health`+`/api/v1` stay open, the login endpoint `503`s until Discord is
-configured). The command-gate checks prove the gate/rejection contract (`400`/`404`/`409`)
+frozen envelope, `/health`+`/api/v1` stay open, and every `/auth` path answers `503` because this
+node signs nobody in). The command-gate checks prove the gate/rejection contract (`400`/`404`/`409`)
 **without mutation** — the gate rejects before a verb runs. NB real native lifecycle needs
 `kgsm-watchdog` up — without it, kgsm direct-spawns an orphan and run-state tracking is
 unreliable.
@@ -158,33 +162,17 @@ host), `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A).
 default, under one `Api` section that `ApiSettings` binds 1:1. It covers host identity, the kgsm
 engine path/journal, the monitor/watchdog/assistant/scheduler/reactor/firewall endpoints, the bind
 address
-and DB path, the CORS allowlist, and the auth keys (the Discord application, the account store, and
-how long an answer from it is reused). `ApiOptions.FromSettings` is the one place any of it is interpreted; nothing reads
-configuration by string key.
+and DB path, the CORS allowlist, and the auth keys (the account replica, and how long an answer from
+it or from the ended-session list is reused). `ApiOptions.FromSettings` is the one place any of it is
+interpreted; nothing reads configuration by string key.
 
-**Who someone is comes from a shared application; what they may do comes from their KGSM account.**
-The host's OAuth applications live once, in `/etc/kgsm/kgsm-auth.env`, bound from the shared
-`KgsmAuth` section that `TheKrystalShip.KGSM.Auth` owns. They are keyed by provider
-(`KgsmAuth__Providers__discord__ClientId`), so wiring this host to another provider is a pair of
-keys and no rebuild. Every unit loads that file *before* its own env file, so a leaf can still
-override deliberately — and doing so means two surfaces signing people in through different
-applications, so prefer the shared file. Nothing in that file grants anything: authority is the
-account store (`Api__UsersDbPath`), read on every request.
-
-**A provider is a route value, resolved against `IAuthProviderCatalog`** (`Services/Auth/`). It is
-registered once per provider in `Startup`, and that registration is the **only** place this API names
-one — `/auth/{provider}/start|callback` and `/auth/identities/{provider}/start|callback` take the
-name off the route, so adding a provider touches the composition and nothing else. A provider this
-host holds no application for and one nothing has ever registered are the **same answer**, a `503
-auth_unconfigured`, never a 404 — otherwise the set of providers a build knows about could be probed.
-Anonymous `GET /auth/providers` reports the configured set, so the login page draws a button only
-where a bounce would work.
-
-This host's own OAuth callback is **not** shared and stays `Api__DiscordRedirectUri`. Its **origin**
-is what every provider's two callbacks are built from — the paths are this API's own routes, so a
-host's public address is written once and two callbacks cannot name different origins. A provider
-accepts only redirect URIs registered on the application, so **both** of a provider's callbacks have
-to be registered with it or linking is refused at the provider, where no log here sees it.
+**Who someone is comes from the auth anchor; what they may do comes from their KGSM account.** The
+anchor signs people in — by password or through an identity provider — and mints the session; this
+API verifies it offline against the key the anchor publishes, read through gossip, and resolves the
+tier from its replica of the cluster's accounts (`Api__UsersDbPath`) on every request. It holds no
+identity-provider application, no signing key and no sign-in door, and needs nothing configured to
+accept sessions beyond the cluster secret in `/etc/kgsm/kgsm-cluster.env`. Every `/auth` path answers
+`503` naming the member that holds the accounts. The detail is `src/Api/Services/Auth/CLAUDE.md`.
 
 An environment variable **overrides one key** by spelling that key's path with `__`
 (`Api__DomainPollMs`, `Logging__LogLevel__Default`, `Kestrel__Certificates__Default__Path`), and env
@@ -210,11 +198,10 @@ request. Mechanism: `../kgsm-componentconfig/README.md`.
 
 Two consequences worth knowing: **secrets are declared blank here and set for real only in the
 root-owned `/etc/kgsm-api/kgsm-api.env`**, and the boolean knobs take **`true`/`false` only** — the
-older `1`/`0`/`yes`/`on` spellings are refused at startup with an error naming the key. The Discord
-application is **shared external config** (the same one the host's Discord bot and assistant use) —
-configuration, not a process dependency on kgsm-bot (keystone §4). **`tests/Api.Tests/`** (xUnit + `WebApplicationFactory`,
-the Discord seam faked) runs with `dotnet test kgsm-api.slnx`; it owns the 401/403/tier
-matrix + the callback/refresh/session flow, with smoke covering the HTTP contract surface.
+older `1`/`0`/`yes`/`on` spellings are refused at startup with an error naming the key.
+**`tests/Api.Tests/`** (xUnit + `WebApplicationFactory`, the auth anchor stood in for by a signer) runs
+with `dotnet test kgsm-api.slnx`; it owns the 401/403/tier matrix against anchor-signed sessions and
+the ended-session deny-list, with smoke covering the HTTP contract surface.
 
 ## The stack decision — do NOT undo it
 
@@ -335,7 +322,7 @@ of leaves present.
    Record every frozen shape in `PLAN.md §6`.
 4. **Additive-only within `/api/v1`** (path-versioned). Grow into reserved fields, no break.
 5. **Persistence is downstream of the stateless engine.** The API persists only its *own*
-   operational metadata — the append-only **audit log** and the **session registry**
+   operational metadata — the append-only **audit log** and the **ended-session list**
    (revocation state — see `Services/Auth/CLAUDE.md`; identity itself stays in the JWT, no user
    row) via EF; the domain is live-scraped, never stored. KGSM stays stateless (the watchdog
    is the lone resident exception, and it's engine, not this API). **The audit is event-sourced,

@@ -44,8 +44,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// SQLite file for the API's own operational metadata. Also the anchor for
-    /// <see cref="RawgCacheDir"/>'s default and for <see cref="StateDir"/>, so the image cache and the
-    /// secrets this host generates for itself land in the same state directory.
+    /// <see cref="RawgCacheDir"/>'s default, so the image cache lands in the same state directory.
     /// </summary>
     public string DbPath { get; init; } = "kgsm-api.db";
 
@@ -541,7 +540,7 @@ public sealed class ApiOptions
 
     /// <summary>
     /// How often (ms) the cluster bus GC worker sweeps (<c>Api__ClusterGcMs</c>, default 600000 =
-    /// 10 min, floor 60000) — the same cadence family as <see cref="SessionsGcMs"/>.
+    /// 10 min, floor 60000).
     /// </summary>
     public int ClusterGcMs { get; init; } = 600000;
 
@@ -588,11 +587,10 @@ public sealed class ApiOptions
     /// </summary>
     public int ClusterReapMs { get; init; } = 300000;
 
-    // --- Auth (M4·a) — Discord per-host, Model A (architecture.html §3·f, keystone O5) -----------
-    // Identity is a global Discord SSO anchor; authorization is a short-lived host-scoped bearer
-    // this host mints after verifying identity once and resolving the role via the host's bot.
-    // The Discord app/guild/bot-token/role-map are SHARED EXTERNAL CONFIG (same values the Discord
-    // bot uses) — keystone §4: this is configuration, NOT a process dependency on kgsm-bot.
+    // --- Auth -------------------------------------------------------------------------------------
+    // This node signs nobody in. Every session it accepts was minted by the cluster's auth anchor and
+    // is verified against the key that member publishes; what a person may do is read from this
+    // node's replica of the cluster's accounts on every request.
 
     /// <summary>
     /// Dev escape hatch (<c>Api__AuthDisabled=true</c>). When set, every request is authenticated
@@ -609,51 +607,16 @@ public sealed class ApiOptions
     /// </summary>
     public required string DisabledAuthActor { get; init; }
 
-    /// <summary>HMAC signing key for the host-scoped session JWTs (<c>Api__SigningKey</c>).
-    /// Blank means this host generates one for itself and keeps it in <see cref="SigningKeyPath"/>,
-    /// so sessions survive a restart with nothing configured; a value here always wins.</summary>
-    public required string SigningKey { get; init; }
-
     /// <summary>
-    /// The OAuth applications this host signs people in through, by provider name
-    /// (<c>KgsmAuth__Providers__&lt;name&gt;__ClientId</c>). Shared with every other surface on the
-    /// host, so one file points all of them at the same applications.
-    /// </summary>
-    public required KgsmAuthOptions OAuth { get; init; }
-
-    /// <summary>
-    /// This host's own sign-in callback (<c>Api__DiscordRedirectUri</c>) — the address a provider
-    /// returns a browser to. Its <b>origin</b> is what every provider's two callbacks are built from
-    /// (<see cref="LoginRedirectUri"/>, <see cref="LinkRedirectUri"/>): the paths belong to this
-    /// API's own routes, so there is one place a host's public address is written and no way for two
-    /// callbacks to name different origins.
-    /// </summary>
-    public required string DiscordRedirectUri { get; init; }
-
-    /// <summary>
-    /// The SPA origin/URL the OAuth callback hands the session back to
-    /// (<c>Api__AuthFrontendUrl</c>). When set, <c>/auth/discord/callback</c> 302s the browser
-    /// here with the result in the URL <b>fragment</b> (<c>#access=…&amp;refresh=…</c> on success,
-    /// <c>#error=…</c> otherwise) instead of returning JSON — the SPA token handoff. The redirect target
-    /// is THIS single configured value, never a request-supplied one (no open-redirect). Blank → the
-    /// callback keeps returning JSON (API-only deployments, and the test default).
-    /// </summary>
-    public required string AuthFrontendUrl { get; init; }
-
-    /// <summary>
-    /// The host's shared KGSM account store (<c>Api__UsersDbPath</c>, default
-    /// <c>/var/lib/kgsm/auth/users.db</c>) — where local accounts, their credentials and their tiers live.
+    /// This node's replica of the cluster's accounts (<c>Api__UsersDbPath</c>, default
+    /// <c>/var/lib/kgsm/auth/users.db</c>) — the accounts and their tiers, kept current by replication
+    /// from the auth anchor.
     /// </summary>
     /// <remarks>
     /// Deliberately outside <see cref="DbPath"/>. This API's own database is its operational state and
-    /// is wiped when its schema changes; accounts are the <em>host's</em>, shared with every other KGSM
-    /// surface running beside it and never wiped. Pointing this at a file the assistant does not read
-    /// gives the two surfaces different accounts.
-    /// </remarks>
-    /// <remarks>
-    /// Not <c>required</c>, unlike the secrets beside it: this has one correct value on every host in
-    /// the ecosystem, so a default here is the shared location rather than a guess. What must never
-    /// default is a credential.
+    /// is wiped when its schema changes; the replica is the <em>machine's</em>, shared with every other
+    /// KGSM service running beside it and never wiped. It has one correct value on every host in the
+    /// ecosystem, so a default here is the shared location rather than a guess.
     /// </remarks>
     public string UsersDbPath { get; init; } = UserStoreOptions.DefaultPath;
 
@@ -669,230 +632,41 @@ public sealed class ApiOptions
     /// </remarks>
     public int AuthorityCacheSeconds { get; init; } = 5;
 
-    /// <summary>
-    /// The most accounts awaiting approval to hold at once (<c>Api__PendingUserCap</c>, default 32,
-    /// floor 1).
-    /// </summary>
-    /// <remarks>
-    /// Signing in through an identity provider with no account here provisions one, unapproved and at
-    /// no tier. That is reachable by anyone who can complete a login at that provider, so the table it
-    /// grows needs a ceiling however little each row can do.
-    /// </remarks>
-    public int PendingUserCap { get; init; } = 32;
-
-    /// <summary>
-    /// How long an unapproved, self-provisioned account survives unattended
-    /// (<c>Api__PendingUserTtlDays</c>, default 14, floor 1).
-    /// </summary>
-    /// <remarks>
-    /// What keeps <see cref="PendingUserCap"/> from becoming a lockout: without expiry, one burst of
-    /// arrivals fills the cap permanently and the next real person is refused. Only ever removes an
-    /// account that arrived on its own and is still unapproved — one an admin created carries a
-    /// granted tier and is spared however long it waits. Somebody who signs up and is not approved
-    /// within this window is gone and has to sign up again, so it wants to be as long as approving
-    /// anyone here realistically takes.
-    /// </remarks>
-    public int PendingUserTtlDays { get; init; } = 14;
-
-    /// <summary>
-    /// Whether anonymous callers may create their own account
-    /// (<c>Api__AllowSelfRegistration</c>, default <see langword="false"/>).
-    /// </summary>
-    /// <remarks>
-    /// Off by default because it opens an anonymous write on a host that may be reachable from the
-    /// internet. What it opens is bounded — a registered account is <c>pending</c> at no tier and
-    /// waits for an admin exactly as an OAuth arrival does, and <see cref="PendingUserCap"/> bounds
-    /// how many can be waiting — so this decides who may join the queue, never who gets in.
-    /// </remarks>
-    public bool AllowSelfRegistration { get; init; }
-
-    /// <summary>
-    /// Sign-in and sign-up attempts one caller may make per minute
-    /// (<c>Api__AnonymousRateLimit</c>, default 10, floor 1).
-    /// </summary>
-    /// <remarks>
-    /// Partitioned on the caller's address, which is what makes the default generous: behind a shared
-    /// connection several real people are one caller here, and a limit tuned for one person would
-    /// lock a household out. It is a ceiling on a burst, not the protection against guessing a
-    /// password — the account store's exponential lockout is that, and the two are separate because
-    /// they answer to different attackers.
-    /// </remarks>
-    public int AnonymousRateLimit { get; init; } = 10;
-
-    /// <summary>
-    /// How long after proving a credential a session may attach or detach one
-    /// (<c>Api__ReauthWindowMinutes</c>, default 5, floor 1).
-    /// </summary>
-    /// <remarks>
-    /// Linking is the one write that outlives the session making it: afterwards, whoever holds that
-    /// provider account can sign in as this one forever. A live session is not proof enough for that —
-    /// it can be a borrowed unlocked laptop — so the credential has to have been proved recently, and
-    /// this is how recently. Signing in counts as proving it, so the common path never sees a prompt.
-    /// </remarks>
-    public int ReauthWindowMinutes { get; init; } = 5;
-
-    /// <summary>How this host bounds unapproved arrivals.</summary>
-    public PendingPolicy PendingPolicy =>
-        new(PendingUserCap, TimeSpan.FromDays(PendingUserTtlDays));
-
     /// <summary>Auth is on unless the dev escape hatch is set.</summary>
     public bool AuthEnabled => !AuthDisabled;
 
-    // --- Sessions — the session registry + cached per-request validator
-    // (authority: Services/Auth/CLAUDE.md).
-    // Sessions are operational state, NOT a user profile row; identity stays in the JWT claims.
-    // The registry is the authority the cached validator reads to decide "is this session alive"
-    // — what the stateless JWT alone cannot answer (close the 30d-refresh revocation gap).
-
     /// <summary>
-    /// Master switch for the session registry + the cached per-request validator +
-    /// the revocation surface (<c>Api__SessionsDisabled</c>, default <see langword="false"/>
-    /// → sessions ON). When <see langword="true"/> the registry is inert — no per-request check,
-    /// no <c>GET /auth/sessions</c>, no revoke endpoints (the M4·a stateless-JWT posture, an
-    /// escape hatch for debugging). In-flight tokens under <c>DISABLED</c> are always alive
-    /// (no <c>sid</c> check); only set this for a deliberate debugging window, never on a real
-    /// host. <b>Default ON</b> like <see cref="AuthEnabled"/>.
-    /// </summary>
-    public bool SessionsEnabled { get; init; } = true;
-
-    /// <summary>
-    /// The in-memory cache TTL (ms) for the per-request session validator
-    /// (<c>Api__SessionsCacheTtlMs</c>, default 5000 = 5s, floor 500). The accepted
-    /// revocation-lag bound (D2): a revoke evicts the cache entry immediately (best-effort), and
-    /// the TTL is the backstop — worst case a revoked session lives up to this long before the
-    /// next access → 401. Per-host single-instance so no cross-node coherence is needed. Lower
-    /// values trade DB load for faster revoke; the access-token TTL (15min) is the hard ceiling
-    /// regardless. Bumping to 0 effectively disables the cache (per-request DB read).
+    /// How long "has this session been ended" is reused on the request path
+    /// (<c>Api__SessionsCacheTtlMs</c>, default 5000 = 5s, floor 500). The accepted lag between a
+    /// sign-out arriving over the bus and the session stopping on this node: a revoke evicts the
+    /// cached answer at once, and the TTL is the backstop for a read that raced it.
     /// </summary>
     public required int SessionsCacheTtlMs { get; init; }
 
     /// <summary>
-    /// How often the session GC worker deletes expired rows
-    /// (<c>Api__SessionsGcMs</c>, default 600000 = 10 min, floor 60000). Both revoked and
-    /// non-revoked rows whose <c>Expires &lt; now</c> are deleted (expired is dead regardless of
-    /// revocation) — keeps the table permanently bounded. Runs once at startup for catch-up after
-    /// downtime. Inert when <see cref="SessionsEnabled"/> is <see langword="false"/>.
-    /// </summary>
-    public required int SessionsGcMs { get; init; }
-
-    /// <summary>
-    /// The session absolute-cap window in days (<c>Api__SessionsRefreshAbsoluteDays</c>,
-    /// default 30, floor 1). A session row's <c>Expires = Created + this</c>. <b>No sliding</b>
-    /// on refresh (the cap stays absolute, per the original M4·a lock rationale) — D8. Must
-    /// stay in lockstep with <see cref="Services.Auth.SessionTokenService"/>'s refresh-token TTL:
-    /// if you change one, change both. A mismatch means the registry treats alive tokens as
-    /// dead (or vice versa) — the registry is the revocation authority, the JWT TTL is the mint
-    /// bound, and they must agree.
-    /// </summary>
-    public required int SessionsRefreshAbsoluteDays { get; init; }
-
-    /// <summary>Sessions are on unless the master switch is unset. Mirrors
-    /// <see cref="AuthEnabled"/>'s default-ON posture.</summary>
-    public bool SessionsProvisioned => SessionsEnabled;
-
-    /// <summary>
-    /// Whether a sign-in through <paramref name="provider"/> can run here — an application for it,
-    /// and this host's own public address. That is the whole of what signing someone in needs: no
-    /// group and no role, because a login establishes who someone is and the account store alone
-    /// says what they may do.
+    /// Where this machine's own auth anchor is reached (<c>Api__LocalAnchorUrl</c>, default
+    /// <c>http://127.0.0.1:8098</c>, the anchor's own default bind). Empty turns the local join off.
     /// </summary>
     /// <remarks>
-    /// Auth (JWT validation, tier gates) is enforced regardless; this gates the <em>login</em> and
-    /// <em>linking</em> endpoints, which 503 when a provider is not configured. A provider this host
-    /// has no application for and one it has never heard of answer the same, so a caller asks this
-    /// and never whether the name is known.
+    /// A machine that founded its own cluster runs the anchor beside this node, and the two only find
+    /// each other through a handshake. Nobody can sign in to ask for one until they have, so a node
+    /// that knows no member introduces itself here on its own (<c>LocalAnchorJoin</c>).
     /// </remarks>
-    public bool ProviderConfigured(string provider) =>
-        OAuth.For(provider).Configured && !string.IsNullOrWhiteSpace(DiscordRedirectUri);
-
-    /// <summary>Where <paramref name="provider"/> returns a browser that is <em>signing in</em>.</summary>
-    public string LoginRedirectUri(string provider) => CallbackUri($"/auth/{provider}/callback");
+    public string LocalAnchorUrl { get; init; } = "http://127.0.0.1:8098";
 
     /// <summary>
-    /// Where <paramref name="provider"/> returns a browser that is <em>attaching</em> an account
-    /// rather than signing in.
-    /// </summary>
-    /// <remarks>
-    /// A separate address because the two flows end differently: one mints a session, the other
-    /// attaches a credential to an account that already exists. A provider accepts only redirect
-    /// URIs registered on the application, so <b>this one has to be registered alongside the login
-    /// callback</b> or a link is refused at the provider before it starts. That refusal is loud and
-    /// names the URI.
-    /// </remarks>
-    public string LinkRedirectUri(string provider) =>
-        CallbackUri($"/auth/identities/{provider}/callback");
-
-    /// <summary>
-    /// One of this host's callbacks, on the origin <see cref="DiscordRedirectUri"/> establishes. The
-    /// path is this API's own route rather than anything configured, so a host's public address is
-    /// written once and every provider's two callbacks agree on it by construction.
-    /// </summary>
-    private string CallbackUri(string path) =>
-        Uri.TryCreate(DiscordRedirectUri, UriKind.Absolute, out Uri? configured)
-            ? new Uri(configured, path).ToString()
-            : string.Empty;
-
-    /// <summary>
-    /// The directory this API keeps its own state in — the directory <see cref="DbPath"/> names, which
-    /// under the deployed unit is systemd's <c>StateDirectory=</c> (<c>/var/lib/kgsm-api</c>).
-    /// </summary>
-    /// <remarks>
-    /// Derived from the database path rather than configured separately, for the same reason
-    /// <see cref="RawgCacheDir"/>'s default is: a host says where its state lives once, and a second
-    /// knob is a second place for it to be wrong. A bare relative database name (the coded default)
-    /// leaves the state directory as the working directory.
-    /// </remarks>
-    public string StateDir =>
-        Path.GetDirectoryName(DbPath) is { Length: > 0 } dir ? dir : ".";
-
-    /// <summary>
-    /// The file this host keeps its session signing key in, used only when
-    /// <see cref="SigningKey"/> is blank.
-    /// </summary>
-    public string SigningKeyPath => Path.Combine(StateDir, "signing-key");
-
-    /// <summary>
-    /// The file the bootstrap administrator's one-time password is left in, on a host that had no
-    /// accounts at all when it first started.
-    /// </summary>
-    public string InitialAdminPasswordPath => Path.Combine(StateDir, "initial-admin-password");
-
-    /// <summary>
-    /// The address a browser reaches this API on, scheme and authority only — the same origin
-    /// <see cref="DiscordRedirectUri"/> establishes, which is already the one written-once statement of
-    /// this host's public address. Null when none is configured; a caller then has to say so rather
-    /// than inventing one.
+    /// The address a browser reaches this API on, scheme and authority only — the origin of
+    /// <see cref="PublicBaseUrl"/> when one is configured. Null otherwise; a caller then says so
+    /// rather than inventing one, and a panel served by this API on its own origin needs none.
     /// </summary>
     public string? PublicOrigin =>
-        Uri.TryCreate(DiscordRedirectUri, UriKind.Absolute, out Uri? uri)
+        Uri.TryCreate(PublicBaseUrl, UriKind.Absolute, out Uri? uri)
         && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
             ? uri.GetLeftPart(UriPartial.Authority)
             : null;
 
-    /// <summary>Whether the OAuth callback redirects the session back to the SPA (fragment handoff)
-    /// rather than returning JSON. True iff a frontend URL is configured.</summary>
-    public bool FrontendRedirectEnabled => !string.IsNullOrWhiteSpace(AuthFrontendUrl);
-
-    /// <summary>
-    /// How this host mints session tokens. Projected here so <see cref="SessionsRefreshAbsoluteDays"/>
-    /// is the ONE place the session lifetime is written: the token's expiry and the registry row's
-    /// expiry are both derived from it, and a second copy would drift until a token outlived its own
-    /// row or the reverse.
-    /// </summary>
-    public SessionTokenOptions ToSessionTokenOptions() => new(
-        HostId,
-        SigningKey,
-        AccessLifetime: TimeSpan.FromMinutes(15),
-        RefreshLifetime: TimeSpan.FromDays(SessionsRefreshAbsoluteDays),
-        // "kgsm-api", not the package's neutral default: this host has been minting tokens under it,
-        // and the issuer is validated. Adopting a tidier value would 401 every token already out
-        // there and force every signed-in person to log in again.
-        Issuer: "kgsm-api");
-
     public static ApiOptions FromConfiguration(IConfiguration configuration) =>
-        FromSettings(
-            configuration.GetSection(ApiSettings.Section).Get<ApiSettings>() ?? new ApiSettings(),
-            configuration.GetSection(KgsmAuthOptions.Section).Get<KgsmAuthOptions>() ?? new KgsmAuthOptions());
+        FromSettings(configuration.GetSection(ApiSettings.Section).Get<ApiSettings>() ?? new ApiSettings());
 
     /// <summary>
     /// Validates what configuration supplied and produces the form the API runs on: clamps every
@@ -908,13 +682,8 @@ public sealed class ApiOptions
     /// that difference; <see cref="BlankFallback"/> deliberately collapses it, for the few paths an
     /// empty string would make <c>Path.*</c> throw on.
     /// </remarks>
-    public static ApiOptions FromSettings(
-        ApiSettings s, KgsmAuthOptions? auth = null)
+    public static ApiOptions FromSettings(ApiSettings s)
     {
-        // The OAuth applications are the ECOSYSTEM's, not this API's — the assistant beside us signs
-        // people in through the same ones — so they arrive from the shared KgsmAuth section. The
-        // redirect URI is not among them: each surface has its own callback.
-        auth ??= new KgsmAuthOptions();
         string hostId = Clean(s.HostId) ?? Environment.MachineName;
 
         // Computed ahead of the object initializer so ClusterRetentionDays's floor can reference it
@@ -1052,29 +821,14 @@ public sealed class ApiOptions
             // Auth. On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = s.AuthDisabled ?? false,
             DisabledAuthActor = Defaulted(s.DisabledAuthActor, ""),
-            SigningKey = Defaulted(s.SigningKey, ""),
-            OAuth = auth,
-            DiscordRedirectUri = Defaulted(s.DiscordRedirectUri, ""),
-            AuthFrontendUrl = Defaulted(s.AuthFrontendUrl, ""),
-            // Blank falls back to the shared host location rather than to a file beside this API's
-            // own database: accounts belong to the host, and a private copy would be a second set of
-            // users the assistant beside us cannot see.
+            // Blank falls back to the shared machine location rather than to a file beside this API's
+            // own database: the replica belongs to the machine, and a private copy would be one no
+            // replication updates and the services beside us cannot see.
             UsersDbPath = BlankFallback(s.UsersDbPath, UserStoreOptions.DefaultPath),
             AuthorityCacheSeconds = Math.Max(0, s.AuthorityCacheSeconds ?? 5),
-            PendingUserCap = Math.Max(1, s.PendingUserCap ?? 32),
-            PendingUserTtlDays = Math.Max(1, s.PendingUserTtlDays ?? 14),
-            ReauthWindowMinutes = Math.Max(1, s.ReauthWindowMinutes ?? 5),
-            AllowSelfRegistration = s.AllowSelfRegistration ?? false,
-            AnonymousRateLimit = Math.Max(1, s.AnonymousRateLimit ?? 10),
-
-            // Sessions. SessionsEnabled is the default-ON twin of the written SessionsDisabled
-            // (a disable-flag with inverted polarity). The cache TTL bounds the revocation lag;
-            // the GC cadence bounds the table; the refresh-absolute-days mirrors the JWT refresh
-            // TTL (the two must stay in lockstep — see the property's doc).
-            SessionsEnabled = !(s.SessionsDisabled ?? false),
             SessionsCacheTtlMs = Math.Max(500, s.SessionsCacheTtlMs ?? 5000),
-            SessionsGcMs = Math.Max(60000, s.SessionsGcMs ?? 600000),
-            SessionsRefreshAbsoluteDays = Math.Max(1, s.SessionsRefreshAbsoluteDays ?? 30),
+            // Defaulted, not BlankFallback: an empty value is the deliberate "never join locally".
+            LocalAnchorUrl = Defaulted(s.LocalAnchorUrl, "http://127.0.0.1:8098").Trim(),
         };
     }
 

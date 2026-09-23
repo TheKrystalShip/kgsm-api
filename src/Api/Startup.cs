@@ -1,9 +1,6 @@
 using TheKrystalShip.KGSM.WebPush;
-using System.Globalization;
 using System.Net;
 using System.Security.Claims;
-using System.Threading.RateLimiting;
-using Microsoft.AspNetCore.RateLimiting;
 
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Caching.Memory;
@@ -40,7 +37,6 @@ using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Extensions;
 
 using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Discord;
 
 using TheKrystalShip.KGSM.Auth.Sessions;
 using TheKrystalShip.KGSM.Auth.Cluster;
@@ -539,45 +535,9 @@ public class Startup(IConfiguration configuration)
         // migrations — the schema is EnsureCreated (greenfield/dev authority; PLAN M5).
         services.AddSingleton<AuditService>();
 
-        // M4·c — the session registry's single writer (one row per login × device, keyed by the JWT
-        // `sid` claim). Own DI scope per write + a write gate (SQLite single-writer), the same
-        // posture as AuditService above. Reads (the per-request validator, GET /auth/sessions) go
-        // through AppDbContext on the request scope directly, NOT through this store. The table is
-        // created by EnsureCreated on a fresh DB and by a one-shot sqlite3 command on the existing
-        // prod DB (D11) — this store assumes the table exists.
-        services.AddSingleton<SessionStore>();
-
-        // M4·c — the per-request session validator (cached): an IMemoryCache keyed by sid → bool,
-        // backed by a DB query on cache miss. The 5s TTL (SessionsCacheTtlMs) is the accepted
-        // revocation-lag bound (D2); the Evict call in the revoke path (Increment 5/6) makes a revoke
-        // ~instant, the TTL is the backstop. MemoryCache is process-local (per-host single-instance —
-        // D2, no cross-node coherence). Registered as a singleton + the IMemoryCache it depends on
-        // (AddMemoryCache is the standard Microsoft.Extensions.Caching.Memory registration).
+        // The request path's caches: the ended-session answer and the authority answer both live here,
+        // process-local, with their own short TTLs.
         services.AddMemoryCache();
-        services.AddSingleton<ISessionRegistry>(sp => sp.GetRequiredService<SessionStore>());
-
-        // Api__SessionsDisabled makes the whole registry inert — the stateless-JWT posture, a debugging
-        // escape hatch. That switch is THIS API's, not the session package's: rather than teaching the
-        // shared validator and GC worker about a flag only one surface has, the switch decides what
-        // gets composed. Disabled means a validator that answers "alive" without asking anyone, and no
-        // GC worker at all — a genuinely inert registry rather than a live one that skips its work.
-        if (apiOptions.SessionsEnabled)
-        {
-            services.AddSingleton<ISessionValidator>(sp => new SessionValidator(
-                sp.GetRequiredService<ISessionRegistry>(),
-                sp.GetRequiredService<IMemoryCache>(),
-                TimeSpan.FromMilliseconds(apiOptions.SessionsCacheTtlMs)));
-
-            // Deletes expired rows (revoked or not) on a timer so the table stays permanently bounded.
-            services.AddHostedService(sp => new SessionCleanupWorker(
-                sp.GetRequiredService<ISessionRegistry>(),
-                TimeSpan.FromMilliseconds(apiOptions.SessionsGcMs),
-                sp.GetRequiredService<ILogger<SessionCleanupWorker>>()));
-        }
-        else
-        {
-            services.AddSingleton<ISessionValidator, InertSessionValidator>();
-        }
 
         // Player-presence live roster — an in-memory projection driven
         // FROM KgsmAuditConsumer's own player.join/player.leave (+ start/stop reset) handlers, never via a
@@ -729,16 +689,15 @@ public class Startup(IConfiguration configuration)
 
         // session.revoke is registered rather than built in: the transport dispatches by type and
         // knows nothing about sessions, and the handler is every member's rather than this API's. The
-        // retention is how long a record of an ended session is worth keeping — the longest a bearer
-        // for it could still be presented, which is a refresh token's life.
-        services.AddSingleton<IClusterSessionAuthority>(sp => new ClusterSessionStore(
-            sp.GetRequiredService<SessionStore>(), sp.GetRequiredService<ApiOptions>()));
+        // retention is how long a record of an ended session is worth keeping.
+        services.AddSingleton<EndedSessionStore>();
+        services.AddSingleton<IClusterSessionAuthority>(sp => sp.GetRequiredService<EndedSessionStore>());
 
         services.AddSingleton<IClusterMessageHandler>(sp => new SessionRevokeHandler(
             sp.GetRequiredService<IClusterSessionAuthority>(),
-            sp.GetRequiredService<ISessionValidator>(),
+            new NoLocalSessions(),
             sp.GetRequiredService<ClusterSessionRevocations>(),
-            TimeSpan.FromDays(sp.GetRequiredService<ApiOptions>().SessionsRefreshAbsoluteDays),
+            EndedSessionStore.Retention,
             sp.GetRequiredService<ILogger<SessionRevokeHandler>>()));
 
         // This node's own copy of the cluster's accounts. It is what lets authority be resolved here
@@ -749,8 +708,13 @@ public class Startup(IConfiguration configuration)
         // owns along with its whole answer to a store it cannot read.
         services.AddSingleton<IReplicatedAccounts>(sp => sp.GetRequiredService<UserDirectory>());
 
-        services.AddSingleton<IClusterMessageHandler, AccountReplicationHandler>();
-        services.AddSingleton<IClusterMessageHandler, AccountRemovalHandler>();
+        // Applied by the shared handlers, then carried to the affected person's open streams, so an
+        // approval or a demotion made at the anchor lands on a panel at once rather than at the
+        // connection's own re-read.
+        services.AddSingleton<AccountReplicationHandler>();
+        services.AddSingleton<AccountRemovalHandler>();
+        services.AddSingleton<IClusterMessageHandler, AccountChangesReachOpenStreams>();
+        services.AddSingleton<IClusterMessageHandler, AccountRemovalsReachOpenStreams>();
 
         // The first full copy. The stream alone would leave a node holding only what changed after it
         // joined, resolving everybody who existed before that as a stranger.
@@ -766,105 +730,47 @@ public class Startup(IConfiguration configuration)
         // so no new client. The self/* exposing endpoints live on PeersController (no extra service).
         services.AddSingleton<ClusterPeerRelay>();
 
-        // Auth — per-host, Model A. The sign-in seam (ISignInService, from TheKrystalShip.KGSM.Auth)
-        // keeps the login behind one interface shared with every other KGSM surface, so the whole
-        // 401/403/tier matrix is testable in-process with a fake and no two surfaces can resolve a
-        // person differently. The token service mints/validates the host-scoped JWTs; the tier handler
-        // grants a hierarchical viewer/operator/admin policy from the 'tier' claim.
-        // What tokens are signed with is resolved once, here, and never re-read: a configured key wins,
-        // and a host given none generates one and keeps it, so sessions outlive a restart on a machine
-        // nobody handed a secret to.
-        services.AddSingleton<HostSigningKey>();
-
-        // The other kind of session this host accepts: one the cluster's auth anchor minted, verified
-        // against the key it publishes. The keys are read through the capability's holder and refreshed
-        // at the gossip cadence, so a reassignment or a rotation needs no restart here. A host that is
-        // not in a cluster learns nothing and accepts only its own sessions, which is the whole of what
-        // a standalone install has ever done.
-        // Whether this node still answers for its own accounts, or its cluster has an anchor that
-        // does. Read from cluster state rather than configured, so it follows an anchor joining or
-        // being reassigned with nothing to change here.
-        services.AddSingleton<AnchorHeldGate>();
-
+        // Auth. This node signs nobody in: every session it accepts was minted by the cluster's auth
+        // anchor — which on a machine that is a cluster of one runs beside it — and is verified here
+        // against the key that member publishes. The keys, the audience and the issuer are read through
+        // the capability's holder and refreshed at the gossip cadence, so a reassignment or a rotation
+        // needs no restart. Until gossip has said who holds the accounts there is nothing to verify
+        // against, and every session is refused.
         services.AddSingleton<ClusterSessionKeys>();
         services.AddSingleton<IClusterSessionKeys>(sp => sp.GetRequiredService<ClusterSessionKeys>());
         services.AddHostedService(sp => sp.GetRequiredService<ClusterSessionKeys>());
 
-        // A cluster session has no row here, so the only thing worth storing about one is that it has
-        // been ended. Same cache bound as the validator beside it, for the same reason.
+        // Who holds the accounts, by name. It is what a browser asking this node how to sign in is told,
+        // and what the startup report says when nobody does.
+        services.AddSingleton<AnchorHeldGate>();
+        services.AddHostedService<AuthAnchorReport>();
+
+        // A machine that founded its own cluster runs the anchor beside this node; a node that knows no
+        // member introduces itself to it, because nobody can sign in to add it until it has.
+        services.AddHostedService<LocalAnchorJoin>();
+
+        // A session has no row here, so the only thing worth storing about one is that it has been
+        // ended. Cached on the request path; a revoke arriving over the bus evicts.
         services.AddSingleton(sp => new ClusterSessionRevocations(
             sp.GetRequiredService<IClusterSessionAuthority>(),
             sp.GetRequiredService<IMemoryCache>(),
             TimeSpan.FromMilliseconds(sp.GetRequiredService<ApiOptions>().SessionsCacheTtlMs)));
 
-        services.AddSingleton<ISessionTokenService>(sp => new SessionTokenService(
-            sp.GetRequiredService<ApiOptions>().ToSessionTokenOptions()
-                with { SigningKey = sp.GetRequiredService<HostSigningKey>().Value },
-            sp.GetRequiredService<ILogger<SessionTokenService>>()));
-        // The callback URL is this surface's own; the application is the host's. Both are projected
-        // from ApiOptions rather than re-read from configuration: ApiOptions is the single place any
-        // key is interpreted, and a second reader is how two halves of one setting drift apart.
-        services.AddSingleton(sp => sp.GetRequiredService<ApiOptions>().OAuth);
-        // This host's own accounts. A singleton because it wraps one SQLite file that every request
-        // reads — the store opens connections per operation and pools them, so nothing is held. It is
-        // NOT on AppDbContext: this API's database is operational state and is wiped whenever its
-        // schema changes, and accounts cannot be. Opening it can fail (a permission problem, or a file
-        // written by a newer sibling on this host); UserDirectory captures that as a capability rather
-        // than letting it decide whether the Control Panel starts.
+        // This node's replica of the cluster's accounts. A singleton because it wraps one SQLite file
+        // that every request reads — the store opens connections per operation and pools them, so
+        // nothing is held. Opening it can fail (a permission problem, or a file written by a newer
+        // sibling on this host); UserDirectory captures that as a capability rather than letting it
+        // decide whether the Control Panel starts.
         services.AddSingleton<UserDirectory>();
 
-        // The first start on a host with no accounts creates the administrator that start-of-life
-        // needs, and leaves its password in the state directory. Every start after that finds accounts
-        // and does nothing.
-        services.AddHostedService<HostBootstrapper>();
-
-        // The two halves of a sign-in come from two different places, which is the whole reason they
-        // are separate seams. A provider says WHO someone is (IIdentityProvider) and contributes
-        // nothing else; the account store says what they may DO (IAuthorityProvider), and is the only
-        // thing that ever does. A group or a role is not an answer to the second question and is not
-        // read here at all: any provider account can be attached to any KGSM account, and where else
-        // it can get in says nothing about either.
-        services.AddTransient<IAuthorityProvider, DirectoryAuthority>();
-
-        // One registration per provider, and the ONLY place in this API a provider is named.
-        // Everything above takes the name off the route and asks the catalog, so wiring up another is
-        // a line here and nothing anywhere else.
-        //
-        // Each is built per resolution, like the typed client it wraps: holding one in a singleton
-        // pins one handler for the process lifetime, so the factory's rotation — and with it DNS
-        // refresh — silently stops. The redirect URI is handed in rather than read, because the same
-        // provider serves two flows that end differently and must name different callbacks.
-        //
-        // "identify guilds", not the package's leaner "identify" default: the granted scopes are
-        // surfaced on GET /auth/session and /me and the SPA reads them, so narrowing the set would be
-        // a visible contract change. Neither scope contributes to authority — nothing Discord grants
-        // does.
-        services.AddHttpClient(nameof(DiscordDirectory), c => c.Timeout = TimeSpan.FromSeconds(10));
-        services.AddSingleton(new AuthProviderRegistration(
-            KgsmActorProvider.Discord,
-            (sp, application, redirectUri) => new DiscordDirectory(
-                sp.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(DiscordDirectory)),
-                application,
-                new DiscordOAuthEndpoints(redirectUri, "identify guilds"))));
-        services.AddSingleton<IAuthProviderCatalog, AuthProviderCatalog>();
-
-        // Authority on every request, from the store, replacing the tier the token was minted with.
+        // Authority on every request, from the replica, replacing the tier the token was minted with.
         services.AddSingleton<LiveAuthority>();
-
-        // Changing what proves an account needs the credential proved again, and a link in flight has
-        // to remember whose account it is without telling the browser. Both are per-process on purpose
-        // (see LinkFlow.cs): a restart makes everyone prove themselves again and drops links in flight,
-        // which costs a click and cannot grant anything.
-        services.AddSingleton(sp => new ReauthGate(
-            TimeSpan.FromMinutes(sp.GetRequiredService<ApiOptions>().ReauthWindowMinutes)));
-        services.AddSingleton<LinkTicketStore>();
         services.AddSingleton<IAuthorizationHandler, TierAuthorizationHandler>();
 
         // Auth is ON by default; Api__AuthDisabled=true swaps the default scheme for a synthetic-admin
         // handler so every policy passes (the explicit, loudly-logged dev/open window). When enabled, the
-        // JwtBearer scheme validates the session JWTs with the SAME parameters the token service mints under
-        // (shared via the post-configure below). SSE streams carry the bearer as an Authorization header;
-        // a refresh token is never accepted as an access bearer.
+        // JwtBearer scheme accepts the auth anchor's sessions and nothing else. SSE streams carry the
+        // bearer as an Authorization header; a refresh token is never accepted as an access bearer.
         // Opening the door is allowed; opening it anonymously is not. Every request that comes through
         // it is attributed to Api__DisabledAuthActor and lands in the audit log under that name, so the
         // host refuses to start until it has been told a real one. Failing here rather than at the first
@@ -918,27 +824,20 @@ public class Startup(IConfiguration configuration)
                 {
                     OnTokenValidated = async ctx =>
                     {
-                        // A refresh token authenticates ONLY /auth/session/refresh, never a protected call.
+                        // A refresh token is spent at the anchor, never presented here as a bearer.
                         if (ctx.Principal?.FindFirst(KgsmAuthClaims.TokenKind)?.Value != KgsmTokenKind.Access)
                         {
                             ctx.Fail("not an access token");
                             return;
                         }
 
-                        // The per-request session check, cached. It runs AFTER the access-kind gate (a
-                        // refresh token never reaches here) and AFTER the signature, issuer, audience
-                        // and lifetime have all been confirmed — so what is left to establish is only
-                        // whether the session behind a genuine token is still live. The SSE path rides
-                        // the same event, its bearer set by OnMessageReceived for /stream.
-                        //
-                        // Api__SessionsDisabled bypasses the whole block, which is the stateless-JWT
-                        // posture kept for debugging. A token carrying no sid is refused: a session
-                        // nothing can revoke is not one this host is willing to hold open.
+                        // Whether the session behind a genuine token has been ended. It runs AFTER the
+                        // signature, issuer, audience and lifetime have all been confirmed. The session
+                        // has no row here — the sign-in happened at the anchor — so what is asked is a
+                        // deny-list the bus fills when somebody ends one, cached on this path. A token
+                        // carrying no sid is refused: a session nothing can end is not one this node is
+                        // willing to hold open. The SSE path rides the same event.
                         var svc = ctx.HttpContext.RequestServices;
-                        var opts = svc.GetRequiredService<ApiOptions>();
-                        if (!opts.SessionsEnabled)
-                            return;
-
                         string? sid = ctx.Principal?.FindFirst(KgsmAuthClaims.SessionId)?.Value;
                         if (string.IsNullOrEmpty(sid))
                         {
@@ -952,30 +851,10 @@ public class Startup(IConfiguration configuration)
                             return;
                         }
 
-                        // Two kinds of session, held to opposite questions about the same table.
-                        //
-                        // One this host minted has a row, so the row IS the session: no live row means
-                        // no session, and the check is an allow-list.
-                        //
-                        // One the cluster's auth anchor minted has no row here — the sign-in happened
-                        // on another machine — and is accepted because its signature verifies against
-                        // the key that member publishes. There is nothing to look up, so the only
-                        // thing worth storing is that somebody ended it, and the check is a deny-list.
-                        // Running the allow-list against a cluster session would refuse every one of
-                        // them, which is "sign in once" failing on every member but the anchor.
-                        if (ClusterSessionValidation.IsClusterSession(claims, opts.HostId))
+                        if (await svc.GetRequiredService<ClusterSessionRevocations>()
+                            .IsRevokedAsync(sid, ctx.HttpContext.RequestAborted).ConfigureAwait(false))
                         {
-                            if (await svc.GetRequiredService<ClusterSessionRevocations>()
-                                .IsRevokedAsync(sid, ctx.HttpContext.RequestAborted).ConfigureAwait(false))
-                            {
-                                ctx.Fail("cluster session ended");
-                                return;
-                            }
-                        }
-                        else if (!await svc.GetRequiredService<ISessionValidator>()
-                            .IsValidAsync(sid, ctx.HttpContext.RequestAborted).ConfigureAwait(false))
-                        {
-                            ctx.Fail("session revoked or expired");
+                            ctx.Fail("session ended");
                             return;
                         }
 
@@ -1010,13 +889,11 @@ public class Startup(IConfiguration configuration)
                     },
                 };
             });
-            // The signing key lives in the token service (derived once); its rules are shared so this
-            // host's access and refresh tokens validate identically, and widened so the anchor's
-            // sessions validate beside them under rules of their own.
+            // The anchor's published keys, audience and issuer, re-read as gossip moves them. Nothing
+            // this node could sign is ever accepted, because it holds no key to sign with.
             services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
-                .Configure<ISessionTokenService, IClusterSessionKeys>((o, tokens, clusterKeys) =>
-                    o.TokenValidationParameters =
-                        ClusterSessionValidation.Accepting(tokens.ValidationParameters, clusterKeys));
+                .Configure<IClusterSessionKeys>((o, clusterKeys) =>
+                    o.TokenValidationParameters = ClusterSessionValidation.Accepting(clusterKeys));
         }
         else
         {
@@ -1039,52 +916,11 @@ public class Startup(IConfiguration configuration)
             o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
         });
 
-        // Per-caller throttling for the anonymous doors that touch credentials — sign in, and sign
-        // up. The account store's own lockout is exponential and keyed on the account being guessed
-        // at, which is the right shape for protecting one person and the wrong shape for two things:
-        // one password sprayed across many usernames locks nobody out, and registration has no
-        // account to lock. Both throttles stay; they answer different questions.
-        //
-        // Partitioned on the client address, which is the forwarded one — UseForwardedHeaders runs
-        // first and only trusts a proxy on this machine, so this cannot be widened by a header a
-        // stranger appended. A caller with no address at all (a unit test's in-memory transport)
-        // falls into one shared bucket rather than escaping the limiter.
-        //
-        // Ten a minute: a person who mistypes a password several times and then registers never
-        // meets it, and a script trying to enumerate does so on its first breath.
-        services.AddRateLimiter(o =>
-        {
-            o.AddPolicy(RateLimitPolicy.Anonymous, http =>
-                RateLimitPartition.GetFixedWindowLimiter(
-                    http.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                    _ => new FixedWindowRateLimiterOptions
-                    {
-                        PermitLimit = apiOptions.AnonymousRateLimit,
-                        Window = TimeSpan.FromMinutes(1),
-                        QueueLimit = 0,
-                    }));
-
-            // The frozen {error} envelope, with the same code the account lockout uses — a caller
-            // being throttled and a caller being locked out are one thing to whoever is typing, and
-            // a client that handles one handles both.
-            o.OnRejected = async (context, ct) =>
-            {
-                int seconds = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter)
-                    ? Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))
-                    : 60;
-                context.HttpContext.Response.Headers.RetryAfter =
-                    seconds.ToString(CultureInfo.InvariantCulture);
-                await ApiErrors.WriteAsync(
-                    context.HttpContext, StatusCodes.Status429TooManyRequests, "too_many_attempts",
-                    $"Too many attempts. Try again in {seconds}s.");
-            };
-        });
-
         // Behind a reverse proxy the request this app sees is the PROXY's: plain http, from 127.0.0.1.
-        // Without translating the forwarded headers, `Request.IsHttps` is false on every request — and
-        // the OAuth CSRF state cookie is written `Secure = Request.IsHttps`, so a browser login would
-        // quietly downgrade to a non-Secure cookie while continuing to work. Client addresses would
-        // likewise all read as loopback, making the audit log's actor-vs-origin story meaningless.
+        // Without translating the forwarded headers, `Request.IsHttps` is false on every request, so the
+        // plain-HTTP gate below would bounce every internet browser the proxy already served over TLS
+        // back to https in a loop, and client addresses would all read as loopback, making the audit
+        // log's actor-vs-origin story meaningless.
         //
         // Trust is restricted to a proxy on this machine. The middleware honours these headers only
         // when the IMMEDIATE PEER is a known proxy, so a request arriving from the internet carrying a
@@ -1158,12 +994,6 @@ public class Startup(IConfiguration configuration)
                 "AUTH DISABLED (Api__AuthDisabled) — every request is authenticated as admin and "
                 + "attributed to {Actor}. Never enable this on an exposed host.",
                 options.DisabledAuthActor);
-        else if (app.ApplicationServices.GetRequiredService<IAuthProviderCatalog>().Configured is { Count: 0 })
-            startupLog.LogWarning(
-                "Auth is ON but this host is wired to no identity provider — the /auth/{{provider}}/* "
-                + "login endpoints and identity linking will 503 until an application "
-                + "(KgsmAuth__Providers__<name>__ClientId) and this host's redirect URI are set. A KGSM "
-                + "password still signs anyone in; protected endpoints require a bearer (401).");
 
         // Same-origin SPA delivery: when the Control Panel SPA's built bundle is present in the web root
         // (the deploy drops kgsm-web's dist/ into wwwroot), Kestrel serves it at / on the SAME origin as
@@ -1235,13 +1065,8 @@ public class Startup(IConfiguration configuration)
 
         app.UseRouting();
         app.UseCors(CorsPolicy);
-        // After UseRouting, or the endpoint carrying [EnableRateLimiting] is not known yet and the
-        // policy silently never applies. Before authentication, so a throttled caller is refused
-        // without the store being read at all.
-        app.UseRateLimiter();
-        // M4·a — auth pipeline (the M0 placeholder, now filled). Authentication populates User from the
-        // bearer (or the synthetic-admin scheme when disabled); authorization enforces the [Authorize]
-        // tier policies. A 401/403 here flows through UseStatusCodePages above into the {error} envelope.
+        // Authentication populates User from the bearer (or the synthetic-admin scheme when disabled);
+        // authorization enforces the [Authorize] tier policies. A 401/403 here flows through UseStatusCodePages above into the {error} envelope.
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseEndpoints(endpoints =>

@@ -255,10 +255,12 @@ public sealed class WebPushNotificationProvider(
 
     /// <summary>
     /// The <c>sub</c> claim: a way to contact whoever runs this server, which push services want from a
-    /// sender. This host's own public callback origin is exactly that and is already configured, so no
-    /// new setting is invented for it.
+    /// sender. This node's public origin when one is configured, else the address its network is
+    /// reached at from the internet — both already configured, so no new setting is invented for it.
     /// </summary>
-    private string VapidSubject() => options.PublicOrigin ?? "https://localhost";
+    private string VapidSubject() =>
+        options.PublicOrigin
+        ?? (string.IsNullOrEmpty(options.PublicHost) ? "https://localhost" : "https://" + options.PublicHost);
 
     /// <summary>The notification body the service worker renders. Deliberately small: a push service
     /// caps the payload, and everything here is already on the panel a tap away.</summary>

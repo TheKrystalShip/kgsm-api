@@ -378,24 +378,6 @@
       "risk": "safe"
     },
     {
-      "key": "authClientId",
-      "env": "KgsmAuth__Providers__discord__ClientId",
-      "label": "Discord application id",
-      "description": "The Discord application users sign in through. A sign-in proves who someone is; the KGSM account they prove decides what they may do.",
-      "group": "auth",
-      "type": "string",
-      "risk": "wiring"
-    },
-    {
-      "key": "authClientSecret",
-      "env": "KgsmAuth__Providers__discord__ClientSecret",
-      "label": "Discord client secret",
-      "description": "Secret for that application, used to complete a sign-in server-side.",
-      "group": "auth",
-      "type": "secret",
-      "risk": "wiring"
-    },
-    {
       "key": "authDisabled",
       "env": "Api__AuthDisabled",
       "label": "Disable authentication",
@@ -415,37 +397,10 @@
       "risk": "safe"
     },
     {
-      "key": "signingKey",
-      "env": "Api__SigningKey",
-      "label": "Token signing key",
-      "description": "Secret every session token is signed with. Leave it blank and this host generates one for itself on first start and reuses it forever after. Changing it signs everyone out at once, which is also how you revoke every token in a hurry.",
-      "group": "auth",
-      "type": "secret",
-      "risk": "wiring"
-    },
-    {
-      "key": "discordRedirectUri",
-      "env": "Api__DiscordRedirectUri",
-      "label": "Sign-in redirect",
-      "description": "Where Discord sends someone back to after they approve. It has to match the redirect registered on the Discord application exactly.",
-      "group": "auth",
-      "type": "string",
-      "risk": "wiring"
-    },
-    {
-      "key": "authFrontendUrl",
-      "env": "Api__AuthFrontendUrl",
-      "label": "Panel URL",
-      "description": "Where to send someone once sign-in completes. Empty returns them to where they started.",
-      "group": "auth",
-      "type": "string",
-      "risk": "safe"
-    },
-    {
       "key": "usersDbPath",
       "env": "Api__UsersDbPath",
-      "label": "Account store",
-      "description": "The file this host keeps its KGSM accounts and passwords in. Every KGSM service on the host reads the same file, so pointing this somewhere else signs people out of the panel while leaving the assistant on the old one.",
+      "label": "Account replica",
+      "description": "The file this node keeps its copy of the cluster's accounts in, kept current by the auth anchor. Every KGSM service on the machine reads the same file, so pointing this somewhere else resolves people against a copy nothing updates.",
       "group": "auth",
       "type": "path",
       "default": "/var/lib/kgsm/auth/users.db",
@@ -464,77 +419,11 @@
       "risk": "safe"
     },
     {
-      "key": "pendingUserCap",
-      "env": "Api__PendingUserCap",
-      "label": "Accounts awaiting approval",
-      "description": "How many people can be waiting for approval at the same time. Anyone who signs in through an identity provider and has no account here yet becomes one of them, so this is the ceiling on what a stranger can add to this host.",
-      "group": "auth",
-      "type": "int",
-      "default": "32",
-      "min": 1,
-      "risk": "safe"
-    },
-    {
-      "key": "pendingUserTtlDays",
-      "env": "Api__PendingUserTtlDays",
-      "label": "Approval request lifetime",
-      "description": "How long someone waiting for approval stays on the list before being forgotten. Only ever removes an account that arrived on its own and was never approved — one an administrator created by hand waits as long as it waits. Set this to however long approving somebody may realistically take here, because past it they are gone and have to sign up again.",
-      "group": "auth",
-      "type": "int",
-      "default": "14",
-      "min": 1,
-      "unit": "days",
-      "risk": "safe"
-    },
-    {
-      "key": "allowSelfRegistration",
-      "env": "Api__AllowSelfRegistration",
-      "label": "Allow people to sign themselves up",
-      "description": "Lets people create their own account on this host instead of waiting for an administrator to make one. A new account still holds nothing until it is approved, so this decides who may join the queue — not who gets in. Off unless you turn it on: a host reachable from the internet with sign-up open is a host strangers can fill the approval list on.",
-      "group": "auth",
-      "type": "bool",
-      "default": "false",
-      "risk": "safe"
-    },
-    {
-      "key": "anonymousRateLimit",
-      "env": "Api__AnonymousRateLimit",
-      "label": "Sign-in attempts per minute",
-      "description": "How many times a minute one address may try to sign in or sign up before this host stops answering it. Raise it if several people here share one internet connection, since to this host they all look like the same caller.",
-      "group": "auth",
-      "type": "int",
-      "default": "10",
-      "min": 1,
-      "risk": "safe"
-    },
-    {
-      "key": "reauthWindowMinutes",
-      "env": "Api__ReauthWindowMinutes",
-      "label": "Re-authentication window",
-      "description": "How long after entering their password someone may attach or detach a sign-in method. Past it they are asked for it again — a borrowed unlocked laptop should not be able to attach a permanent way back in.",
-      "group": "auth",
-      "type": "int",
-      "default": "5",
-      "min": 1,
-      "unit": "min",
-      "risk": "safe"
-    },
-    {
-      "key": "sessionsDisabled",
-      "env": "Api__SessionsDisabled",
-      "label": "Disable the session registry",
-      "description": "Stops tracking live sessions. Signing in still works, but a token can no longer be revoked before it expires and the Active Sessions list goes empty.",
-      "group": "sessions",
-      "type": "bool",
-      "default": "false",
-      "risk": "destructive"
-    },
-    {
       "key": "sessionsCacheTtlMs",
       "env": "Api__SessionsCacheTtlMs",
       "label": "Session lookup cache",
-      "description": "How long a session's validity is reused before it is checked again. Longer means fewer lookups and a longer wait before a revoked session actually stops working.",
-      "group": "sessions",
+      "description": "How long this node reuses its answer to whether a session has been ended. It is how long a session somebody has just signed out of can still be used here — longer means fewer lookups and a longer wait before a sign-out takes effect on this node.",
+      "group": "auth",
       "type": "int",
       "default": "5000",
       "min": 500,
@@ -542,28 +431,14 @@
       "risk": "safe"
     },
     {
-      "key": "sessionsGcMs",
-      "env": "Api__SessionsGcMs",
-      "label": "Expired session cleanup",
-      "description": "How often expired sessions are cleared out of the registry.",
-      "group": "sessions",
-      "type": "int",
-      "default": "600000",
-      "min": 60000,
-      "unit": "ms",
-      "risk": "safe"
-    },
-    {
-      "key": "sessionsRefreshAbsoluteDays",
-      "env": "Api__SessionsRefreshAbsoluteDays",
-      "label": "Maximum session age",
-      "description": "How long a session can keep renewing itself before the user has to sign in again, however active they are.",
-      "group": "sessions",
-      "type": "int",
-      "default": "30",
-      "min": 1,
-      "unit": "days",
-      "risk": "safe"
+      "key": "localAnchorUrl",
+      "env": "Api__LocalAnchorUrl",
+      "label": "Local auth anchor",
+      "description": "The address of the auth anchor on this machine. A node that knows no other member introduces itself here, which is how a machine that is its own cluster comes to have somebody who can sign people in. Once the node has any member at all it never asks again. Empty turns this off, for a node that only ever joins a cluster someone else runs.",
+      "group": "auth",
+      "type": "string",
+      "default": "http://127.0.0.1:8098",
+      "risk": "wiring"
     },
     {
       "key": "rawgApiKey",

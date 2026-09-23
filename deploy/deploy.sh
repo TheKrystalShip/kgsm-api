@@ -106,26 +106,16 @@ if wait_health; then
     log "kgsm-api is up and healthy ✓"
     systemctl --no-pager --lines=0 status "$SERVICE" 2>/dev/null | head -n 4 || true
 
-    # ── 5. The first administrator ────────────────────────────────────────────
-    # A standalone host with no KGSM accounts has nobody who can sign in to create one, and with no
-    # identity provider configured there is no other door either. So the very first successful deploy
-    # makes one and prints its generated password once.
-    #
-    # Safe to run every time: `user bootstrap` is a no-op the moment any account exists, so this
-    # fires exactly once per host and never touches accounts afterwards. It writes the same store the
-    # running service reads — two processes on one SQLite file is what the store is built for — so
-    # nothing needs restarting. A failure here is reported and does not fail the deploy: the service
-    # is up and healthy, which is what this script promised.
-    #
-    # A member of a cluster is skipped, because its administrator is the cluster's and arrives by
-    # replication. The store is empty exactly once, which is the moment before a member is handed
-    # those accounts, so a local account made here takes the name the holder's own administrator has
-    # — and a replicated account can never take a name a local one already holds.
-    if host_is_clustered; then
-        log "member of a cluster: its administrator comes from the member holding the accounts."
+    # ── 5. Who signs people in ─────────────────────────────────────────────────
+    # This node signs nobody in; the cluster's auth anchor does, and a machine that founded its own
+    # cluster runs it beside this unit. Said here because a deploy that succeeds on a machine with no
+    # secret, or with no anchor running where one should be, serves a panel nobody can sign in to.
+    if ! host_is_clustered; then
+        warn "no cluster secret in ${SHARED_CLUSTER_FILE}: nobody can sign in to this node. Run deploy/setup.sh, which founds a cluster of one."
+    elif [[ -r "$CLUSTER_FOUNDED_FILE" ]] && ! systemctl is-active --quiet kgsm-auth-anchor.service; then
+        warn "this machine founded its cluster but kgsm-auth-anchor is not running, so nobody can sign in. Deploy kgsm-auth (its deploy/setup.sh, then deploy/deploy.sh); its first start leaves the administrator's one-time password in /var/lib/kgsm-auth-anchor/initial-admin-password."
     else
-        "${PREFIX}/${PROJECT}" user bootstrap \
-            || warn "could not create the first administrator; run '${PREFIX}/${PROJECT} user bootstrap' by hand."
+        log "sign-in: the cluster's auth anchor (see this unit's log for which member holds the accounts)."
     fi
 else
     err "service started but ${HEALTH_URL} did not return 200 within ${HEALTH_TRIES}s."

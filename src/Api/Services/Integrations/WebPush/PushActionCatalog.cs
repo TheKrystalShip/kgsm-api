@@ -77,10 +77,12 @@ public static class PushActionCatalog
                 return ev.ActionQualifier is { Length: > 0 } window
                     ? [new PushActionOffer(PushActionKind.SchedulePostpone, subject, "Postpone 1h", window)]
                     : [];
-
-            if (ev.CatalogId == "awaiting_approval")
-                return [new PushActionOffer(PushActionKind.UserApprove, subject, "Approve")];
         }
+
+        // An account waiting for approval gets no button: approving is a write to the accounts, which
+        // are the auth anchor's and are written only there. The notification's own tap opens the page
+        // where an admin makes that decision.
+        if (ev.CatalogId == "awaiting_approval") return [];
 
         // A reactor offer deliberately gets no button, and the absence is the design rather than an
         // omission. Confirming one re-derives the condition on the leaf and shows the person what it

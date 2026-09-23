@@ -433,13 +433,9 @@ public class PushActionCatalogTests
         Assert.Empty(PushActionCatalog.For(Event("leaf_up", null, player: "monitor")));
 
     [Fact]
-    public void Somebody_waiting_to_be_let_in_offers_to_let_them_in()
-    {
-        PushActionOffer only = Assert.Single(
-            PushActionCatalog.For(Event("awaiting_approval", null, player: "usr_abc")));
-        Assert.Equal(PushActionKind.UserApprove, only.Kind);
-        Assert.Equal("usr_abc", only.Target);
-    }
+    public void Somebody_waiting_to_be_let_in_is_not_offered_a_button() =>
+        // Approving is a write to the accounts, which only the auth anchor makes.
+        Assert.Empty(PushActionCatalog.For(Event("awaiting_approval", null, player: "usr_abc")));
 
     [Theory]
     [InlineData("online")]
@@ -465,7 +461,6 @@ public class PushActionCatalogTests
     [InlineData(PushActionKind.PlayerKick)]
     [InlineData(PushActionKind.PlayerBan)]
     [InlineData(PushActionKind.LeafRestart)]
-    [InlineData(PushActionKind.UserApprove)]
     public void Every_kind_the_catalog_can_stage_is_one_the_store_will_hand_back(string kind) =>
         // The store refuses to redeem a row whose kind this build does not know, so a kind added to the
         // catalog and not to IsKnown would stage handles that silently do nothing.

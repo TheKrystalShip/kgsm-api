@@ -195,8 +195,26 @@ public sealed class TierMatrixTests(AuthTestFactory factory) : IClassFixture<Aut
     [Fact]
     public async Task WrongSignature_401()
     {
-        string forged = TestTokens.MintAccessWithKey("a-totally-different-signing-key", AuthTestFactory.HostId, KgsmTier.Admin);
+        string forged = TestTokens.MintByAnUnpublishedAnchor(KgsmTier.Admin);
         HttpResponseMessage resp = await Client(forged).GetAsync("/api/v1/hosts");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task ASymmetricSessionIsRefusedWhateverItsKey_401()
+    {
+        // This node holds no key to sign or verify one with, so no symmetric token is a session here.
+        string own = TestTokens.MintSymmetric("any-key-at-all-of-no-particular-length", KgsmTier.Admin);
+        HttpResponseMessage resp = await Client(own).GetAsync("/api/v1/hosts");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task ASessionNothingCouldEnd_401()
+    {
+        // Genuinely signed by the anchor, but with no sid: nothing could ever end it.
+        string sidless = TestTokens.MintAnchorSignedWithoutSid(KgsmTier.Admin);
+        HttpResponseMessage resp = await Client(sidless).GetAsync("/api/v1/hosts");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 

@@ -12,37 +12,29 @@ same treatment before the suite runs on a live machine.
 
 ## How it works (the pattern to follow)
 
-- **`AuthTestFactory : WebApplicationFactory<Program>`** boots the real app with **auth ON** + a known
-  `KGSM_API_AUTH_SIGNING_KEY`, the Discord config present (so the login path runs), and the
-  **engine/monitor left unprovisioned** so reads degrade to `200` with no external dependency.
-- **`FakeDiscordResolver`** replaces `ISignInService` (via `ConfigureTestServices` + `RemoveAll`) — the
-  seam that makes auth testable without reaching an identity provider. It **switches purely on the
-  OAuth `code`** (`viewer`/`operator`/`admin`/`none`/`bad`/`boom`), so cases are stateless and
-  parallel-safe: no shared mutable state, no test ordering. It records the PKCE verifier the callback
-  presented (`LastCodeVerifier`) so a test can assert the handshake round-tripped rather than trusting
-  it was built.
-  It stands in for the whole composition rather than for `IIdentityProvider` or `IAuthorityProvider`
-  alone, because the tier a case wants is chosen by that `code` — which only the identity half ever
-  sees. Splitting it would mean carrying the choice between two calls in a field, and a shared mutable
-  field is exactly what makes a fake order-dependent.
-- **`AuthServiceGraphTests` builds the auth graph the way PRODUCTION does** — a bare
-  `WebApplicationFactory<Program>` with no fake — because every other test here replaces the sign-in
-  seam and therefore never constructs the real one. A dependency the real implementation needs and the
-  container cannot supply is invisible to the rest of the suite and surfaces as a `500` on the first
-  login against a deployed host. Keep it fake-free. It also pins the registrations' **lifetime** — the
-  graph is transient, and a singleton would pin one HTTP handler for the life of the process.
-- **Mint tokens via the server's OWN token service** — `factory.AccessToken(tier)` /
-  `RefreshToken(tier)` resolve `ISessionTokenService` from `factory.Services`, so the key + host audience
-  match the running pipeline. For a deliberately-wrong-signature token, `TestTokens.MintAccessWithKey`.
-  Those two mint for the **one standing identity**, so every token they hand out is the same person
-  holding whichever tier was asked for last. A case about **who** something reaches, or about one
-  account changing while another watches, needs two people: `FakeDiscordResolver.IdentityFor(subject)`
-  names one and `factory.AccessTokenFor(identity, tier, status)` gives them a session and an account of
-  their own.
-- **A token's tier is a label; the account decides.** Every gate resolves authority from the store per
-  request, so minting at a tier proves nothing on its own — `AccessToken`/`AccessTokenFor` set the
-  account to match, and a test that mints a token by hand has to set the account itself or it is
-  asserting against whatever a previous case left behind.
+- **`AuthTestFactory : WebApplicationFactory<Program>`** boots the real app with **auth ON**, the
+  cluster's auth anchor stood in for by a signer (`AuthTestFactory.AnchorSigner`, one for the whole
+  run), and the **engine/monitor left unprovisioned** so reads degrade to `200` with no external
+  dependency. It replaces `IClusterSessionKeys` with `PublishedAnchor.Default` — what gossip would have
+  delivered — so the JwtBearer pipeline verifies the stand-in anchor's sessions exactly as production
+  verifies the real one's.
+- **Sessions are minted as the anchor mints them** — `factory.AccessToken(tier)` and
+  `factory.RefreshToken(tier)` sign with the stand-in anchor's `SessionTokenService`, audienced to
+  `AuthTestFactory.ClusterId`. A factory built with `WithWebHostBuilder` has its own replica, so mint for
+  it with `AuthTestFactory.MintAccessOn(derived.Services, tier)`, which writes the account where that
+  factory's requests will read it. The two refusal shapes a node must hold are in `TestTokens`: a session
+  signed by a key nobody published, a symmetric token, and an anchor-signed one with no `sid`.
+  `AccessToken` mints for the **one standing identity** (`FakeDiscordResolver.Identity`), so every token
+  it hands out is the same person holding whichever tier was asked for last. A case about **who**
+  something reaches, or about one account changing while another watches, needs two people:
+  `FakeDiscordResolver.IdentityFor(subject)` names one and `factory.AccessTokenFor(identity, tier,
+  status)` gives them a session and an account of their own.
+- **A token's tier is a label; the account decides.** Every gate resolves authority from the replica
+  per request, so minting at a tier proves nothing on its own — `AccessToken`/`AccessTokenFor` set the
+  account to match. The node itself never writes an account, so a test plays replication's part:
+  `AuthTestFactory.ReplicaOf(services)` opens the same file directly, and a change that must reach open
+  streams goes through the registered `account.changed` handler (`MeStreamTests.Retier`), as the bus
+  would deliver it.
 - **`/api/v1/stream` (fetch-based SSE; protocol: `../../src/Api/Realtime/CLAUDE.md`)** is
   exercised with `SseTestHelpers.OpenStream(client, path, token)` — a `GET` with
   `HttpCompletionOption.ResponseHeadersRead` and an `Authorization: Bearer` header (never a query-string
@@ -92,9 +84,9 @@ pipeline. Use the same trick for any other `HttpContext.Connection` fact a test 
 ## What lives here vs. smoke
 
 - **Here:** behavior that needs in-process service replacement or deterministic control — the auth
-  **401/403/tier matrix**, the callback verdict (ok/denied/invalid/upstream-error), refresh rotation,
-  the session snapshot. `401` (no/invalid bearer) vs `403` (authenticated, tier too low) is the
-  load-bearing split — assert both.
+  **401/403/tier matrix** against anchor-signed sessions, the ended-session deny-list, a replicated
+  change reaching an open stream. `401` (no/invalid bearer) vs `403` (authenticated, tier too low) is
+  the load-bearing split — assert both.
 - **`scripts/smoke.sh`:** the HTTP **contract surface** end-to-end (envelopes, DTO shapes, the SSE
   stream protocol, the no-token sweep) against a real running process. The two are complementary, not
   redundant.
@@ -102,5 +94,5 @@ pipeline. Use the same trick for any other `HttpContext.Connection` fact a test 
 ## Convention for new tests
 
 *Behavioral* tests land here, faking the relevant boundary (the leaf client, the event socket, the
-Discord seam); smoke keeps proving the wire contract. Keep fakes switch-on-input (like
-`FakeDiscordResolver`) rather than mutable, so tests stay parallel-safe.
+auth anchor); smoke keeps proving the wire contract. Keep fakes switch-on-input rather than mutable,
+so tests stay parallel-safe.

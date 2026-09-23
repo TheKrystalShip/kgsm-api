@@ -42,11 +42,10 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
 {
     // ---- the types this producer owns ----------------------------------------------------------
 
-    // The account events are NOT this producer's own vocabulary, and the names come from the shared
-    // contract rather than being spelled again here. A host that holds its own accounts records them
-    // from this API; a cluster whose accounts are held by an auth anchor has the anchor record them.
-    // A reader deserializes each into a fixed shape, so a name or a field spelled differently by one
-    // of the two writers does not throw — it simply matches nothing, or lands as a null.
+    // The account and session events are NOT this producer's vocabulary: the auth anchor records them,
+    // and this API reads them to shape audit rows. The names come from the shared contract rather than
+    // being spelled again here, because a reader deserializes each into a fixed shape and a name spelled
+    // differently would not throw — it would simply match nothing.
     public const string LoginEvent = AuthEvents.SignedIn;
     public const string LogoutEvent = AuthEvents.SignedOut;
     public const string ClusterSessionEvent = AuthEvents.ClusterVouched;
@@ -77,61 +76,6 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
 
     public const string LibraryRenamedEvent = "library.renamed";
     public const string LibraryFailedEvent = "library.failed";
-
-    /// <summary>
-    /// Records a session beginning or ending.
-    /// </summary>
-    /// <remarks>
-    /// The actor is the identity that arrived, not this API: nobody else was involved in a sign-in,
-    /// and naming the component that minted the token would hide who came through the door.
-    /// </remarks>
-    public Task SessionAsync(
-        string type, string? userId, string username, string identity, string? provider, string? tier,
-        string? sid, string? userAgent, string? peerNode, string actor, string? origin,
-        CancellationToken ct = default) =>
-        WriteAsync(
-            type, actor, origin,
-            AuthEventPayloads.Session(
-                // UserId is null when the caller did not have the account row in hand — a sign-out
-                // holds the token's identity and nothing else, and deriving an id from the handle
-                // would record a lookup that never happened. PeerNode is present only on a cluster
-                // vouch, and is the thing that says the proof was another node's rather than this
-                // one's.
-                userId, username, identity, provider, tier, sid, userAgent, peerNode),
-            ct);
-
-    /// <summary>Records sessions being torn down before they expired.</summary>
-    public Task SessionRevokedAsync(
-        string scope, string userId, string username, string? sid, int? count,
-        string actor, string? origin, CancellationToken ct = default) =>
-        WriteAsync(
-            SessionRevokedEvent, actor, origin,
-            AuthEventPayloads.SessionRevoked(scope, userId, username, sid, count), ct);
-
-    /// <summary>
-    /// Records an account being provisioned, approved, disabled, deleted, or having its authority or
-    /// password changed.
-    /// </summary>
-    /// <remarks>
-    /// Takes no password parameter and never will. What is recorded is that a credential was set
-    /// and by whom — the only signal an account takeover leaves — and the credential is not part of
-    /// that fact.
-    /// </remarks>
-    public Task AccountAsync(
-        string type, string userId, string username, string? fromTier = null, string? toTier = null,
-        string? fromStatus = null, string? toStatus = null, bool? byHolder = null,
-        string actor = "", string? origin = null, CancellationToken ct = default) =>
-        WriteAsync(
-            type, actor, origin,
-            AuthEventPayloads.Account(
-                userId, username, fromTier, toTier, fromStatus, toStatus, byHolder), ct);
-
-    /// <summary>Records an external identity being attached to or detached from an account.</summary>
-    public Task IdentityAsync(
-        string type, string userId, string username, string provider, string handle,
-        string actor, string? origin, CancellationToken ct = default) =>
-        WriteAsync(
-            type, actor, origin, AuthEventPayloads.Identity(userId, username, provider, handle), ct);
 
     /// <summary>Records a leaf's runtime provisioning being flipped.</summary>
     public Task ServiceProvisioningAsync(

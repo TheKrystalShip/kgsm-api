@@ -189,32 +189,6 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         Assert.Equal("service.connected", service.GetProperty("data")[0].GetProperty("action").GetString());
     }
 
-    // --- The API-internal write path, end-to-end (no kgsm event): a real login -> auth.login row ---
-    [Fact]
-    public async Task Login_WritesAuthLoginAudit_Readable()
-    {
-        // Drive a real callback through the CSRF round-trip. The tier the row records is the one the
-        // ACCOUNT holds, so the account is what this states.
-        factory.SetAccount(FakeDiscordResolver.Identity, KgsmTier.Operator);
-        HttpClient login = factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
-        {
-            AllowAutoRedirect = false,
-        });
-        string state = (await login.GetAsync("/auth/discord/start")).Headers.Location!.Query
-            .TrimStart('?').Split('&').First(kv => kv.StartsWith("state=")).Substring("state=".Length);
-        HttpResponseMessage cb = await login.GetAsync($"/auth/discord/callback?code=operator&state={state}");
-        Assert.Equal(HttpStatusCode.OK, cb.StatusCode);
-
-        // The login is an API-internal action (no kgsm event) — written directly, no double-write.
-        JsonElement body = await Json(await Viewer().GetAsync("/api/v1/audit?actor=haru"));
-        JsonElement[] rows = body.GetProperty("data").EnumerateArray().ToArray();
-        Assert.Contains(rows, x => x.GetProperty("action").GetString() == "auth.signed_in");
-        JsonElement loginRow = rows.First(x => x.GetProperty("action").GetString() == "auth.signed_in");
-        Assert.Equal("discord", loginRow.GetProperty("actor").GetProperty("provider").GetString());
-        Assert.Equal("operator", loginRow.GetProperty("meta").GetProperty("tier").GetString());
-        Assert.Equal(JsonValueKind.Null, loginRow.GetProperty("target").ValueKind); // panel-wide, no target
-    }
-
     // --- The audit topic: an append is pushed as audit.append ---------------------------------------
     [Fact]
     public async Task AuditTopic_DeliversAppend()

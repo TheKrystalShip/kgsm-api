@@ -61,7 +61,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
         });
 
     private static string AdminToken(WebApplicationFactory<Program> app) =>
-        AuthTestFactory.MintTokenWithRow(app.Services, KgsmTier.Admin, access: true);
+        AuthTestFactory.MintAccessOn(app.Services, KgsmTier.Admin);
 
     private static HttpRequestMessage Bearer(HttpMethod method, string path, string token, object? body = null)
     {
@@ -181,7 +181,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
     {
         using WebApplicationFactory<Program> app = BuildApp();
         using HttpClient client = app.CreateClient();
-        string viewerToken = AuthTestFactory.MintTokenWithRow(app.Services, KgsmTier.Viewer, access: true);
+        string viewerToken = AuthTestFactory.MintAccessOn(app.Services, KgsmTier.Viewer);
 
         HttpResponseMessage resp = await client.SendAsync(
             Bearer(HttpMethod.Post, "/api/v1/members", viewerToken, new { url = "https://node-b.test" }));
@@ -288,7 +288,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
     {
         using WebApplicationFactory<Program> app = BuildApp();
         using HttpClient client = app.CreateClient();
-        string viewerToken = AuthTestFactory.MintTokenWithRow(app.Services, KgsmTier.Viewer, access: true);
+        string viewerToken = AuthTestFactory.MintAccessOn(app.Services, KgsmTier.Viewer);
 
         HttpResponseMessage resp = await client.SendAsync(
             Bearer(HttpMethod.Delete, "/api/v1/members/whatever", viewerToken));

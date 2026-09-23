@@ -1,75 +1,58 @@
 #!/usr/bin/env python3
 """
-mint-dev-token.py — mint a kgsm-api session bearer for a SYNTHETIC dev identity.
+mint-dev-token.py — mint a session bearer for a KGSM account, signed as the cluster's auth anchor.
 
 Why this exists
 ---------------
-kgsm-api auth is Discord per-host, Model A: an "account" is just a Discord identity
-verified once at OAuth, then represented as a short-lived HMAC-signed JWT (see
-src/Api/Services/Auth/). There is no user-profile table; the audit log's actor is read
-straight off the token's `uname` claim (AuditPrincipal.ActorString -> "discord:<uname>").
+kgsm-api signs nobody in. Every session it accepts was minted by the cluster's auth anchor
+(kgsm-auth-anchor): an ES256 JWT, audienced to the cluster, stamped with the anchor's issuer, and
+verified against the key the anchor publishes. Authority is not in the token — every request reads
+the caller's tier from the account replica — so a token only means anything if it names an account.
 
-Because the bearer is signed by the host's session key alone (no Discord call on
-validation), we can mint a valid, distinctly-attributable token for an agent identity
-("claude") WITHOUT a Discord round-trip. This is appropriate ONLY on a trusted dev host —
-it bypasses Discord by design. It does NOT weaken auth for anyone else (auth stays ON); it
-just hands a CLI caller a legitimately-signed identity so its test actions land in the
-audit log under their own name instead of the human operator's.
+On a trusted dev host that runs the anchor, this signs such a session with the anchor's own private
+key, so an agent identity ("claude") gets a real, attributable bearer without typing a password into
+the sign-in page. It weakens nothing for anyone else: auth stays on, and the token is exactly one the
+anchor could have minted. It is appropriate ONLY on a machine whose anchor key you already hold.
 
-The session registry (M4·c revocation)
---------------------------------------
-Every request carries a `sid` claim that the API checks against the `sessions` table (a
-5s-cached lookup): a token whose `sid` has no live, non-revoked, unexpired row is rejected
-(401 — no grandfathering). So a signed token alone is not enough; this tool mints the token
-WITH a `sid`/`jti` and inserts the matching session row into the API's DB (the same
-operational row a real OAuth login would create — a session row, not a user profile). The
-row is marked with a recognisable User-Agent so these dev sessions are visible in the
-Active Sessions UI and swept by the normal GC worker once expired. Pass --no-session to
-skip the insert (only useful when the API runs with Api__AuthDisabled=true, where the
-sid check is bypassed).
+Nothing is registered anywhere. A member keeps no row for a session — it records only that one has
+been ended — so a minted token is valid on every member until it expires.
 
-The signing key is read from the host env file at runtime and never written anywhere.
+The private key is read at runtime from the anchor's state directory and never written anywhere.
 
 Claim shape mirrors SessionTokenService.Mint exactly:
-  iss=kgsm-api  aud=<host>  sub=discord:<userId>
-  tier=<tier>  host=<host>  tkn=access  uname=<username>  disp=<display>  scope=...
-  sid=sid_<guid>  jti=<guid>  iat/nbf/exp standard.
+  iss=<anchor issuer>  aud=<cluster id>  sub=local:<usr_ id>
+  tier=<tier>  host=<cluster id>  tkn=access  sid=sid_<hex>  jti=<hex>  uname  disp  scope
+  iat/nbf/exp standard.  Header: alg=ES256, kid=<the published key's id>.
 
 Usage
 -----
-  ./mint-dev-token.py                       # claude / admin / aud=hotrod / 12h + a session row
-  ./mint-dev-token.py --tier operator --ttl 1h
-  ./mint-dev-token.py --username claude --display 'Claude (agent)' --host hotrod
-  ./mint-dev-token.py --db /var/lib/kgsm-api/kgsm-api.db     # override the DB the row lands in
-  ./mint-dev-token.py --no-session          # token only (Api__AuthDisabled hosts)
+  ./mint-dev-token.py --account claude                 # admin tier hint, 12h
+  ./mint-dev-token.py --account claude --ttl 7d
+  ./mint-dev-token.py --account claude --cluster-id kgsm-cluster --issuer kgsm
 """
 import argparse
 import base64
-import hashlib
-import hmac
 import json
-import os
 import re
 import sqlite3
 import sys
 import time
 import uuid
 
+try:
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+except ImportError:
+    sys.exit("error: this needs the python 'cryptography' package (pacman -S python-cryptography)")
+
 
 def b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
-def read_signing_key(env_file: str, state_dir: str) -> str:
-    # Resolve the key exactly as HostSigningKey does, in its order: a configured
-    # Api__SigningKey (exported, or in the systemd EnvironmentFile) is the answer whenever there
-    # is one; with none, the host generated 48 random bytes on first start and keeps them in
-    # {StateDir}/signing-key at 0600, reusing them on every later start. A host nobody handed a
-    # secret to therefore signs with a perfectly stable key, and reading that file is the only way
-    # to mint a token it will accept.
-    if os.environ.get("Api__SigningKey"):
-        return os.environ["Api__SigningKey"]
-    env_missing = False
+def env_setting(env_file: str, key: str):
+    """One setting out of a systemd EnvironmentFile, or None."""
     try:
         with open(env_file, "r", encoding="utf-8") as fh:
             for line in fh:
@@ -77,60 +60,39 @@ def read_signing_key(env_file: str, state_dir: str) -> str:
                 if line.startswith("#") or "=" not in line:
                     continue
                 k, _, v = line.partition("=")
-                if k.strip() == "Api__SigningKey":
-                    return v.strip().strip('"').strip("'")
-    except FileNotFoundError:
-        env_missing = True
-    except PermissionError:
-        env_missing = True
-
-    key_file = os.path.join(state_dir, "signing-key")
-    try:
-        with open(key_file, "r", encoding="utf-8") as fh:
-            stored = fh.read().strip()
-        if stored:
-            return stored
-    except FileNotFoundError:
+                if k.strip() == key:
+                    return v.strip().strip('"').strip("'") or None
+    except (FileNotFoundError, PermissionError):
         pass
-    except PermissionError:
-        sys.exit(f"error: {key_file} is not readable (it is 0600, owned by the service user) — "
-                 f"re-run with sudo, or export Api__SigningKey")
-
-    where = f"{env_file} (unreadable or absent)" if env_missing else env_file
-    sys.exit(f"error: no signing key found — Api__SigningKey is not in {where}, and this host has "
-             f"generated no {key_file}. Start kgsm-api once so it writes one, or set a key.")
+    return None
 
 
-# .NET DateTimeOffset.UtcTicks at the Unix epoch — the API stores session timestamps as UTC ticks
-# (100ns since 0001-01-01) via an EF ValueConverter, so we convert Unix seconds the same way.
-TICKS_AT_UNIX_EPOCH = 621_355_968_000_000_000
-
-
-def resolve_db_path(explicit: str | None, env_file: str) -> str:
-    # Precedence mirrors the API: an explicit flag, then Api__DbPath in the environment, then the
-    # host env file, then the systemd unit's StateDirectory default.
-    if explicit:
-        return explicit
-    if os.environ.get("Api__DbPath"):
-        return os.environ["Api__DbPath"]
+def read_private_key(path: str):
     try:
-        with open(env_file, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line.startswith("#") or "=" not in line:
-                    continue
-                k, _, v = line.partition("=")
-                if k.strip() == "Api__DbPath":
-                    return v.strip().strip('"').strip("'")
+        with open(path, "rb") as fh:
+            return serialization.load_pem_private_key(fh.read(), password=None)
     except FileNotFoundError:
-        pass
-    return "/var/lib/kgsm-api/kgsm-api.db"
+        sys.exit(f"error: no anchor signing key at {path} — does this machine run kgsm-auth-anchor?")
+    except PermissionError:
+        sys.exit(f"error: {path} is not readable (0600, owned by the service user) — run as that user")
+
+
+def read_kid(published: str) -> str:
+    """The key id the anchor publishes for its current key — what a member matches a token on."""
+    try:
+        with open(published, "r", encoding="utf-8") as fh:
+            keys = json.load(fh).get("keys") or []
+    except (FileNotFoundError, PermissionError, json.JSONDecodeError) as e:
+        sys.exit(f"error: could not read the published key set at {published}: {e}")
+    if not keys or not keys[0].get("kid"):
+        sys.exit(f"error: {published} names no key")
+    return keys[0]["kid"]
 
 
 def read_account(users_db: str, username: str):
     """The KGSM account behind `username`: (user_id, username, display_name), or exit.
 
-    Authority is resolved from the account store on every request, so a dev token only means
+    Authority is resolved from the account replica on every request, so a dev token only means
     anything if there is an account behind it. Reading the store rather than taking a `usr_` id on
     the command line is what keeps the two from drifting apart silently.
     """
@@ -147,34 +109,8 @@ def read_account(users_db: str, username: str):
     finally:
         conn.close()
     if row is None:
-        sys.exit(f"error: no KGSM account '{username}' on this host "
-                 f"(create one: kgsm-api user create --username {username} --tier admin)")
+        sys.exit(f"error: no KGSM account '{username}' in {users_db} — create it at the anchor")
     return row
-
-
-def insert_session(db_path: str, sid: str, sub: str, host: str, jti: str,
-                   now_s: int, exp_s: int, user_agent: str) -> None:
-    # Insert the operational session row the M4·c validator requires (row exists, not revoked,
-    # Expires > now). Expires tracks the token's own exp so the session is alive exactly while the
-    # token is. WAL + a busy timeout so this never contends with the live API's writes.
-    now_ticks = TICKS_AT_UNIX_EPOCH + now_s * 10_000_000
-    exp_ticks = TICKS_AT_UNIX_EPOCH + exp_s * 10_000_000
-    try:
-        conn = sqlite3.connect(db_path, timeout=5)
-    except sqlite3.Error as e:
-        sys.exit(f"error: could not open the API DB at {db_path}: {e} (pass --db or --no-session)")
-    try:
-        conn.execute("PRAGMA busy_timeout=5000;")
-        conn.execute(
-            'INSERT INTO "sessions" '
-            '("Id","UserId","HostId","Created","LastSeen","Expires","UserAgent","Revoked","RevokedAt","CurrentJti") '
-            "VALUES (?,?,?,?,?,?,?,0,NULL,?)",
-            (sid, sub, host, now_ticks, now_ticks, exp_ticks, user_agent, jti))
-        conn.commit()
-    except sqlite3.OperationalError as e:
-        sys.exit(f"error: could not write the session row (is the `sessions` table present in {db_path}?): {e}")
-    finally:
-        conn.close()
 
 
 def parse_ttl(s: str) -> int:
@@ -186,64 +122,52 @@ def parse_ttl(s: str) -> int:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Mint a kgsm-api dev session bearer.")
-    ap.add_argument("--username", default="claude", help="Discord username -> audit actor (discord:<username>)")
-    ap.add_argument("--display", default="Claude (agent)", help="display name (profile snapshot)")
-    ap.add_argument("--user-id", default="claude", help="sub becomes discord:<user-id>")
-    ap.add_argument("--account", default=None,
-                    help="mint AS a KGSM account (sub becomes local:<usr_ id>, read from the account "
-                         "store). Authority comes from that account, so this is what a token needs "
-                         "to be worth anything; --user-id mints an external identity instead.")
+    ap = argparse.ArgumentParser(description="Mint a session bearer signed as the cluster's auth anchor.")
+    ap.add_argument("--account", required=True,
+                    help="the KGSM account to mint for (sub becomes local:<usr_ id>)")
     ap.add_argument("--users-db", default="/var/lib/kgsm/auth/users.db",
                     help="the account store --account is read from")
     ap.add_argument("--tier", default="admin", choices=["viewer", "operator", "admin"],
-                    help="the token's tier claim. A display hint only — every gate resolves "
-                         "authority from the account store, so this is what the ACCOUNT holds or "
-                         "the request is refused at the real one.")
-    ap.add_argument("--host", default="hotrod", help="host id == token audience (Api__HostId, default machine name)")
+                    help="the token's tier claim. A display hint only — every gate resolves authority "
+                         "from the account replica.")
     ap.add_argument("--ttl", default="12h", help="lifetime: 30m / 12h / 7d (default 12h)")
-    ap.add_argument("--env-file", default="/etc/kgsm-api/kgsm-api.env", help="EnvironmentFile a pinned Api__SigningKey may be in; without one the key is read from {StateDir}/signing-key")
-    ap.add_argument("--db", default=None,
-                    help="API DB to insert the session row into (default: Api__DbPath / env file / "
-                         "/var/lib/kgsm-api/kgsm-api.db)")
-    ap.add_argument("--no-session", action="store_true",
-                    help="mint the token only; skip the session row (for Api__AuthDisabled hosts)")
+    ap.add_argument("--key", default="/var/lib/kgsm-auth-anchor/session-signing.pem",
+                    help="the anchor's private signing key")
+    ap.add_argument("--published", default="/var/lib/kgsm/cluster/auth-public-key.json",
+                    help="the key set the anchor publishes, for the key id")
+    ap.add_argument("--anchor-env", default="/etc/kgsm-auth-anchor/kgsm-auth-anchor.env",
+                    help="the anchor's EnvironmentFile, for a configured cluster id or issuer")
+    ap.add_argument("--cluster-id", default=None,
+                    help="the audience (default: Anchor__ClusterId from --anchor-env, else kgsm-cluster)")
+    ap.add_argument("--issuer", default=None,
+                    help="the issuer (default: Anchor__Issuer from --anchor-env, else kgsm)")
     args = ap.parse_args()
 
-    # The state dir is the DB's, so an Api__DbPath override moves the key lookup with it — the API
-    # derives SigningKeyPath from the same StateDir.
-    secret = read_signing_key(args.env_file, os.path.dirname(resolve_db_path(args.db, args.env_file)))
-    # SessionTokenService: key = SHA256(UTF8(secret)) -> 32-byte HMAC key.
-    key = hashlib.sha256(secret.encode("utf-8")).digest()
+    cluster_id = args.cluster_id or env_setting(args.anchor_env, "Anchor__ClusterId") or "kgsm-cluster"
+    issuer = args.issuer or env_setting(args.anchor_env, "Anchor__Issuer") or "kgsm"
+    key = read_private_key(args.key)
+    if not isinstance(key, ec.EllipticCurvePrivateKey):
+        sys.exit(f"error: {args.key} is not an EC key")
+    kid = read_kid(args.published)
 
+    user_id, username, display_name = read_account(args.users_db, args.account)
     now = int(time.time())
-    exp = now + parse_ttl(args.ttl)
-    username, display = args.username, args.display
-    if args.account:
-        user_id, username, display_name = read_account(args.users_db, args.account)
-        sub = f"local:{user_id}"
-        display = display_name or display
-    else:
-        sub = f"discord:{args.user_id}"
-    # M4·c: a stable session id (sid_<guid>) checked against the sessions table, and a per-token jti.
-    sid = "sid_" + uuid.uuid4().hex
-    jti = uuid.uuid4().hex
-    header = {"alg": "HS256", "typ": "JWT"}
+    header = {"alg": "ES256", "kid": kid, "typ": "JWT"}
     payload = {
-        "iss": "kgsm-api",
-        "aud": args.host,
-        "sub": sub,
+        "iss": issuer,
+        "aud": cluster_id,
+        "sub": f"local:{user_id}",
         "tier": args.tier,
-        "host": args.host,
+        "host": cluster_id,
         "tkn": "access",
-        "sid": sid,
-        "jti": jti,
+        "sid": "sid_" + uuid.uuid4().hex,
+        "jti": uuid.uuid4().hex,
         "uname": username,
-        "disp": display,
-        "scope": "identify guilds",
+        "disp": display_name or username,
+        "scope": "",
         "iat": now,
         "nbf": now,
-        "exp": exp,
+        "exp": now + parse_ttl(args.ttl),
     }
 
     signing_input = (
@@ -251,20 +175,12 @@ def main() -> None:
         + "."
         + b64url(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     )
-    sig = hmac.new(key, signing_input.encode("ascii"), hashlib.sha256).digest()
-    token = signing_input + "." + b64url(sig)
+    # A JWS ES256 signature is r || s, each 32 bytes — not the DER the library produces.
+    r, s = decode_dss_signature(key.sign(signing_input.encode("ascii"), ec.ECDSA(hashes.SHA256())))
+    token = signing_input + "." + b64url(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
 
-    # Insert the operational session row the validator requires (unless explicitly skipped).
-    if not args.no_session:
-        db_path = resolve_db_path(args.db, args.env_file)
-        insert_session(db_path, sid, sub, args.host, jti, now, exp,
-                       user_agent=f"mint-dev-token ({username})")
-
+    print(f"# {username} ({payload['sub']}) aud={cluster_id} iss={issuer} exp={args.ttl}", file=sys.stderr)
     print(token)
-    # Diagnostics to stderr so `TOKEN=$(mint-dev-token.py)` stays clean.
-    session_note = "no session row (--no-session)" if args.no_session else f"session {sid}"
-    print(f"# identity={sub} actor={username} tier={args.tier} aud={args.host} "
-          f"ttl={args.ttl} (exp in {exp - now}s) · {session_note}", file=sys.stderr)
 
 
 if __name__ == "__main__":

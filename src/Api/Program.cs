@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
-using TheKrystalShip.KGSM.Auth.Users;
-
 namespace TheKrystalShip.Api;
 
 /// <summary>
@@ -23,32 +21,9 @@ public class Program
 
     public static int Main(string[] args)
     {
-        // `kgsm-api user …` manages the host's KGSM accounts and exits without starting a server.
-        // It is checked before the host is built because the two want opposite things from the
-        // command line: the host feeds args to the configuration binder, where `user create` would
-        // bind to nothing, and the CLI needs the words themselves.
-        if (args.Length > 0 && args[0] == UserCli.Verb)
-            return UserCli.RunAsync(args, CliOptions(args)).GetAwaiter().GetResult();
-
         CreateHostBuilder(args).Build().Run();
         return 0;
     }
-
-    /// <summary>
-    /// The settings the CLI runs on, resolved exactly as the running service resolves them — the
-    /// settings file beside the binary, then the environment, then the command line.
-    /// </summary>
-    /// <remarks>
-    /// Built from the same sources in the same order rather than reading one of them, because a CLI
-    /// that writes a different file from the one the service reads is worse than no CLI: the account
-    /// it creates simply never appears.
-    /// </remarks>
-    private static ApiOptions CliOptions(string[] args) =>
-        ApiOptions.FromConfiguration(new ConfigurationBuilder()
-            .AddJsonFile(Path.Combine(AppContext.BaseDirectory, SettingsFile), optional: true)
-            .AddEnvironmentVariables()
-            .AddCommandLine(args)
-            .Build());
 
     public static IHostBuilder CreateHostBuilder(string[] args) =>
         Host.CreateDefaultBuilder(args)

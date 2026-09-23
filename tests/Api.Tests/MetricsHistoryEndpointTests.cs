@@ -167,7 +167,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         using WebApplicationFactoryWithFake fakeFactory = new(monitorBody);
         HttpClient client = fakeFactory.Factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", AuthTestFactory.MintTokenWithRow(fakeFactory.Factory.Services, KgsmTier.Viewer, access: true));
+            "Bearer", AuthTestFactory.MintAccessOn(fakeFactory.Factory.Services, KgsmTier.Viewer));
 
         HttpResponseMessage r = await client.GetAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}/services/watchdog/metrics/history?range=1h");
@@ -191,7 +191,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         using WebApplicationFactoryWithFake fakeFactory = new(monitorBody);
         HttpClient client = fakeFactory.Factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", AuthTestFactory.MintTokenWithRow(fakeFactory.Factory.Services, KgsmTier.Viewer, access: true));
+            "Bearer", AuthTestFactory.MintAccessOn(fakeFactory.Factory.Services, KgsmTier.Viewer));
 
         HttpResponseMessage r = await client.GetAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}/metrics/history?range=1h");

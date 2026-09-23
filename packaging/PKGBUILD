@@ -28,8 +28,14 @@ groups=('kgsm-node')
 # and survives stripping, which is why only the single-file packages carry this.
 options=('!debug' '!strip')
 # kgsm-base carries the kgsm service account this unit runs as, the /var/lib/kgsm tree it scans for
-# leaf descriptors and the account store, and the preset policy deciding whether it runs here.
-depends=('kgsm-base' 'kgsm' 'systemd' 'glibc' 'aspnet-runtime' 'polkit')
+# leaf descriptors and the account replica, the cluster secret, and the preset policy deciding
+# whether it runs here.
+#
+# kgsm-auth-anchor is a dependency rather than an option because this node signs nobody in: every
+# session it accepts is minted by its cluster's auth anchor. A machine that founds its own cluster
+# runs the anchor beside this unit, and one that joins a cluster keeps it installed and off, as the
+# promotion candidate a cluster keeps.
+depends=('kgsm-base' 'kgsm' 'kgsm-auth-anchor' 'systemd' 'glibc' 'aspnet-runtime' 'polkit')
 optdepends=(
     'kgsm-web: the Control Panel SPA this serves at / (without it the API runs headless)'
     'kgsm-monitor: host and per-server metrics'

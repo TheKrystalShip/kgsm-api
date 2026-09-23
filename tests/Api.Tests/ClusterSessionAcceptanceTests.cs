@@ -170,8 +170,8 @@ public sealed class ClusterSessionAcceptanceTests
 
         // What the anchor's sign-out fan-out lands as here. The session has no row on this node, so
         // the marker is the whole of what ends it.
-        var sessions = node.Services.GetRequiredService<SessionStore>();
-        await sessions.RecordRevocationAsync(sid, "host-a", DateTimeOffset.UtcNow.AddDays(30));
+        var sessions = node.Services.GetRequiredService<EndedSessionStore>();
+        await sessions.RecordRevocationAsync(sid, DateTimeOffset.UtcNow.AddDays(30));
         node.Services.GetRequiredService<ClusterSessionRevocations>().Evict(sid);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Get("/api/v1/me", token))).StatusCode);
@@ -191,15 +191,15 @@ public sealed class ClusterSessionAcceptanceTests
         string phone = Anchor(signer).MintAccess(person, KgsmTier.Admin, "sid_phone").Token;
         string laptop = Anchor(signer).MintAccess(person, KgsmTier.Admin, "sid_laptop").Token;
 
-        await node.Services.GetRequiredService<SessionStore>()
-            .RecordRevocationAsync("sid_phone", "host-a", DateTimeOffset.UtcNow.AddDays(30));
+        await node.Services.GetRequiredService<EndedSessionStore>()
+            .RecordRevocationAsync("sid_phone", DateTimeOffset.UtcNow.AddDays(30));
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Get("/api/v1/me", phone))).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Get("/api/v1/me", laptop))).StatusCode);
     }
 
     [Fact]
-    public async Task A_node_that_has_heard_nothing_refuses_a_cluster_session_and_still_serves_its_own()
+    public async Task A_node_that_has_heard_of_no_anchor_accepts_no_session_at_all()
     {
         using var signer = EcdsaSessionSigner.Generate();
         await using var factory = new AuthTestFactory();
@@ -210,12 +210,13 @@ public sealed class ClusterSessionAcceptanceTests
         AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
         string fromAnchor = Anchor(signer).MintAccess(person, KgsmTier.Admin, "sid_1").Token;
 
+        // Nothing to verify against and nothing of its own to fall back on: this node signs nobody in.
         Assert.Equal(
             HttpStatusCode.Unauthorized, (await client.SendAsync(Get("/api/v1/me", fromAnchor))).StatusCode);
-
-        // The whole of what a standalone install has ever done, unchanged.
-        string own = AuthTestFactory.MintTokenWithRow(node.Services, KgsmTier.Admin, access: true);
-        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Get("/api/v1/me", own))).StatusCode);
+        Assert.Equal(
+            HttpStatusCode.Unauthorized,
+            (await client.SendAsync(Get("/api/v1/me", AuthTestFactory.MintAccessOn(node.Services, KgsmTier.Admin))))
+                .StatusCode);
     }
 
     [Fact]

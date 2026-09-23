@@ -44,21 +44,30 @@ public sealed class SpaFallbackTests : IDisposable
         Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
     }
 
-    [Theory]
-    [InlineData("/api/v1/no-such-thing")]
-    [InlineData("/auth/session/no-such-thing")]
-    public async Task ARouteThatDoesNotExistIsNotAWebPage(string path)
+    [Fact]
+    public async Task ARouteThatDoesNotExistIsNotAWebPage()
     {
-        // /auth sits at the root beside /api rather than under it, so naming only /api leaves the
-        // whole auth surface answering a web page for paths that do not exist.
-        HttpResponseMessage response = await _client.GetAsync(path);
+        HttpResponseMessage response = await _client.GetAsync("/api/v1/no-such-thing");
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.NotEqual("text/html", response.Content.Headers.ContentType?.MediaType);
     }
 
     [Theory]
-    [InlineData("/auth/session/cluster-exchange")]
+    [InlineData("/auth/session")]
+    [InlineData("/auth/login")]
+    public async Task AskingThisNodeHowToSignInIsNotAWebPage(string path)
+    {
+        // /auth sits at the root beside /api, where the panel's client-side routing would otherwise
+        // answer it with the app. This node signs nobody in, and every /auth path says so.
+        HttpResponseMessage response = await _client.GetAsync(path);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.NotEqual("text/html", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Theory]
+    [InlineData("/api/v1/no-such-thing")]
     [InlineData("/somewhere-a-person-might-navigate")]
     public async Task AWriteToARouteThatDoesNotExistIsNotAWebPage(string path)
     {

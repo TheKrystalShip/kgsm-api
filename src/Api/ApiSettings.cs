@@ -249,31 +249,11 @@ public sealed class ApiSettings
     [ConfigField("disabledAuthActor", "Actor while auth is disabled", Group = "auth", NoDefault = true)]
     public string? DisabledAuthActor { get; set; }
 
-    /// <summary>HMAC signing key for session JWTs. Blank means the host generates and keeps its own.</summary>
-    /// <panel>Secret every session token is signed with. Leave it blank and this host generates one for
-    /// itself on first start and reuses it forever after. Changing it signs everyone out at once, which
-    /// is also how you revoke every token in a hurry.</panel>
-    [ConfigField("signingKey", "Token signing key", Group = "auth", Type = ConfigType.Secret,
-        Risk = ConfigRisk.Wiring, NoDefault = true)]
-    public string? SigningKey { get; set; }
-
-    /// <summary>This host's OAuth redirect URI; must match the app registry.</summary>
-    /// <panel>Where Discord sends someone back to after they approve. It has to match the redirect
-    /// registered on the Discord application exactly.</panel>
-    [ConfigField("discordRedirectUri", "Sign-in redirect", Group = "auth", Risk = ConfigRisk.Wiring,
-        NoDefault = true)]
-    public string? DiscordRedirectUri { get; set; }
-
-    /// <summary>SPA origin the OAuth callback hands the session back to. Blank returns JSON.</summary>
-    /// <panel>Where to send someone once sign-in completes. Empty returns them to where they started.</panel>
-    [ConfigField("authFrontendUrl", "Panel URL", Group = "auth", NoDefault = true)]
-    public string? AuthFrontendUrl { get; set; }
-
-    /// <summary>The host's shared KGSM account store. Blank falls back to /var/lib/kgsm/auth/users.db.</summary>
-    /// <panel>The file this host keeps its KGSM accounts and passwords in. Every KGSM service on the
-    /// host reads the same file, so pointing this somewhere else signs people out of the panel while
-    /// leaving the assistant on the old one.</panel>
-    [ConfigField("usersDbPath", "Account store", Group = "auth", Type = ConfigType.Path,
+    /// <summary>This node's replica of the cluster's accounts. Blank falls back to /var/lib/kgsm/auth/users.db.</summary>
+    /// <panel>The file this node keeps its copy of the cluster's accounts in, kept current by the auth
+    /// anchor. Every KGSM service on the machine reads the same file, so pointing this somewhere else
+    /// resolves people against a copy nothing updates.</panel>
+    [ConfigField("usersDbPath", "Account replica", Group = "auth", Type = ConfigType.Path,
         Risk = ConfigRisk.Wiring)]
     public string? UsersDbPath { get; set; }
 
@@ -284,68 +264,20 @@ public sealed class ApiSettings
     [ConfigField("authorityCacheSeconds", "Authority lookup cache", Group = "auth", Min = 0, Unit = "s")]
     public int? AuthorityCacheSeconds { get; set; }
 
-    /// <summary>The most accounts awaiting approval this host will hold at once. Floor 1.</summary>
-    /// <panel>How many people can be waiting for approval at the same time. Anyone who signs in through
-    /// an identity provider and has no account here yet becomes one of them, so this is the ceiling on
-    /// what a stranger can add to this host.</panel>
-    [ConfigField("pendingUserCap", "Accounts awaiting approval", Group = "auth", Min = 1)]
-    public int? PendingUserCap { get; set; }
-
-    /// <summary>How long an unapproved, self-provisioned account survives unattended, in days. Floor 1.</summary>
-    /// <panel>How long someone waiting for approval stays on the list before being forgotten. Only ever
-    /// removes an account that arrived on its own and was never approved — one an administrator created
-    /// by hand waits as long as it waits. Set this to however long approving somebody may realistically
-    /// take here, because past it they are gone and have to sign up again.</panel>
-    [ConfigField("pendingUserTtlDays", "Approval request lifetime", Group = "auth", Min = 1, Unit = "days")]
-    public int? PendingUserTtlDays { get; set; }
-
-    /// <summary>Whether anonymous callers may create their own account through <c>POST /auth/register</c>.</summary>
-    /// <panel>Lets people create their own account on this host instead of waiting for an administrator
-    /// to make one. A new account still holds nothing until it is approved, so this decides who may
-    /// join the queue — not who gets in. Off unless you turn it on: a host reachable from the internet
-    /// with sign-up open is a host strangers can fill the approval list on.</panel>
-    [ConfigField("allowSelfRegistration", "Allow people to sign themselves up", Group = "auth")]
-    public bool? AllowSelfRegistration { get; set; }
-
-    /// <summary>Sign-in and sign-up attempts one caller may make per minute. Floor 1.</summary>
-    /// <panel>How many times a minute one address may try to sign in or sign up before this host stops
-    /// answering it. Raise it if several people here share one internet connection, since to this host
-    /// they all look like the same caller.</panel>
-    [ConfigField("anonymousRateLimit", "Sign-in attempts per minute", Group = "auth", Min = 1)]
-    public int? AnonymousRateLimit { get; set; }
-
-    /// <summary>How long a proved credential keeps a session allowed to change what proves it. Floor 1.</summary>
-    /// <panel>How long after entering their password someone may attach or detach a sign-in method.
-    /// Past it they are asked for it again — a borrowed unlocked laptop should not be able to attach a
-    /// permanent way back in.</panel>
-    [ConfigField("reauthWindowMinutes", "Re-authentication window", Group = "auth", Min = 1, Unit = "min")]
-    public int? ReauthWindowMinutes { get; set; }
-
-
-    // ── Sessions ──────────────────────────────────────────────────────
-    /// <summary>Turns the session registry inert, leaving revocation unenforceable.</summary>
-    /// <panel>Stops tracking live sessions. Signing in still works, but a token can no longer be revoked
-    /// before it expires and the Active Sessions list goes empty.</panel>
-    [ConfigField("sessionsDisabled", "Disable the session registry", Group = "sessions",
-        Risk = ConfigRisk.Destructive)]
-    public bool? SessionsDisabled { get; set; }
-
-    /// <summary>Per-request session validator cache TTL, the accepted revocation lag. Floor 500.</summary>
-    /// <panel>How long a session's validity is reused before it is checked again. Longer means fewer
-    /// lookups and a longer wait before a revoked session actually stops working.</panel>
-    [ConfigField("sessionsCacheTtlMs", "Session lookup cache", Group = "sessions", Min = 500, Unit = "ms")]
+    /// <summary>How long "has this session been ended" is reused before it is asked again. Floor 500.</summary>
+    /// <panel>How long this node reuses its answer to whether a session has been ended. It is how long a
+    /// session somebody has just signed out of can still be used here — longer means fewer lookups and a
+    /// longer wait before a sign-out takes effect on this node.</panel>
+    [ConfigField("sessionsCacheTtlMs", "Session lookup cache", Group = "auth", Min = 500, Unit = "ms")]
     public int? SessionsCacheTtlMs { get; set; }
 
-    /// <summary>How often expired session rows are deleted. Floor 60000.</summary>
-    /// <panel>How often expired sessions are cleared out of the registry.</panel>
-    [ConfigField("sessionsGcMs", "Expired session cleanup", Group = "sessions", Min = 60000, Unit = "ms")]
-    public int? SessionsGcMs { get; set; }
-
-    /// <summary>The sliding session refresh window in days. Floor 1.</summary>
-    /// <panel>How long a session can keep renewing itself before the user has to sign in again, however
-    /// active they are.</panel>
-    [ConfigField("sessionsRefreshAbsoluteDays", "Maximum session age", Group = "sessions", Min = 1, Unit = "days")]
-    public int? SessionsRefreshAbsoluteDays { get; set; }
+    /// <summary>Where this machine's own auth anchor is reached, joined while this node knows no member. Blank turns it off.</summary>
+    /// <panel>The address of the auth anchor on this machine. A node that knows no other member
+    /// introduces itself here, which is how a machine that is its own cluster comes to have somebody
+    /// who can sign people in. Once the node has any member at all it never asks again. Empty turns
+    /// this off, for a node that only ever joins a cluster someone else runs.</panel>
+    [ConfigField("localAnchorUrl", "Local auth anchor", Group = "auth", Risk = ConfigRisk.Wiring)]
+    public string? LocalAnchorUrl { get; set; }
 
 
     // ── Game library & cover art ──────────────────────────────────────────────────────

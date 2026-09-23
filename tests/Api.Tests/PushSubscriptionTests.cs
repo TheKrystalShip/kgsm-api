@@ -50,16 +50,7 @@ public class PushSubscriptionTests(AuthTestFactory factory) : IClassFixture<Auth
     private string OtherUserToken()
     {
         var identity = new KgsmIdentity(KgsmActorProvider.Discord, "999000111", "someone-else", "Someone Else", null, []);
-        var tokens = factory.Services.GetRequiredService<ISessionTokenService>();
-        var store = factory.Services.GetRequiredService<SessionStore>();
-        var opts = factory.Services.GetRequiredService<TheKrystalShip.Api.ApiOptions>();
-        string sid = "sid_other_" + Guid.NewGuid().ToString("N");
-        MintedToken minted = tokens.MintAccess(identity, KgsmTier.Viewer, sid);
-        store.CreateAsync(sid, identity.Handle, opts.HostId, DateTimeOffset.UtcNow,
-            DateTimeOffset.UtcNow.AddDays(opts.SessionsRefreshAbsoluteDays),
-            userAgent: null, initialJti: minted.Jti, CancellationToken.None).GetAwaiter().GetResult();
-        AuthTestFactory.SetAccountOn(factory.Services, identity, KgsmTier.Viewer);
-        return minted.Token;
+        return factory.AccessTokenFor(identity, KgsmTier.Viewer);
     }
 
     [Fact]

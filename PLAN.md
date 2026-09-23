@@ -311,92 +311,25 @@ migrated WebSocket→SSE 2026-07-02, protocol in `src/Api/Realtime/CLAUDE.md`; f
 - **Frontend gate:** confirm the trust window above; then action buttons → optimistic transitional
   state → `jobs`-topic tracking → reconcile to the authoritative status on `server.patch`.
 
-### M4 — Auth: Discord per-host (Model A)  ·  `partial` (M4·a + M4·b backend built & live-validated 2026-06-15; frontend gate pending)
-- **Goal:** the security boundary — make good on the trust window M3 ran under.
-- **Wires:** Discord (external IdP, silent SSO) + this host's bot (role → tier).
-- **Split like M1** — the one milestone with an unfabricable live dependency (a real Discord app +
-  bot token + guild + role-map). The credential-*independent* half is fully buildable/self-validatable
-  now; only the live OAuth round-trip gates on creds + the trusted host.
-
-**M4·a — the credential-independent half.** · `partial` (built & self-validated 2026-06-15)
-- **Bearer mechanism (the §5-open decision, RESOLVED):** **stateless JWT** (HMAC-SHA256; access ~15 min +
-  refresh with an 8h absolute cap) — no session table, no user row (honors "no user row anywhere",
-  keeps M5 as the first EF migration). The signing key derives from `Api__SigningKey`
-  (SHA-256 → 256-bit; ephemeral + loud warn if unset).
-- **Built:** `Services/Auth/` — the **Discord seam** `IDiscordIdentityResolver` (everything that talks to
-  discord.com behind one interface, so the whole 401/403/tier matrix is testable with a fake — the
-  M3-style "exercise the contract without the live dependency" move); `SessionTokenService`
-  (mint/validate, shared `TokenValidationParameters` with the JwtBearer pipeline); the hierarchical
-  `TierRequirement`/handler (viewer⊆operator⊆admin); `DisabledAuthHandler` (the escape hatch — synthetic
-  admin). `AuthController` (`/auth/discord/start` 302, `/auth/discord/callback`, `/auth/session/refresh`,
-  `/auth/session`, `/auth/logout`). `[Authorize]` on Hosts/Servers (viewer) + the command `POST` (operator)
-  + the `/stream` WS (viewer; the bearer rides `?access_token=` since a WS handshake can't set a header).
-- **Auth is ON by default;** `Api__AuthDisabled=true` is the explicit, loudly-logged dev escape hatch.
-- **Honest failure modes (the security analog of never-fabricate-a-status):** Discord unreachable → `502`,
-  never a default grant; `none`/not-in-guild → terminal `403`; a failed role lookup is never silently
-  downgraded; a refresh token is never accepted as an access bearer.
-- **Self-validated:** `scripts/smoke.sh` **31/31** (the +3 M4·a no-token sweep: protected → `401` envelope,
-  `/health`+`/api/v1` open, login → `503` unconfigured) + **`tests/Api.Tests` 30/30** (xUnit +
-  `WebApplicationFactory`, Discord seam faked: the 401/403/viewer-operator-admin matrix, none-tier/
-  refresh-as-access/wrong-signature/garbage rejections, the WS `?access_token=` path, and the callback
-  verdict ok/denied/invalid/upstream-error + refresh rotation + session snapshot).
-
-**M4·b — the live OAuth round-trip.** · `built` (live-validated 2026-06-15 on the trusted host)
-- The real `DiscordIdentityResolver` (code exchange → `/users/@me` → `GET /guilds/{guild}/members/{user}`
-  with the **bot token** — the only path to roles, since the `identify guilds` scopes don't carry them)
-  is now **live-validated**: a real Discord login resolved an in-guild member's 3 roles to `admin`, minted
-  the bearer, and that bearer passed live tier-gating end-to-end (see §8). The login endpoints `503` only
-  until the Discord app / bot token / guild / role-map are configured. **Shared external config, not a
-  kgsm-bot process dependency** (keystone §4).
-- **OAuth `state` CSRF round-trip (added here):** `/start` sets a one-time HttpOnly state cookie (the
-  stateless double-submit nonce — no server store, honoring the no-session-table decision); `/callback`
-  rejects a missing/mismatched state with `400 invalid_state` *before* any Discord exchange. `Secure`
-  tracks the scheme (off on http loopback, on under https); `SameSite=Lax` so it rides Discord's
-  top-level redirect back. Fake-tested (mismatch + no-cookie) and exercised on the live login.
-- **Depends:** M0 (the auth-pipeline placeholder, now filled). Tier-gating of M3 commands is live.
-- **Outstanding before `built` flips to the full M4:** the **frontend gate** only — the per-host session
-  state machine end-to-end + tier-gated controls (the SPA, still `planned`). Op note: set a stable
-  `Api__SigningKey` on any real host (dev ran ephemeral — tokens die on restart).
-- **Risk:** the security boundary itself.
-
-**M4·c — session management + revocation.** · `built` (self-validated 2026-07-09; live OAuth soak owed) — authority: `src/Api/Services/Auth/CLAUDE.md`
-- **Goal:** revocation. A ~15-min access token is honestly bounded by its TTL, but a 30-day refresh token
-  mints fresh access tokens for a month with no kill switch short of rotating the signing key (which betrays
-  every user). M4·c adds the narrow operational state that lets an operator revoke one session, or all of a
-  user's, in ≤5s — and gives the Settings page a real Active Sessions surface reading live state, not the
-  append-only audit log (which can't revoke).
-- **Built:** a `SessionEntry` registry (`Data/SessionEntry.cs` + `Services/Auth/SessionStore.cs`, on the
-  existing `AppDbContext` via `EnsureCreated`; UTC-ticks `ValueConverter`s so `Expires > now` is a translatable
-  indexed `INTEGER` compare) keyed by a stable **`sid`** JWT claim; a **cached per-request validator**
-  (`SessionValidator`, `IMemoryCache` 5s TTL, evicted on revoke — not a per-request DB hit), wired into the
-  JwtBearer `OnTokenValidated` so REST + SSE both check it; **sliding-window refresh with `jti` rotation +
-  reuse-detection** (each refresh slides `Expires` to `now+30d` and rotates both tokens; a stale `jti` → `401`);
-  **server-side logout** (revoke + evict); the **revoke surface** `Controllers/SessionController.cs`
-  (`GET /auth/sessions` viewer-self / admin `?userId=`; `POST /auth/session/revoke {sid?|all?}`; admin
-  `POST /auth/sessions/{sid}/revoke` + `POST /auth/users/{userId}/sessions/revoke-all`); three additive
-  **`auth.session.*`** audit actions (direct-write, the `auth.login` case — no double-write); **`/me.recentLogins`**
-  (read off `auth.login` audit rows, `/me`'s first DB read); mint-time **`expiresAt`** on `CallbackResult`/
-  `RefreshResponse`; and a 10-min **`SessionCleanupWorker`** GC (hard-deletes expired rows; inert under the
-  master switch). Identity is unchanged — the login-time JWT-claim snapshot; no user-profile row.
-- **Invariants intact:** #1 honest (UA from the header, expiry from the just-minted token, revocation from real
-  state) · #4 additive within `/api/v1` (the `/auth` refresh wire adds a field) · #5 audit still single-writer,
-  the new actions additive + direct-write. The session table is the API's own **operational state** (revocation),
-  the second such table after the audit log — the domain stays live-scraped.
-- **Config:** four `KGSM_API_SESSIONS_*` keys (documented in `appsettings.json`) — `_DISABLED` (master switch,
-  makes the registry inert), `_CACHE_TTL_MS` (5000, the revocation-lag bound), `_GC_MS` (600000), and
-  `_REFRESH_ABSOLUTE_DAYS` (30, in lockstep with the JWT refresh TTL).
-- **Self-validated:** `dotnet test` **655/655** (0-warn Release) — the xUnit matrix covers login-creates-a-row,
-  the cached per-request check (valid→200 / revoked→401-in-window / expired→401 / no-`sid`→401 / disabled-bypass /
-  cache-serves-stale-then-Evict), rotation + reuse-detection + logout-revoke, the self + admin revoke tier matrix,
-  `GET /auth/sessions` (`current` flag + admin `?userId=`), `/me.recentLogins`, mint-time `expiresAt`, and the GC
-  worker. Smoke is unchanged (it runs under `Api__AuthDisabled=true`, so the JwtBearer pipeline — and thus the
-  session check — never fires).
-- **Outstanding:** the **live OAuth soak** (a real Discord bounce leaving a real device's UA in the row + a real
-  self-revoke-all forcing a relogin) — records in §8 when done. **Deploy note:** a token with no `sid` claim
-  `401`s, so at the first deploy of the registry every pre-existing refresh token dies → all users force-relogin;
-  smoke a forced relogin before any live redeploy. Fresh DBs get the `sessions` table from `EnsureCreated`; an
-  already-deployed DB needs the table + `CurrentJti` column created once in place (audit rows untouched). **No
-  kgsm-lib bump** (entirely within the API); **no `Migrations/`** (the `EnsureCreated`-for-fresh posture holds).
+### M4 — Auth: sessions from the cluster's auth anchor  ·  `built`
+- **Goal:** the security boundary — every protected call carries a session the cluster's auth anchor
+  minted, and what the caller may do is read from this node's replica of the accounts on every request.
+- **This node signs nobody in.** No login, registration, identity linking, session registry, signing
+  key or first-admin bootstrap lives here; they are `kgsm-auth-anchor`'s, which every install runs (a
+  machine on its own is a cluster of one). Authority for the model: `../cluster-auth-plan.md` and
+  `../hosted-sign-in-plan.md`; the local rules: `src/Api/Services/Auth/CLAUDE.md`.
+- **Built:** the JwtBearer pipeline accepts ES256 sessions only, verified through
+  `ClusterSessionValidation.Accepting(IClusterSessionKeys)` against the key, audience and issuer the
+  holder of `auth` publishes over gossip; an ended session is refused through the `EndedSessionStore`
+  deny-list the bus fills (`session.revoke`), cached on the request path; `LiveAuthority` replaces the
+  token's tier with the replica's on every request; replicated account changes reach open streams at
+  once (`AccountChangesReachOpenStreams`). `/auth/*` answers `503` naming the holder
+  (`SignInElsewhereController`), and `AuthAnchorReport` logs which member signs people in, or that none
+  does. `Api__AuthDisabled=true` stays the loudly-logged dev escape hatch.
+- **Self-validated:** `tests/Api.Tests` — the 401/403/tier matrix against sessions a stand-in anchor
+  signs, an unpublished key / a symmetric token / a sid-less token refused, the deny-list across two
+  nodes over the real bus, and a replicated retier and removal re-gating a live stream. `scripts/smoke.sh`
+  proves the no-token sweep and the `/auth/*` refusal.
 
 ### M5 — Audit log + SQLite (the event-persistence consumer)  ·  `partial` (backend built & self-validated 2026-06-15; frontend gate pending)  ←  *resolves keystone O3*
 - **Goal:** the durable, append-only action record — **persistence downstream of the

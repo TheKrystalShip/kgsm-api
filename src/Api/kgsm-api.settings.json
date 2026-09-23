@@ -93,36 +93,15 @@
       // Who every request is attributed to while auth is off, as 'provider:name'.
       // Required whenever AuthDisabled is set; the host refuses to start without it.
       "DisabledAuthActor": "",
-      // HMAC signing key for session JWTs. Blank generates an ephemeral per-process key.
-      "SigningKey": "",
-      // This host's OAuth redirect URI; must match the app registry.
-      "DiscordRedirectUri": "",
-      // SPA origin the OAuth callback hands the session back to. Blank returns JSON.
-      "AuthFrontendUrl": "",
-      // The host's shared KGSM account store. Every surface on this host reads the same file.
+      // This node's replica of the cluster's accounts, kept current by the auth anchor. Every KGSM
+      // service on the machine reads the same file.
       "UsersDbPath": "/var/lib/kgsm/auth/users.db",
-      // How long a resolved tier is reused before the store is read again. The demotion lag. Floor 0.
+      // How long a resolved tier is reused before the replica is read again. The demotion lag. Floor 0.
       "AuthorityCacheSeconds": 5,
-      // The most accounts awaiting approval this host will hold at once. Floor 1.
-      "PendingUserCap": 32,
-      // How long an unapproved, self-provisioned account survives unattended, in days. Floor 1.
-      "PendingUserTtlDays": 14,
-      // How long after proving a credential that attaching or detaching one stays allowed. Floor 1.
-      "ReauthWindowMinutes": 5,
-      // Whether anonymous callers may create their own account. Off unless turned on.
-      "AllowSelfRegistration": false,
-      // Sign-in and sign-up attempts one caller may make per minute. Floor 1.
-      "AnonymousRateLimit": 10,
-
-      // ── Sessions ──
-      // Turns the session registry inert, leaving revocation unenforceable.
-      "SessionsDisabled": false,
-      // Per-request session validator cache TTL, the accepted revocation lag. Floor 500.
+      // How long "has this session been ended" is reused. The sign-out lag on this node. Floor 500.
       "SessionsCacheTtlMs": 5000,
-      // How often expired session rows are deleted. Floor 60000.
-      "SessionsGcMs": 600000,
-      // The sliding session refresh window in days. Floor 1.
-      "SessionsRefreshAbsoluteDays": 30,
+      // This machine's own auth anchor, joined while this node knows no member. Empty turns it off.
+      "LocalAnchorUrl": "http://127.0.0.1:8098",
 
       // ── Game library & cover art ──
       // RAWG.io API key. Blank no-ops the hydration worker.
@@ -198,28 +177,6 @@
       // Comma-separated CORS origin allowlist, joined with the panel origins this node learns when an
       // admin signs in and when a peer introduces itself. Blank on both allows any origin, a dev-only posture.
       "CorsOrigins": ""
-  },
-
-  // ── How somebody proves who they are, shared across every surface on this host ────────────
-  // The OAuth applications are the ECOSYSTEM's, not this API's: the Discord bot and the assistant
-  // sign people in through the same ones, and setting them per-leaf is how one person ends up
-  // proving a different identity depending on which surface they reach KGSM through. On a
-  // provisioned host they arrive from /etc/kgsm/kgsm-auth.env, which every leaf's unit loads first,
-  // and a per-leaf env file can still override deliberately.
-  //
-  // Keyed by provider: wiring this host to another one is a pair of keys
-  // (KgsmAuth__Providers__github__ClientId) and no rebuild. Only the applications are here —
-  // signing someone in establishes who they are, and the KGSM account they prove says what they may
-  // do, so nothing in this block grants anything. Owned by TheKrystalShip.KGSM.Auth. This host's own
-  // callback URL is NOT here — it is per-surface, and stays as Api:DiscordRedirectUri, whose origin
-  // every provider's callbacks are built from.
-  "KgsmAuth": {
-    "Providers": {
-      "discord": {
-        "ClientId": "",
-        "ClientSecret": ""
-      }
-    }
   },
 
   // --- Standard ASP.NET Core keys ---------------------------------------------------------------

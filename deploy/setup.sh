@@ -104,70 +104,40 @@ else
     ENV_SEEDED=0
 fi
 
-# ── 2a. The shared authorization file ─────────────────────────────────────────
-# The Discord application this host signs people in through, in one place. A host that set it
-# per-leaf would sign the same person in through two different applications — which is the drift
-# this file exists to prevent. What anyone may do is not here: that is their KGSM account, in the
-# account store, set in the Control Panel.
+# ── 2a. The shared cluster secret ─────────────────────────────────────────────
+# Every install is a cluster: this node accepts only sessions its cluster's auth anchor minted, so a
+# machine with no secret has nobody to sign it in. A host with no secret file therefore founds a
+# cluster of its own here — a generated secret, and the founded-here record beside it that says this
+# machine's own anchor is the one to hold the accounts. A host joining an existing
+# cluster is given that cluster's secret instead (kgsm-meta/NODE-PROVISIONING.md §10·a).
 #
-# Created by whichever project's setup.sh runs first, seeded blank, and NEVER overwritten: a
-# re-run on a configured host must not wipe the operator's values. Owned by the deploying user so
-# it can be edited without privilege; 0600 because it holds the application secret.
-if [[ ! -f "$SHARED_AUTH_FILE" ]]; then
-    log "seeding ${SHARED_AUTH_FILE} — EDIT IT: sign-in needs the Discord application id and secret"
-    $SUDO install -d -m 0755 "$(dirname "$SHARED_AUTH_FILE")"
-    $SUDO install -m 0600 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" /dev/null "$SHARED_AUTH_FILE"
-    $SUDO tee "$SHARED_AUTH_FILE" >/dev/null <<'SHARED_AUTH'
-# ── KGSM shared sign-in — read by every surface on this host ──────────────────
-# The OAuth applications people sign in through, keyed by provider. Loaded by each leaf's unit
-# BEFORE its own env file, so a leaf can still override one deliberately — but then two surfaces
-# sign people in through different applications. Prefer changing it here.
-#
-# Wiring this host to another provider is a pair of keys and no rebuild anywhere:
-#   KgsmAuth__Providers__github__ClientId=
-#   KgsmAuth__Providers__github__ClientSecret=
-# Each one also needs BOTH of its callbacks registered on the application — the sign-in
-# (/auth/<provider>/callback) and the account-linking one (/auth/identities/<provider>/callback) —
-# or linking is refused at the provider, before anything here sees it.
-#
-# WHO MAY DO WHAT IS NOT HERE. A sign-in establishes who someone is; what they may do is on their
-# KGSM account, in the account store at /var/lib/kgsm/auth/users.db, and it is set in the Control
-# Panel. No group, guild or role grants anything on any surface.
-
-KgsmAuth__Providers__discord__ClientId=
-KgsmAuth__Providers__discord__ClientSecret=
-SHARED_AUTH
-    $SUDO chown "${DEPLOY_USER}:${DEPLOY_GROUP}" "$SHARED_AUTH_FILE"
-fi
-
-# ── 2a·ii. The shared cluster secret ──────────────────────────────────────────
-# One value every member of a cluster on this host holds — this API today, an auth anchor beside it
-# later — so it is set once here rather than once per member. Seeded blank and never overwritten: a
-# re-run on a clustered host must not split it apart. Owned by the deploying user so it can be edited
-# without privilege; 0600 because it is a secret.
+# Never overwritten: a re-run on a clustered host must not split it apart. Owned by the deploying user
+# so it can be edited without privilege; 0600 because it is a secret.
 if [[ ! -f "$SHARED_CLUSTER_FILE" ]]; then
-    log "seeding ${SHARED_CLUSTER_FILE} — blank, which means this host is not part of a cluster"
+    secret="$(openssl rand -hex 32)"
+    log "founding a cluster of one: seeding ${SHARED_CLUSTER_FILE} with a generated secret"
     $SUDO install -d -m 0755 "$(dirname "$SHARED_CLUSTER_FILE")"
     $SUDO install -m 0600 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" /dev/null "$SHARED_CLUSTER_FILE"
-    $SUDO tee "$SHARED_CLUSTER_FILE" >/dev/null <<'SHARED_CLUSTER'
+    $SUDO tee "$SHARED_CLUSTER_FILE" >/dev/null <<SHARED_CLUSTER
 # ── KGSM cluster — read by every member on this host ──────────────────────────
 # The secret every member of a cluster carries. It is what proves membership: a member trusts any
-# caller bearing a service token signed with it. Generate one and copy it to every machine:
-#
-#   openssl rand -hex 32
-#
-# Blank means this host is not part of a cluster, which is a state and not a misconfiguration.
+# caller bearing a service token signed with it. This one was generated when this machine founded
+# its own cluster; a machine joining another cluster takes that cluster's secret instead.
 #
 # Loaded by each member's unit BEFORE its own env file, so one member can override it deliberately —
 # but a member holding a different secret is a member the others cannot authenticate, and nothing
 # logs that as an error because "no cluster" and "wrong secret" look the same from here.
-Cluster__Secret=
+Cluster__Secret=${secret}
 
 # Rotating: put the NEW secret above and the OLD one here, roll every member, then clear this. Both
 # are accepted while it is set, so a roll needs no downtime.
 Cluster__SecretPrevious=
 SHARED_CLUSTER
     $SUDO chown "${DEPLOY_USER}:${DEPLOY_GROUP}" "$SHARED_CLUSTER_FILE"
+    $SUDO install -d -m 0755 "$(dirname "$CLUSTER_FOUNDED_FILE")"
+    printf '%s\n' "$secret" | sha256sum | cut -d' ' -f1 \
+        | $SUDO tee "$CLUSTER_FOUNDED_FILE" >/dev/null
+    unset secret
 fi
 
 # ── 2b. The shared leaf-descriptor directory ──────────────────────────────────
@@ -181,9 +151,10 @@ if [[ -n "${LEAF_DESCRIPTOR:-}" && -f "$LEAF_DESCRIPTOR" && ! -d "$LEAF_DESCRIPT
 fi
 
 # ── 2b·ii. The shared account store's directory ───────────────────────────────
-# Where this host's KGSM accounts live. Shared like the descriptor directory above and created by
-# whichever project's setup.sh runs first, owned by the deploying user so the service — and
-# `kgsm-api user …` — write it with no privilege.
+# Where this machine's copy of the cluster's accounts lives — the auth anchor's store when the anchor
+# runs here, the replica this API reads either way. Shared like the descriptor directory above and
+# created by whichever project's setup.sh runs first, owned by the deploying user so the services
+# write it with no privilege.
 #
 # 0700, and a directory rather than a bare file under /var/lib/kgsm, for two separate reasons. It
 # holds password hashes, which is the one thing on this host a local read is worth anything against;

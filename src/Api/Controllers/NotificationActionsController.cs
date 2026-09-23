@@ -55,7 +55,6 @@ public sealed class NotificationActionsController(
     PushSnoozeStore snoozes,
     PushSubscriptionStore subscriptions,
     Services.Auth.UserDirectory users,
-    Realtime.StreamHub stream,
     ServerAggregator aggregator,
     PlayerHistoryService history,
     JobRegistry jobs,
@@ -119,7 +118,6 @@ public sealed class NotificationActionsController(
             PushActionKind.ConditionSnooze => await SnoozeAsync(action, ct),
             PushActionKind.LeafRestart => await RestartLeafAsync(action, identity, authority.Tier, ct),
             PushActionKind.SchedulePostpone => await PostponeAsync(action, identity, authority.Tier, ct),
-            PushActionKind.UserApprove => await ApproveAsync(action, identity, authority.Tier, ct),
             _ => Refuse("This build does not know how to do that."),
         };
     }
@@ -211,101 +209,6 @@ public sealed class NotificationActionsController(
             : "";
 
         return Ok(new PushActionResult(true, $"{action.Target}'s {window} maintenance is pushed back an hour.{when}"));
-    }
-
-    /// <summary>
-    /// Let a waiting account in, at the floor.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Viewer, and only viewer.</b> A button has no room to choose a tier, and the floor is the one
-    /// grant that is safe to make from a notification's worth of context. Anything above it stays a
-    /// decision somebody makes in the Users tab while looking at who is asking.
-    /// </para>
-    /// <para>
-    /// <b>This one writes its own audit row</b>, unlike the lifecycle buttons: kgsm runs nothing for an
-    /// account change and emits no event, so there is no echo to carry the provenance and a direct write
-    /// is the only record there will be. Same posture as the Users tab's own writes.
-    /// </para>
-    /// <para>
-    /// An account that is no longer pending — approved from a laptop in the meantime, or since disabled —
-    /// is reported as it is rather than overwritten. Two admins answering the same notification is the
-    /// expected case, not an edge one.
-    /// </para>
-    /// </remarks>
-    private async Task<IActionResult> ApproveAsync(
-        PushActionEntity action, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
-    {
-        if (tier < KgsmTier.Admin)
-            return Refuse("That account is not allowed to approve accounts.");
-
-        // The accounts may not be this node's to answer for. Approving here would write to the
-        // replica: unversioned by the anchor, and overwritten by the next thing it publishes about
-        // that account — so it would report success from a lock screen and quietly stop having
-        // happened. The holder is named and its address is not: a member of a cluster does not tell
-        // a caller where that cluster's accounts are.
-        if (await HttpContext.RequestServices.GetRequiredService<AnchorHeldGate>()
-            .HolderAsync(ct).ConfigureAwait(false) is { } elsewhere)
-        {
-            return Refuse($"This cluster's accounts are held by '{elsewhere.MemberId}'.");
-        }
-
-        KgsmUser? account;
-        try
-        {
-            account = await users.Store.FindByIdAsync(action.Target, ct).ConfigureAwait(false);
-        }
-        catch (Exception e) when (e is not OperationCanceledException)
-        {
-            logger.LogError(e, "notification action: could not read account {UserId}", action.Target);
-            return Unavailable("The account store on this host could not be read.");
-        }
-
-        if (account is null)
-            return Refuse("That account no longer exists on this host.");
-
-        if (account.Status == UserStatus.Active)
-            return Ok(new PushActionResult(true, $"{account.DisplayName} has already been approved."));
-
-        if (account.Status == UserStatus.Disabled)
-            return Refuse($"{account.DisplayName} has been switched off, so approving is not the answer.");
-
-        KgsmUser approved = account with
-        {
-            Tier = KgsmTier.Viewer,
-            TierSource = TierSource.Granted,
-            Status = UserStatus.Active,
-            Updated = DateTimeOffset.UtcNow,
-        };
-
-        if (!await users.Store.UpdateAsync(approved, ct).ConfigureAwait(false))
-            return Refuse("That account no longer exists on this host.");
-
-        // Authority is resolved per request from a short-lived cache; drop this account's entries so the
-        // person who was just let in is not still refused for the length of a TTL.
-        await users.ForgetAsync(approved.UserId, ct).ConfigureAwait(false);
-
-        // Somebody approved from a lock screen is very often somebody sitting in front of the panel
-        // waiting, so their open connection hears it here too — the same push the Users tab's own
-        // write sends.
-        stream.AuthorityChanged(
-            approved.UserId, approved.EffectiveTier, UserStatuses.ToWire(approved.Status));
-
-        await journal.AccountAsync(
-            ApiJournal.UserApprovedEvent,
-            approved.UserId,
-            approved.Username,
-            toTier: KgsmTiers.ToWire(approved.Tier),
-            fromStatus: UserStatuses.ToWire(account.Status),
-            toStatus: UserStatuses.ToWire(approved.Status),
-            actor: KgsmActor.Format(identity.Provider, identity.Username),
-            origin: AuditOrigin.Notification,
-            ct: ct).ConfigureAwait(false);
-
-        logger.LogInformation("notification action: approved {User} as viewer (actor={Actor}, via push)",
-            approved.Username, identity.ActorString);
-
-        return Ok(new PushActionResult(true, $"{approved.DisplayName} can now sign in as a viewer."));
     }
 
     /// <summary>

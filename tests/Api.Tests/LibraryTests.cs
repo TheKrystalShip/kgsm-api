@@ -329,9 +329,8 @@ public sealed class LibraryAggregatorTests
         LeafDescriptorDir = "/tmp/kgsm-api-test-descriptors", AnchorDescriptorDir = "/tmp/kgsm-api-test-anchors",
         LeafDropInDir = "/tmp/kgsm-api-test-dropins",
         DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000,
-        AuthDisabled = true, DisabledAuthActor = "local:test", SigningKey = "", OAuth = new KgsmAuthOptions(),
-        DiscordRedirectUri = "", AuthFrontendUrl = "",
-        SessionsCacheTtlMs = 5000, SessionsGcMs = 600000, SessionsRefreshAbsoluteDays = 30,
+        AuthDisabled = true, DisabledAuthActor = "local:test",
+        SessionsCacheTtlMs = 5000,
         NodeId = "test",
     };
 

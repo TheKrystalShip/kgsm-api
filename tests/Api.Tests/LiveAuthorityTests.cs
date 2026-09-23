@@ -107,7 +107,7 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
         string token = factory.AccessToken(KgsmTier.Admin);
         using HttpClient client = Bearing(factory, token);
         KgsmUser account = factory.AccountOf(FakeDiscordResolver.Identity)!;
-        await factory.Services.GetRequiredService<UserDirectory>().Store.DeleteAsync(account.UserId);
+        await AuthTestFactory.ReplicaOf(factory.Services).DeleteAsync(account.UserId);
 
         HttpResponseMessage me = await client.GetAsync("/api/v1/me");
 
@@ -133,7 +133,7 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
                     ["Api:UsersDbPath"] = "/proc/version/nope/users.db",
                 })));
 
-        string token = AuthTestFactory.MintTokenWithRow(broken.Services, KgsmTier.Admin, access: true);
+        string token = AuthTestFactory.MintAccessOn(broken.Services, KgsmTier.Admin);
         using HttpClient client = Bearing(broken, token);
 
         HttpResponseMessage resp = await client.GetAsync("/api/v1/me");
@@ -158,7 +158,7 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
         using WebApplicationFactory<Program> cached = CachedFor(TimeSpan.FromHours(1));
 
         using HttpClient client = Bearing(
-            cached, AuthTestFactory.MintTokenWithRow(cached.Services, KgsmTier.Operator, access: true));
+            cached, AuthTestFactory.MintAccessOn(cached.Services, KgsmTier.Operator));
         Assert.Equal(HttpStatusCode.NotFound, (await OperatorAction(client)).StatusCode);
 
         await DemoteInTheStoreAsync(cached);
@@ -176,7 +176,7 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
         using WebApplicationFactory<Program> cached = CachedFor(TimeSpan.FromSeconds(1));
 
         using HttpClient client = Bearing(
-            cached, AuthTestFactory.MintTokenWithRow(cached.Services, KgsmTier.Operator, access: true));
+            cached, AuthTestFactory.MintAccessOn(cached.Services, KgsmTier.Operator));
         Assert.Equal(HttpStatusCode.NotFound, (await OperatorAction(client)).StatusCode);
 
         await DemoteInTheStoreAsync(cached);
@@ -192,7 +192,7 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
         Assert.Equal(HttpStatusCode.Forbidden, status);
     }
 
-    /// <summary>A host holding its own account store, resolving authority against a cache of
+    /// <summary>A node with a replica of its own, resolving authority against a cache of
     /// <paramref name="ttl"/>.</summary>
     private WebApplicationFactory<Program> CachedFor(TimeSpan ttl) =>
         factory.WithWebHostBuilder(builder =>
@@ -205,12 +205,12 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
                         ((int)ttl.TotalSeconds).ToString(CultureInfo.InvariantCulture),
                 })));
 
-    /// <summary>Lower the account's tier straight in the store, so nothing drops the cache on the way
-    /// past — the shape of a change made on another surface sharing this host.</summary>
+    /// <summary>Lower the account's tier straight in the replica, so nothing drops the cache on the way
+    /// past — the shape of a change replication delivers from the anchor.</summary>
     private static async Task DemoteInTheStoreAsync(WebApplicationFactory<Program> host)
     {
-        var users = host.Services.GetRequiredService<UserDirectory>();
-        KgsmUser account = (await users.Store.FindByCredentialAsync(FakeDiscordResolver.Identity.Handle))!;
-        await users.Store.UpdateAsync(account with { Tier = KgsmTier.Viewer });
+        var replica = AuthTestFactory.ReplicaOf(host.Services);
+        KgsmUser account = (await replica.FindByCredentialAsync(FakeDiscordResolver.Identity.Handle))!;
+        await replica.UpdateAsync(account with { Tier = KgsmTier.Viewer });
     }
 }

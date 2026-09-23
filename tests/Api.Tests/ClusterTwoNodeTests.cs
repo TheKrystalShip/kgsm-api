@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -61,12 +62,8 @@ public sealed class ClusterTwoNodeTests
             await using var factoryA = new ClusterNodeFactory(
                 "node-a", "host-a", secret, dbPath: dbA, drainerHandlerFactory: () => handlerToB);
 
-            SessionStore storeB = factoryB.Services.GetRequiredService<SessionStore>();
+            EndedSessionStore endedB = factoryB.Services.GetRequiredService<EndedSessionStore>();
             string sid = "sid_2node_happy_" + Guid.NewGuid().ToString("N");
-            await storeB.CreateAsync(
-                sid, "discord:two-node-test-user", "host-b",
-                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(30),
-                userAgent: null, initialJti: null);
 
             IClusterBus busA = factoryA.Services.GetRequiredService<IClusterBus>();
             await busA.EnqueueJsonAsync(
@@ -74,9 +71,9 @@ public sealed class ClusterTwoNodeTests
                 [new ClusterTarget("node-b", "http://node-b")], CancellationToken.None);
 
             bool revoked = await PollUntilAsync(
-                async () => (await storeB.GetByIdAsync(sid))?.Revoked ?? false,
+                () => endedB.IsRevokedAsync(sid),
                 TimeSpan.FromSeconds(5));
-            Assert.True(revoked, "expected node B's session to be revoked via the cluster bus within 5s");
+            Assert.True(revoked, "expected node B to record the session as ended via the cluster bus within 5s");
 
             // The drainer marks its own row `delivered` only AFTER it observes B's 2xx response — that
             // happens strictly after (and racily close to) B applying the handler above, so poll here
@@ -108,12 +105,8 @@ public sealed class ClusterTwoNodeTests
             await using var factoryA = new ClusterNodeFactory(
                 "node-a", "host-a", secret, dbPath: dbA, drainerHandlerFactory: () => toggle);
 
-            SessionStore storeB = factoryB.Services.GetRequiredService<SessionStore>();
+            EndedSessionStore endedB = factoryB.Services.GetRequiredService<EndedSessionStore>();
             string sid = "sid_2node_downup_" + Guid.NewGuid().ToString("N");
-            await storeB.CreateAsync(
-                sid, "discord:two-node-test-user", "host-b",
-                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(30),
-                userAgent: null, initialJti: null);
 
             IClusterBus busA = factoryA.Services.GetRequiredService<IClusterBus>();
             await busA.EnqueueJsonAsync(
@@ -132,9 +125,7 @@ public sealed class ClusterTwoNodeTests
                 TimeSpan.FromSeconds(3));
             Assert.True(retriedWhileDown, "expected at least one failed delivery attempt while B is down");
 
-            SessionEntry? stillActive = await storeB.GetByIdAsync(sid);
-            Assert.NotNull(stillActive);
-            Assert.False(stillActive!.Revoked, "the session must NOT be revoked while B is unreachable");
+            Assert.False(await endedB.IsRevokedAsync(sid), "the session must NOT be ended while B is unreachable");
 
             OutboxRow? pendingRow = await GetOutboxRowAsync(factoryA, "node-b");
             Assert.NotNull(pendingRow);
@@ -144,7 +135,7 @@ public sealed class ClusterTwoNodeTests
             toggle.Down = false;
 
             bool revoked = await PollUntilAsync(
-                async () => (await storeB.GetByIdAsync(sid))?.Revoked ?? false,
+                () => endedB.IsRevokedAsync(sid),
                 TimeSpan.FromSeconds(8));
             Assert.True(revoked, "expected the queued revoke to be redelivered and applied once B recovers");
 
@@ -177,12 +168,8 @@ public sealed class ClusterTwoNodeTests
             await using var factoryA = new ClusterNodeFactory(
                 "node-a", "host-a", "a-only-secret", dbPath: dbA, drainerHandlerFactory: () => handlerToB);
 
-            SessionStore storeB = factoryB.Services.GetRequiredService<SessionStore>();
+            EndedSessionStore endedB = factoryB.Services.GetRequiredService<EndedSessionStore>();
             string sid = "sid_2node_authfail_" + Guid.NewGuid().ToString("N");
-            await storeB.CreateAsync(
-                sid, "discord:two-node-test-user", "host-b",
-                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddDays(30),
-                userAgent: null, initialJti: null);
 
             IClusterBus busA = factoryA.Services.GetRequiredService<IClusterBus>();
             await busA.EnqueueJsonAsync(
@@ -198,9 +185,7 @@ public sealed class ClusterTwoNodeTests
             Assert.NotNull(row);
             Assert.Contains("401", row!.LastError ?? "", StringComparison.Ordinal);
 
-            SessionEntry? untouched = await storeB.GetByIdAsync(sid);
-            Assert.NotNull(untouched);
-            Assert.False(untouched!.Revoked, "B must never apply a message from a token it rejected");
+            Assert.False(await endedB.IsRevokedAsync(sid), "B must never apply a message from a token it rejected");
         }
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
     }
@@ -222,7 +207,7 @@ public sealed class ClusterTwoNodeTests
                 "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
 
             using HttpClient clientA = factoryA.CreateClient();
-            string adminToken = AuthTestFactory.MintTokenWithRow(factoryA.Services, KgsmTier.Admin, access: true);
+            string adminToken = AuthTestFactory.MintAccessOn(factoryA.Services, KgsmTier.Admin);
 
             var addRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/members")
             {
@@ -242,6 +227,36 @@ public sealed class ClusterTwoNodeTests
             JsonElement peers = JsonDocument.Parse(await listResp.Content.ReadAsStringAsync())
                 .RootElement.GetProperty("members");
             Assert.Contains(peers.EnumerateArray(), p => p.GetProperty("memberId").GetString() == "node-b");
+        }
+        finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
+    }
+
+    // ── 4b. The local join: a node that knows nobody introduces itself to its machine's anchor ──────
+
+    [Fact]
+    public async Task ANodeThatKnowsNoMemberJoinsItsLocalAnchorWithNobodySignedIn()
+    {
+        // The fresh cluster of one: nobody can sign in to add a member until the node knows who holds
+        // the accounts, so the node takes that step itself against the configured local address. Node B
+        // stands in for the anchor, reached through the same handshake an admin's paste would use.
+        const string secret = "two-node-local-join-secret";
+        string dbA = NewDbPath("a-localjoin"), dbB = NewDbPath("b-localjoin");
+        try
+        {
+            await using var factoryB = new ClusterNodeFactory("node-b", "host-b", secret, dbPath: dbB);
+            HttpMessageHandler handlerToB = factoryB.Server.CreateHandler();
+            await using var factoryA = new ClusterNodeFactory(
+                "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
+            using WebApplicationFactory<Program> nodeA = factoryA.WithWebHostBuilder(builder =>
+                builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
+                    new Dictionary<string, string?> { ["Api:LocalAnchorUrl"] = "http://node-b" })));
+
+            MembersStore membersA = nodeA.Services.GetRequiredService<MembersStore>();
+            bool joined = await PollUntilAsync(
+                async () => (await membersA.ListAsync(CancellationToken.None)).Any(m => m.MemberId == "node-b"),
+                TimeSpan.FromSeconds(10));
+
+            Assert.True(joined, "a node with an empty roster never introduced itself to its local anchor");
         }
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
     }

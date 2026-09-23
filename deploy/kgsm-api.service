@@ -27,7 +27,7 @@ SupplementaryGroups=systemd-journal
 ExecStart=/opt/kgsm-api/kgsm-api
 # REQUIRED: the .NET content root defaults to the process working dir. Without this it is "/"
 # and kgsm-api.settings.json / kgsm-api.settings.Development.json (shipped next to the binary) are NOT
-# loaded — Discord/role config silently goes missing and login 503s. Pin it to the app dir.
+# loaded, and every setting silently falls back to its coded default. Pin it to the app dir.
 WorkingDirectory=/opt/kgsm-api
 
 # Operational config (bind + paths). Secrets and host specifics live in the EnvironmentFile
@@ -37,19 +37,13 @@ Environment=Api__KgsmPath=/usr/bin/kgsm
 Environment=Api__KgsmJournalDir=/var/lib/kgsm/events
 Environment=Api__MonitorSocketPath=/run/kgsm-monitor/metrics.sock
 Environment=Api__DbPath=/var/lib/kgsm-api/kgsm-api.db
-# Production by default; a host may flip this to Development in the env file to load Discord
-# creds from a co-located kgsm-api.settings.Development.json instead of the env file.
+# Production by default; a host may flip this to Development in the env file to load a co-located
+# kgsm-api.settings.Development.json over the base settings.
 Environment=ASPNETCORE_ENVIRONMENT=Production
 
-# Secrets + host overrides: the Discord OAuth app/guild/bot + role->tier map, Api__CorsOrigins
-# (the SPA origin), Api__AuthFrontendUrl. See deploy/kgsm-api.env.example. The session signing
-# key is not among them — with none configured the service generates one and keeps it in the
-# StateDirectory below, so sessions survive a restart on a host nobody handed a secret to.
-# Who may do what on this host, shared with every other KGSM surface. Loaded FIRST so the per-leaf
-# file below can still override a value deliberately; setting one there is how a host ends up
-# granting the same person different authority on different surfaces, so prefer the shared file.
-# Seeded by deploy/setup.sh; optional, so a host that never provisioned it still starts.
-EnvironmentFile=-/etc/kgsm/kgsm-auth.env
+# Host overrides — Api__CorsOrigins, the public host, the leaf endpoints. See
+# deploy/kgsm-api.env.example. No sign-in secret is among them: this node signs nobody in, and every
+# session it accepts is verified against the key its cluster's auth anchor publishes.
 # The cluster secret every member on this host holds, before this unit's own file so a member could
 # override it deliberately — though a member on a different secret is one the others cannot reach.
 EnvironmentFile=-/etc/kgsm/kgsm-cluster.env

@@ -188,16 +188,17 @@ PUBLISH_DIR="${REPO_DIR}/artifacts/publish"
 # Where every leaf drops its config descriptor. Shared across projects and scanned by kgsm-api —
 # the API holds no list of leaves, so a new leaf becomes configurable by landing a file here.
 LEAF_DESCRIPTOR_DIR="${KGSM_LEAF_DESCRIPTOR_DIR:-/var/lib/kgsm/leaves}"
-# Where this host declares who may do what — the Discord app, guild, role-lookup token and role map
-# every KGSM surface authorizes against. One file, so a person cannot hold different authority on
-# different surfaces. Each unit loads it before its own env file; setup.sh seeds it blank.
-SHARED_AUTH_FILE="${KGSM_SHARED_AUTH_FILE:-/etc/kgsm/kgsm-auth.env}"
-
 # The cluster secret every member on this host holds. One file rather than one copy per member: a
 # machine can run more than one member of a cluster — a node and an auth anchor — and they must all
 # hold the same secret or each concludes separately that it is not clustered. Each unit loads it
-# before its own env file; setup.sh seeds it blank.
+# before its own env file; setup.sh founds a cluster of one when it finds none.
 SHARED_CLUSTER_FILE="${KGSM_SHARED_CLUSTER_FILE:-/etc/kgsm/kgsm-cluster.env}"
+
+# The record that this machine founded its cluster: the SHA-256 of the secret it generated. It is
+# what says this machine's own auth anchor is the one to hold the accounts — a machine given another
+# cluster's secret has none, or one that no longer matches, and its anchor stays off. Beside the secret
+# it describes, and written by whichever installer founded the cluster.
+CLUSTER_FOUNDED_FILE="${KGSM_CLUSTER_FOUNDED_FILE:-/etc/kgsm/cluster-founded}"
 
 # Where this host keeps its KGSM accounts — the store every surface on the box reads directly, so
 # one person is one account whichever door they come through. A directory of its own rather than a

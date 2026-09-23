@@ -10,19 +10,15 @@ post_install() {
 
     cat <<'MSG'
 
-  kgsm-api is enabled and starts on its own. Its first start creates the administrator this host
-  begins with and leaves the password here, readable by nobody else:
+  kgsm-api is enabled and starts on its own. It signs nobody in: people sign in at the cluster's
+  auth anchor, and every session this node accepts is one the anchor minted.
 
-    /var/lib/kgsm-api/initial-admin-password
+  On a machine that founded its own cluster the anchor runs here, and its first start leaves the
+  administrator's one-time password, readable by nobody else, in:
 
-  Sign in as 'admin', change the password, and the file is removed on that first sign-in.
+    /var/lib/kgsm-auth-anchor/initial-admin-password
 
-  It also generates the key its sessions are signed with, in /var/lib/kgsm-api/signing-key. Set
-  Api__SigningKey in /etc/kgsm-api/kgsm-api.env only to pin one deliberately.
-
-  If people here sign in through Discord or another provider, that application goes in
-  /etc/kgsm/kgsm-auth.env, which every surface on the host reads. A host whose people sign in with a
-  KGSM password needs nothing there.
+  A machine joining an existing cluster is signed into through that cluster's anchor instead.
 
   Install kgsm-web for the Control Panel UI. Without it the API serves its endpoints and no page,
   which is a supported way to run a node.

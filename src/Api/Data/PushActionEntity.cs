@@ -126,13 +126,6 @@ public static class PushActionKind
     public const string LeafRestart = "leaf.restart";
 
     /// <summary>
-    /// Let the account named by <c>Target</c> in, as a viewer. Viewer rather than a choice of tier: a
-    /// button carries no room to pick one, and the floor is the only grant that is safe to make without
-    /// looking at who is asking. Anything above it is a decision for the Users tab.
-    /// </summary>
-    public const string UserApprove = "user.approve";
-
-    /// <summary>
     /// Apply the available update to every server a summary named. The one action that acts on more than
     /// one thing, and it exists only for a digest — where the batch is uniform, so the instruction reads
     /// the same as the single-server one it repeats.
@@ -148,7 +141,7 @@ public static class PushActionKind
 
     public static bool IsKnown(string? kind) =>
         kind is ServerUpdate or ServerStart or ServerStop or ConditionSnooze
-             or PlayerKick or PlayerBan or LeafRestart or UserApprove or ServerUpdateAll
+             or PlayerKick or PlayerBan or LeafRestart or ServerUpdateAll
              or SchedulePostpone;
 
     /// <summary>The moderation action a kind runs, or <see langword="null"/> when it is not one. Maps onto

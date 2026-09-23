@@ -102,29 +102,14 @@ public class LeafDescriptorSelfTests
         return found;
     }
 
-    /// <summary>The env-var spelling of every property the API binds.</summary>
     /// <summary>
-    /// The keys of the shared <c>KgsmAuth</c> block that <em>this</em> surface's descriptor declares.
-    /// </summary>
-    /// <remarks>
-    /// Written out rather than derived from the type, because the section binds a <em>map</em> of
-    /// applications keyed by provider name — there is no property per provider to reflect over, which
-    /// is exactly what lets a host be wired to another one with no rebuild here. What belongs in this
-    /// list is what an operator can set from this leaf's configuration page.
-    /// </remarks>
-    private static readonly string[] SharedAuthKeysThisApiReads =
-        ["Providers__discord__ClientId", "Providers__discord__ClientSecret"];
-
-    /// <summary>
-    /// Every key the settings file can bind, across BOTH bound types. The <c>Api</c> section is this
-    /// API's own; <c>KgsmAuth</c> is the ecosystem's shared authorization block, bound from the same
-    /// file to a type in <c>TheKrystalShip.KGSM.Auth</c> so every surface on the host reads the same
-    /// keys. A section declared in the file but not bound anywhere would silently drop.
+    /// Every key the settings file can bind — the env-var spelling of every property on the <c>Api</c>
+    /// section, which is the one section this API binds. A key declared in the file and bound nowhere
+    /// would silently drop.
     /// </summary>
     private static HashSet<string> SettingsPropertyKeys() =>
     [
         .. typeof(ApiSettings).GetProperties().Select(p => $"{ApiSettings.Section}__{p.Name}"),
-        .. SharedAuthKeysThisApiReads.Select(k => $"{KgsmAuthOptions.Section}__{k}"),
     ];
 
     /// <summary>The declared value of one <c>Api</c> key, rendered the way a descriptor default is
@@ -322,8 +307,6 @@ public class LeafDescriptorSelfTests
     {
         string[] mustBeSecret =
         [
-            "Api__SigningKey",
-            "KgsmAuth__Providers__discord__ClientSecret",
             "Api__RawgApiKey",
         ];
 
