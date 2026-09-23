@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a fact this node changes across a restart reaches the cluster (0.200.1)
+
+Takes `TheKrystalShip.KGSM.Cluster 1.0.0-dev.23`: a restart that re-publishes as many facts as before, one
+of them different, no longer lands level with the incarnation other members hold and goes unheard.
+
 ### Added — the node names its sign-in provider and announces its panel (0.200.0)
 
 `GET /.well-known/oauth-protected-resource` (RFC 9728) names the issuer this node verifies sessions
