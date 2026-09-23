@@ -135,16 +135,29 @@ def main() -> None:
                     help="the anchor's private signing key")
     ap.add_argument("--published", default="/var/lib/kgsm/cluster/auth-public-key.json",
                     help="the key set the anchor publishes, for the key id")
-    ap.add_argument("--anchor-env", default="/etc/kgsm-auth-anchor/kgsm-auth-anchor.env",
-                    help="the anchor's EnvironmentFile, for a configured cluster id or issuer")
+    ap.add_argument("--anchor-env", action="append",
+                    help="an EnvironmentFile the anchor loads, for a configured cluster id or issuer. "
+                         "Repeatable; a later file wins, as systemd loads them. Default: the host's "
+                         "file, then the override its own configuration page writes")
     ap.add_argument("--cluster-id", default=None,
-                    help="the audience (default: Anchor__ClusterId from --anchor-env, else kgsm-cluster)")
+                    help="the audience (default: Anchor__ClusterId from the anchor's env files, else kgsm-cluster)")
     ap.add_argument("--issuer", default=None,
-                    help="the issuer (default: Anchor__Issuer from --anchor-env, else kgsm)")
+                    help="the issuer (default: Anchor__Issuer from the anchor's env files, else kgsm)")
     args = ap.parse_args()
 
-    cluster_id = args.cluster_id or env_setting(args.anchor_env, "Anchor__ClusterId") or "kgsm-cluster"
-    issuer = args.issuer or env_setting(args.anchor_env, "Anchor__Issuer") or "kgsm"
+    env_files = args.anchor_env or [
+        "/etc/kgsm-auth-anchor/kgsm-auth-anchor.env",
+        "/var/lib/kgsm-auth-anchor/config-override.env",
+    ]
+
+    def anchor_setting(name: str) -> str | None:
+        found = None
+        for path in env_files:
+            found = env_setting(path, name) or found
+        return found
+
+    cluster_id = args.cluster_id or anchor_setting("Anchor__ClusterId") or "kgsm-cluster"
+    issuer = (args.issuer or anchor_setting("Anchor__Issuer") or "kgsm").rstrip("/")
     key = read_private_key(args.key)
     if not isinstance(key, ec.EllipticCurvePrivateKey):
         sys.exit(f"error: {args.key} is not an EC key")
