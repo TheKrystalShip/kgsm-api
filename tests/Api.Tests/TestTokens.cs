@@ -6,7 +6,7 @@ using Microsoft.IdentityModel.Tokens;
 
 using TheKrystalShip.KGSM.Auth;
 
-using TheKrystalShip.KGSM.Auth.Sessions;
+using TheKrystalShip.KGSM.Auth.Minting;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -24,29 +24,38 @@ internal static class TestTokens
         using var stranger = EcdsaSessionSigner.Generate();
         var tokens = new SessionTokenService(
             new SessionTokenOptions(
-                HostId: AuthTestFactory.ClusterId,
-                SigningKey: "",
+                Audience: AuthTestFactory.ClusterId,
                 AccessLifetime: TimeSpan.FromMinutes(15),
                 RefreshLifetime: TimeSpan.FromDays(30),
                 Issuer: AuthTestFactory.AnchorIssuer),
-            logger: null,
-            signer: stranger);
+            stranger);
         return tokens.MintAccess(FakeDiscordResolver.Identity, tier, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
     }
 
     /// <summary>
-    /// A session a surface signed for itself with a symmetric key, audienced to this node — the kind of
-    /// token this node would have to be holding a key to accept, and holds none for.
+    /// A session signed with a symmetric key, audienced to this node — the kind of token this node would
+    /// have to be holding a key to accept, and holds none for.
     /// </summary>
     public static string MintSymmetric(string signingKey, KgsmTier tier)
     {
-        var tokens = new SessionTokenService(new SessionTokenOptions(
-            HostId: AuthTestFactory.HostId,
-            SigningKey: signingKey,
-            AccessLifetime: TimeSpan.FromMinutes(15),
-            RefreshLifetime: TimeSpan.FromDays(30),
-            Issuer: "kgsm-api"));
-        return tokens.MintAccess(FakeDiscordResolver.Identity, tier, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
+        var claims = new List<Claim>
+        {
+            new("sub", FakeDiscordResolver.Identity.Handle),
+            new(KgsmAuthClaims.Tier, KgsmTiers.ToWire(tier)),
+            new(KgsmAuthClaims.Host, AuthTestFactory.HostId),
+            new(KgsmAuthClaims.TokenKind, KgsmTokenKind.Access),
+            new(KgsmAuthClaims.SessionId, "sid_test_" + Guid.NewGuid().ToString("N")),
+        };
+        var key = new SymmetricSecurityKey(SHA256.HashData(Encoding.UTF8.GetBytes(signingKey)));
+        return new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+        {
+            Issuer = "kgsm-api",
+            Audience = AuthTestFactory.HostId,
+            Subject = new ClaimsIdentity(claims),
+            Expires = DateTime.UtcNow.AddMinutes(15),
+            IssuedAt = DateTime.UtcNow,
+            SigningCredentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256),
+        });
     }
 
     /// <summary>

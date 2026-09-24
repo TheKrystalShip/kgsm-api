@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the auth packages match the roles (0.201.1)
+
+Takes `TheKrystalShip.KGSM.Auth 4.0.0-dev.2`, `Auth.Users 1.4.0-dev.7`, `Auth.Cluster 1.0.0-dev.8` and
+`TheKrystalShip.KGSM.Cluster 1.0.0-dev.24`, and no longer `Auth.Sessions`: validating and reading a
+session come from `Auth.Cluster`, which holds nothing that can mint one. `EndedSessionStore` is an
+`IClusterSessionDenyList`, and the no-op `NoLocalSessions` goes with the handler argument it filled.
+The tests mint through `TheKrystalShip.KGSM.Auth.Testing`, the anchor's own minter; a symmetric session
+the node must refuse is signed in the test itself. No behaviour changes.
+
 ### Changed — the provider's clients are what CORS admits, and no `/auth` path is served (0.201.0)
 
 CORS admits the origins the cluster's sign-in provider has registered clients at, read through the holder

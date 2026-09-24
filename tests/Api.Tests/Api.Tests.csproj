@@ -27,6 +27,12 @@
     <ProjectReference Include="..\..\src\Api\Api.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The auth anchor's minter: a signed-in caller here holds a session minted exactly as the anchor
+         mints one, and this node verifies it through its own composition. -->
+    <PackageReference Include="TheKrystalShip.KGSM.Auth.Testing" Version="1.0.0-dev.1" />
+  </ItemGroup>
+
   <!-- Mirrors Api.csproj: suppress the transitive SQLite native-lib advisory (no patched version
        published yet — see Api.csproj for the rationale). Keeps `dotnet test` at 0 warnings. -->
   <ItemGroup>

@@ -11,9 +11,9 @@ using Microsoft.IdentityModel.Tokens;
 
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Sessions;
-using TheKrystalShip.KGSM.Auth.Users;
 using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.KGSM.Auth.Minting;
+using TheKrystalShip.KGSM.Auth.Users;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -50,7 +50,7 @@ public sealed class ClusterSessionAcceptanceTests
         : IClusterSessionKeys
     {
         public static Published Of(EcdsaSessionSigner signer, string audience = ClusterId) =>
-            new(audience, AnchorIssuer, EcdsaSessionSigner.VerificationKeysFrom(signer.PublicKeys));
+            new(audience, AnchorIssuer, SessionKeys.VerificationKeysFrom(signer.PublicKeys));
 
         public static Published Nothing => new(null, null, []);
     }
@@ -67,13 +67,11 @@ public sealed class ClusterSessionAcceptanceTests
     /// <summary>The anchor's own token service: asymmetric, audienced to the cluster.</summary>
     private static SessionTokenService Anchor(EcdsaSessionSigner signer, string audience = ClusterId) =>
         new(new SessionTokenOptions(
-                HostId: audience,
-                SigningKey: "",
+                Audience: audience,
                 AccessLifetime: TimeSpan.FromMinutes(15),
                 RefreshLifetime: TimeSpan.FromDays(30),
                 Issuer: AnchorIssuer),
-            logger: null,
-            signer: signer);
+            signer);
 
     /// <summary>
     /// Somebody the anchor knows, named by a replicated identity.

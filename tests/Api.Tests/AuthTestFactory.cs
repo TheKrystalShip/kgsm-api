@@ -14,7 +14,8 @@ using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Users;
 
-using TheKrystalShip.KGSM.Auth.Sessions;
+using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.KGSM.Auth.Minting;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -46,13 +47,11 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     /// <summary>The stand-in anchor's token service: asymmetric, audienced to the cluster.</summary>
     public static readonly SessionTokenService Anchor = new(
         new SessionTokenOptions(
-            HostId: ClusterId,
-            SigningKey: "",
+            Audience: ClusterId,
             AccessLifetime: TimeSpan.FromMinutes(15),
             RefreshLifetime: TimeSpan.FromDays(30),
             Issuer: AnchorIssuer),
-        logger: null,
-        signer: AnchorSigner);
+        AnchorSigner);
 
     /// <summary>What gossip would have delivered from the member holding the accounts.</summary>
     public sealed record PublishedAnchor(string? Audience, string? Issuer, IReadOnlyList<SecurityKey> Keys)
@@ -60,7 +59,7 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     {
         /// <summary>The stand-in anchor, as every factory is told about it.</summary>
         public static PublishedAnchor Default { get; } =
-            new(ClusterId, AnchorIssuer, EcdsaSessionSigner.VerificationKeysFrom(AnchorSigner.PublicKeys));
+            new(ClusterId, AnchorIssuer, SessionKeys.VerificationKeysFrom(AnchorSigner.PublicKeys));
 
         /// <summary>A node that has not heard from any anchor.</summary>
         public static PublishedAnchor Nothing { get; } = new(null, null, []);

@@ -38,7 +38,6 @@ using TheKrystalShip.KGSM.Extensions;
 
 using TheKrystalShip.KGSM.Auth;
 
-using TheKrystalShip.KGSM.Auth.Sessions;
 using TheKrystalShip.KGSM.Auth.Cluster;
 using TheKrystalShip.KGSM.Lifecycle;
 
@@ -697,11 +696,10 @@ public class Startup(IConfiguration configuration)
         // knows nothing about sessions, and the handler is every member's rather than this API's. The
         // retention is how long a record of an ended session is worth keeping.
         services.AddSingleton<EndedSessionStore>();
-        services.AddSingleton<IClusterSessionAuthority>(sp => sp.GetRequiredService<EndedSessionStore>());
+        services.AddSingleton<IClusterSessionDenyList>(sp => sp.GetRequiredService<EndedSessionStore>());
 
         services.AddSingleton<IClusterMessageHandler>(sp => new SessionRevokeHandler(
-            sp.GetRequiredService<IClusterSessionAuthority>(),
-            new NoLocalSessions(),
+            sp.GetRequiredService<IClusterSessionDenyList>(),
             sp.GetRequiredService<ClusterSessionRevocations>(),
             EndedSessionStore.Retention,
             sp.GetRequiredService<ILogger<SessionRevokeHandler>>()));
@@ -767,7 +765,7 @@ public class Startup(IConfiguration configuration)
         // A session has no row here, so the only thing worth storing about one is that it has been
         // ended. Cached on the request path; a revoke arriving over the bus evicts.
         services.AddSingleton(sp => new ClusterSessionRevocations(
-            sp.GetRequiredService<IClusterSessionAuthority>(),
+            sp.GetRequiredService<IClusterSessionDenyList>(),
             sp.GetRequiredService<IMemoryCache>(),
             TimeSpan.FromMilliseconds(sp.GetRequiredService<ApiOptions>().SessionsCacheTtlMs)));
 

@@ -12,7 +12,7 @@ using TheKrystalShip.KGSM.Core.Models.Enums;
 
 using TheKrystalShip.KGSM.Auth;
 
-using TheKrystalShip.KGSM.Auth.Sessions;
+using TheKrystalShip.KGSM.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Controllers;
 

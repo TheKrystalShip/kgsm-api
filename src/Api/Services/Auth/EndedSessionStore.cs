@@ -16,18 +16,13 @@ namespace TheKrystalShip.Api.Services.Auth;
 /// <see cref="ClusterSessionRevocations"/> keeps on the request path.
 /// </para>
 /// <para>
-/// <b>This node mints nothing, so it holds nothing of its own to end.</b> The revoke handler's first
-/// step ends a session the member itself minted; here that step finds none and returns, and the record
-/// is what ends the session.
-/// </para>
-/// <para>
 /// Idempotent, and a record is never overwritten: the bus delivers at least once, and a redelivery must
 /// not move an end or resurrect a session. Every write sweeps the records whose bearers can no longer be
 /// presented, so the table stays bounded with nothing else running.
 /// </para>
 /// </remarks>
 public sealed class EndedSessionStore(IServiceScopeFactory scopeFactory, ILogger<EndedSessionStore> logger)
-    : IClusterSessionAuthority
+    : IClusterSessionDenyList
 {
     /// <summary>
     /// How long a record of an ended session is kept. Only an access token is ever presented here — a
@@ -98,9 +93,4 @@ public sealed class EndedSessionStore(IServiceScopeFactory scopeFactory, ILogger
         }
         finally { _writeGate.Release(); }
     }
-
-    public Task RevokeAsync(string sessionId, CancellationToken ct = default) => Task.CompletedTask;
-
-    public Task<IReadOnlyList<string>> RevokeAllForHandleAsync(string handle, CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<string>>([]);
 }
