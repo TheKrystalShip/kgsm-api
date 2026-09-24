@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Auth.Cluster;
 using TheKrystalShip.KGSM.Auth.Sessions;
 using TheKrystalShip.KGSM.Cluster.Membership;
@@ -80,13 +79,15 @@ public sealed class ProviderDiscoveryTests(AuthTestFactory factory) : IClassFixt
                 node.Services.GetRequiredService<SelfPublications>().Current
                     .GetValueOrDefault(ClusterClientAnnouncement.FactKey));
 
+            ClusterClientAnnouncement panel = ClusterClientAnnouncement.ControlPanel;
             Assert.NotNull(announced);
-            Assert.Equal(PanelClient.Name, announced.Name);
-            Assert.Equal([PanelClient.RedirectPath], announced.RedirectPaths);
-            Assert.Equal([PanelClient.PostLogoutRedirectPath], announced.PostLogoutRedirectPaths);
+            Assert.Equal(panel.Name, announced.Name);
+            Assert.Equal(panel.RedirectPaths, announced.RedirectPaths);
+            Assert.Equal(panel.PostLogoutRedirectPaths, announced.PostLogoutRedirectPaths);
 
             // And the path the provider sends a code to is the panel, not a 404.
-            using HttpResponseMessage landing = await client.GetAsync($"{PanelClient.RedirectPath}?code=x&state=y");
+            using HttpResponseMessage landing = await client.GetAsync(
+                $"{ClusterClientAnnouncement.ControlPanel.RedirectPaths[0]}?code=x&state=y");
             Assert.Equal(HttpStatusCode.OK, landing.StatusCode);
             Assert.Contains("panel", await landing.Content.ReadAsStringAsync());
         }

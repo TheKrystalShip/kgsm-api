@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the panel's paths are the shared statement (0.200.2)
+
+A node serving the panel announces `ClusterClientAnnouncement.ControlPanel` from
+`TheKrystalShip.KGSM.Auth.Sessions 2.2.0-dev.5` — the same statement the auth anchor declares a
+static-host panel with — so the two cannot send a browser to different paths.
+
 ### Fixed — a fact this node changes across a restart reaches the cluster (0.200.1)
 
 Takes `TheKrystalShip.KGSM.Cluster 1.0.0-dev.23`: a restart that re-publishes as many facts as before, one

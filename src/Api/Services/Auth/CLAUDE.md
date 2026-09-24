@@ -61,7 +61,8 @@ the local "what you must not break."
   Anonymous and readable from any origin without credentials, by its own route-level CORS policy,
   because a panel served with no member behind it asks whichever member a person names.
 - **The panel this node serves is a client of the provider, by announcement.** When the bundle is in
-  the web root, this node publishes `auth.client` (`PanelClient`: paths only, `/signed-in` and `/`),
+  the web root, this node publishes `auth.client` (`ClusterClientAnnouncement.ControlPanel`: paths only,
+  `/signed-in` and `/` — the statement the anchor declares a static-host panel with),
   which the provider joins to the browser address the roster hands out for this node. A node serving
   no panel announces nothing.
 - **This node writes the host file its machine's leaves verify against** (`HostProviderFileWriter`,

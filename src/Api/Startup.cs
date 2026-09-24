@@ -1023,7 +1023,7 @@ public class Startup(IConfiguration configuration)
             // so the provider sends people back to it with nobody registering it. A node serving no
             // panel announces nothing, and the provider sends nobody here.
             app.ApplicationServices.GetRequiredService<SelfPublications>()
-                .Publish(ClusterClientAnnouncement.FactKey, PanelClient.Announcement.ToJson());
+                .Publish(ClusterClientAnnouncement.FactKey, ClusterClientAnnouncement.ControlPanel.ToJson());
         }
 
         // FIRST, before anything reads the scheme or the caller's address: rewrite the request from
