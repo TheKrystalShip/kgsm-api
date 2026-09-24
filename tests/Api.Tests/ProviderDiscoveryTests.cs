@@ -49,6 +49,40 @@ public sealed class ProviderDiscoveryTests(AuthTestFactory factory) : IClassFixt
         Assert.False(response.Headers.Contains("Access-Control-Allow-Credentials"));
     }
 
+    private sealed class Registered(params string[] origins) : IClientOrigins
+    {
+        public bool Admits(string? origin) => origin is not null && origins.Contains(origin, StringComparer.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_registered_client_s_origin_is_admitted_across_origins_and_nothing_else_is()
+    {
+        using WebApplicationFactory<Program> node = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IClientOrigins>();
+                services.AddSingleton<IClientOrigins>(new Registered("https://kgsm.example.test"));
+            }));
+        using HttpClient client = node.CreateClient();
+
+        async Task<HttpResponseMessage> PreflightFrom(string origin)
+        {
+            using var preflight = new HttpRequestMessage(HttpMethod.Options, "/api/v1/servers");
+            preflight.Headers.Add("Origin", origin);
+            preflight.Headers.Add("Access-Control-Request-Method", "GET");
+            preflight.Headers.Add("Access-Control-Request-Headers", "authorization");
+            return await client.SendAsync(preflight);
+        }
+
+        // Registering a client at the provider is what lets it call this node; no node holds a list.
+        using HttpResponseMessage admitted = await PreflightFrom("https://kgsm.example.test");
+        Assert.Equal("https://kgsm.example.test", admitted.Headers.GetValues("Access-Control-Allow-Origin").Single());
+        Assert.False(admitted.Headers.Contains("Access-Control-Allow-Credentials"));
+
+        using HttpResponseMessage refused = await PreflightFrom("https://elsewhere.test");
+        Assert.False(refused.Headers.Contains("Access-Control-Allow-Origin"));
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData(AuthTestFactory.AnchorIssuer)]

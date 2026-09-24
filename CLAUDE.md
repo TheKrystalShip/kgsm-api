@@ -143,8 +143,8 @@ Note the two polkit rules are separate on purpose: `48-kgsm-api-deploy.rules` le
 an **auth-ENABLED** no-token sweep. The domain checks run under `Api__AuthDisabled=true` (the
 escape hatch — synthetic admin) so they exercise the contracts unchanged; a dedicated
 auth-enabled instance then proves the no-token sweep (every protected endpoint `401`s with the
-frozen envelope, `/health`+`/api/v1` stay open, and every `/auth` path answers `503` because this
-node signs nobody in). The command-gate checks prove the gate/rejection contract (`400`/`404`/`409`)
+frozen envelope, `/health`+`/api/v1` stay open, and an `/auth` path is a `404` because this node
+signs nobody in). The command-gate checks prove the gate/rejection contract (`400`/`404`/`409`)
 **without mutation** — the gate rejects before a verb runs. NB real native lifecycle needs
 `kgsm-watchdog` up — without it, kgsm direct-spawns an orphan and run-state tracking is
 unreliable.
@@ -162,7 +162,7 @@ host), `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A).
 default, under one `Api` section that `ApiSettings` binds 1:1. It covers host identity, the kgsm
 engine path/journal, the monitor/watchdog/assistant/scheduler/reactor/firewall endpoints, the bind
 address
-and DB path, the CORS allowlist, and the auth keys (the account replica, and how long an answer from
+and DB path, and the auth keys (the account replica, and how long an answer from
 it or from the ended-session list is reused). `ApiOptions.FromSettings` is the one place any of it is
 interpreted; nothing reads configuration by string key.
 
@@ -171,8 +171,9 @@ anchor signs people in — by password or through an identity provider — and m
 API verifies it offline against the key the anchor publishes, read through gossip, and resolves the
 tier from its replica of the cluster's accounts (`Api__UsersDbPath`) on every request. It holds no
 identity-provider application, no signing key and no sign-in door, and needs nothing configured to
-accept sessions beyond the cluster secret in `/etc/kgsm/kgsm-cluster.env`. Every `/auth` path answers
-`503` naming the member that holds the accounts. The detail is `src/Api/Services/Auth/CLAUDE.md`.
+accept sessions beyond the cluster secret in `/etc/kgsm/kgsm-cluster.env`. It names the provider at
+`/.well-known/oauth-protected-resource`, admits the provider's registered clients' origins across
+origins, and serves no `/auth` path. The detail is `src/Api/Services/Auth/CLAUDE.md`.
 
 An environment variable **overrides one key** by spelling that key's path with `__`
 (`Api__DomainPollMs`, `Logging__LogLevel__Default`, `Kestrel__Certificates__Default__Path`), and env

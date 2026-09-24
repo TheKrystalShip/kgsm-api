@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the provider's clients are what CORS admits, and no `/auth` path is served (0.201.0)
+
+CORS admits the origins the cluster's sign-in provider has registered clients at, read through the holder
+as `auth.origins` (`IClientOrigins`, `TheKrystalShip.KGSM.Auth.Cluster 1.0.0-dev.7`), without credentials;
+a host with auth disabled admits any origin. `Api__CorsOrigins` and the panel origins this node learned
+from an admin's request are no longer read, and `SignInElsewhereController` is gone, so an `/auth/*`
+request is a plain `404`. Takes `TheKrystalShip.KGSM.Auth 4.0.0-dev.1` and `Auth.Sessions 2.2.0-dev.6`.
+
 ### Changed — the panel's paths are the shared statement (0.200.2)
 
 A node serving the panel announces `ClusterClientAnnouncement.ControlPanel` from

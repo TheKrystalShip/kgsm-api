@@ -58,11 +58,11 @@ public sealed class SpaFallbackTests : IDisposable
     [InlineData("/auth/login")]
     public async Task AskingThisNodeHowToSignInIsNotAWebPage(string path)
     {
-        // /auth sits at the root beside /api, where the panel's client-side routing would otherwise
-        // answer it with the app. This node signs nobody in, and every /auth path says so.
+        // /auth is where the provider keeps its doors, and the panel's client-side routing would
+        // otherwise answer it here with the app. This node has none of them.
         HttpResponseMessage response = await _client.GetAsync(path);
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.NotEqual("text/html", response.Content.Headers.ContentType?.MediaType);
     }
 

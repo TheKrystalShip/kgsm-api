@@ -1574,12 +1574,12 @@ req GET /api/v1;       V=$CODE
 [[ "$H" == 200 && "$V" == 200 ]] && ok "/health + /api/v1 stay open under auth (200/200)" \
   || bad "open endpoints under auth (health=$H meta=$V)"
 
-# 33. This node signs nobody in: any /auth path is a 503 that says which member does, or — with no
-#     cluster secret, as here — that no member holds the accounts. Never a 404 and never the SPA.
+# 33. This node signs nobody in and serves no /auth path: a 404, never the SPA. A surface finds the
+#     provider from /.well-known/oauth-protected-resource instead.
 req GET /auth/login
-[[ "$CODE" == 503 ]] && grep -q '"code":"auth_holder_unknown"' <<<"$BODY" \
-  && ok "/auth/* -> 503 auth_holder_unknown (this node signs nobody in; no anchor known)" \
-  || bad "/auth/* 503 (code=$CODE body=$BODY)"
+[[ "$CODE" == 404 ]] \
+  && ok "/auth/* -> 404 (this node signs nobody in)" \
+  || bad "/auth/* 404 (code=$CODE body=$BODY)"
 
 # Coverage note: the 401/403/tier matrix (viewer/operator/admin) against anchor-signed sessions, the
 # ended-session deny-list, a symmetric or sid-less token refused, and the SSE stream's bearer-header auth

@@ -323,13 +323,13 @@ migrated WebSocket→SSE 2026-07-02, protocol in `src/Api/Realtime/CLAUDE.md`; f
   holder of `auth` publishes over gossip; an ended session is refused through the `EndedSessionStore`
   deny-list the bus fills (`session.revoke`), cached on the request path; `LiveAuthority` replaces the
   token's tier with the replica's on every request; replicated account changes reach open streams at
-  once (`AccountChangesReachOpenStreams`). `/auth/*` answers `503` naming the holder
-  (`SignInElsewhereController`), and `AuthAnchorReport` logs which member signs people in, or that none
-  does. `Api__AuthDisabled=true` stays the loudly-logged dev escape hatch.
+  once (`AccountChangesReachOpenStreams`). No `/auth` path is served; CORS admits the provider's
+  registered clients' origins, read through the holder; `AuthAnchorReport` logs which member signs
+  people in, or that none does. `Api__AuthDisabled=true` stays the loudly-logged dev escape hatch.
 - **Self-validated:** `tests/Api.Tests` — the 401/403/tier matrix against sessions a stand-in anchor
   signs, an unpublished key / a symmetric token / a sid-less token refused, the deny-list across two
   nodes over the real bus, and a replicated retier and removal re-gating a live stream. `scripts/smoke.sh`
-  proves the no-token sweep and the `/auth/*` refusal.
+  proves the no-token sweep and that `/auth/*` is a `404`.
 
 ### M5 — Audit log + SQLite (the event-persistence consumer)  ·  `partial` (backend built & self-validated 2026-06-15; frontend gate pending)  ←  *resolves keystone O3*
 - **Goal:** the durable, append-only action record — **persistence downstream of the

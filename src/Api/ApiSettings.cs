@@ -465,11 +465,4 @@ public sealed class ApiSettings
     /// <panel>Addresses this API serves on. The Control Panel and every other surface reach it here.</panel>
     [ConfigField("bindAddress", "Listen address", Group = "general", Risk = ConfigRisk.Wiring)]
     public string? Urls { get; set; }
-
-    /// <summary>Comma-separated CORS origin allowlist. Blank allows any origin, which is a dev-only posture.</summary>
-    /// <panel>Exact origins a browser may call this API from. A panel served from an origin that is not
-    /// listed is refused by the browser before the request arrives.</panel>
-    [ConfigField("corsOrigins", "Allowed browser origins", Group = "general", Type = ConfigType.Csv,
-        Risk = ConfigRisk.Wiring, NoDefault = true)]
-    public string? CorsOrigins { get; set; }
 }

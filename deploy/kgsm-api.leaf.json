@@ -762,15 +762,6 @@
       "type": "string",
       "default": "http://0.0.0.0:8080",
       "risk": "wiring"
-    },
-    {
-      "key": "corsOrigins",
-      "env": "Api__CorsOrigins",
-      "label": "Allowed browser origins",
-      "description": "Exact origins a browser may call this API from. A panel served from an origin that is not listed is refused by the browser before the request arrives.",
-      "group": "general",
-      "type": "csv",
-      "risk": "wiring"
     }
   ]
 }

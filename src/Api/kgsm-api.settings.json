@@ -175,10 +175,7 @@
 
       // ── General ──
       // HTTP bind address(es), semicolon-separated. Read before the host exists, so it is bound separately in Program.
-      "Urls": "http://0.0.0.0:8080",
-      // Comma-separated CORS origin allowlist, joined with the panel origins this node learns when an
-      // admin signs in and when a peer introduces itself. Blank on both allows any origin, a dev-only posture.
-      "CorsOrigins": ""
+      "Urls": "http://0.0.0.0:8080"
   },
 
   // --- Standard ASP.NET Core keys ---------------------------------------------------------------

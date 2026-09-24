@@ -71,9 +71,11 @@ the local "what you must not break."
 - **It introduces itself to the anchor beside it only on the machine that founded the cluster**, and
   only while it knows no member (`LocalAnchorJoin`, `ClusterFounding.IsFoundedHere`). A machine holding
   another cluster's secret is joined by an admin; the anchor beside it holds nothing there.
-- **`/auth/*` says which member signs people in.** `SignInElsewhereController` answers every `/auth`
-  path `503` with the holder's **name** on `X-Kgsm-Auth-Holder` (`auth_held_by_anchor`), or
-  `auth_holder_unknown` when none is known — never an address, and never the SPA's HTML.
+- **There is no `/auth` path here at all.** A surface finds the provider from the protected-resource
+  document above; an `/auth/*` request is an ordinary `404`, never the SPA's HTML.
+- **CORS admits the provider's registered clients' origins** (`IClientOrigins`, read through the holder
+  by `ClusterSessionKeys`), without credentials, so no node is configured with a list of origins. A host
+  with auth disabled admits any origin: it has no session to protect.
 - **Auth is ON by default.** `Api__AuthDisabled=true` swaps in `DisabledAuthHandler` (synthetic admin,
   attributed to `Api__DisabledAuthActor`), loudly logged. Never enable it on an exposed host.
 
@@ -81,7 +83,7 @@ the local "what you must not break."
 
 - **Secure-by-default.** A `FallbackPolicy` requires an authenticated caller, so a **new endpoint is
   gated unless it opts out**. Adding an open endpoint is a deliberate, reviewed act — not an omission.
-  `/health`, `/api/v1` and the `/auth/*` refusal carry `[AllowAnonymous]`, and **one anonymous write**
+  `/health`, `/api/v1` and the protected-resource document carry `[AllowAnonymous]`, and **one anonymous write**
   needs its own paragraph: **`POST /notifications/actions/{handle}`**. A service worker holds no
   session, so a notification button has no bearer to present and the handle stands in for one. What
   keeps that sound is that the handle names an operation **staged server-side**, is **bound to the push

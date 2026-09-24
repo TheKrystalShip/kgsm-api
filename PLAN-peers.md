@@ -648,10 +648,11 @@ the cluster package's `docs/cluster-message-bus.md`.
   cached Cluster-page data. Selecting a peer switches the SPA to talk **directly**
   to that peer (it already holds, or lazily vouches, a native session there); the
   source node drops out of the loop.
-- **CORS is a setup requirement:** for the browser to call a peer directly, that
-  peer's `Api__CorsOrigins` must list the SPA origin. The Cluster page runs a
-  browser-side preflight probe per peer and **warns** on a CORS/reachability
-  mismatch rather than failing opaquely mid-install.
+- **CORS follows the sign-in provider's clients:** a peer admits the SPA's origin
+  because the SPA is a registered client of the cluster's provider, whose origins
+  every member reads through the holder (`hosted-sign-in-plan.md` decision 18). The
+  Cluster page runs a browser-side preflight probe per peer and **warns** on a
+  CORS/reachability mismatch rather than failing opaquely mid-install.
 
 ---
 

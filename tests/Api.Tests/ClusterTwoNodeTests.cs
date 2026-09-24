@@ -439,8 +439,7 @@ public sealed class ClusterNodeFactory(
     int gossipMs = 250,
     int suspectMs = 1500,
     int reapMs = 4000,
-    int pollMs = 250,
-    string? corsOrigins = null) : AuthTestFactory
+    int pollMs = 250) : AuthTestFactory
 {
     public string NodeId { get; } = nodeId;
     public string ClusterHostId { get; } = hostId;
@@ -477,8 +476,6 @@ public sealed class ClusterNodeFactory(
             };
             if (advertiseUrl is not null)
                 settings["Api:PublicBaseUrl"] = advertiseUrl;
-            if (corsOrigins is not null)
-                settings["Api:CorsOrigins"] = corsOrigins;
             config.AddInMemoryCollection(settings);
         });
 

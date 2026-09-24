@@ -165,17 +165,11 @@ public sealed class MembersController(
         // This request is the one moment this node can learn its own address honestly: an admin reached it
         // here, through a browser, to run an admin action. A node cannot work that address out for itself,
         // and it needs one before it can tell the member it is about to introduce itself to where to call
-        // back. The browser's origin is recorded for the same reason — it is the panel's origin, and every
-        // member of the cluster will need to answer it.
+        // back.
         await selfIdentity
             .RecordCandidateAsync($"{Request.Scheme}://{Request.Host}", client: true,
                 SelfIdentityStore.BrowserObserved, ct)
             .ConfigureAwait(false);
-        if (Request.Headers.TryGetValue("Origin", out Microsoft.Extensions.Primitives.StringValues origin)
-            && origin.Count > 0 && origin[0] is { Length: > 0 } panel)
-        {
-            await selfIdentity.RecordPanelOriginAsync(panel, ct).ConfigureAwait(false);
-        }
 
         MemberAddResult result = await handshake
             .AddMemberAsync(body.Url.Trim(), body.Nickname, ct).ConfigureAwait(false);

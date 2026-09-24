@@ -90,10 +90,10 @@ public class Startup(IConfiguration configuration)
     private const string CorsPolicy = "frontend";
 
     // The CORS policy is built in ConfigureServices, before any service exists to resolve, but it has to
-    // consult the panel origins this node learns at runtime. The store is dropped in here once the provider
-    // is up (Configure), and the policy predicate reads it per request. Null until then, which reads as
-    // "nothing learned yet" — the same answer the node gave before it learned anything.
-    private SelfIdentityStore? _corsPanelOrigins;
+    // consult the origins the cluster's sign-in provider publishes, which arrive at runtime. The reader is
+    // dropped in here once the provider is up (Configure), and the policy predicate asks it per request.
+    // Null until then, which admits nobody.
+    private IClientOrigins? _clientOrigins;
 
     public void ConfigureServices(IServiceCollection services)
     {
@@ -744,6 +744,7 @@ public class Startup(IConfiguration configuration)
         // against, and every session is refused.
         services.AddSingleton<ClusterSessionKeys>();
         services.AddSingleton<IClusterSessionKeys>(sp => sp.GetRequiredService<ClusterSessionKeys>());
+        services.AddSingleton<IClientOrigins>(sp => sp.GetRequiredService<ClusterSessionKeys>());
         services.AddHostedService(sp => sp.GetRequiredService<ClusterSessionKeys>());
 
         // What this node verifies sessions with, written for the leaves on its machine: a leaf joins no
@@ -961,47 +962,26 @@ public class Startup(IConfiguration configuration)
         services.AddExceptionHandler<ApiExceptionHandler>();
         services.AddProblemDetails();
 
-        // CORS answers from two places: the configured allowlist, and the panel origins this node has
-        // learned — an origin an admin signed in from here, or one a peer carried over in an introduce
-        // exchange (PLAN-peers.md P0.6). That is what lets a panel served from somewhere that is not a node
-        // reach every node in a cluster without a per-node allowlist. When neither names anything we allow
-        // any origin (dev only — safe because bearers ride the Authorization header, not cookies).
-        IReadOnlyList<string> corsOrigins = apiOptions.CorsOrigins;
+        // CORS admits the origins the cluster's sign-in provider has registered clients at, read through
+        // the holder — so registering a client at the provider is what lets it call every node, and no
+        // node is configured with a list. Without credentials: a session rides the Authorization header,
+        // and nothing here reads a cookie.
+        //
+        // A host with auth disabled admits any origin. It has no session to protect, and it is the posture
+        // the development harness runs a panel on another port against.
+        bool anyOrigin = apiOptions.AuthDisabled;
         services.AddCors(options => options.AddPolicy(CorsPolicy, policy =>
-            policy.SetIsOriginAllowed(origin =>
-                  {
-                      IReadOnlyList<string>? learned = _corsPanelOrigins?.CachedPanelOrigins();
-                      if (corsOrigins.Count == 0 && (learned is null || learned.Count == 0))
-                          return true;
-
-                      string? normalized = SelfIdentityStore.Normalize(origin);
-                      if (normalized is null) return false;
-
-                      return corsOrigins.Any(o => string.Equals(
-                                 SelfIdentityStore.Normalize(o), normalized, StringComparison.OrdinalIgnoreCase))
-                             || (learned?.Any(o => string.Equals(o, normalized, StringComparison.OrdinalIgnoreCase))
-                                 ?? false);
-                  })
+            policy.SetIsOriginAllowed(origin => anyOrigin || (_clientOrigins?.Admits(origin) ?? false))
                   .AllowAnyHeader()
                   .AllowAnyMethod()
-                  .SetPreflightMaxAge(TimeSpan.FromHours(24))));
+                  .SetPreflightMaxAge(TimeSpan.FromMinutes(10))));
     }
 
     public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ILoggerFactory loggerFactory)
     {
         // Make the trust posture impossible to miss in the logs.
         ApiOptions options = app.ApplicationServices.GetRequiredService<ApiOptions>();
-        _corsPanelOrigins = app.ApplicationServices.GetRequiredService<SelfIdentityStore>();
-        // Warm it before the first request: the CORS predicate reads this cache synchronously, and an
-        // unloaded cache is indistinguishable from an empty one — which would silently widen a node that
-        // has learned exactly which origin its panel is served from. A store that cannot be read leaves the
-        // configured allowlist in charge rather than taking the host down.
-        try { _corsPanelOrigins.PrimeAsync(CancellationToken.None).GetAwaiter().GetResult(); }
-        catch (Exception ex)
-        {
-            loggerFactory.CreateLogger("TheKrystalShip.Api.Startup")
-                .LogWarning(ex, "could not read this node's learned addresses and panel origins at startup");
-        }
+        _clientOrigins = app.ApplicationServices.GetRequiredService<IClientOrigins>();
         ILogger startupLog = loggerFactory.CreateLogger("TheKrystalShip.Api.Startup");
         if (options.AuthDisabled)
             startupLog.LogWarning(
@@ -1120,9 +1100,9 @@ public class Startup(IConfiguration configuration)
             // caller cannot tell "this route is gone" from "here is a web page" by status alone, and
             // will conclude the route still exists.
             //
-            //  - Anything under an API prefix. /auth/* is one of them: it sits at the root beside /api
-            //    rather than under it, so naming only /api leaves the whole auth surface answering 200
-            //    HTML to a path that does not exist.
+            //  - Anything under an API prefix, and /auth/* — where the cluster's sign-in provider keeps its
+            //    doors. A caller that mistakes this node for the provider is told there is nothing here,
+            //    not handed the app with a 200.
             //  - Anything that is not a GET or a HEAD. A deep link is a navigation; nothing client-routed
             //    arrives as a POST, so a POST that matched no controller is a caller in error and is
             //    owed an answer that says so.
@@ -1160,8 +1140,7 @@ public class Startup(IConfiguration configuration)
                 // No panel here, and saying so is the whole job. Without this an unmatched path meets
                 // the global RequireAuthenticatedUser fallback policy — which applies to a request
                 // with no endpoint at all — and answers 401: "sign in and you will see it", about a
-                // path that does not exist. On a node whose cluster has an anchor that is doubly
-                // wrong, because signing in here is exactly what it refuses to let anybody do.
+                // path that does not exist, on a node nobody signs in to.
                 //
                 // A node that serves no panel is an ordinary node. It should read as one.
                 //

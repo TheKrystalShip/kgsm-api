@@ -38,12 +38,6 @@ public sealed class ApiOptions
     public string Urls { get; init; } = "http://127.0.0.1:8080";
 
     /// <summary>
-    /// CORS origin allowlist, already split. Empty means any-origin, which is safe only because
-    /// bearers ride the Authorization header rather than cookies — set real origins on a deployed host.
-    /// </summary>
-    public IReadOnlyList<string> CorsOrigins { get; init; } = [];
-
-    /// <summary>
     /// SQLite file for the API's own operational metadata. Also the anchor for
     /// <see cref="RawgCacheDir"/>'s default, so the image cache lands in the same state directory.
     /// </summary>
@@ -708,7 +702,6 @@ public sealed class ApiOptions
         return new ApiOptions
         {
             Urls = BlankFallback(s.Urls, "http://0.0.0.0:8080"),
-            CorsOrigins = Csv(s.CorsOrigins),
 
             HostId = hostId,
             HostLabel = Clean(s.HostLabel) ?? hostId,
