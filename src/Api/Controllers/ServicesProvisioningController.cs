@@ -23,9 +23,33 @@ public sealed class ServicesProvisioningController(
     ServicesAggregator services,
     LeafConfigService config,
     LeafConfigCatalog catalog,
+    LeafSurfaceRelay relay,
     ApiJournal journal,
     ApiOptions options) : ControllerBase
 {
+    /// <summary>Hands back a leaf's own answer exactly as it gave it — status and bytes both.</summary>
+    /// <remarks>
+    /// Re-serializing would mean holding the shape here, and a second statement of the descriptor's
+    /// rules that can disagree with the one the component serves is what this removes.
+    /// </remarks>
+    private IActionResult Relayed(LeafSurfaceAnswer answer) =>
+        new ContentResult
+        {
+            StatusCode = answer.Status,
+            Content = answer.Body,
+            ContentType = answer.ContentType ?? "application/json",
+        };
+
+    /// <summary>Which keys a request meant to move — the fact that is audited, never their values.</summary>
+    private static IReadOnlyList<string> KeysIn(ComponentConfigUpdate body) =>
+        [.. body.Values?.Keys ?? [], .. body.Reset ?? []];
+
+    /// <summary>
+    /// What the audit records happened. A refused apply is written as loudly as an accepted one: it is
+    /// exactly the case nobody was watching a screen for.
+    /// </summary>
+    private static string OutcomeOf(int status) => status is >= 200 and < 300 ? "applied" : "refused";
+
     /// <summary><c>POST .../services/{leaf}/connect</c> — provision (connect) a leaf at runtime; re-poll so the
     /// SPA's capability set lights up live; audit. Returns the refreshed leaf row.</summary>
     [HttpPost("{leaf}/connect")]
@@ -62,6 +86,11 @@ public sealed class ServicesProvisioningController(
     {
         if (!IsThisHost(id))
             return NotFound();
+
+        // The leaf answers for itself where it can: it owns the descriptor, the file and the rules.
+        if (await relay.SendAsync(leaf, HttpMethod.Get, "config", null, ct) is { } answered)
+            return Relayed(answered);
+
         ComponentConfigView? cfg = await config.GetConfigAsync(leaf, ct);
         return cfg is null ? NotFound() : Ok(cfg);
     }
@@ -72,7 +101,35 @@ public sealed class ServicesProvisioningController(
     [HttpPut("{leaf}/config")]
     public async Task<IActionResult> PutConfig(string id, string leaf, [FromBody] ComponentConfigUpdate? body, CancellationToken ct)
     {
-        if (!IsThisHost(id) || !catalog.IsConfigTarget(leaf))
+        if (!IsThisHost(id))
+            return NotFound();
+
+        // The leaf applies its own change where it can: it owns the file, the validation and the
+        // restart, and it alone knows what the running build will accept.
+        //
+        // The AUDIT stays here, because this is the only side that knows who asked. A leaf reached
+        // over a unix socket has an authenticated caller upstream of it and no way to see one, so a
+        // line written there could name nobody. Keys only, never values, for the reason every other
+        // config line here is written that way.
+        if (relay.ServesOwnSurface(leaf))
+        {
+            ComponentConfigUpdate forwarded = body ?? new ComponentConfigUpdate(null, null);
+            // Written with the contract's own serializer, which is the one the component reads it
+            // back with — so the request cannot be spelled one way here and expected another there.
+            string json = System.Text.Json.JsonSerializer.Serialize(
+                forwarded, ApiContractsJson.Default.ComponentConfigUpdate);
+
+            if (await relay.SendAsync(leaf, HttpMethod.Put, "config", json, ct) is { } answered)
+            {
+                await journal.ServiceConfigAsync(
+                    leaf, null, KeysIn(forwarded), OutcomeOf(answered.Status),
+                    AuditPrincipal.ActorString(User) ?? "",
+                    AuditMapping.NormalizeOrigin(AuditOrigin.Api), ct);
+                return Relayed(answered);
+            }
+        }
+
+        if (!catalog.IsConfigTarget(leaf))
             return NotFound();
 
         body ??= new ComponentConfigUpdate(null, null);

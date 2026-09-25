@@ -590,6 +590,7 @@ public class Startup(IConfiguration configuration)
         // path this API can no longer reach.
         services.AddSingleton<LeafDescriptorStore>();
         services.AddSingleton<AnchorDescriptorStore>();
+        services.AddSingleton<LeafSurfaceRelay>();
         services.AddSingleton<LeafCommandStore>();
         services.AddSingleton<LeafConfigCatalog>();
         services.AddSingleton<LeafOverrideStore>();

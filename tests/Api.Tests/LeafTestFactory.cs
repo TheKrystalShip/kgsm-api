@@ -32,6 +32,12 @@ public class LeafTestFactory : AuthTestFactory
     public string AnchorDir { get; }
     public string DropInDir { get; }
 
+    /// <summary>Where a leaf would serve its own surface. Pinned away from the machine's real
+    /// <c>/run</c>, whose sockets belong to the daemons actually running on the developer's box — a
+    /// leaf that answers for itself is relayed to rather than read from disk, so an unpinned run
+    /// would put a live daemon behind a test's assertions.</summary>
+    public string SurfaceRoot { get; }
+
     /// <param name="monitorSocket">Non-blank to model a host whose config DOES provide the monitor — the
     /// only way to move a leaf's config seed between two factories sharing one DB.</param>
     public LeafTestFactory(string dbPath, string monitorSocket = "")
@@ -43,6 +49,7 @@ public class LeafTestFactory : AuthTestFactory
         DescriptorDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-desc-{id}");
         AnchorDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-anchor-{id}");
         DropInDir = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-dropin-{id}");
+        SurfaceRoot = Path.Combine(Path.GetTempPath(), $"kgsm-api-leaf-surface-{id}");
 
         // The config-target leaves are "wired" by default here — the apply path refuses a leaf with no
         // override drop-in, and these tests are about the broker, not about host provisioning.
@@ -106,6 +113,10 @@ public class LeafTestFactory : AuthTestFactory
                 ["Api:LeafOverridesDir"] = OverridesDir,
                 ["Api:LeafDescriptorDir"] = DescriptorDir,
                 ["Api:AnchorDescriptorDir"] = AnchorDir,
+                // Never the default. /run holds the sockets of the leaves ACTUALLY RUNNING on this
+                // machine, and a leaf that answers for itself is relayed to rather than read from
+                // disk — so an unpinned run would read the developer's own live daemons.
+                ["Api:LeafSurfaceRoot"] = SurfaceRoot,
                 ["Api:LeafDropInDir"] = DropInDir,
                 // Keep the canary short so a rollback test doesn't wait 15s.
                 ["Api:LeafApplyCanaryMs"] = "2000",

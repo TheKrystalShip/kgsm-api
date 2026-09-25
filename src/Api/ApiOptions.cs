@@ -451,6 +451,15 @@ public sealed class ApiOptions
     public required string AnchorDescriptorDir { get; init; }
 
     /// <summary>
+    /// The runtime root a leaf's own surface socket is looked for under (<c>Api__LeafSurfaceRoot</c>,
+    /// default <c>/run</c>). A leaf that answers for itself serves
+    /// <c>&lt;root&gt;/kgsm-&lt;id&gt;/surface.sock</c> — the <c>RuntimeDirectory</c> its unit already
+    /// provisions — so the path is derived from the leaf's own id and this API carries no list of
+    /// leaves and no per-leaf setting. A leaf serving one is a leaf that gets asked.
+    /// </summary>
+    public required string LeafSurfaceRoot { get; init; }
+
+    /// <summary>
     /// One unit-file directory to search instead of systemd's own (<c>Api__LeafDropInDir</c>). Blank —
     /// the default — searches every root systemd does, in its order, which is what makes a packaged
     /// unit in <c>/usr/lib/systemd/system</c> and a deployed one in <c>/etc/systemd/system</c> both
@@ -795,6 +804,7 @@ public sealed class ApiOptions
             LeafApplyCanaryMs = Math.Max(2000, s.LeafApplyCanaryMs ?? 15000),
             LeafDescriptorDir = leafDescriptorDir,
             AnchorDescriptorDir = BlankFallback(s.AnchorDescriptorDir, DefaultAnchorDescriptorDir),
+            LeafSurfaceRoot = BlankFallback(s.LeafSurfaceRoot, DefaultLeafSurfaceRoot),
             // Blank on purpose: SystemdUnitPaths then searches every root systemd reads, rather than
             // one this API would have to guess from how the host was provisioned.
             LeafDropInDir = Defaulted(s.LeafDropInDir, ""),
@@ -869,6 +879,9 @@ public sealed class ApiOptions
 
     /// <summary>Where an anchor's package installs its config descriptor on a standard install.</summary>
     public const string DefaultAnchorDescriptorDir = "/var/lib/kgsm/anchors";
+
+    /// <summary>Where a leaf serving its own surface is looked for.</summary>
+    public const string DefaultLeafSurfaceRoot = "/run";
 
     /// <summary>
     /// Resolves one optional leaf's endpoint. A pinned value always wins; otherwise the leaf's

@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a leaf answers for its own configuration, and this node relays (0.202.0)
+
+A component owns its descriptor, its overrides and its own lifecycle wherever it runs; only the
+transport differs. A leaf serves that over a unix socket and `LeafSurfaceRelay` forwards to it,
+because this API is the only thing on a node with an address a browser can reach. The leaf's status
+and the leaf's bytes travel verbatim — re-serializing would mean holding the shape here, and a second
+statement of the descriptor's rules that can disagree with the one the component serves is the
+duplication this removes.
+
+The socket is derived, never configured: `Api__LeafSurfaceRoot` (default `/run`) plus the leaf's own
+id, which is the `RuntimeDirectory` its unit already provisions. So this API carries no list of
+leaves and no per-leaf setting, and a leaf that starts serving a surface is relayed to with nothing
+registered anywhere.
+
+Reading the descriptor here stays, and it is not a leftover. A leaf that is **down** is exactly when
+its configuration is wanted, and it is the one case a component serving its own surface cannot cover;
+same descriptor, same rules, and the only question is which process is still running to read them. A
+socket file nothing listens on falls back the same way.
+
+The **audit** stays here whichever path answers, because this is the only side that knows who asked:
+a leaf reached over a unix socket has an authenticated caller upstream of it and no way to see one.
+Keys only, never values, and a refused apply is recorded as loudly as an accepted one.
+
 ### Changed — the auth packages match the roles (0.201.1)
 
 Takes `TheKrystalShip.KGSM.Auth 4.0.0-dev.2`, `Auth.Users 1.4.0-dev.7`, `Auth.Cluster 1.0.0-dev.8` and

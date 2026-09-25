@@ -114,6 +114,11 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 // the services board — so a developer's own host would decide which leaves a test sees.
                 ["Api:AnchorDescriptorDir"] =
                     Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-anchors-{Guid.NewGuid():N}"),
+                // Never the default. /run holds the sockets of the leaves ACTUALLY RUNNING on this
+                // machine, and a leaf that answers for itself is relayed to rather than read from
+                // disk — so an unpinned run would read the developer's own live daemons.
+                ["Api:LeafSurfaceRoot"] =
+                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-surfaces-{Guid.NewGuid():N}"),
                 // Never the default. /var/lib/kgsm/auth/users.db is the MACHINE's real account file,
                 // shared with every KGSM service on the box, and opening it CREATES it — so an unpinned
                 // test run would hand the operator a live accounts file that nobody made.

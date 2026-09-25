@@ -31,6 +31,7 @@ namespace TheKrystalShip.Api.Controllers;
 public sealed class ServicesController(
     ServicesAggregator services,
     LeafCommandStore commands,
+    LeafSurfaceRelay relay,
     ApiOptions options) : ControllerBase
 {
     /// <summary>How far a postponement moves a window when the caller names no span. An hour is long
@@ -61,13 +62,26 @@ public sealed class ServicesController(
     /// are passed through — this API cannot verify a gate it does not implement, so it does not restate it.
     /// </remarks>
     [HttpGet("{leaf}/commands")]
-    public ActionResult<LeafCommandManifest> GetCommands(string id, string leaf)
+    public async Task<IActionResult> GetCommands(string id, string leaf, CancellationToken ct)
     {
         if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
             return NotFound();
 
+        // The leaf declares its own commands, so it answers where it can. Its manifest travels
+        // verbatim either way — this API cannot verify a gate it does not implement, so it restates
+        // nothing and holds no copy of the file's schema.
+        if (await relay.SendAsync(leaf, HttpMethod.Get, "commands", null, ct) is { } answered)
+        {
+            return new ContentResult
+            {
+                StatusCode = answered.Status,
+                Content = answered.Body,
+                ContentType = answered.ContentType ?? "application/json",
+            };
+        }
+
         LeafCommandManifest? manifest = commands.For(leaf);
-        return manifest is null ? NotFound() : manifest;
+        return manifest is null ? NotFound() : Ok(manifest);
     }
 
     /// <summary>

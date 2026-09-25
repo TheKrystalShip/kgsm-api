@@ -380,6 +380,14 @@ public sealed class ApiSettings
         Type = ConfigType.Path, Risk = ConfigRisk.Wiring)]
     public string? AnchorDescriptorDir { get; set; }
 
+    /// <summary>Runtime root a leaf's own surface socket is looked for under.</summary>
+    /// <panel>Where this node asks a leaf about itself. A leaf that serves its own configuration does
+    /// so on a socket under here, named after the leaf; one that does not is read from its descriptor
+    /// on disk instead. Pointing it elsewhere makes every leaf look like it answers for nothing.</panel>
+    [ConfigField("leafSurfaceRoot", "Leaf surface socket root", Group = "leafconfig",
+        Type = ConfigType.Path, Risk = ConfigRisk.Wiring)]
+    public string? LeafSurfaceRoot { get; set; }
+
     /// <summary>One unit-file directory to search instead of systemd's own roots. Blank searches all
     /// of them, in systemd's order.</summary>
     /// <panel>One directory to look for unit files and their drop-ins in, instead of everywhere systemd

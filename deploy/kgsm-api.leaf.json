@@ -600,6 +600,16 @@
       "risk": "wiring"
     },
     {
+      "key": "leafSurfaceRoot",
+      "env": "Api__LeafSurfaceRoot",
+      "label": "Leaf surface socket root",
+      "description": "Where this node asks a leaf about itself. A leaf that serves its own configuration does so on a socket under here, named after the leaf; one that does not is read from its descriptor on disk instead. Pointing it elsewhere makes every leaf look like it answers for nothing.",
+      "group": "leafconfig",
+      "type": "path",
+      "default": "/run",
+      "risk": "wiring"
+    },
+    {
       "key": "leafDropInDir",
       "env": "Api__LeafDropInDir",
       "label": "Drop-in directory",

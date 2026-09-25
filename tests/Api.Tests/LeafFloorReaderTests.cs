@@ -26,6 +26,7 @@ public sealed class LeafFloorReaderTests : IDisposable
                 ["Api:LeafOverridesDir"] = Path.Combine(_dir, "overrides"),
                 ["Api:LeafDescriptorDir"] = Path.Combine(_dir, "no-descriptors"),
                 ["Api:AnchorDescriptorDir"] = Path.Combine(_dir, "no-anchors"),
+                ["Api:LeafSurfaceRoot"] = Path.Combine(_dir, "no-surfaces"),
             })
             .Build());
         var catalog = new LeafConfigCatalog(

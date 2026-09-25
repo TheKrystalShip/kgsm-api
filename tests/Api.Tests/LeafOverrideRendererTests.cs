@@ -26,6 +26,7 @@ public sealed class LeafOverrideRendererTests : IDisposable
                 // exactly the mapping these tests pin.
                 ["Api:LeafDescriptorDir"] = Path.Combine(_dir, "no-descriptors"),
                 ["Api:AnchorDescriptorDir"] = Path.Combine(_dir, "no-anchors"),
+                ["Api:LeafSurfaceRoot"] = Path.Combine(_dir, "no-surfaces"),
             })
             .Build());
         var catalog = new LeafConfigCatalog(

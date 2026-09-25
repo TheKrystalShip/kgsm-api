@@ -140,6 +140,8 @@
       "LeafDescriptorDir": "/var/lib/kgsm/leaves",
       // Shared directory the anchor config descriptors are discovered in.
       "AnchorDescriptorDir": "/var/lib/kgsm/anchors",
+      // Runtime root a leaf's own surface socket is looked for under.
+      "LeafSurfaceRoot": "/run",
       // One unit-file directory to search instead of systemd's own roots. Blank searches all of them.
       "LeafDropInDir": "",
       // How long a leaf's health is watched after a config restart before the change is declared good. Floor 2000.
