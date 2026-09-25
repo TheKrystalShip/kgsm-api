@@ -6,6 +6,7 @@ using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Players;
+using TheKrystalShip.KGSM.Auth.Cluster;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Events;
@@ -308,10 +309,18 @@ public sealed class KgsmAuditConsumer(
             domainPump.Nudge();
             return WriteServerAndBridge(d, "restarted");
         });
-        events.RegisterHandler<InstanceUninstalledData>(d =>
+        // The auth anchor is told which install went, so every grant naming it goes too — and a later
+        // install under the same name, which has a nonce of its own, inherits none of them. No nonce is
+        // an instance on an offline library, whose config nothing could read; its grants name an
+        // install that can never match again.
+        AuthorityReporter? authority = services.GetService<AuthorityReporter>();
+        events.RegisterHandler<InstanceUninstalledData>(async d =>
         {
             instanceCache.TryRefresh();
-            return WriteServer(d, AuditSeverity.Warn, "uninstalled");
+            if (authority is not null && d.InstallNonce is { Length: > 0 } nonce)
+                await authority.ReportUninstalledAsync(d.InstanceName, nonce, CancellationToken.None).ConfigureAwait(false);
+
+            await WriteServer(d, AuditSeverity.Warn, "uninstalled").ConfigureAwait(false);
         });
 
         // server.update_available — a newer build exists upstream. kgsm establishes this: it records

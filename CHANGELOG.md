@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — this node reports its actions to the auth anchor (0.206.0)
+
+This node reports what it is responsible for to the cluster's auth anchor
+(`kgsm-docs/plans/permissions.md` §3·b): every action manifest under the leaves' `actions` directory
+(`<LeafDescriptorDir>/actions`, where the engine's and each leaf's deploy installs theirs). It reports
+on start, on any change, on a change of holder, and every 15 minutes, through
+`Auth.Cluster`'s `AuthorityReporter`. The anchor's catalog of what can be granted is the union of every
+member's report.
+
+When the engine reports `server.uninstalled` with an install nonce, the anchor is told which install
+went, so every grant naming it goes too. A reinstall under the same name has a new nonce and inherits
+none of them. Nothing here enforces anything yet; the tiers still decide.
+
+Takes `TheKrystalShip.KGSM.Lib` 8.10.0-dev.3, `Auth.Users` 2.0.0-dev.2 and `Auth.Cluster` 1.0.0-dev.10.
+
 ### Changed — a leaf's floor is read through the library the leaf serves it with (0.205.0)
 
 `LeafFloorReader` is a seam onto `ComponentSurface`'s own reader rather than a second implementation of

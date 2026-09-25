@@ -725,6 +725,17 @@ public class Startup(IConfiguration configuration)
         // joined, resolving everybody who existed before that as a stranger.
         services.AddHostedService<AccountSnapshotWorker>();
 
+        // What this node is responsible for, told to the auth anchor: the engine's action manifest and
+        // every leaf's, from the actions directory below the leaf descriptors, where each one's deploy
+        // installs it. The anchor's catalog of what can be granted is the union of every member's. Inert
+        // with no cluster; the uninstall half is called by the audit consumer.
+        services.AddSingleton(new AuthorityReporterOptions
+        {
+            ManifestDirectories = [Path.Combine(apiOptions.LeafDescriptorDir, "actions")],
+        });
+        services.AddSingleton<AuthorityReporter>();
+        services.AddHostedService(sp => sp.GetRequiredService<AuthorityReporter>());
+
         // The roster-backed fan-out target list. A durable, identity-carrying message goes only to members
         // this node has authenticated first-hand — never to one it has merely heard about — or the outbox
         // would retry a secret-bearing message at a phantom for the full retry window.
