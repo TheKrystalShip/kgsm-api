@@ -99,20 +99,16 @@ public sealed class ApiOptions
     public required string FirewallSocketPath { get; init; }
 
     /// <summary>
-    /// kgsm-scheduler status socket (Settings Phase 3). The scheduler exposes an NDJSON-over-unix-socket
-    /// status snapshot at this path (default standard install: <c>/run/kgsm-scheduler/status.sock</c>).
+    /// kgsm-scheduler's socket. The scheduler serves HTTP over a unix socket at this path (default
+    /// standard install: <c>/run/kgsm-scheduler/scheduler.sock</c>) — <c>GET /status</c> for the schedule
+    /// snapshot and <c>POST /windows/&lt;verb&gt;</c> for the instructions that defer one, so one path
+    /// carries both the reading and the telling.
     /// Empty ⇒ the scheduler leaf is not provisioned (absent): <c>GET /servers/{id}/settings</c> still
     /// returns 200 with <c>nextFireUtc:null</c>, and the scheduler capability renders absent — never a
     /// perpetually-<c>down</c> row. <strong>Opt-in like the assistant/firewall</strong>: the scheduler is a
     /// separate optional leaf (built in parallel, not yet deployed), so a host without it reports absent.
     /// </summary>
     public required string SchedulerSocketPath { get; init; }
-
-    /// <summary>kgsm-scheduler control socket — the path a postponement is sent to. Blank means the
-    /// capability is simply not offered here; the schedule is still read from the status socket.</summary>
-    /// Defaulted rather than <c>required</c>, unlike its siblings: blank already means "not offered
-    /// here", so a construction site that says nothing about it is stating the honest thing.
-    public string SchedulerControlSocketPath { get; init; } = "";
 
     /// <summary>
     /// kgsm-reactor status socket. The reactor serves HTTP over a unix socket (default standard install:
@@ -487,7 +483,6 @@ public sealed class ApiOptions
         $"{ApiSettings.Section}__{nameof(ApiSettings.MonitorSocketPath)}" => MonitorSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.WatchdogSocketPath)}" => WatchdogSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerSocketPath)}" => SchedulerSocketPath,
-        $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerControlSocketPath)}" => SchedulerControlSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.BotSocketPath)}" => BotSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.ReactorSocketPath)}" => ReactorSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.SpeechSocketPath)}" => SpeechSocketPath,
@@ -729,8 +724,7 @@ public sealed class ApiOptions
             // The browser route is opt-in and has no sensible default — a loopback URL is not one.
             AssistantPublicUrl = Clean(s.AssistantPublicUrl),
             FirewallSocketPath = LeafEndpoint(s.FirewallSocketPath, "/run/kgsm-firewall/firewall.sock", "firewall", leafDescriptorDir),
-            SchedulerSocketPath = LeafEndpoint(s.SchedulerSocketPath, "/run/kgsm-scheduler/status.sock", "scheduler", leafDescriptorDir),
-            SchedulerControlSocketPath = LeafEndpoint(s.SchedulerControlSocketPath, "/run/kgsm-scheduler/control.sock", "scheduler", leafDescriptorDir),
+            SchedulerSocketPath = LeafEndpoint(s.SchedulerSocketPath, "/run/kgsm-scheduler/scheduler.sock", "scheduler", leafDescriptorDir),
             BotSocketPath = LeafEndpoint(s.BotSocketPath, "/run/kgsm-bot/status.sock", "bot", leafDescriptorDir),
             ReactorSocketPath = LeafEndpoint(s.ReactorSocketPath, "/run/kgsm-reactor/status.sock", "reactor", leafDescriptorDir),
             // Not opt-in like its neighbours: the socket file's presence is the provisioning check, so

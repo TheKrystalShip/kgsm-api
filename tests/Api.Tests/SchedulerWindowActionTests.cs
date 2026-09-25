@@ -13,8 +13,8 @@ namespace TheKrystalShip.Api.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The scheduler's control socket carries no identity, so the operator gate here is the only one there is
-/// — which is why it runs before the socket is reached rather than being left to a daemon with no way to
+/// The scheduler's socket carries no identity, so the operator gate here is the only one there is —
+/// which is why it runs before the socket is reached rather than being left to a daemon with no way to
 /// apply it. These tests point the client at a socket that is not there, so everything up to the dial is
 /// proven and the dial itself honestly fails.
 /// </para>
@@ -131,8 +131,7 @@ public sealed class SchedulerWindowActionTests : IClassFixture<SchedulerWindowAc
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["Api:HostId"] = HostIdForTests,
-                    ["Api:SchedulerSocketPath"] = "/tmp/kgsm-api-tests-scheduler-status.sock",
-                    ["Api:SchedulerControlSocketPath"] = "/tmp/kgsm-api-tests-scheduler-control.sock",
+                    ["Api:SchedulerSocketPath"] = "/tmp/kgsm-api-tests-scheduler.sock",
                 });
             });
         }

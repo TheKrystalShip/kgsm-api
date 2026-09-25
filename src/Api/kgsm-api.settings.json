@@ -51,7 +51,6 @@
       "AssistantPublicUrl": "",
       "FirewallSocketPath": null,
       "SchedulerSocketPath": null,
-      "SchedulerControlSocketPath": null,
       "ReactorSocketPath": null,
       "BotSocketPath": null,
       // kgsm-speech control socket. systemd binds it whether or not the daemon runs, so the file being

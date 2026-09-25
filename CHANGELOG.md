@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the scheduler is reached over HTTP, on one socket (0.203.0)
+
+`SchedulerClient` dials the scheduler the same way the monitor and reactor clients dial theirs: a
+`SocketsHttpHandler` whose `ConnectCallback` connects a unix-domain socket. `GET /status` is the
+snapshot and each verb is a `POST /windows/<verb>`, so the method says whether something is being read
+or changed and one socket carries both. `Api__SchedulerControlSocketPath` is gone with the second
+socket it named, and `Api__SchedulerSocketPath` resolves to `/run/kgsm-scheduler/scheduler.sock`.
+
+A refusal arrives 200 carrying `ok:false` and the scheduler's own reason, so a non-2xx keeps its single
+meaning of "the scheduler could not read the instruction" — the distinction a surface needs when it is
+about to tell somebody what happened to their evening.
+
 ### Changed — a leaf answers for its own configuration, and this node relays (0.202.0)
 
 A component owns its descriptor, its overrides and its own lifecycle wherever it runs; only the

@@ -204,16 +204,7 @@
       "key": "schedulerSocket",
       "env": "Api__SchedulerSocketPath",
       "label": "Scheduler socket",
-      "description": "The scheduler's status socket. Empty means the next scheduled restart shows as unknown.",
-      "group": "leaves",
-      "type": "path",
-      "risk": "wiring"
-    },
-    {
-      "key": "schedulerControlSocket",
-      "env": "Api__SchedulerControlSocketPath",
-      "label": "Scheduler control socket",
-      "description": "The scheduler's control socket, which postponing a scheduled restart goes through. Empty means restarts can be seen but not deferred.",
+      "description": "The scheduler's socket, which both the schedule and the instructions that defer it travel over. Empty means the next scheduled restart shows as unknown and none can be deferred.",
       "group": "leaves",
       "type": "path",
       "risk": "wiring"

@@ -43,8 +43,7 @@ public class LeafEndpointResolutionTests : IDisposable
 
         ApiOptions o = Resolve();
 
-        Assert.Equal("/run/kgsm-scheduler/status.sock", o.SchedulerSocketPath);
-        Assert.Equal("/run/kgsm-scheduler/control.sock", o.SchedulerControlSocketPath);
+        Assert.Equal("/run/kgsm-scheduler/scheduler.sock", o.SchedulerSocketPath);
         Assert.Equal("/run/kgsm-reactor/status.sock", o.ReactorSocketPath);
         Assert.Equal("/run/kgsm-bot/status.sock", o.BotSocketPath);
         Assert.Equal("/run/kgsm-firewall/firewall.sock", o.FirewallSocketPath);
@@ -84,7 +83,7 @@ public class LeafEndpointResolutionTests : IDisposable
 
         ApiOptions o = Resolve();
 
-        Assert.Equal("/run/kgsm-scheduler/status.sock", o.SchedulerSocketPath);
+        Assert.Equal("/run/kgsm-scheduler/scheduler.sock", o.SchedulerSocketPath);
         Assert.Equal("", o.ReactorSocketPath);
     }
 

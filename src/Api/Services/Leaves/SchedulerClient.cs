@@ -1,27 +1,36 @@
 using System.Net.Sockets;
-using System.Text;
 using System.Text.Json;
 
 namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>
-/// The kgsm-scheduler leaf client. Unlike the monitor/assistant, the scheduler speaks
-/// <strong>NDJSON-over-unix-socket</strong>, not HTTP: on connect to the status socket it writes exactly one
-/// JSON line — the per-instance maintenance-window snapshot — then closes. This client dials that socket,
-/// reads the single line, and parses it. It is registered ONLY when the socket is configured
-/// (<c>Api__SchedulerSocketPath</c>); consumers resolve it optionally and degrade to <c>absent</c>/null when
-/// it is missing.
+/// The kgsm-scheduler leaf client: the API's seam onto the scheduler's socket.
 /// </summary>
 /// <remarks>
-/// Honesty: an unreachable/timed-out/malformed snapshot yields <c>null</c> — the caller then reports the
-/// scheduler capability down and nulls every window's next fire and last run (never a fabricated schedule).
-/// kgsm-api is JIT, so plain reflection-based <see cref="JsonSerializer"/> (camelCase) is fine here — no
-/// source-gen needed.
+/// <para>
+/// The scheduler serves HTTP over a unix-domain socket (Kestrel, nothing off this host has any business
+/// asking a leaf what it is scheduled to do), so the transport is the same
+/// <see cref="SocketsHttpHandler.ConnectCallback"/> pattern the monitor and reactor clients use.
+/// <c>GET /status</c> is the snapshot; the three verbs are <c>POST</c>s under <c>/windows/</c>, so the
+/// method already says whether something is being read or changed and one socket carries both.
+/// </para>
+/// <para>
+/// <b>A refusal is an answer.</b> An instruction naming a window the host does not have comes back 200
+/// carrying <c>ok:false</c> and the scheduler's own reason, so a non-2xx keeps its single meaning of
+/// "the scheduler could not read this". The caller is about to tell a person what happened to their
+/// evening, and "it said no" has to stay distinguishable from "it could not be reached".
+/// </para>
+/// <para>
+/// Honesty: an unreachable, slow or malformed snapshot yields <c>null</c> — the caller then reports the
+/// scheduler capability down and nulls every window's next fire and last run, never a fabricated
+/// schedule. kgsm-api is JIT, so plain reflection-based <see cref="JsonSerializer"/> (camelCase) is fine
+/// here — no source-gen needed.
+/// </para>
 /// </remarks>
 public sealed class SchedulerClient
 {
-    // A snapshot read must be fast (the scheduler writes one line and closes); bound it so a hung socket can
-    // never stall a /settings request or the leaf-health poll.
+    // A snapshot read must be fast (the scheduler answers off an in-memory registry); bound it so a hung
+    // socket can never stall a /settings request or the leaf-health poll.
     private static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(2);
 
     private static readonly JsonSerializerOptions Json = new()
@@ -30,43 +39,77 @@ public sealed class SchedulerClient
     };
 
     private readonly string _socketPath;
-    private readonly string _controlSocketPath;
     private readonly ILogger<SchedulerClient> _logger;
+    private readonly HttpClient _http;
 
     public SchedulerClient(ApiOptions options, ILogger<SchedulerClient> logger)
     {
         _socketPath = options.SchedulerSocketPath;
-        _controlSocketPath = options.SchedulerControlSocketPath;
         _logger = logger;
+
+        string socketPath = _socketPath;
+
+        var handler = new SocketsHttpHandler
+        {
+            // Every connection is dialed over the unix-domain socket; the request URI host is a
+            // placeholder the scheduler ignores.
+            ConnectCallback = async (_, ct) =>
+            {
+                var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+                try
+                {
+                    await socket.ConnectAsync(new UnixDomainSocketEndPoint(socketPath), ct).ConfigureAwait(false);
+                    return new NetworkStream(socket, ownsSocket: true);
+                }
+                catch
+                {
+                    socket.Dispose();
+                    throw;
+                }
+            }
+        };
+
+        _http = new HttpClient(handler, disposeHandler: true)
+        {
+            BaseAddress = new Uri("http://localhost"),
+            // Bounded per call rather than on the client, so the budget that makes a slow reply mean a
+            // sick daemon is applied where it belongs.
+            Timeout = Timeout.InfiniteTimeSpan,
+        };
     }
 
     /// <summary>
-    /// Connects to the scheduler socket, reads the one-line status snapshot, and returns it — or <c>null</c>
-    /// when the socket is unreachable, slow, or the line is empty/malformed (honest unknown, never fabricated).
+    /// Asks the scheduler for its status snapshot — or <c>null</c> when the socket is unreachable, slow,
+    /// or the answer is empty/malformed (honest unknown, never fabricated).
     /// </summary>
     public async Task<SchedulerStatusResponse?> GetStatusAsync(CancellationToken ct = default)
     {
+        if (!IsWired)
+            return null;
+
         using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timed.CancelAfter(ReadTimeout);
         try
         {
-            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-            await socket.ConnectAsync(new UnixDomainSocketEndPoint(_socketPath), timed.Token).ConfigureAwait(false);
+            using HttpResponseMessage response = await _http
+                .GetAsync("/status", timed.Token).ConfigureAwait(false);
 
-            await using var stream = new NetworkStream(socket, ownsSocket: false);
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            string? line = await reader.ReadLineAsync(timed.Token).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(line))
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("scheduler answered {Status} for /status at {Path}",
+                    (int)response.StatusCode, _socketPath);
                 return null;
+            }
 
-            return JsonSerializer.Deserialize<SchedulerStatusResponse>(line, Json);
+            return await response.Content
+                .ReadFromJsonAsync<SchedulerStatusResponse>(Json, timed.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             _logger.LogDebug("scheduler status read timed out after {Timeout} at {Path}", ReadTimeout, _socketPath);
             return null;
         }
-        catch (Exception ex) when (ex is SocketException or IOException or JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or SocketException or IOException or JsonException)
         {
             _logger.LogDebug(ex, "scheduler socket unreachable/unreadable at {Path}", _socketPath);
             return null;
@@ -78,8 +121,16 @@ public sealed class SchedulerClient
     public async Task<bool> CheckHealthAsync(CancellationToken ct = default) =>
         await GetStatusAsync(ct).ConfigureAwait(false) is not null;
 
-    /// <summary>Whether this host is wired to send the scheduler an instruction at all.</summary>
-    public bool CanControl => !string.IsNullOrWhiteSpace(_controlSocketPath);
+    /// <summary>Whether this host is wired to a scheduler at all.</summary>
+    private bool IsWired => !string.IsNullOrWhiteSpace(_socketPath);
+
+    /// <summary>Whether this host can send the scheduler an instruction.</summary>
+    /// <remarks>
+    /// One socket carries both the reading and the telling, so a host that can ask the scheduler
+    /// anything can also tell it something. A surface still asks this rather than assuming it: what it
+    /// renders is a button, and a host running no scheduler must not show one.
+    /// </remarks>
+    public bool CanControl => IsWired;
 
     /// <summary>
     /// Push one window's next run back by <paramref name="minutes"/>. The schedule is untouched, so the fire
@@ -87,26 +138,22 @@ public sealed class SchedulerClient
     /// </summary>
     public Task<SchedulerControlResponse> PostponeAsync(
         string instance, string window, int minutes, CancellationToken ct = default) =>
-        SendAsync(new SchedulerControlRequest(SchedulerVerb.Postpone, instance, window, minutes), ct);
+        SendAsync(SchedulerVerb.Postpone, new SchedulerControlRequest(instance, window, minutes), ct);
 
     /// <summary>Drop this occurrence of one window. The one after it is unaffected.</summary>
     public Task<SchedulerControlResponse> SkipAsync(
         string instance, string window, CancellationToken ct = default) =>
-        SendAsync(new SchedulerControlRequest(SchedulerVerb.Skip, instance, window), ct);
+        SendAsync(SchedulerVerb.Skip, new SchedulerControlRequest(instance, window), ct);
 
     /// <summary>Bring one window forward to the scheduler's next poll — the same run a due one would get.</summary>
     public Task<SchedulerControlResponse> RunNowAsync(
         string instance, string window, CancellationToken ct = default) =>
-        SendAsync(new SchedulerControlRequest(SchedulerVerb.RunNow, instance, window), ct);
+        SendAsync(SchedulerVerb.RunNow, new SchedulerControlRequest(instance, window), ct);
 
     /// <summary>
-    /// One instruction to the scheduler: write a line, read the reply.
+    /// One instruction to the scheduler: the verb is the route, the body is what it acts on.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// A different socket from the status one, and deliberately so on the daemon's side: that one's
-    /// contract is that a client only ever reads. This writes one NDJSON line and reads one back.
-    /// </para>
     /// <para>
     /// <b>Every verb names its window.</b> One instance holds several appointments, and moving the wrong
     /// one is worse than refusing — the daemon refuses an instruction that names none.
@@ -117,47 +164,50 @@ public sealed class SchedulerClient
     /// distinguishable from "it said no" and from "it is deferred".
     /// </para>
     /// </remarks>
-    private async Task<SchedulerControlResponse> SendAsync(SchedulerControlRequest request, CancellationToken ct)
+    private async Task<SchedulerControlResponse> SendAsync(
+        string verb, SchedulerControlRequest request, CancellationToken ct)
     {
         if (!CanControl)
-            return new SchedulerControlResponse(false, "this host is not wired to the scheduler's control socket");
+            return new SchedulerControlResponse(false, "this host is not wired to a scheduler");
 
         using var timed = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timed.CancelAfter(ReadTimeout);
         try
         {
-            using var socket = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-            await socket.ConnectAsync(new UnixDomainSocketEndPoint(_controlSocketPath), timed.Token)
-                .ConfigureAwait(false);
+            using HttpResponseMessage response = await _http
+                .PostAsJsonAsync("/windows/" + verb, request, Json, timed.Token).ConfigureAwait(false);
 
-            await using var stream = new NetworkStream(socket, ownsSocket: false);
-            byte[] line = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request, Json) + "\n");
-            await stream.WriteAsync(line, timed.Token).ConfigureAwait(false);
-            await stream.FlushAsync(timed.Token).ConfigureAwait(false);
+            // A non-2xx means the scheduler could not read the instruction, which is this API's fault
+            // rather than the caller's — and never a refusal, which arrives 200 carrying its own reason.
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("scheduler answered {Status} for /windows/{Verb} at {Path}",
+                    (int)response.StatusCode, verb, _socketPath);
+                return new SchedulerControlResponse(false, "the scheduler could not read the instruction");
+            }
 
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            string? reply = await reader.ReadLineAsync(timed.Token).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(reply))
-                return new SchedulerControlResponse(false, "the scheduler answered nothing");
-
-            return JsonSerializer.Deserialize<SchedulerControlResponse>(reply, Json)
-                ?? new SchedulerControlResponse(false, "the scheduler's answer could not be read");
+            return await response.Content
+                       .ReadFromJsonAsync<SchedulerControlResponse>(Json, timed.Token).ConfigureAwait(false)
+                   ?? new SchedulerControlResponse(false, "the scheduler's answer could not be read");
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            _logger.LogDebug("scheduler control write timed out after {Timeout} at {Path}",
-                ReadTimeout, _controlSocketPath);
+            _logger.LogDebug("scheduler {Verb} timed out after {Timeout} at {Path}",
+                verb, ReadTimeout, _socketPath);
             return new SchedulerControlResponse(false, "the scheduler did not answer in time");
         }
-        catch (Exception ex) when (ex is SocketException or IOException or JsonException)
+        catch (Exception ex) when (ex is HttpRequestException or SocketException or IOException or JsonException)
         {
-            _logger.LogDebug(ex, "scheduler control socket unreachable at {Path}", _controlSocketPath);
+            _logger.LogDebug(ex, "scheduler socket unreachable at {Path}", _socketPath);
             return new SchedulerControlResponse(false, "the scheduler could not be reached");
         }
     }
 }
 
-/// <summary>The control socket's verbs, spelled the way the daemon reads them.</summary>
+/// <summary>
+/// The verbs the scheduler takes, spelled the way its routes are: each constant is the last segment of
+/// the <c>POST /windows/&lt;verb&gt;</c> the daemon serves, and the same word a browser asks for.
+/// </summary>
 public static class SchedulerVerb
 {
     /// <summary>Push a window's next run back. Takes <c>minutes</c>, which the daemon caps at 720.</summary>
@@ -174,10 +224,11 @@ public static class SchedulerVerb
 }
 
 /// <summary>
-/// One instruction to the scheduler, as its control socket takes it. <see cref="Window"/> is the window's
-/// schedule expression — its id — and <see cref="Minutes"/> is carried only by <see cref="SchedulerVerb.Postpone"/>.
+/// What one instruction acts on. <see cref="Window"/> is the window's schedule expression — its id — and
+/// <see cref="Minutes"/> is carried only by <see cref="SchedulerVerb.Postpone"/>. The verb itself is the
+/// route, so it is not spelled again in here.
 /// </summary>
-public sealed record SchedulerControlRequest(string Command, string Instance, string Window, int? Minutes = null);
+public sealed record SchedulerControlRequest(string Instance, string Window, int? Minutes = null);
 
 /// <summary>What the scheduler said. <see cref="NextFireUtc"/> is the window's target as it now stands.</summary>
 public sealed record SchedulerControlResponse(bool Ok, string Message, DateTimeOffset? NextFireUtc = null);

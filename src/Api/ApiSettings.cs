@@ -116,19 +116,12 @@ public sealed class ApiSettings
         Risk = ConfigRisk.Wiring, NoDefault = true)]
     public string? FirewallSocketPath { get; set; }
 
-    /// <summary>kgsm-scheduler status socket. Blank reports the scheduler absent.</summary>
-    /// <panel>The scheduler's status socket. Empty means the next scheduled restart shows as unknown.</panel>
+    /// <summary>kgsm-scheduler's socket. Blank reports the scheduler absent.</summary>
+    /// <panel>The scheduler's socket, which both the schedule and the instructions that defer it travel
+    /// over. Empty means the next scheduled restart shows as unknown and none can be deferred.</panel>
     [ConfigField("schedulerSocket", "Scheduler socket", Group = "leaves", Type = ConfigType.Path,
         Risk = ConfigRisk.Wiring, NoDefault = true)]
     public string? SchedulerSocketPath { get; set; }
-
-    /// <summary>kgsm-scheduler control socket. Blank means a scheduled restart cannot be postponed from
-    /// here — the panel offers nothing rather than offering something that fails.</summary>
-    /// <panel>The scheduler's control socket, which postponing a scheduled restart goes through. Empty
-    /// means restarts can be seen but not deferred.</panel>
-    [ConfigField("schedulerControlSocket", "Scheduler control socket", Group = "leaves", Type = ConfigType.Path,
-        Risk = ConfigRisk.Wiring, NoDefault = true)]
-    public string? SchedulerControlSocketPath { get; set; }
 
     /// <summary>kgsm-reactor status socket. Blank reports the reactor absent.</summary>
     /// <panel>The reactor's status socket, which its health is read from. Empty means the Services page
