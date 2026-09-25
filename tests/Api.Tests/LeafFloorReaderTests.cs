@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using TheKrystalShip.Api.Services.Leaves;
+using TheKrystalShip.KGSM.ComponentSurface;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -9,6 +10,10 @@ namespace TheKrystalShip.Api.Tests;
 /// provenance against. What it produces has to be the value the <em>leaf</em> reads, spelled the way every
 /// other tier spells it — the panel compares tiers as strings, so a spelling difference is reported to an
 /// operator as a difference in configuration.
+///
+/// The reading itself is <c>ComponentSurface</c>'s, the same library the leaf serves its own surface
+/// with. What is under test here is that this API's seam onto it — the per-leaf override path it
+/// excludes and the unit directory it pins — hands it what it needs.
 /// </summary>
 public sealed class LeafFloorReaderTests : IDisposable
 {
@@ -35,7 +40,7 @@ public sealed class LeafFloorReaderTests : IDisposable
         return new LeafFloorReader(
             options,
             new LeafOverrideRenderer(options, catalog, NullLogger<LeafOverrideRenderer>.Instance),
-            NullLogger<LeafFloorReader>.Instance);
+            NullLogger<ComponentFloorReader>.Instance);
     }
 
     private static LeafConfigDescriptor Descriptor(string settingsPath) => new(
@@ -44,7 +49,7 @@ public sealed class LeafFloorReaderTests : IDisposable
         FloorSources: [new LeafFloorSource("appsettings", settingsPath)],
         Groups: [], Fields: []);
 
-    private LeafFloor ReadSettings(string json)
+    private ComponentFloor ReadSettings(string json)
     {
         string settings = Path.Combine(_dir, "kgsm-probe.settings.json");
         File.WriteAllText(settings, json);
@@ -61,7 +66,7 @@ public sealed class LeafFloorReaderTests : IDisposable
     [Fact]
     public void JsonBooleans_FlattenToTheCanonicalLowercaseSpelling()
     {
-        LeafFloor floor = ReadSettings("""
+        ComponentFloor floor = ReadSettings("""
             { "Discord": { "Announce": { "Started": true, "Ready": false } } }
             """);
 
@@ -74,7 +79,7 @@ public sealed class LeafFloorReaderTests : IDisposable
     [Fact]
     public void NestedObjects_FlattenWithTheEnvSeparator()
     {
-        LeafFloor floor = ReadSettings("""
+        ComponentFloor floor = ReadSettings("""
             { "KGSM": { "Path": "/usr/local/bin/kgsm" }, "Logging": { "LogLevel": { "Default": "Information" } } }
             """);
 
@@ -86,7 +91,7 @@ public sealed class LeafFloorReaderTests : IDisposable
     [Fact]
     public void NumbersAndStrings_AreCarriedVerbatim()
     {
-        LeafFloor floor = ReadSettings("""
+        ComponentFloor floor = ReadSettings("""
             { "A": { "Count": 300, "Ratio": 0.3, "Name": "kgsm", "Blank": "" } }
             """);
 
@@ -103,7 +108,7 @@ public sealed class LeafFloorReaderTests : IDisposable
     [Fact]
     public void AnnotatedSettingsFile_IsRead_NotReportedIncomplete()
     {
-        LeafFloor floor = ReadSettings("""
+        ComponentFloor floor = ReadSettings("""
             {
               // what the bot announces
               "Discord": { "Announce": { "Crashed": true, } },
@@ -121,7 +126,7 @@ public sealed class LeafFloorReaderTests : IDisposable
     [Fact]
     public void AMissingSettingsFile_LeavesTheFloorComplete()
     {
-        LeafFloor floor = NewReader().Read(Descriptor(Path.Combine(_dir, "nope.json")));
+        ComponentFloor floor = NewReader().Read(Descriptor(Path.Combine(_dir, "nope.json")));
 
         Assert.True(floor.Complete);
         Assert.Empty(floor.Values);

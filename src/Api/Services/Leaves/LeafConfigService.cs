@@ -1,3 +1,4 @@
+using TheKrystalShip.KGSM.ComponentSurface;
 using System.Globalization;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Audit;
@@ -277,7 +278,9 @@ public sealed class LeafConfigService(
 
         // The leaf's own configuration, so each field can report where its live value actually comes from.
         // Only a descriptor declares where that lives; without one the floor is genuinely unknown.
-        LeafFloor floor = identity.Descriptor is null ? LeafFloor.Unknown : floorReader.Read(identity.Descriptor);
+        ComponentFloor floor = identity.Descriptor is null
+            ? LeafFloorReader.Unknown
+            : floorReader.Read(identity.Descriptor);
 
         bool editable = catalog.IsEditable(leafId, out string? reason);
 

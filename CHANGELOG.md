@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a leaf's floor is read through the library the leaf serves it with (0.205.0)
+
+`LeafFloorReader` is a seam onto `ComponentSurface`'s own reader rather than a second implementation of
+it. This API reads a leaf's descriptor for the one case the leaf cannot cover — a leaf that is **down**,
+which is exactly when its configuration is wanted — and it now reads it with the same rules the leaf
+serves it with, so two answers about one file cannot come from two sets of rules and disagree only while
+the leaf is down. `SystemdUnitPaths` goes with it: where systemd finds a unit is `ComponentUnitPaths`,
+shared with every component that reads its own.
+
+What this API still owns is what is genuinely its own: the per-leaf override path excluded from the
+floor, the unit directory a host pinned, and the provenance, canary and `applied_unreachable` reporting
+built on top.
+
 ### Changed — the bot is reached over HTTP (0.204.0)
 
 `BotClient` asks the bot for `GET /status` over its socket, the same

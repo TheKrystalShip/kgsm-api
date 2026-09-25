@@ -1,3 +1,5 @@
+using TheKrystalShip.KGSM.ComponentSurface;
+
 namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>
@@ -103,7 +105,7 @@ public sealed class LeafConfigCatalog(LeafDescriptorStore descriptors, AnchorDes
         // Every unit-file root, not one: the drop-in arrives in /usr/lib on a node that installed
         // kgsm-api from a package and in /etc on a host its setup script provisioned, and systemd
         // applies it from either. Looking in one place answers correctly for one kind of host.
-        if (SystemdUnitPaths.HasDropIn(identity.Unit, OverrideDropInName, options.LeafDropInDir))
+        if (ComponentUnitPaths.HasDropIn(identity.Unit, OverrideDropInName, options.LeafDropInDir))
             return true;
 
         reason = $"{identity.DisplayName} is not wired for configuration on this host — {identity.Unit} has no "

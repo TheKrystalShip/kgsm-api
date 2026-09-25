@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.204.0</Version>
+    <Version>0.205.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -65,6 +65,12 @@
     <!-- Build-only: the attributes arrive as source and the generator as a tool, and the package
          declares no dependencies of its own. -->
     <PackageReference Include="TheKrystalShip.KGSM.ComponentConfig" Version="3.0.0" PrivateAssets="all" />
+
+    <!-- The descriptor's reader, shared with every component that serves its own surface. This API
+         reads a leaf's descriptor for the one case the leaf cannot cover — a leaf that is DOWN, which
+         is exactly when its configuration is wanted — and reads it through the same library the leaf
+         serves it with, so the two answers about one file cannot come from two sets of rules. -->
+    <PackageReference Include="TheKrystalShip.KGSM.ComponentSurface" Version="1.0.0-dev.8" />
   </ItemGroup>
 
   <!-- The wire contract, built here because this API is what produces it, and packed so a caller on

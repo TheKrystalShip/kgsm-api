@@ -1,13 +1,16 @@
-using TheKrystalShip.Api.Services.Leaves;
+using TheKrystalShip.KGSM.ComponentSurface;
 
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// Finding a unit the way systemd finds it. The case that used to fail is a node: a package installs
-/// its unit and its drop-ins under /usr/lib, a deploy script puts them under /etc, and reading one of
-/// those two directories answers correctly for one kind of host and reports the other as unwired.
+/// Finding a unit the way systemd finds it: a package installs its unit and its drop-ins under
+/// /usr/lib, a deploy script puts them under /etc, and reading one of those two directories answers
+/// correctly for one kind of host and reports the other as unwired.
+///
+/// The resolver is `ComponentSurface`'s, shared with every component that reads its own unit, so this
+/// exercises the one implementation from the side that reads every leaf's.
 /// </summary>
-public class SystemdUnitPathsTests : IDisposable
+public class ComponentUnitPathsTests : IDisposable
 {
     private readonly string _root = Path.Combine(Path.GetTempPath(), "kgsm-api-units-" + Guid.NewGuid().ToString("N"));
 
@@ -36,16 +39,16 @@ public class SystemdUnitPathsTests : IDisposable
         // Highest precedence first — an administrator's copy shadows a package's, not the reverse.
         Assert.Equal(
             ["/etc/systemd/system", "/run/systemd/system", "/usr/local/lib/systemd/system", "/usr/lib/systemd/system"],
-            SystemdUnitPaths.StandardRoots);
+            ComponentUnitPaths.StandardRoots);
     }
 
     [Fact]
     public void APinnedDirectoryIsSearchedAlone()
     {
         string dir = Pinned("only");
-        Assert.Equal([dir], SystemdUnitPaths.Roots(dir));
-        Assert.Equal(SystemdUnitPaths.StandardRoots, SystemdUnitPaths.Roots(""));
-        Assert.Equal(SystemdUnitPaths.StandardRoots, SystemdUnitPaths.Roots(null));
+        Assert.Equal([dir], ComponentUnitPaths.Roots(dir));
+        Assert.Equal(ComponentUnitPaths.StandardRoots, ComponentUnitPaths.Roots(""));
+        Assert.Equal(ComponentUnitPaths.StandardRoots, ComponentUnitPaths.Roots(null));
     }
 
     [Fact]
@@ -55,13 +58,13 @@ public class SystemdUnitPathsTests : IDisposable
         Write(Path.Combine(dir, "kgsm-monitor.service"), "[Service]\n");
 
         Assert.Equal(Path.Combine(dir, "kgsm-monitor.service"),
-            SystemdUnitPaths.Fragment("kgsm-monitor.service", dir));
+            ComponentUnitPaths.Fragment("kgsm-monitor.service", dir));
     }
 
     [Fact]
     public void AMissingFragmentIsNullRatherThanAGuess()
     {
-        Assert.Null(SystemdUnitPaths.Fragment("kgsm-nothing.service", Pinned("empty")));
+        Assert.Null(ComponentUnitPaths.Fragment("kgsm-nothing.service", Pinned("empty")));
     }
 
     [Fact]
@@ -71,8 +74,8 @@ public class SystemdUnitPathsTests : IDisposable
         string dir = Pinned("usr-lib");
         Write(Path.Combine(dir, "kgsm-monitor.service.d", "50-kgsm-api-override.conf"), "[Service]\n");
 
-        Assert.True(SystemdUnitPaths.HasDropIn("kgsm-monitor.service", "50-kgsm-api-override.conf", dir));
-        Assert.False(SystemdUnitPaths.HasDropIn("kgsm-monitor.service", "50-kgsm-web.conf", dir));
+        Assert.True(ComponentUnitPaths.HasDropIn("kgsm-monitor.service", "50-kgsm-api-override.conf", dir));
+        Assert.False(ComponentUnitPaths.HasDropIn("kgsm-monitor.service", "50-kgsm-web.conf", dir));
     }
 
     [Fact]
@@ -88,21 +91,21 @@ public class SystemdUnitPathsTests : IDisposable
 
         Assert.Equal(
             ["10-early.conf", "50-middle.conf", "90-late.conf"],
-            SystemdUnitPaths.DropIns("kgsm-bot.service", dir).Select(Path.GetFileName));
+            ComponentUnitPaths.DropIns("kgsm-bot.service", dir).Select(Path.GetFileName));
     }
 
     [Fact]
     public void AUnitWithNoDropInsHasNone()
     {
-        Assert.Empty(SystemdUnitPaths.DropIns("kgsm-bot.service", Pinned("bare")));
-        Assert.False(SystemdUnitPaths.HasDropIn("kgsm-bot.service", "50-kgsm-api-override.conf", Pinned("bare2")));
+        Assert.Empty(ComponentUnitPaths.DropIns("kgsm-bot.service", Pinned("bare")));
+        Assert.False(ComponentUnitPaths.HasDropIn("kgsm-bot.service", "50-kgsm-api-override.conf", Pinned("bare2")));
     }
 
     [Fact]
     public void AnUnreadableRootIsNotAFailure()
     {
         // A root that does not exist is the ordinary case — most hosts have no /usr/local/lib units.
-        Assert.Empty(SystemdUnitPaths.DropIns("kgsm-bot.service", Path.Combine(_root, "never-created")));
-        Assert.Null(SystemdUnitPaths.Fragment("kgsm-bot.service", Path.Combine(_root, "never-created")));
+        Assert.Empty(ComponentUnitPaths.DropIns("kgsm-bot.service", Path.Combine(_root, "never-created")));
+        Assert.Null(ComponentUnitPaths.Fragment("kgsm-bot.service", Path.Combine(_root, "never-created")));
     }
 }
