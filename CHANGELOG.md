@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the bot is reached over HTTP (0.204.0)
+
+`BotClient` asks the bot for `GET /status` over its socket, the same
+`SocketsHttpHandler.ConnectCallback` transport the monitor, reactor and scheduler clients use. The
+snapshot is still relayed verbatim and still parsed only far enough to reject a malformed body: the bot
+owns that shape, and re-modelling it here would add a second definition to keep in step for no gain.
+
 ### Changed — the scheduler is reached over HTTP, on one socket (0.203.0)
 
 `SchedulerClient` dials the scheduler the same way the monitor and reactor clients dial theirs: a
