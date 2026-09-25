@@ -620,7 +620,7 @@ the cluster package's `docs/cluster-message-bus.md`.
 
 ## 8 · SPA changes
 
-> **The SPA-side authority is `kgsm-web/CLAUDE.md`** — the SPA's cluster surface (discovery,
+> **The SPA-side authority is `kgsm-web/src/lib/CLAUDE.md`** — the SPA's cluster surface (discovery,
 > node-roster registration, and the two SPA-facing API dependencies: a viewer-readable node
 > list and a user-authed vouch *initiator*), and the honest baseline (the SPA is single-host
 > for auth today; SSO is what unblocks N≥2). The bullets below are the API-side summary.

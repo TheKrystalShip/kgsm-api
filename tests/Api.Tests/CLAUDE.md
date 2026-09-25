@@ -70,7 +70,7 @@ disk, and a suite that records into a dictionary cannot see it:
 
 Both use temp fixtures on purpose. The engine's real journal is one shared host-wide file that every
 kgsm-api on the box reads, so a test writing to it would land permanently in the operator's audit log —
-the same rule that keeps kgsm-web's smoke read-only (`kgsm-web/CLAUDE.md`).
+the same rule that keeps kgsm-web's smoke read-only (`kgsm-web/scripts/CLAUDE.md`).
 
 ## Setting connection facts a test server does not supply
 
