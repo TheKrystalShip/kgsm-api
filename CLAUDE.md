@@ -116,7 +116,7 @@ long-term maintainability wins here.
 
 ## Conventions
 
-- **JSON:** camelCase + ISO-8601 UTC **`Z`** timestamps, configured once in `Json/ApiJson.cs` and
+- **JSON:** camelCase + ISO-8601 UTC **`Z`** timestamps, configured once in `src/Api.Contracts/ApiJson.cs` and
   applied to both MVC and HTTP options. New `DateTimeOffset` fields inherit `Z` automatically.
 - **Errors:** every non-2xx returns the frozen envelope `{ "error": { "code", "message", "details?" } }`
   (`architecture.html §6`) — via `ApiExceptionHandler` (500s) and `UseStatusCodePages` (404, 401, 403).
