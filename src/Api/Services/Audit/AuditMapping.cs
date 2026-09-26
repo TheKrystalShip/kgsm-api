@@ -1224,6 +1224,148 @@ public static class AuditMapping
         return ApiWrite(d, type, AuditSeverity.Warn, target, hostId, summary, meta);
     }
 
+    /// <summary>Map an <c>auth.assignment.granted</c> / <c>auth.assignment.revoked</c> event.</summary>
+    /// <remarks>
+    /// Warn either way: somebody's access moved. A role's or an account's deletion revokes each of its
+    /// assignments on its own line, so an access review reads what happened to each person.
+    /// </remarks>
+    public static AuditWrite FromAssignmentEvent(AssignmentEventData d, string type, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        bool granted = string.Equals(type, ApiJournal.AssignmentGrantedEvent, StringComparison.Ordinal);
+        string who = ActorName(d.Actor);
+        string person = string.IsNullOrEmpty(d.Username) ? d.UserId ?? "an account" : $"'{d.Username}'";
+        string role = d.Role is { Length: > 0 } name ? $"'{name}'" : d.RoleId;
+        string summary = granted
+            ? $"{who} gave {person} the {role} role {ScopePhrase(d.Scope)}"
+            : $"{who} took the {role} role from {person} {ScopePhrase(d.Scope)}";
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["assignmentId"] = d.AssignmentId,
+            ["roleId"] = d.RoleId,
+            ["scope"] = d.Scope,
+            ["authorityVersion"] = d.AuthorityVersion.ToString(CultureInfo.InvariantCulture),
+        };
+        if (!string.IsNullOrEmpty(d.Role)) meta["role"] = d.Role!;
+        if (!string.IsNullOrEmpty(d.UserId)) meta["userId"] = d.UserId!;
+
+        AuditTarget? target = string.IsNullOrEmpty(d.UserId)
+            ? null
+            : new AuditTarget("user", d.UserId!, string.IsNullOrEmpty(d.Username) ? d.UserId! : d.Username);
+
+        return ApiWrite(d, type, AuditSeverity.Warn, target, hostId, summary, meta);
+    }
+
+    /// <summary>Map a role or permission being changed or removed.</summary>
+    /// <remarks>
+    /// Warn: a role's or a permission's contents are what everybody holding it may do, so changing one
+    /// changes several people's access at once.
+    /// </remarks>
+    public static AuditWrite FromAuthorityRecordEvent(AuthorityRecordEventData d, string type, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        bool role = type is ApiJournal.RoleChangedEvent or ApiJournal.RoleRemovedEvent;
+        bool removed = type is ApiJournal.RoleRemovedEvent or ApiJournal.PermissionRemovedEvent;
+        string kind = role ? "role" : "permission";
+        string what = d.Name is { Length: > 0 } name ? $"the {kind} '{name}'" : $"a {kind}";
+        string summary = removed ? $"{ActorName(d.Actor)} deleted {what}" : $"{ActorName(d.Actor)} changed {what}";
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [kind + "Id"] = d.Id,
+            ["authorityVersion"] = d.AuthorityVersion.ToString(CultureInfo.InvariantCulture),
+        };
+        if (!string.IsNullOrEmpty(d.Name)) meta["name"] = d.Name!;
+
+        return ApiWrite(d, type, AuditSeverity.Warn, new AuditTarget(kind, d.Id, d.Name ?? d.Id), hostId, summary, meta);
+    }
+
+    /// <summary>Map an <c>auth.catalog.changed</c> event: actions arriving in or leaving what can be granted.</summary>
+    /// <remarks>
+    /// Info: nothing anybody may do changed. An arrival is in no permission until a person files it, and
+    /// a departure is an action no member performs any more.
+    /// </remarks>
+    public static AuditWrite FromCatalogEvent(CatalogEventData d, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        int added = d.Added?.Length ?? 0;
+        int removed = d.Removed?.Length ?? 0;
+        string member = string.IsNullOrEmpty(d.Member) ? "a member" : d.Member;
+        string summary = (added, removed) switch
+        {
+            (> 0, 0) => $"{member} declared {added} new {Actions(added)}, not yet in any permission",
+            (0, > 0) => $"{removed} {Actions(removed)} left the catalog with {member}",
+            _ => $"{member} declared {added} new {Actions(added)} and {removed} left the catalog",
+        };
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["member"] = member,
+            ["authorityVersion"] = d.AuthorityVersion.ToString(CultureInfo.InvariantCulture),
+        };
+        if (added > 0) meta["added"] = string.Join(", ", d.Added!);
+        if (removed > 0) meta["removed"] = string.Join(", ", d.Removed!);
+
+        return ApiWrite(d, ApiJournal.CatalogChangedEvent, AuditSeverity.Info, null, hostId, summary, meta);
+
+        static string Actions(int n) => n == 1 ? "action" : "actions";
+    }
+
+    /// <summary>Map a service's requirement being approved or revoked.</summary>
+    /// <remarks>
+    /// Warn either way. An automatic approval is a grant nobody chose, which is exactly why it is shown:
+    /// the row says so rather than naming the member that reported it as having decided it.
+    /// </remarks>
+    public static AuditWrite FromServiceRequirementEvent(ServiceRequirementEventData d, string type, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        bool approved = string.Equals(type, ApiJournal.ServiceRequirementApprovedEvent, StringComparison.Ordinal);
+        string service = d.Service is { Length: > 0 } s ? s : "a service account";
+        string summary = approved
+            ? d.Automatic
+                ? $"{service} was allowed {d.Action} {ScopePhrase(d.Scope)} automatically"
+                : $"{ActorName(d.Actor)} allowed {service} {d.Action} {ScopePhrase(d.Scope)}"
+            : $"{ActorName(d.Actor)} revoked {d.Action} from {service}";
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["accountId"] = d.AccountId,
+            ["action"] = d.Action,
+            ["automatic"] = d.Automatic ? "true" : "false",
+            ["authorityVersion"] = d.AuthorityVersion.ToString(CultureInfo.InvariantCulture),
+        };
+        if (!string.IsNullOrEmpty(d.Scope)) meta["scope"] = d.Scope!;
+        if (!string.IsNullOrEmpty(d.Service)) meta["service"] = d.Service!;
+
+        return ApiWrite(d, type, AuditSeverity.Warn, new AuditTarget("user", d.AccountId, d.Service ?? d.AccountId), hostId, summary, meta);
+    }
+
+    /// <summary>A scope as a sentence reads it: cluster-wide, on a node, on one server.</summary>
+    private static string ScopePhrase(string? scope)
+    {
+        if (string.IsNullOrEmpty(scope) || scope == "cluster")
+            return "cluster-wide";
+
+        if (scope.StartsWith("node:", StringComparison.Ordinal))
+            return $"on {scope["node:".Length..]}";
+
+        if (scope.StartsWith("instance:", StringComparison.Ordinal))
+        {
+            string rest = scope["instance:".Length..];
+            int slash = rest.IndexOf('/');
+            int hash = rest.IndexOf('#');
+            if (slash > 0 && hash > slash)
+                return $"on {rest[(slash + 1)..hash]} on {rest[..slash]}";
+        }
+
+        return $"at {scope}";
+    }
+
     /// <summary>Map a <c>service.connected</c> / <c>service.disconnected</c> event.</summary>
     public static AuditWrite FromServiceProvisioningEvent(
         ServiceProvisioningEventData d, string type, string hostId)

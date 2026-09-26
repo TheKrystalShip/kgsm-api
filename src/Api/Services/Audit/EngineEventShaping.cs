@@ -219,6 +219,17 @@ public static class EngineEventShaping
             ApiJournal.IdentityLinkedEvent or ApiJournal.IdentityUnlinkedEvent =>
                 Map<IdentityLinkEventData>(item, d => AuditMapping.FromIdentityEvent(d, item.Type, hostId)),
 
+            // Who may do what: the auth anchor's record of access moving, one line per change.
+            ApiJournal.AssignmentGrantedEvent or ApiJournal.AssignmentRevokedEvent =>
+                Map<AssignmentEventData>(item, d => AuditMapping.FromAssignmentEvent(d, item.Type, hostId)),
+            ApiJournal.RoleChangedEvent or ApiJournal.RoleRemovedEvent
+                or ApiJournal.PermissionChangedEvent or ApiJournal.PermissionRemovedEvent =>
+                Map<AuthorityRecordEventData>(item, d => AuditMapping.FromAuthorityRecordEvent(d, item.Type, hostId)),
+            ApiJournal.CatalogChangedEvent =>
+                Map<CatalogEventData>(item, d => AuditMapping.FromCatalogEvent(d, hostId)),
+            ApiJournal.ServiceRequirementApprovedEvent or ApiJournal.ServiceRequirementRevokedEvent =>
+                Map<ServiceRequirementEventData>(item, d => AuditMapping.FromServiceRequirementEvent(d, item.Type, hostId)),
+
             ApiJournal.ServiceConnectedEvent or ApiJournal.ServiceDisconnectedEvent =>
                 Map<ServiceProvisioningEventData>(item,
                     d => AuditMapping.FromServiceProvisioningEvent(d, item.Type, hostId)),

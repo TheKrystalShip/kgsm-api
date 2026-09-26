@@ -111,6 +111,13 @@ public sealed class StreamHub
     /// reached as readily as one established with a password. A connection that proves no account
     /// here belongs to nobody and is never a recipient — <see cref="StreamConnection.BelongsTo"/>.
     /// </remarks>
+    /// <summary>The accounts with at least one live connection subscribed to <paramref name="topic"/>.</summary>
+    public IReadOnlyCollection<string> AccountsSubscribedTo(string topic) =>
+        [.. _connections.Keys
+            .Where(c => c.AccountId is not null && c.IsSubscribed(topic))
+            .Select(c => c.AccountId!)
+            .Distinct(StringComparer.Ordinal)];
+
     public void PublishToAccount(string accountId, string topic, string coalesceKey, StreamMessage message)
     {
         ReadOnlyMemory<byte>? frame = null;

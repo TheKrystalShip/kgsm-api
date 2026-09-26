@@ -120,6 +120,14 @@ public static class StreamProtocol
     /// standing, and an older reading of it says nothing the newest does not.</summary>
     public const string MeEntityKey = "me";
 
+    /// <summary>The caller's access on this node changed: <c>data</c> is the whole
+    /// <c>GET /api/v1/me/access</c> answer, which the client replaces what it holds with.</summary>
+    public const string MeAccess = "me.access";
+
+    /// <summary>The coalesce key for <see cref="MeAccess"/>, apart from <see cref="MeEntityKey"/> so a
+    /// standing patch and an access report queued together both arrive.</summary>
+    public const string MeAccessEntityKey = "me.access";
+
     // --- server -> client message types (the `type` field of the { topic, type, data } envelope) ---
     /// <summary>A full honest <c>Server</c> element to merge by id (doc-given). Fired on status/roster change.</summary>
     public const string ServerPatch = "server.patch";

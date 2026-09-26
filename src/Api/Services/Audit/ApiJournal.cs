@@ -62,6 +62,16 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     public const string IdentityLinkedEvent = AuthEvents.IdentityLinked;
     public const string IdentityUnlinkedEvent = AuthEvents.IdentityUnlinked;
 
+    public const string AssignmentGrantedEvent = AuthEvents.AssignmentGranted;
+    public const string AssignmentRevokedEvent = AuthEvents.AssignmentRevoked;
+    public const string RoleChangedEvent = AuthEvents.RoleChanged;
+    public const string RoleRemovedEvent = AuthEvents.RoleRemoved;
+    public const string PermissionChangedEvent = AuthEvents.PermissionChanged;
+    public const string PermissionRemovedEvent = AuthEvents.PermissionRemoved;
+    public const string CatalogChangedEvent = AuthEvents.CatalogChanged;
+    public const string ServiceRequirementApprovedEvent = AuthEvents.ServiceRequirementApproved;
+    public const string ServiceRequirementRevokedEvent = AuthEvents.ServiceRequirementRevoked;
+
     public const string ServiceConnectedEvent = "service.connected";
     public const string ServiceDisconnectedEvent = "service.disconnected";
     public const string ServiceConfigChangedEvent = "service.config_changed";

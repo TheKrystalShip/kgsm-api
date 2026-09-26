@@ -736,6 +736,15 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<AuthorityReporter>();
         services.AddHostedService(sp => sp.GetRequiredService<AuthorityReporter>());
 
+        // What a person may do on this node, from this node's replica of the authority: the account
+        // store file, once it holds one. Until then GET /api/v1/me/access answers
+        // authority_unavailable, and the me topic's access push has no change to carry.
+        services.AddSingleton<IReplicatedAuthority>(sp => new AuthorityReplicaFile(
+            apiOptions.UsersDbPath, sp.GetRequiredService<ILogger<AuthorityReplicaFile>>()));
+        services.AddSingleton<MemberAccess>();
+        services.AddSingleton<NodeAccess>();
+        services.AddSingleton<IAuthorityChangeListener, MeAccessPush>();
+
         // The roster-backed fan-out target list. A durable, identity-carrying message goes only to members
         // this node has authenticated first-hand — never to one it has merely heard about — or the outbox
         // would retry a secret-bearing message at a phantom for the full retry window.

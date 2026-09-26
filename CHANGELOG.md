@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the caller's access on this node, and the anchor's access events in the audit (0.207.0)
+
+- **`GET /api/v1/me/access`** — what the caller may do on this node, already evaluated: at the
+  cluster, at this node and at each instance with an install nonce, for the actions this node's own
+  components perform (the components of the manifests under the leaves' `actions` directory). Read from
+  this node's replica of the authority, the account store once it is at schema version 2; until then it
+  answers `503 authority_unavailable`.
+- **`me.access` on the `me` topic** — a fresh copy of that answer, pushed to an account's open streams
+  whenever this node's replica takes a change (`MeAccessPush`, an `IAuthorityChangeListener`).
+- **The audit renders the auth anchor's access events**: an assignment granted or revoked, a role or a
+  permission changed or deleted, actions arriving in or leaving the catalog, and a service's requirement
+  approved — saying so when nobody chose it — or revoked.
+- Pins `TheKrystalShip.KGSM.Lib` 8.10.0-dev.4, `Auth.Journal` 1.1.0-dev.2, `Auth.Users` 2.0.0-dev.3,
+  `Auth.Cluster` 1.0.0-dev.13 and, in the tests, `Auth.Testing` 1.0.0-dev.2.
+
 ### Added — this node reports its actions to the auth anchor (0.206.0)
 
 This node reports what it is responsible for to the cluster's auth anchor
