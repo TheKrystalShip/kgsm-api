@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — a server's install nonce, and an auth-disabled host's access (0.208.0, contracts 1.0.0-dev.13)
+
+- **`installNonce` on every server** (list, detail and the `servers` stream): the nonce the engine wrote
+  at install, which an access grant on the server names and `/me/access` keys its instances by.
+- **An auth-disabled host answers `/me/access` as an Owner**: `owner: true` and, cluster-wide, every
+  action its components' manifests declare — the answer its every policy already gives its synthetic
+  caller.
+- `/me/access` carries `owner` for a real caller too. Pins `Auth.Users` 2.0.0-dev.5 and `Auth.Cluster`
+  1.0.0-dev.15.
+
 ### Added — the caller's access on this node, and the anchor's access events in the audit (0.207.0)
 
 - **`GET /api/v1/me/access`** — what the caller may do on this node, already evaluated: at the

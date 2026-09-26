@@ -273,7 +273,12 @@ public sealed record Server(
     // The absolute root Library names — what the instance actually records. Carried beside the name
     // so a surface can say where the files are without joining against the host's registry, and so an
     // instance whose library is unregistered can still say which directory it is under.
-    string? LibraryPath = null);
+    string? LibraryPath = null,
+    // The nonce the engine wrote into this instance at install, which it never changes for the
+    // instance's life. It is what an access grant on this server names (`instance:<node>/<id>#<nonce>`)
+    // and what `/me/access` keys its instances by, so a reinstall under the same id is a different
+    // target. Null while the engine has not reported one.
+    string? InstallNonce = null);
 
 /// <summary>
 /// A server's operator-authored note — free text an Operator writes for players and teammates

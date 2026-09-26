@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -163,5 +164,38 @@ public sealed class MeAccessTests : IDisposable
         Assert.Equal(["kgsm:library.read"], report.GetProperty("cluster").EnumerateArray().Select(a => a.GetString()));
         Assert.True(report.GetProperty("current").GetBoolean());
         Assert.Equal(6, report.GetProperty("version").GetInt64());
+        Assert.False(report.GetProperty("owner").GetBoolean());
+    }
+
+    [Fact]
+    public async Task AnAuthDisabledHost_AnswersAsAnOwnerHoldingEveryActionItsComponentsDeclare()
+    {
+        await using AuthTestFactory factory = new();
+        using WebApplicationFactory<Program> node = factory.WithWebHostBuilder(builder =>
+        {
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Api:AuthDisabled"] = "true",
+                ["Api:DisabledAuthActor"] = "local:claude",
+                ["Api:DbPath"] = AuthTestFactory.NewDbPath("kgsm-api-tests-access-open"),
+            }));
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<AuthorityReporterOptions>();
+                services.AddSingleton(new AuthorityReporterOptions { ManifestDirectories = [ManifestDirectory] });
+            });
+        });
+        Directory.CreateDirectory(ManifestDirectory);
+        File.WriteAllText(Path.Combine(ManifestDirectory, "kgsm.json"),
+            """{"schemaVersion":1,"component":"kgsm","actions":[{"id":"server.start","title":"Start servers","effect":"execute","scope":"instance"},{"id":"library.read","title":"Read the library","effect":"read","scope":"cluster"}]}""");
+
+        HttpResponseMessage response = await node.CreateClient().GetAsync("/api/v1/me/access");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        JsonElement report = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.True(report.GetProperty("owner").GetBoolean());
+        Assert.True(report.GetProperty("current").GetBoolean());
+        Assert.Equal(["kgsm:library.read", "kgsm:server.start"],
+            report.GetProperty("cluster").EnumerateArray().Select(a => a.GetString()));
     }
 }

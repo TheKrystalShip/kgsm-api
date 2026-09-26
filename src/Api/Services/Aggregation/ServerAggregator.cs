@@ -481,7 +481,8 @@ public sealed class ServerAggregator
             // that predates libraries, which stays blank rather than becoming a guessed root.
             Library: string.IsNullOrWhiteSpace(instance.Library) ? null : instance.Library,
             LibraryPath: string.IsNullOrWhiteSpace(instance.LibraryDir) ? null : instance.LibraryDir,
-            LibraryState: libraryState);
+            LibraryState: libraryState,
+            InstallNonce: string.IsNullOrEmpty(instance.InstallNonce) ? null : instance.InstallNonce);
     }
 
     /// <summary>

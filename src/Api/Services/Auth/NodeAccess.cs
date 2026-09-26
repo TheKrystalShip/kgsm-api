@@ -62,7 +62,35 @@ public sealed class NodeAccess(
     /// </summary>
     public Func<string, bool> Include()
     {
-        HashSet<string> components = new(StringComparer.Ordinal);
+        HashSet<string> components = new(Manifests().Select(m => m.Component), StringComparer.Ordinal);
+
+        return action =>
+        {
+            int colon = action.IndexOf(':', StringComparison.Ordinal);
+            return colon > 0 && components.Contains(action[..colon]);
+        };
+    }
+
+    /// <summary>
+    /// The report for the synthetic caller of an auth-disabled host: an Owner, holding every action
+    /// this node's components declare, cluster-wide.
+    /// </summary>
+    /// <remarks>
+    /// Such a host authenticates every request without asking anybody who they are, so there is no
+    /// account to evaluate and the answer is the one its every policy already gives.
+    /// </remarks>
+    public AccessReport SyntheticOwner()
+    {
+        string[] actions = [.. Manifests().SelectMany(m => m.CatalogActions()).Select(a => a.Id)
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+
+        return new AccessReport(0, Current: true, actions,
+            new Dictionary<string, IReadOnlyList<string>>(), new Dictionary<string, IReadOnlyList<string>>(),
+            Owner: true);
+    }
+
+    private IEnumerable<ActionManifest> Manifests()
+    {
         foreach (string directory in manifests.ManifestDirectories)
         {
             if (!Directory.Exists(directory))
@@ -71,17 +99,11 @@ public sealed class NodeAccess(
             foreach (string file in Directory.EnumerateFiles(directory, "*.json"))
             {
                 if (ActionManifests.TryRead(file, out string? problem) is { } manifest)
-                    components.Add(manifest.Component);
+                    yield return manifest;
                 else
                     logger.LogDebug("action manifest {File} left out: {Problem}", file, problem);
             }
         }
-
-        return action =>
-        {
-            int colon = action.IndexOf(':', StringComparison.Ordinal);
-            return colon > 0 && components.Contains(action[..colon]);
-        };
     }
 }
 

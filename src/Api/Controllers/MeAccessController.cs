@@ -26,11 +26,14 @@ namespace TheKrystalShip.Api.Controllers;
 [ApiController]
 [Route("api/v1/me/access")]
 [Authorize]
-public sealed class MeAccessController(NodeAccess access) : ControllerBase
+public sealed class MeAccessController(NodeAccess access, ApiOptions options) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<AccessReport>> Get(CancellationToken ct)
     {
+        if (options.AuthDisabled)
+            return access.SyntheticOwner();
+
         (MemberAccessCaller caller, AccessReport? report) = await access.ReportAsync(User, ct);
 
         return caller.Refusal switch
