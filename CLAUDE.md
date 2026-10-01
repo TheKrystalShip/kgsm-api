@@ -14,9 +14,10 @@ metrics, kept for *harvest only* — **never treat it as authoritative or a desi
 
 **This API signs nobody in.** Every session it accepts is minted by the cluster's auth anchor
 (`kgsm-auth-anchor`), which every install runs — a machine on its own is a cluster of one — and is
-verified here against the key that anchor publishes; the tier comes from its replica of the cluster's
-accounts on every request. **Auth is ON by default** — `Api__AuthDisabled=true` is the explicit,
-loudly-logged dev escape hatch (synthetic admin). Detail: `src/Api/Services/Auth/CLAUDE.md`.
+verified here against the key that anchor publishes; what a caller may do is evaluated per action from
+its replica of the cluster's authority on every request. **Auth is ON by default** —
+`Api__AuthDisabled=true` is the explicit, loudly-logged dev escape hatch (a synthetic Owner). Detail:
+`src/Api/Services/Auth/CLAUDE.md`.
 
 ## Read first (sources of truth)
 
@@ -39,7 +40,7 @@ loudly-logged dev escape hatch (synthetic admin). Detail: `src/Api/Services/Auth
 
 ```bash
 dotnet build kgsm-api.slnx                 # build (Debug)
-dotnet test  kgsm-api.slnx                 # tests/Api.Tests — the 401/403/tier matrix and the rest
+dotnet test  kgsm-api.slnx                 # tests/Api.Tests — the 401/403 access matrix and the rest
 dotnet run --project src/Api/Api.csproj    # run locally (binds Api__Urls, default :8080)
 scripts/smoke.sh                           # build Release + run the HTTP contract checks (the "mock frontend")
 ./deploy/deploy.sh                         # build + (re)deploy the live systemd service — see deploy/CLAUDE.md
@@ -58,7 +59,10 @@ refused at startup with an error naming the key.
 
 **`deploy/kgsm-api.leaf.json` is generated, not written.** `TheKrystalShip.KGSM.ComponentConfig`
 rewrites it on every build from `[ConfigField]` attributes and `<panel>` doc tags on `ApiSettings` — so
-edit the settings class, never the JSON, and commit what the build produces. A settings key nothing
+edit the settings class, never the JSON, and commit what the build produces. Beside it the same build
+writes `deploy/kgsm-api.leaf.actions.json`, the actions this API performs and the engine actions it
+requires as its own service account (`src/Api/ApiActionDeclarations.cs`), and fails when an engine call
+is neither required nor named by the code making it for a checked person. A settings key nothing
 describes fails the build naming it; `AllowedHosts` is declared exempt, because host filtering belongs
 to the framework rather than to this API's configuration surface. This API is the one leaf whose
 descriptor says `readOnly` — applying a change here means restarting the process serving the request.

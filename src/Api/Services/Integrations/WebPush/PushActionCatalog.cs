@@ -64,7 +64,7 @@ public static class PushActionCatalog
             return [new PushActionOffer(PushActionKind.ConditionSnooze, condition, "Snooze 4h")];
 
         // The two events that name something other than a server. Both act on the id the event carries,
-        // and both are refused at the tap if the account has since lost the tier for them.
+        // and both are refused at the tap if the account has since lost the action for them.
         if (ev.ActionSubject is { Length: > 0 } subject)
         {
             if (ev.CatalogId == "leaf_down" && Leaves.LeafCatalog.IsRestartable(subject))

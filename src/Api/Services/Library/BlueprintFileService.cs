@@ -1,3 +1,4 @@
+using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
@@ -134,7 +135,9 @@ public interface IBlueprintFileService
 
 /// <summary>The default <see cref="IBlueprintFileService"/> — see the interface doc for the delegation
 /// model. Depends on kgsm-lib's transient <see cref="IBlueprintFiles"/>/<see cref="IBlueprintService"/>,
-/// so this is registered transient too (no captive-dependency singleton).</summary>
+/// so this is registered transient too (no captive-dependency singleton). Its writes are made for a
+/// caller the library routes checked for <c>kgsm:blueprints.write</c>.</summary>
+[PerformedFor(ActionIds.BlueprintsWrite)]
 public sealed class BlueprintFileService(IBlueprintFiles files, IBlueprintService blueprints)
     : IBlueprintFileService
 {

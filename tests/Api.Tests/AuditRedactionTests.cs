@@ -33,7 +33,7 @@ public sealed class AuditRedactionTests
     [Fact]
     public void APlayersAddressNeedsOperator_TheirNameDoesNot()
     {
-        AuditRecord viewer = AuditRedaction.ForViewer(Row(
+        AuditRecord viewer = AuditRedaction.Redacted(Row(
             "player.joined", "bob joined mc",
             ("playerName", "bob"), ("playerAddr", "95.49.44.91"), ("sessionKey", "abc")));
 
@@ -51,7 +51,7 @@ public sealed class AuditRedactionTests
     [Fact]
     public void AConsoleCommandLeavesTheSummaryTooNotJustTheMeta()
     {
-        AuditRecord viewer = AuditRedaction.ForViewer(Row(
+        AuditRecord viewer = AuditRedaction.Redacted(Row(
             "console.input.sent", "ran 'op somebody' on mc", ("command", "op somebody")));
 
         Assert.Null(viewer.Meta);
@@ -72,7 +72,7 @@ public sealed class AuditRedactionTests
         AuditWrite carriedNothing = AuditMapping.FromInputSentEvent(
             new InstanceInputSentData { InstanceName = "mc", Command = "" }, "h1");
 
-        AuditRecord viewer = AuditRedaction.ForViewer(
+        AuditRecord viewer = AuditRedaction.Redacted(
             Row("console.input.sent", carried.Summary, ("command", "op somebody")));
 
         Assert.Equal(carriedNothing.Summary, viewer.Summary);
@@ -87,7 +87,7 @@ public sealed class AuditRedactionTests
     [Fact]
     public void AModerationTargetNeedsOperatorBecauseItMayBeAnAddress()
     {
-        AuditRecord viewer = AuditRedaction.ForViewer(Row(
+        AuditRecord viewer = AuditRedaction.Redacted(Row(
             "player.banned", "banned 95.49.44.91 on mc",
             ("target", "95.49.44.91"), ("command", "/ban 95.49.44.91")));
 
@@ -105,7 +105,7 @@ public sealed class AuditRedactionTests
     public void TheRowSurvivesEverythingTakenOffIt()
     {
         AuditRecord full = Row("player.banned", "banned bob on mc", ("target", "bob"));
-        AuditRecord viewer = AuditRedaction.ForViewer(full);
+        AuditRecord viewer = AuditRedaction.Redacted(full);
 
         Assert.Equal(full.Id, viewer.Id);
         Assert.Equal(full.Ts, viewer.Ts);
@@ -123,7 +123,7 @@ public sealed class AuditRedactionTests
     {
         AuditRecord row = Row("server.started", "started mc");
 
-        Assert.Same(row, AuditRedaction.ForViewer(row));
+        Assert.Same(row, AuditRedaction.Redacted(row));
     }
 
     /// <summary>

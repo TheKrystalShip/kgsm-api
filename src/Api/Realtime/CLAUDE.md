@@ -43,12 +43,12 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The cont
   `open_ports` verify (the firewall is socket-activated + idle-exits; a periodic probe would defeat that).
   Don't add a network pump; don't fold `network` into `server.patch`.
 - **`me` is delivered by AUDIENCE, not by subscription alone.** Every other topic is host-wide: anyone
-  subscribed gets the frame. This one carries the *reader's own* standing (`tier` + `status`, the
-  mutable half of `GET /me`), so it goes only to the connections authenticated as the account it is
-  about — `StreamHub.PublishToAccount`, matched on the **account id** so a session established through
-  a linked provider identity is reached as readily as one established with a password. A connection
-  that proves no account belongs to nobody and is never a recipient. Broadcasting it would hand every
-  viewer a directory of who holds what.
+  subscribed gets the frame. This one carries the *reader's own* standing (`me.patch` with the account's
+  `status`, `me.access` with the whole `GET /me/access` answer), so it goes only to the connections
+  authenticated as the account it is about — `StreamHub.PublishToAccount`, matched on the **account id**
+  so a session established through a linked provider identity is reached as readily as one established
+  with a password. A connection that proves no account belongs to nobody and is never a recipient.
+  Broadcasting it would hand every reader a directory of who holds what.
 - **One shared `MetricsMapping`** makes a stream tick byte-identical to the REST element it patches —
   REST and the stream must not drift. Map in one place.
 - **Honesty: monitor-down → metric topics go silent**, never a replayed stale frame. The
@@ -58,18 +58,26 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The cont
   **gated on subscribers** (idle stream costs nothing). Both intervals are **configurable** (`ApiOptions`):
   `Api__MetricsPollMs` (default **1s** — the live charts feed, keep it tight) and
   `Api__DomainPollMs` (default **5s**, relaxed — each tick spawns `kgsm.sh` and the roster changes
-  rarely; operator actions push an immediate verify patch off the command path, so this only catches
+  rarely; commands push an immediate verify patch off the command path, so this only catches
   out-of-band changes). `LeafHealthMonitor` is **always-on** (~2s) — the single source feeding both this
   stream's `capabilities.patch` and the REST `GET /hosts` capability block, so they can't disagree.
 
 ## Auth
 
-`/stream` is `[Authorize]` — any authenticated caller connects, and **the gate is per topic**
-(`StreamProtocol.MinimumTier`): the two operator topics need operator, `me` needs nothing at all, and
-everything else is the viewer floor. A topic the caller's tier does not reach is **silently dropped**
-from the subscription set at connect — never a 403 on the whole stream. What the `me` floor buys is
-the one caller a viewer gate has nothing to say to: somebody awaiting approval, who connects to hear
-about their own account and hears nothing else.
+`/stream` is `[Authorize]` — any authenticated caller connects, and **the gate is per topic and per
+frame** (`StreamProtocol.Gate`, `StreamAccess`): a host topic takes the action its REST companion does
+(`api:logs.read`, `api:services.read`, `api:audit.read`, `api:alerts.read`, `api:batches.read`,
+`api:hosts.read`, `monitor:metrics.read`); one server's metrics or console takes `kgsm:server.read` /
+`kgsm:server.console.read` at that server; the server collections (`servers`, `servers/metrics`,
+`jobs`, `players`) are open to subscribe and each frame reaches only the readers of the server it is
+about (`Publish(..., serverId)`, `PublishRows`); `me` needs nothing; a topic this build does not know is
+an Owner's alone. A topic the reader may not see **delivers nothing** — never a 403 on the whole stream.
+What the open `me` buys is the one caller nothing else has anything to say to: somebody awaiting
+approval, who connects to hear about their own account and hears nothing else.
+
+The audit feed says the same things to every reader of it; only the values inside a row differ. A row
+the engine classifies as carrying personal or privileged values is published with a redacted variant
+(`StreamRedaction`), sent to readers without `api:audit.personal-fields`.
 
 Fetch-based SSE sends the bearer as a normal `Authorization: Bearer` header through the standard
 JwtBearer pipeline — a query-string token authenticates nothing (regression-pinned:
@@ -79,7 +87,7 @@ this endpoint.**
 
 **The connection re-checks its own session every 20s.** `[Authorize]` gates the CONNECT and nothing in
 the framework re-runs it on a request that lasts hours, so `StreamController` hands the connection a
-probe over `ISessionValidator` and the write loop ends the stream once the `sid` stops being valid —
+probe over `ClusterSessionRevocations` and the write loop ends the stream once the `sid` has been ended —
 a revoke reaches the live channel in ≤20s, the same order as REST's ≤5s. Two things about it are
 load-bearing: it runs on the **loop's own clock**, not inside the heartbeat branch (a busy stream is
 woken by frames faster than any delay completes, so a duty hung off that branch never fires on the
@@ -89,17 +97,13 @@ reconnect banner each time, for a credential the client is about to rotate anywa
 THROWS ends the stream too: "couldn't measure" is not "still valid", and the redial re-runs the full
 auth pipeline, which is the authority. No `sid` (auth-disabled) → no probe, unchanged behaviour.
 
-**The connection re-reads what its reader may do on the same 20s clock.** A tier that has moved is
-applied in place: the connection's tier becomes the new one, every subscription above it is dropped
-(`StreamConnection.ApplyTier`), and a `me.patch` tells the reader. Two properties are load-bearing.
-It only ever takes reach away — a promotion adds nothing back, because the subscription set is what
-the client asked for filtered by what it held, and nothing here can tell a topic the client did not
-want from one it was refused; the client that wants more opens a stream asking for more. And an
-unreadable account store **ends the stream** rather than resolving to `none`: "we could not ask" is a
-third answer, and flattening it into a tier would report an outage as everybody having lost their
-access. The redial re-runs the full auth pipeline, which is the authority.
-
-That re-read is the **backstop**, not the fast path. A change made through this API's own endpoints
-(`PATCH /auth/users/{id}`, the delete, the notification approve action) calls
-`StreamHub.AuthorityChanged` and lands at once; the clock covers the writers this process never sees,
-since the account store is a shared host file the assistant, the bot and `kgsm-api user` all write.
+**Access is evaluated per frame, and the evaluator is replaced whenever the replica moves.** The
+connection keeps the topics the client asked for and asks on every frame whether its reader reaches
+them, so access granted or taken away applies to the next frame, both ways, with no reconnect. Every
+change the replica takes reaches every connection at once (`StreamAccessRefresh`, an
+`IAuthorityChangeListener`, calls `StreamHub.AccessChanged`), and a reader whose account status moved
+is sent a `me.patch`. The loop also re-reads the replica on the same 20s clock as the session check —
+the backstop for a change that reached the file without this process being told. An unreadable replica
+**ends the stream** rather than refusing everything: "we could not ask" is a third answer, and
+flattening it into a refusal would report an outage as everybody having lost their access. The redial
+re-runs the full auth pipeline, which is the authority.

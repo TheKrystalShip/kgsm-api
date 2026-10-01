@@ -22,7 +22,7 @@ public class PushPreferenceTests(AuthTestFactory factory) : IClassFixture<AuthTe
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Admin));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Owner));
         return c;
     }
 

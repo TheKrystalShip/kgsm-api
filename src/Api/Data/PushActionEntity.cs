@@ -13,8 +13,9 @@ namespace TheKrystalShip.Api.Data;
 /// worker holds no session — it can read neither the access token nor the refresh token — so there is
 /// no bearer on the redemption call and the handle is what stands in for one. Three things put the
 /// floor back under it: the row names the <em>device</em> it was staged for and a redemption has to
-/// present that endpoint, the tier is re-resolved from the account store at redemption rather than
-/// trusted from staging time, and it is single-use with a short life.
+/// present that endpoint, the person's access to the operation's action at its target is evaluated
+/// from the replica at redemption rather than trusted from staging time, and it is single-use with a
+/// short life.
 /// </para>
 /// </summary>
 public sealed class PushActionEntity
@@ -43,7 +44,7 @@ public sealed class PushActionEntity
     public string? Subject { get; set; }
 
     /// <summary>The provider-qualified handle of the account it was staged for (<c>provider:subject</c>) —
-    /// what the tier is re-resolved from. A subject alone is unique only within its provider.</summary>
+    /// what the account is resolved from at redemption. A subject alone is unique only within its provider.</summary>
     public string UserHandle { get; set; } = "";
 
     /// <summary>That account's username at staging time, for the audit actor. A label, never authority.</summary>

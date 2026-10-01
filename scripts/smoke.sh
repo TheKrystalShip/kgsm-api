@@ -66,10 +66,19 @@ KGSM_PATH="${SMOKE_KGSM_PATH:-/usr/local/bin/kgsm}"
 # consumer wires up without touching anything real.
 KGSM_SOCK="${SMOKE_KGSM_SOCKET:-/tmp/kgsm-api-smoke-events.sock}"; rm -f "$KGSM_SOCK"
 
-# M4·a: auth is ON by default. The M0–M3 checks below run under the dev escape hatch (synthetic admin)
+# Auth is ON by default. The domain checks below run under the dev escape hatch (a synthetic Owner)
 # so they exercise the domain contracts unchanged; the auth boundary itself gets its own ENABLED
-# instance + no-token sweep at the end (and the full tier matrix lives in tests/Api.Tests).
+# instance + no-token sweep at the end (and the full access matrix lives in tests/Api.Tests).
 export Api__AuthDisabled=true
+# NEVER the machine's own files. /var/lib/kgsm/auth/users.db is this machine's authority replica, which
+# this API owns and sets aside when it finds an older schema there; the provider file is what this
+# machine's leaves verify sessions against; the founded marker and the local anchor are this machine's
+# real cluster. Every API the smoke starts gets its own.
+SMOKE_STATE="$(mktemp -d /tmp/kgsm-api-smoke-state.XXXXXX)"
+export Api__UsersDbPath="${SMOKE_STATE}/users.db"
+export Api__HostProviderFilePath="${SMOKE_STATE}/auth-provider.json"
+export Api__LocalAnchorUrl=""
+export Cluster__FoundedPath="${SMOKE_STATE}/cluster-founded"
 # Auth is off for these checks, so nothing authenticates a caller. This names who the audit log
 # attributes the run to; the API refuses to start without it.
 export Api__DisabledAuthActor="local:claude"
@@ -113,6 +122,7 @@ cleanup() {
   for p in "${PIDS[@]:-}"; do wait "$p" 2>/dev/null; done
   rm -f "$STUB_SOCK" "$STUB_ASSIST_PY" 2>/dev/null
   rm -f "${M7_DB:-}" "${M7_DB:-}"-wal "${M7_DB:-}"-shm 2>/dev/null
+  rm -rf "${SMOKE_STATE:-/nonexistent}" 2>/dev/null
 }
 trap cleanup EXIT
 

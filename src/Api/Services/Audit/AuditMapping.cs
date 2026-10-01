@@ -1142,8 +1142,8 @@ public static class AuditMapping
 
     /// <summary>Map one of the six <c>user.*</c> events to its account action.</summary>
     /// <remarks>
-    /// These are the trail's most sensitive rows: with the account store as this host's sole
-    /// authority, a tier change here is the ONLY way anybody's permissions ever move.
+    /// These are the trail's most sensitive rows: each records an account changing at the auth anchor.
+    /// A row journalled with a tier names it, and is shaped as it was written.
     /// </remarks>
     public static AuditWrite FromUserAccountEvent(UserAccountEventData d, string type, string hostId)
     {

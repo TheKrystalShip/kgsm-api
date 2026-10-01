@@ -178,8 +178,8 @@ internal static class MetricsMapping
 /// <remarks>
 /// <para>
 /// The monitor measures every compute context on the card, and most hosts run things besides KGSM. A
-/// viewer has no business learning that somebody is running a particular binary on the box, so below
-/// operator the unresolved rows lose their pid and name.
+/// reader who may not see this host's services has no business learning that somebody is running a
+/// particular binary on the box, so for them the unresolved rows lose their pid and name.
 /// </para>
 /// <para>
 /// <b>They are aggregated, not dropped.</b> The withheld memory stays, as one unnamed row per device. A
@@ -190,7 +190,7 @@ internal static class MetricsMapping
 /// </remarks>
 public static class GpuRedaction
 {
-    public static IReadOnlyList<GpuProcessSample>? ForViewer(IReadOnlyList<GpuProcessSample>? processes)
+    public static IReadOnlyList<GpuProcessSample>? Redacted(IReadOnlyList<GpuProcessSample>? processes)
     {
         if (processes is null) return null;
 

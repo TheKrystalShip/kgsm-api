@@ -20,15 +20,14 @@ namespace TheKrystalShip.Api.Controllers;
 /// <see cref="KgsmAuditConsumer"/> publishes them live without persisting them) — the client prepends;
 /// this endpoint is the hydrate/backfill source (§3·j).
 /// <para>
-/// Gated at <b>viewer</b>: the audit feed is a core read surface (every "what happened" view reads
-/// here), consistent with "viewer = reads". Pagination is keyset on the opaque <c>cursor</c> string.
+/// Gated on <c>api:audit.read</c>. Pagination is keyset on the opaque <c>cursor</c> string.
 /// </para>
 /// </summary>
 [ApiController]
 [Route("api/v1/audit")]
-[Authorize(Policy = AuthPolicy.Viewer)]
+[RequiresAction(ActionIds.AuditRead)]
 public sealed class AuditController(
-    AppDbContext db, ApiOptions options, IAuthorizationService authorization)
+    AppDbContext db, ApiOptions options, NodeAccess access)
     : ControllerBase
 {
     /// <summary>
@@ -79,16 +78,14 @@ public sealed class AuditController(
             category,
             ct).ConfigureAwait(false);
 
-        // Below operator, the values the engine classifies as personal or privileged come off the rows
-        // — a player's connection address, what somebody typed at a console, who a ban named. The rows
-        // themselves stay, and the page is the same length: withholding a value is a different thing
-        // from reporting a shorter history to a reader, and only the first is honest. Resolved through
-        // the policy rather than off the claim so the one tier ladder decides
-        // (StreamController does the same for its operator-only topics).
-        bool isOperator =
-            (await authorization.AuthorizeAsync(User, policyName: AuthPolicy.Operator).ConfigureAwait(false))
-            .Succeeded;
+        // Without api:audit.personal-fields, the values the engine classifies as personal or privileged
+        // come off the rows — a player's connection address, what somebody typed at a console, who a ban
+        // named. The rows themselves stay, and the page is the same length: withholding a value is a
+        // different thing from reporting a shorter history to a reader, and only the first is honest.
+        // The audit topic redacts its live frames by the same action.
+        bool personal = await access.AllowsAsync(User, ActionIds.AuditPersonalFields, access.NodeTarget, ct)
+            .ConfigureAwait(false);
 
-        return isOperator ? page : page with { Data = AuditRedaction.ForViewer(page.Data) };
+        return personal ? page : page with { Data = AuditRedaction.Redacted(page.Data) };
     }
 }

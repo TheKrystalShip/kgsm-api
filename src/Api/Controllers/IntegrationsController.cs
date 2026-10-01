@@ -9,8 +9,8 @@ namespace TheKrystalShip.Api.Controllers;
 /// <summary>
 /// <c>/integrations/{provider}</c> — outbound notification routing (architecture.html §3·e).
 /// Provider-agnostic: a provider is resolved by id out of the registered
-/// <see cref="INotificationProvider"/> set, and one that is not registered is a 404. <b>Admin-gated</b>
-/// (settings/integrations = admin). The webhook secret is never echoed (masked hint on read, write-only
+/// <see cref="INotificationProvider"/> set, and one that is not registered is a 404. Gated on
+/// <c>api:integrations.manage</c>, a cluster-wide action. The webhook secret is never echoed (masked hint on read, write-only
 /// on PATCH).
 /// </summary>
 /// <remarks>
@@ -23,7 +23,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// </remarks>
 [ApiController]
 [Route("api/v1/integrations")]
-[Authorize(Policy = AuthPolicy.Admin)]
+[RequiresAction(ActionIds.IntegrationsManage)]
 public sealed class IntegrationsController(
     IntegrationStore store,
     IEnumerable<INotificationProvider> providers) : ControllerBase

@@ -372,7 +372,7 @@
       "key": "authDisabled",
       "env": "Api__AuthDisabled",
       "label": "Disable authentication",
-      "description": "Turns off every authentication check and treats each caller as an administrator. Intended for local development only — on a reachable host it hands full control of every server to anyone who can connect.",
+      "description": "Turns off every authentication check and treats each caller as an Owner. Intended for local development only — on a reachable host it hands full control of every server to anyone who can connect.",
       "group": "auth",
       "type": "bool",
       "default": "false",
@@ -391,23 +391,11 @@
       "key": "usersDbPath",
       "env": "Api__UsersDbPath",
       "label": "Account replica",
-      "description": "The file this node keeps its copy of the cluster's accounts in, kept current by the auth anchor. Every KGSM service on the machine reads the same file, so pointing this somewhere else resolves people against a copy nothing updates.",
+      "description": "The file this node keeps its copy of the cluster's accounts, roles and assignments in, kept current by the auth anchor. Every KGSM service on the machine reads the same file, so pointing this somewhere else resolves people against a copy nothing updates.",
       "group": "auth",
       "type": "path",
       "default": "/var/lib/kgsm/auth/users.db",
       "risk": "wiring"
-    },
-    {
-      "key": "authorityCacheSeconds",
-      "env": "Api__AuthorityCacheSeconds",
-      "label": "Authority lookup cache",
-      "description": "How long someone's authority is reused before it is looked up again. This is how long after an admin changes what a person may do that their next request can still go through at the old level.",
-      "group": "auth",
-      "type": "int",
-      "default": "5",
-      "min": 0,
-      "unit": "s",
-      "risk": "safe"
     },
     {
       "key": "sessionsCacheTtlMs",

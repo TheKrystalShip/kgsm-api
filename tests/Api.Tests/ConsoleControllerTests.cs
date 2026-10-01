@@ -37,7 +37,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     // replica (the request goes through the derived pipeline, which resolves authority there), so the
     // token is minted via the derived factory's Services (AuthTestFactory.MintAccessOn), NOT
     // factory.AccessToken — whose account would be invisible to the derived pipeline, a stranger at none.
-    private HttpClient ClientWithWatchdog(IWatchdogClient watchdog, KgsmTier tier)
+    private HttpClient ClientWithWatchdog(IWatchdogClient watchdog, Persona tier)
     {
         var derived = factory.WithWebHostBuilder(b =>
             b.ConfigureTestServices(s =>
@@ -62,7 +62,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     [Fact]
     public async Task NoneTier_403()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.None)).GetAsync("/api/v1/servers/mc/console");
+        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.None)).GetAsync("/api/v1/servers/mc/console");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -70,7 +70,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     public async Task Viewer_WatchdogAbsent_200_EmptyLines_NotA500()
     {
         // The AuthTestFactory leaves the watchdog unprovisioned → no IWatchdogClient → honest empty, never 500.
-        HttpResponseMessage resp = await Client(factory.AccessToken(KgsmTier.Viewer)).GetAsync("/api/v1/servers/mc/console");
+        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Viewer)).GetAsync("/api/v1/servers/mc/console");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal(Array.Empty<string>(), await ReadLines(resp));
     }
@@ -79,7 +79,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     public async Task Viewer_Tail_HappyPath_ReturnsLines()
     {
         var wd = new FakeTailWatchdog(["[server] starting", "[server] ready", "player joined"]);
-        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, Persona.Viewer)
             .GetAsync("/api/v1/servers/mc/console?tail=3");
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -92,7 +92,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     public async Task Viewer_NoTailParam_DefaultsTo200()
     {
         var wd = new FakeTailWatchdog([]);
-        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer).GetAsync("/api/v1/servers/mc/console");
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, Persona.Viewer).GetAsync("/api/v1/servers/mc/console");
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal(200, wd.LastLines); // default tail when ?tail= omitted
@@ -103,7 +103,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     {
         // Provisioned but unreachable: GetConsoleTailAsync throws (transport) → controller degrades to empty.
         var wd = new FakeTailWatchdog(throws: true);
-        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer).GetAsync("/api/v1/servers/mc/console?tail=50");
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, Persona.Viewer).GetAsync("/api/v1/servers/mc/console?tail=50");
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal(Array.Empty<string>(), await ReadLines(resp));
@@ -124,7 +124,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     public async Task Viewer_Scrollback_ReportsTheRangeItServed()
     {
         var wd = new FakeTailWatchdog(["a", "b"], start: 4096);
-        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, Persona.Viewer)
             .GetAsync("/api/v1/servers/mc/console?tail=2");
 
         JsonElement body = await ReadBody(resp);
@@ -137,7 +137,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     public async Task Viewer_AtTheStartOfTheRun_SaysThereIsNothingEarlier()
     {
         var wd = new FakeTailWatchdog(["first line"], start: 0);
-        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, Persona.Viewer)
             .GetAsync("/api/v1/servers/mc/console?tail=200");
 
         Assert.False((await ReadBody(resp)).GetProperty("hasEarlier").GetBoolean());
@@ -147,7 +147,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     public async Task Viewer_Before_ForwardsTheCursor_AndItsAbsenceMeansTheEnd()
     {
         var wd = new FakeTailWatchdog(["x"]);
-        HttpClient client = ClientWithWatchdog(wd, KgsmTier.Viewer);
+        HttpClient client = ClientWithWatchdog(wd, Persona.Viewer);
 
         await client.GetAsync("/api/v1/servers/mc/console?tail=50");
         Assert.Equal(-1, wd.LastEndOffset);   // no ?before= → read from the end of the log
@@ -162,7 +162,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
         // The clamp bounds ONE response. It is not a limit on how far back a caller can read — that is
         // what the cursor is for — so this asserts the clamp without implying a ceiling on the history.
         var wd = new FakeTailWatchdog([]);
-        await ClientWithWatchdog(wd, KgsmTier.Viewer).GetAsync("/api/v1/servers/mc/console?tail=999999");
+        await ClientWithWatchdog(wd, Persona.Viewer).GetAsync("/api/v1/servers/mc/console?tail=999999");
 
         Assert.Equal(5000, wd.LastLines);
     }
@@ -173,7 +173,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     public async Task Viewer_Download_StreamsTheWholeLogAsAnAttachment()
     {
         var wd = new FakeTailWatchdog(download: "boot\nplayer joined\ncrash\n");
-        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, Persona.Viewer)
             .GetAsync("/api/v1/servers/mc/console/download");
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -189,7 +189,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
         // An empty file would say the server printed nothing. A 404 says there is no console here —
         // a container, or a watchdog that cannot answer.
         var wd = new FakeTailWatchdog(download: null);
-        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, Persona.Viewer)
             .GetAsync("/api/v1/servers/mc/console/download");
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
@@ -199,7 +199,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     public async Task Viewer_Download_WatchdogDown_404_NotA500()
     {
         var wd = new FakeTailWatchdog(throws: true, download: "unreachable");
-        HttpResponseMessage resp = await ClientWithWatchdog(wd, KgsmTier.Viewer)
+        HttpResponseMessage resp = await ClientWithWatchdog(wd, Persona.Viewer)
             .GetAsync("/api/v1/servers/mc/console/download");
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);

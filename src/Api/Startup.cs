@@ -496,7 +496,7 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<ConsoleBridgeManager>();
         services.AddHostedService(sp => sp.GetRequiredService<ConsoleBridgeManager>());
 
-        // Host-log live tail — the resident piece behind the follow-only, operator-gated hosts/{id}/logs WS
+        // Host-log live tail — the resident piece behind the follow-only, api:logs.read-gated hosts/{id}/logs WS
         // topic. While that topic has subscribers it runs ONE shared `journalctl -f` across the configured leaf
         // units and fans each new line out as a log.line (the REST GET /hosts/{id}/logs hydrates history; this
         // streams the live tail). Idle when nobody is watching; degrades to silent if journalctl is unavailable.
@@ -705,26 +705,6 @@ public class Startup(IConfiguration configuration)
             EndedSessionStore.Retention,
             sp.GetRequiredService<ILogger<SessionRevokeHandler>>()));
 
-        // This node's own copy of the cluster's accounts. It is what lets authority be resolved here
-        // rather than by asking the member that holds them — so a demotion lands on the next request
-        // and an outage over there costs this node nothing it serves. The replica itself lives on
-        // UserDirectory, which already owns this host's answer to a store it cannot read.
-        // The replica the handlers apply to is this host's account store, which UserDirectory already
-        // owns along with its whole answer to a store it cannot read.
-        services.AddSingleton<IReplicatedAccounts>(sp => sp.GetRequiredService<UserDirectory>());
-
-        // Applied by the shared handlers, then carried to the affected person's open streams, so an
-        // approval or a demotion made at the anchor lands on a panel at once rather than at the
-        // connection's own re-read.
-        services.AddSingleton<AccountReplicationHandler>();
-        services.AddSingleton<AccountRemovalHandler>();
-        services.AddSingleton<IClusterMessageHandler, AccountChangesReachOpenStreams>();
-        services.AddSingleton<IClusterMessageHandler, AccountRemovalsReachOpenStreams>();
-
-        // The first full copy. The stream alone would leave a node holding only what changed after it
-        // joined, resolving everybody who existed before that as a stranger.
-        services.AddHostedService<AccountSnapshotWorker>();
-
         // What this node is responsible for, told to the auth anchor: the engine's action manifest and
         // every leaf's, from the actions directory below the leaf descriptors, where each one's deploy
         // installs it. The anchor's catalog of what can be granted is the union of every member's. Inert
@@ -736,14 +716,20 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<AuthorityReporter>();
         services.AddHostedService(sp => sp.GetRequiredService<AuthorityReporter>());
 
-        // What a person may do on this node, from this node's replica of the authority: the account
-        // store file, once it holds one. Until then GET /api/v1/me/access answers
-        // authority_unavailable, and the me topic's access push has no change to carry.
-        services.AddSingleton<IReplicatedAuthority>(sp => new AuthorityReplicaFile(
-            apiOptions.UsersDbPath, sp.GetRequiredService<ILogger<AuthorityReplicaFile>>()));
+        // This node's own copy of the cluster's authority — accounts, roles, permissions, assignments
+        // and the catalog. It is what lets access be evaluated here rather than by asking the member
+        // that holds them, so a change lands on the next request and an outage over there costs this
+        // node nothing it serves. This API owns the file: it creates it, sets aside one written at an
+        // older schema, and takes the anchor's snapshot into it; the leaves on this machine read it.
+        // The shared handlers apply what the anchor publishes, and every change taken is carried to
+        // open streams and the me topic.
+        services.AddSingleton<IReplicatedAuthority>(sp => new OwnedReplicaFile(
+            apiOptions.UsersDbPath, sp.GetRequiredService<ILogger<OwnedReplicaFile>>()));
+        services.AddAuthorityReplica();
         services.AddSingleton<MemberAccess>();
         services.AddSingleton<NodeAccess>();
         services.AddSingleton<IAuthorityChangeListener, MeAccessPush>();
+        services.AddSingleton<IAuthorityChangeListener, StreamAccessRefresh>();
 
         // The roster-backed fan-out target list. A durable, identity-carrying message goes only to members
         // this node has authenticated first-hand — never to one it has merely heard about — or the outbox
@@ -790,18 +776,14 @@ public class Startup(IConfiguration configuration)
             sp.GetRequiredService<IMemoryCache>(),
             TimeSpan.FromMilliseconds(sp.GetRequiredService<ApiOptions>().SessionsCacheTtlMs)));
 
-        // This node's replica of the cluster's accounts. A singleton because it wraps one SQLite file
-        // that every request reads — the store opens connections per operation and pools them, so
-        // nothing is held. Opening it can fail (a permission problem, or a file written by a newer
-        // sibling on this host); UserDirectory captures that as a capability rather than letting it
-        // decide whether the Control Panel starts.
-        services.AddSingleton<UserDirectory>();
-
-        // Authority on every request, from the replica, replacing the tier the token was minted with.
+        // The account behind every request, from the replica; every gate evaluates one action for it at
+        // the target its route names. A policy named action:<id> is built on demand, so an action needs
+        // no registration beside the attribute that names it.
         services.AddSingleton<LiveAuthority>();
-        services.AddSingleton<IAuthorizationHandler, TierAuthorizationHandler>();
+        services.AddSingleton<IAuthorizationPolicyProvider, ActionPolicyProvider>();
+        services.AddSingleton<IAuthorizationHandler, ActionAuthorizationHandler>();
 
-        // Auth is ON by default; Api__AuthDisabled=true swaps the default scheme for a synthetic-admin
+        // Auth is ON by default; Api__AuthDisabled=true swaps the default scheme for a synthetic-Owner
         // handler so every policy passes (the explicit, loudly-logged dev/open window). When enabled, the
         // JwtBearer scheme accepts the auth anchor's sessions and nothing else. SSE streams carry the
         // bearer as an Authorization header; a refresh token is never accepted as an access bearer.
@@ -839,10 +821,7 @@ public class Startup(IConfiguration configuration)
 
         // The decision itself is the shared package's, so every member reaches the same answer about who
         // somebody is; the handler here is the ASP.NET half — reading the request and shaping the ticket.
-        services.AddSingleton<MemberActingResolver>(sp => new MemberActingResolver(
-            sp.GetRequiredService<IClusterTokenService>(),
-            sp.GetRequiredService<IClusterMemberGate>(),
-            sp.GetRequiredService<UserDirectory>()));
+        services.AddSingleton<MemberActingAccountResolver>();
 
         // Registered whether or not this host is clustered. Without a cluster secret the token check
         // refuses every caller, which is the correct answer for a member-to-member call on a machine
@@ -853,7 +832,7 @@ public class Startup(IConfiguration configuration)
         {
             authBuilder.AddJwtBearer(options =>
             {
-                options.MapInboundClaims = false; // keep claim types verbatim ("sub", "tier", …)
+                options.MapInboundClaims = false; // keep claim types verbatim ("sub", "sid", …)
                 options.Events = new JwtBearerEvents
                 {
                     OnTokenValidated = async ctx =>
@@ -892,13 +871,11 @@ public class Startup(IConfiguration configuration)
                             return;
                         }
 
-                        // Authority, resolved now rather than read off the token. The `tier` claim
-                        // the token was minted with is replaced with what the account store says
-                        // today, so a demotion lands within the authority cache TTL instead of
-                        // whenever the token happens to rotate, and this API and the assistant beside
-                        // it — which re-derives per request — cannot disagree about the same person.
-                        // A disabled account fails here, which is what makes the switch cut live
-                        // sessions on every surface with no cross-service call.
+                        // The account behind the session, resolved now from the replica; nothing about
+                        // access is read off the token, so a change lands on the next request and this
+                        // API and the assistant beside it cannot disagree about the same person. A
+                        // disabled account fails here, which is what makes the switch cut live sessions
+                        // on every surface with no cross-service call.
                         if (await svc.GetRequiredService<LiveAuthority>()
                             .ApplyAsync(claims, ctx.HttpContext.RequestAborted).ConfigureAwait(false) is { } refusal)
                         {
@@ -935,18 +912,15 @@ public class Startup(IConfiguration configuration)
                 DisabledAuthHandler.SchemeName, _ => { });
         }
 
-        // Hierarchical tier policies (admin ⊇ operator ⊇ viewer). An unauthenticated caller fails the
-        // requirement → 401 challenge; an authenticated-but-too-low tier → 403 (the authorization
-        // middleware picks challenge vs forbid). 401/403 already render the frozen {error} envelope below.
+        // An unauthenticated caller fails an action policy's first requirement → 401 challenge; an
+        // authenticated caller refused the action → 403 (the authorization middleware picks challenge vs
+        // forbid). 401/403 already render the frozen {error} envelope below.
         services.AddAuthorization(o =>
         {
-            o.AddPolicy(AuthPolicy.Viewer, p => p.Requirements.Add(new TierRequirement(KgsmTier.Viewer)));
-            o.AddPolicy(AuthPolicy.Operator, p => p.Requirements.Add(new TierRequirement(KgsmTier.Operator)));
-            o.AddPolicy(AuthPolicy.Admin, p => p.Requirements.Add(new TierRequirement(KgsmTier.Admin)));
             // Secure-by-default: any endpoint without an explicit [Authorize]/[AllowAnonymous] still
             // requires an authenticated caller — so a future controller can't ship silently open. The
-            // open probes (/health, /api/v1) opt out with [AllowAnonymous]; diagnostics are admin-gated.
-            // (Under the disabled escape hatch the synthetic-admin scheme satisfies this too.)
+            // open probes (/health, /api/v1) opt out with [AllowAnonymous].
+            // (Under the disabled escape hatch the synthetic-Owner scheme satisfies this too.)
             o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
         });
 
@@ -1086,8 +1060,8 @@ public class Startup(IConfiguration configuration)
 
         app.UseRouting();
         app.UseCors(CorsPolicy);
-        // Authentication populates User from the bearer (or the synthetic-admin scheme when disabled);
-        // authorization enforces the [Authorize] tier policies. A 401/403 here flows through UseStatusCodePages above into the {error} envelope.
+        // Authentication populates User from the bearer (or the synthetic-Owner scheme when disabled);
+        // authorization enforces the action gates. A 401/403 here flows through UseStatusCodePages above into the {error} envelope.
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseEndpoints(endpoints =>

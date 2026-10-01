@@ -8,8 +8,9 @@ using TheKrystalShip.KGSM.Auth;
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
-/// The <c>Api__AuthDisabled=true</c> escape hatch. Authenticates EVERY request as a synthetic
-/// <c>admin</c>, so every tier policy passes and the smoke/dev flow runs with no login. Registered as
+/// The <c>Api__AuthDisabled=true</c> escape hatch. Authenticates EVERY request as a synthetic Owner —
+/// <see cref="NodeAccess"/> allows every action to an authenticated caller on such a host, and
+/// <c>/me/access</c> reports the Owner — so the smoke/dev flow runs with no login. Registered as
 /// the default scheme only when auth is off; the loud warning is logged once at startup (see
 /// <c>Startup.Configure</c>). Never wire this on an exposed host.
 /// </summary>
@@ -41,7 +42,6 @@ public sealed class DisabledAuthHandler(
         Claim[] claims =
         [
             new("sub", api.DisabledAuthActor),
-            new(KgsmAuthClaims.Tier, KgsmTiers.Admin),
             new(KgsmAuthClaims.Host, api.HostId),
             new(KgsmAuthClaims.TokenKind, KgsmTokenKind.Access),
             new(KgsmAuthClaims.Username, name),

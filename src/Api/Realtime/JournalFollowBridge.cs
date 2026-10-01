@@ -5,7 +5,7 @@ using TheKrystalShip.Api.Services.Logs;
 namespace TheKrystalShip.Api.Realtime;
 
 /// <summary>
-/// The live host-log follow bridge — the resident piece behind the follow-only, operator-gated
+/// The live host-log follow bridge — the resident piece behind the follow-only, <c>api:logs.read</c>-gated
 /// <c>hosts/{id}/logs</c> WS topic (the live-tail companion to the REST <c>GET /hosts/{id}/logs</c>).
 /// An always-running reconcile loop (the <see cref="ConsoleBridgeManager"/> shape): while the host-logs
 /// topic has subscribers it runs <strong>exactly one</strong> shared <c>journalctl -f --output=json -n 0

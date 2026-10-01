@@ -162,7 +162,7 @@ public sealed class CommandOutcomeAuditTests
             Outcome(error: "/opt/kgsm did not answer", exitCode: 1), ApiJournal.CommandFailedEvent, HostId);
         AuditRecord row = AuditMapping.ToRecordDirect(write, "evt_test");
 
-        Assert.Equal(row, AuditRedaction.ForViewer(row));
+        Assert.Equal(row, AuditRedaction.Redacted(row));
     }
 
     // ---- the categorisation the runner makes ----------------------------------------------------

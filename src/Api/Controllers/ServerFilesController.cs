@@ -12,12 +12,13 @@ using TheKrystalShip.KGSM.Core.Models;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// The file browser &amp; editor (Tier 3 #12) — <c>GET /servers/{id}/files</c> (list one directory, lazy),
+/// The file browser &amp; editor — <c>GET /servers/{id}/files</c> (list one directory, lazy),
 /// <c>GET /servers/{id}/files/content</c> (read a text file) and <c>PUT /servers/{id}/files/content</c>
 /// (save an existing text file). Everything is scoped to the instance's working directory; paths ride a
 /// <c>?path=</c> query (relative, server-canonicalized — never a route segment, an encoding/injection
-/// minefield). <strong>BOTH read and write are operator-gated, not viewer</strong> (file contents routinely
-/// hold secrets — rcon passwords, tokens, webhook URLs — so even listing/reading is operator+).
+/// minefield). Reads take <c>kgsm:server.files.read</c> and the save <c>kgsm:server.files.write</c>, at the
+/// server — reading is its own action, apart from reading the server, because file contents routinely hold
+/// secrets (rcon passwords, tokens, webhook URLs).
 /// <para>
 /// The controller does its own engine-provisioned/unknown-id pre-check (<c>IInstanceService.GetInstanceInfo</c>
 /// via the chokepoint); the actual jailed list/read/write is kgsm-lib's <c>IInstanceFiles</c> — the single
@@ -30,7 +31,6 @@ namespace TheKrystalShip.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/servers/{id}/files")]
-[Authorize(Policy = AuthPolicy.Operator)] // read AND write are operator+ (contents hold secrets)
 public sealed class ServerFilesController(
     ServerAggregator aggregator,
     ApiJournal journal,
@@ -47,6 +47,7 @@ public sealed class ServerFilesController(
     /// </list>
     /// </summary>
     [HttpGet]
+    [RequiresAction(ActionIds.ServerFilesRead)]
     public async Task<IActionResult> List(string id, [FromQuery] string? path, CancellationToken ct)
     {
         Jail jail = await TryResolveJail(id, ct).ConfigureAwait(false);
@@ -74,6 +75,7 @@ public sealed class ServerFilesController(
     /// </list>
     /// </summary>
     [HttpGet("content")]
+    [RequiresAction(ActionIds.ServerFilesRead)]
     public async Task<IActionResult> Read(string id, [FromQuery] string? path, CancellationToken ct)
     {
         Jail jail = await TryResolveJail(id, ct).ConfigureAwait(false);
@@ -108,6 +110,7 @@ public sealed class ServerFilesController(
     /// composed from listing.
     /// </remarks>
     [HttpGet("find")]
+    [RequiresAction(ActionIds.ServerFilesRead)]
     public async Task<IActionResult> Find(
         string id, [FromQuery] string? path, [FromQuery] string? pattern, CancellationToken ct)
     {
@@ -147,6 +150,7 @@ public sealed class ServerFilesController(
     /// not the file would otherwise read every file in the tree to look for it.
     /// </remarks>
     [HttpGet("search")]
+    [RequiresAction(ActionIds.ServerFilesRead)]
     public async Task<IActionResult> Search(
         string id, [FromQuery] string? path, [FromQuery] string? pattern,
         [FromQuery] bool ignoreCase = true, CancellationToken ct = default)
@@ -187,6 +191,7 @@ public sealed class ServerFilesController(
     /// </list>
     /// </summary>
     [HttpPut("content")]
+    [RequiresAction(ActionIds.ServerFilesWrite)]
     public async Task<IActionResult> Save(string id, [FromQuery] string? path, [FromBody] SaveFileRequest? body, CancellationToken ct)
     {
         if (body?.Content is not string content)

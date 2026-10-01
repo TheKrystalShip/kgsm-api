@@ -21,12 +21,11 @@ namespace TheKrystalShip.Api.Controllers;
 /// client's, and this endpoint just returns what was stored.
 /// </para>
 /// <para>
-/// Reads are viewer-gated like the rest of the domain; cancel is a mutation and takes operator.
+/// Reads take <c>api:batches.read</c>; cancel takes <c>api:batches.cancel</c>.
 /// </para>
 /// </remarks>
 [ApiController]
 [Route("api/v1/batches")]
-[Authorize(Policy = AuthPolicy.Viewer)]
 public sealed class BatchesController(
     BatchStore batches,
     BatchWorker worker,
@@ -44,6 +43,7 @@ public sealed class BatchesController(
     /// <c>?runId=</c> narrows to one cluster-wide run's share of this node.
     /// </summary>
     [HttpGet]
+    [RequiresAction(ActionIds.BatchesRead)]
     public async Task<ActionResult<BatchList>> GetAll(
         [FromQuery] bool? active, [FromQuery] string? runId, [FromQuery] int? limit, CancellationToken ct)
     {
@@ -54,6 +54,7 @@ public sealed class BatchesController(
 
     /// <summary>One batch and every member's standing.</summary>
     [HttpGet("{id}")]
+    [RequiresAction(ActionIds.BatchesRead)]
     public async Task<ActionResult<BatchView>> Get(string id, CancellationToken ct)
     {
         BatchView? batch = await batches.GetAsync(id, ct);
@@ -78,7 +79,7 @@ public sealed class BatchesController(
     /// </para>
     /// </remarks>
     [HttpDelete("{id}")]
-    [Authorize(Policy = AuthPolicy.Operator)]
+    [RequiresAction(ActionIds.BatchesCancel)]
     public async Task<ActionResult<BatchCancelled>> Cancel(
         string id, [FromQuery] string? origin, CancellationToken ct)
     {
@@ -118,7 +119,7 @@ public sealed class BatchesController(
                 Error = "cancelled before it ran",
             });
             hub.Publish(StreamProtocol.JobsTopic, StreamProtocol.JobEntityKey(settled.Id),
-                new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, settled));
+                new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, settled), settled.ServerId);
         }
 
         await worker.PublishBatchAsync(id, ct);

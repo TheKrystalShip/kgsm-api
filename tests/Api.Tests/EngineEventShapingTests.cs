@@ -318,7 +318,7 @@ public sealed class EngineEventShapingTests
         Assert.Equal(AuditSeverity.Warn, shaped.Severity);
         Assert.Equal("mc", shaped.ServerId);
         Assert.Contains("server_command", shaped.Summary);
-        Assert.Contains("tier does not carry it", shaped.Summary);
+        Assert.Contains("access does not carry it", shaped.Summary);
     }
 
     /// <summary>

@@ -29,7 +29,7 @@ public sealed class AnchorNotALeafTests
     {
         using var factory = new LeafTestFactory();
         factory.InstallAnchorDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant-service.service"));
-        HttpClient admin = Client(factory, KgsmTier.Admin);
+        HttpClient admin = Client(factory, Persona.Owner);
 
         IReadOnlyList<string> ids = await ServiceIds(admin);
 
@@ -44,7 +44,7 @@ public sealed class AnchorNotALeafTests
     {
         using var factory = new LeafTestFactory();
         factory.InstallAnchorDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant-service.service"));
-        HttpClient admin = Client(factory, KgsmTier.Admin);
+        HttpClient admin = Client(factory, Persona.Owner);
 
         HttpResponseMessage resp = await admin.GetAsync($"/api/v1/hosts/{Host}/services/assistant/config");
 
@@ -55,7 +55,7 @@ public sealed class AnchorNotALeafTests
     public async Task WithNoAnchorsDescribed_TheBoardIsTheWholeCatalog()
     {
         using var factory = new LeafTestFactory();
-        HttpClient admin = Client(factory, KgsmTier.Admin);
+        HttpClient admin = Client(factory, Persona.Owner);
 
         IReadOnlyList<string> ids = await ServiceIds(admin);
 
@@ -72,7 +72,7 @@ public sealed class AnchorNotALeafTests
         using var factory = new LeafTestFactory();
         factory.InstallDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant-service.service"));
         factory.InstallAnchorDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant-service.service"));
-        HttpClient admin = Client(factory, KgsmTier.Admin);
+        HttpClient admin = Client(factory, Persona.Owner);
 
         Assert.DoesNotContain("assistant", await ServiceIds(admin));
     }
@@ -84,7 +84,7 @@ public sealed class AnchorNotALeafTests
         return [.. d.GetProperty("data").EnumerateArray().Select(s => s.GetProperty("id").GetString() ?? "")];
     }
 
-    private static HttpClient Client(LeafTestFactory factory, KgsmTier tier)
+    private static HttpClient Client(LeafTestFactory factory, Persona tier)
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =

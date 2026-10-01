@@ -25,13 +25,12 @@ namespace TheKrystalShip.Api.Controllers;
 /// change between two page loads.
 /// </para>
 /// <para>
-/// Reads sit at viewer, alongside <c>GET /hosts</c> which already carries the same list. Writes are
-/// admin: registering a disk shapes the host, like the other host-shaping writes.
+/// Reads take <c>api:hosts.read</c>, alongside <c>GET /hosts</c> which already carries the same list.
+/// Writes take <c>kgsm:libraries.manage</c>: registering a disk shapes the host.
 /// </para>
 /// </remarks>
 [ApiController]
 [Route("api/v1/hosts/{id}/libraries")]
-[Authorize(Policy = AuthPolicy.Viewer)]
 public sealed class HostLibrariesController(
     HostAggregator aggregator, ApiJournal journal, ApiOptions options,
     ILogger<HostLibrariesController> logger) : ControllerBase
@@ -46,6 +45,7 @@ public sealed class HostLibrariesController(
     /// registered is a different fact, and one this endpoint says by answering <c>[]</c>.
     /// </remarks>
     [HttpGet]
+    [RequiresAction(ActionIds.HostsRead)]
     public async Task<IActionResult> List(string id, CancellationToken ct)
     {
         if (!IsThisHost(id)) return NotFound();
@@ -67,7 +67,7 @@ public sealed class HostLibrariesController(
     /// throw that away.
     /// </remarks>
     [HttpPost]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.LibrariesManage)]
     public async Task<IActionResult> Add(string id, [FromBody] AddLibraryRequest? body, CancellationToken ct)
     {
         if (!IsThisHost(id)) return NotFound();
@@ -109,7 +109,7 @@ public sealed class HostLibrariesController(
     /// mutation whose successful row this API writes itself.
     /// </remarks>
     [HttpPatch("{name}")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.LibrariesManage)]
     public async Task<IActionResult> Rename(
         string id, string name, [FromBody] RenameLibraryRequest? body, CancellationToken ct)
     {
@@ -168,7 +168,7 @@ public sealed class HostLibrariesController(
     /// </para>
     /// </remarks>
     [HttpDelete("{name}")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.LibrariesManage)]
     public async Task<IActionResult> Remove(
         string id, string name, [FromQuery] string? origin, [FromQuery] string? drain, CancellationToken ct)
     {

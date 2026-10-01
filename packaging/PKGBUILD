@@ -81,6 +81,10 @@ package() {
     install -Dm644 "${repo}/deploy/kgsm-api.leaf.json" \
         "${pkgdir}/var/lib/kgsm/leaves/api.json"
 
+    # The actions this API performs, which the node reports to the auth anchor's catalog.
+    install -Dm644 "${repo}/deploy/kgsm-api.leaf.actions.json" \
+        "${pkgdir}/var/lib/kgsm/leaves/actions/api.json"
+
     # The RUNTIME polkit grant — what lets the running service restart a leaf after a config change.
     # Unlike the 48-*-deploy grants, which exist only so a human can deploy without a password and
     # have no place on a node, this one is part of the product. Rendered here with the packaged

@@ -295,23 +295,10 @@ public sealed class ServicesPumpTests
     }
 
     [Fact]
-    public void RequiresOperator_includes_services_topic()
+    public void The_services_topic_is_gated_on_services_read_on_any_host()
     {
-        Assert.True(StreamProtocol.RequiresOperator("hosts/hotrod/services"));
-        Assert.True(StreamProtocol.RequiresOperator("hosts/any-host/services"));
-    }
-
-    [Fact]
-    public void RequiresOperator_includes_logs_topic()
-    {
-        Assert.True(StreamProtocol.RequiresOperator("hosts/hotrod/logs"));
-    }
-
-    [Fact]
-    public void RequiresOperator_does_not_include_metrics_or_capabilities()
-    {
-        Assert.False(StreamProtocol.RequiresOperator("hosts/hotrod/metrics"));
-        Assert.False(StreamProtocol.RequiresOperator("hosts/hotrod/capabilities"));
+        Assert.Equal("api:services.read", StreamProtocol.Gate("hosts/hotrod/services").Action);
+        Assert.Equal("api:services.read", StreamProtocol.Gate("hosts/any-host/services").Action);
     }
 
     [Fact]

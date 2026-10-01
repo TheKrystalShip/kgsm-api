@@ -227,8 +227,8 @@ public sealed class ApiSettings
 
 
     // ── Authentication ──────────────────────────────────────────────────────
-    /// <summary>Dev escape hatch: authenticate every request as a synthetic admin.</summary>
-    /// <panel>Turns off every authentication check and treats each caller as an administrator. Intended
+    /// <summary>Dev escape hatch: authenticate every request as a synthetic Owner.</summary>
+    /// <panel>Turns off every authentication check and treats each caller as an Owner. Intended
     /// for local development only — on a reachable host it hands full control of every server to
     /// anyone who can connect.</panel>
     [ConfigField("authDisabled", "Disable authentication", Group = "auth", Risk = ConfigRisk.Destructive)]
@@ -242,20 +242,13 @@ public sealed class ApiSettings
     [ConfigField("disabledAuthActor", "Actor while auth is disabled", Group = "auth", NoDefault = true)]
     public string? DisabledAuthActor { get; set; }
 
-    /// <summary>This node's replica of the cluster's accounts. Blank falls back to /var/lib/kgsm/auth/users.db.</summary>
-    /// <panel>The file this node keeps its copy of the cluster's accounts in, kept current by the auth
-    /// anchor. Every KGSM service on the machine reads the same file, so pointing this somewhere else
-    /// resolves people against a copy nothing updates.</panel>
+    /// <summary>This node's replica of the cluster's authority. Blank falls back to /var/lib/kgsm/auth/users.db.</summary>
+    /// <panel>The file this node keeps its copy of the cluster's accounts, roles and assignments in, kept
+    /// current by the auth anchor. Every KGSM service on the machine reads the same file, so pointing this
+    /// somewhere else resolves people against a copy nothing updates.</panel>
     [ConfigField("usersDbPath", "Account replica", Group = "auth", Type = ConfigType.Path,
         Risk = ConfigRisk.Wiring)]
     public string? UsersDbPath { get; set; }
-
-    /// <summary>How long a resolved tier is reused before the store is read again. Floor 0.</summary>
-    /// <panel>How long someone's authority is reused before it is looked up again. This is how long
-    /// after an admin changes what a person may do that their next request can still go through at the
-    /// old level.</panel>
-    [ConfigField("authorityCacheSeconds", "Authority lookup cache", Group = "auth", Min = 0, Unit = "s")]
-    public int? AuthorityCacheSeconds { get; set; }
 
     /// <summary>How long "has this session been ended" is reused before it is asked again. Floor 500.</summary>
     /// <panel>How long this node reuses its answer to whether a session has been ended. It is how long a

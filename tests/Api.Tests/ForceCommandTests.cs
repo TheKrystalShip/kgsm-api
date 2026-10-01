@@ -28,7 +28,7 @@ public sealed class ForceCommandTests(AuthTestFactory factory) : IClassFixture<A
     {
         HttpClient authed = factory.CreateClient();
         authed.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Operator));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Operator));
         return authed;
     }
 

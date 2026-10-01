@@ -25,7 +25,7 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Viewer));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Viewer));
         return c;
     }
 
@@ -194,7 +194,7 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     public async Task AuditTopic_DeliversAppend()
     {
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            factory.CreateClient(), "/api/v1/stream?topics=audit", factory.AccessToken(KgsmTier.Viewer));
+            factory.CreateClient(), "/api/v1/stream?topics=audit", factory.AccessToken(Persona.Viewer));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 

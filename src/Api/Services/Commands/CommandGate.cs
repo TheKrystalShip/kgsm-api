@@ -10,7 +10,8 @@ namespace TheKrystalShip.Api.Services.Commands;
 /// admissibility rule kgsm does not actually enforce; a subtler-but-impossible transition runs and
 /// surfaces as a job <see cref="JobState.Failed"/> + the engine's real error. An
 /// <see cref="ServerStatus.Unknown"/> status never blocks — we cannot honestly call a transition a
-/// no-op when we could not read the current state. Permission gating (tiers, identity) lands at M4.
+/// no-op when we could not read the current state. Whether the caller may perform the verb at all is the
+/// caller's action at the server, decided before this gate runs.
 /// </summary>
 public static class CommandGate
 {

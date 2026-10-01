@@ -31,7 +31,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
     {
         // Authenticated but below the bar — a different answer from "who are you", and the split this
         // suite exists to keep honest.
-        HttpResponseMessage r = await Client(KgsmTier.Viewer).GetAsync($"/api/v1/hosts/{Host}/thresholds");
+        HttpResponseMessage r = await Client(Persona.Viewer).GetAsync($"/api/v1/hosts/{Host}/thresholds");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
@@ -40,7 +40,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
     {
         // Reading the thresholds is configuration; changing them decides what the whole fleet alerts on,
         // and an operator who can read them still cannot silence a machine.
-        HttpResponseMessage r = await Client(KgsmTier.Operator)
+        HttpResponseMessage r = await Client(Persona.Operator)
             .PutAsync($"/api/v1/hosts/{Host}/thresholds", Body("""{"rules":[]}"""));
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
@@ -48,7 +48,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
     [Fact]
     public async Task Delete_Operator_403()
     {
-        HttpResponseMessage r = await Client(KgsmTier.Operator).DeleteAsync($"/api/v1/hosts/{Host}/thresholds");
+        HttpResponseMessage r = await Client(Persona.Operator).DeleteAsync($"/api/v1/hosts/{Host}/thresholds");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
@@ -59,7 +59,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
     {
         // Per-host API: the only valid id is this host, and asking about another one is a 404 rather than
         // an attempt to relay somewhere.
-        HttpResponseMessage r = await Client(KgsmTier.Operator).GetAsync("/api/v1/hosts/somewhere-else/thresholds");
+        HttpResponseMessage r = await Client(Persona.Operator).GetAsync("/api/v1/hosts/somewhere-else/thresholds");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
@@ -70,7 +70,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
     {
         // The test factory leaves the monitor unprovisioned. "The policy could not be read" is not the same
         // as "this host watches nothing", so it degrades rather than answering with an empty rule set.
-        HttpResponseMessage r = await Client(KgsmTier.Operator).GetAsync($"/api/v1/hosts/{Host}/thresholds");
+        HttpResponseMessage r = await Client(Persona.Operator).GetAsync($"/api/v1/hosts/{Host}/thresholds");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
 
         JsonElement body = await Json(r);
@@ -81,7 +81,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
     [Fact]
     public async Task Put_NoMonitor_503_AndDoesNotClaimSuccess()
     {
-        HttpResponseMessage r = await Client(KgsmTier.Admin)
+        HttpResponseMessage r = await Client(Persona.Owner)
             .PutAsync($"/api/v1/hosts/{Host}/thresholds", Body("""{"rules":[]}"""));
 
         // Never a 2xx for a policy that reached nothing — an operator told their change landed when it did
@@ -96,7 +96,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
         // This API deliberately does not validate a policy — the monitor owns the rules. A body it cannot
         // read is therefore the monitor's to refuse, and with no monitor the answer is the same 503 as any
         // other unreachable write, NOT a 400 invented here.
-        HttpResponseMessage r = await Client(KgsmTier.Admin)
+        HttpResponseMessage r = await Client(Persona.Owner)
             .PutAsync($"/api/v1/hosts/{Host}/thresholds", Body("{ not json"));
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
@@ -104,7 +104,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
 
     // --- helpers -------------------------------------------------------------------------------------
 
-    private HttpClient Client(KgsmTier tier)
+    private HttpClient Client(Persona tier)
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(tier));

@@ -1,3 +1,4 @@
+using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
@@ -26,7 +27,18 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// The registry is asked on every call, so connecting or disconnecting the watchdog at runtime takes
 /// effect on the next request.
 /// </para>
+/// <para>
+/// <b>It decides nothing.</b> A call reaching the watchdog through it was made by the code above it, which
+/// checked the person it acts for or acts as this API's own reads; the actions below are the ones those
+/// callers perform through it.
+/// </para>
 /// </remarks>
+[PerformedFor(ActionIds.ServerStart)]
+[PerformedFor(ActionIds.ServerStop)]
+[PerformedFor(ActionIds.ServerRestart)]
+[PerformedFor(ActionIds.ServerUpdate)]
+[PerformedFor(ActionIds.ServerUninstall)]
+[PerformedFor(ActionIds.ServerConfigWrite)]
 public sealed class ProvisionedWatchdogClient : IWatchdogClient
 {
     /// <summary>

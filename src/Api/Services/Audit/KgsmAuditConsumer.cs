@@ -851,7 +851,7 @@ public sealed class KgsmAuditConsumer(
 
     private void PublishJob(Job job) =>
         hub.Publish(StreamProtocol.JobsTopic, StreamProtocol.JobEntityKey(job.Id),
-            new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, job));
+            new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, job), job.ServerId);
 
     private Task PublishPhase(string instanceName, string phase)
     {
@@ -860,7 +860,7 @@ public sealed class KgsmAuditConsumer(
         {
             Job patched = jobRegistry.Update(job with { Phase = phase });
             hub.Publish(StreamProtocol.JobsTopic, StreamProtocol.JobEntityKey(patched.Id),
-                new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, patched));
+                new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, patched), patched.ServerId);
         }
         return Task.CompletedTask;
     }

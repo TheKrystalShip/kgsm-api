@@ -1,19 +1,17 @@
 using System.Security.Claims;
 
-using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Cluster;
-using TheKrystalShip.KGSM.Auth.Users;
 
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
-/// The account store could not be asked what a caller may do. Carried on the authentication failure
-/// so the challenge answers <c>502</c> rather than <c>401</c>.
+/// The replica could not be asked who a caller is. Carried on the authentication failure so the
+/// challenge answers <c>502</c> rather than <c>401</c>.
 /// </summary>
 /// <remarks>
-/// The distinction is the point. A <c>401</c> tells a browser its session is no good and sends the
-/// user back to sign in, which they cannot do either — every door reads the same file. A <c>502</c>
-/// says the host cannot answer right now, which is what actually happened.
+/// The distinction is the point. A <c>401</c> tells a browser its session is no good and sends the user
+/// back to sign in, which changes nothing — this node reads the same replica afterwards. A <c>502</c> says
+/// the host cannot answer right now, which is what actually happened.
 /// </remarks>
 public sealed class AuthorityUnavailableException(string message, Exception? inner = null)
     : Exception(message, inner);
@@ -24,92 +22,64 @@ public sealed class AuthorityUnavailableException(string message, Exception? inn
 public sealed class AccountDisabledException(string message) : Exception(message);
 
 /// <summary>
-/// Resolves what the bearer of a valid session may do, on every request, from the account store.
+/// Finds the account behind a valid session, on every request, in this node's replica, and stamps its
+/// id on the principal for every gate after it.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The token carries a <c>tier</c> claim minted at login, and this replaces it. Authorizing on the
-/// claim would mean a demotion takes effect only when the token next rotates — up to its full life —
-/// and it would mean this API and the assistant beside it, which re-derives authority per request,
-/// disagree about the same person for that whole window. Resolving here collapses disable, demote and
-/// revoke into one mechanism: the record is changed, and the next request reads the record.
+/// The token names who; nothing on it says what. What the account may do is evaluated per action from
+/// the same replica (<see cref="NodeAccess"/>), so a change the anchor makes lands on the next request
+/// with no session ended, and this API and the surfaces beside it cannot disagree about a person.
 /// </para>
 /// <para>
-/// The claim stays on the token as what it now is — a display hint the SPA can render before its
-/// first call — and stops being what any gate trusts.
-/// </para>
-/// <para>
-/// The cost is a lookup per request, which is why <see cref="UserStoreAuthority"/> caches for
-/// <c>Api__AuthorityCacheSeconds</c>. That TTL is the demotion lag, and it is the only staleness left
-/// in the model.
+/// Three outcomes, kept apart: a disabled account fails authentication; an identity no account holds is
+/// a stranger — authenticated, stamped with nothing, refused every action; an unreadable replica is an
+/// outage, never a denial.
 /// </para>
 /// </remarks>
-public sealed class LiveAuthority(UserDirectory users, ILogger<LiveAuthority> logger)
+public sealed class LiveAuthority(MemberAccess access, ILogger<LiveAuthority> logger)
 {
     /// <summary>
-    /// Read the caller's identity off their validated token, resolve what it may do now, and write
-    /// that back onto the principal.
+    /// Resolve the caller behind <paramref name="identity"/> and stamp the account on it.
     /// </summary>
     /// <returns>
-    /// <see langword="null"/> when the request may proceed at the tier now stamped on
-    /// <paramref name="identity"/>; otherwise the reason it may not, to fail the authentication with.
+    /// <see langword="null"/> when the request may proceed; otherwise the reason it may not, to fail the
+    /// authentication with.
     /// </returns>
-    /// <remarks>
-    /// A disabled account is the one outcome that ends the session rather than lowering it. Leaving it
-    /// authenticated at <see cref="KgsmTier.None"/> would let someone who has been switched off keep
-    /// reading their own profile and holding a live stream open; the switch is meant to be a door
-    /// closing. An account that simply does not exist here is a stranger, and a stranger holds
-    /// <see cref="KgsmTier.None"/> — which is a real answer, so their session stands and every gate
-    /// refuses them.
-    /// </remarks>
     public async Task<Exception?> ApplyAsync(ClaimsIdentity identity, CancellationToken ct)
     {
-        if (SessionClaims.ReadIdentity(identity) is not { } caller)
-            return new AuthorityUnavailableException("The bearer carries no identity to resolve.");
+        MemberAccessCaller caller = await access.ResolveAsync(new ClaimsPrincipal(identity), ct).ConfigureAwait(false);
 
-        if (!users.Available)
+        switch (caller.Refusal)
         {
-            return new AuthorityUnavailableException(
-                users.UnavailableReason ?? "The KGSM account store is unavailable on this host.");
-        }
+            case MemberAccessRefusal.Unavailable:
+                logger.LogError("Could not resolve a caller: the authority replica is unavailable ({Reason}).", caller.Reason);
+                return new AuthorityUnavailableException(caller.Reason ?? "This node's authority replica could not be read.");
 
-        AuthorityAnswer answer;
-        try
-        {
-            answer = await users.Authority.ResolveAsync(caller, ct).ConfigureAwait(false);
-        }
-        catch (Exception e) when (e is not OperationCanceledException)
-        {
-            logger.LogError(e, "Could not resolve authority for {Handle} from the account store.", caller.Handle);
-            return new AuthorityUnavailableException("The KGSM account store could not be read.", e);
-        }
+            case MemberAccessRefusal.AccountDisabled:
+                return new AccountDisabledException("The account behind this session is disabled.");
 
-        if (answer.Outcome == AuthorityOutcome.Disabled)
-            return new AccountDisabledException($"The account behind {caller.Handle} is disabled.");
+            case MemberAccessRefusal.None:
+                return Stamp(identity, caller.AccountId!);
 
-        return Stamp(identity, answer.Tier);
+            default:
+                return null;
+        }
     }
 
-    // Replace the minted tier with the resolved one, so every reader — the policy handler, /me, the
-    // cluster vouch relay — sees one answer without knowing this ran.
-    private static Exception? Stamp(ClaimsIdentity identity, KgsmTier tier)
+    // One account claim, the resolved one. A second would be read by whichever reader took the first match.
+    private static Exception? Stamp(ClaimsIdentity identity, string accountId)
     {
-        foreach (Claim stale in identity.FindAll(KgsmAuthClaims.Tier).ToList())
+        foreach (Claim stale in identity.FindAll(AccessClaims.Account).ToList())
         {
-            // A claim can only be removed from the identity that owns it. A JWT's claims are owned by
-            // the identity built from them, so this holds on the real pipeline.
             if (stale.Subject == identity)
                 identity.RemoveClaim(stale);
         }
 
-        // Refuse rather than add a second one. Claim readers take the first match, so a surviving
-        // minted claim would silently win and this whole class would be doing nothing — the failure
-        // it exists to prevent, arrived at by a different route.
-        if (identity.FindFirst(KgsmAuthClaims.Tier) is not null)
-            return new AuthorityUnavailableException(
-                "The bearer's tier claim could not be replaced with the resolved one.");
+        if (identity.FindFirst(AccessClaims.Account) is not null)
+            return new AuthorityUnavailableException("The bearer carried an account claim that could not be replaced.");
 
-        identity.AddClaim(new Claim(KgsmAuthClaims.Tier, KgsmTiers.ToWire(tier)));
+        identity.AddClaim(new Claim(AccessClaims.Account, accountId));
         return null;
     }
 }

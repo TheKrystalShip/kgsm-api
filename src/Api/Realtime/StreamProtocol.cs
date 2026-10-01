@@ -1,6 +1,28 @@
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Api.Services.Auth;
 
 namespace TheKrystalShip.Api.Realtime;
+
+/// <summary>How reading a topic is gated.</summary>
+public enum TopicGateKind
+{
+    /// <summary>Nothing needed: the caller's own <c>me</c>.</summary>
+    Open,
+
+    /// <summary>A server collection: open to subscribe, each frame cut to the servers the reader may read.</summary>
+    PerServer,
+
+    /// <summary>One action at this node.</summary>
+    Node,
+
+    /// <summary>One action at one server.</summary>
+    Server,
+
+    /// <summary>A topic this build does not know: an Owner's alone.</summary>
+    OwnerOnly,
+}
+
+/// <summary>What reading one topic takes (<see cref="StreamProtocol.Gate"/>).</summary>
+public readonly record struct TopicGate(TopicGateKind Kind, string? Action = null, string? ServerId = null);
 
 /// <summary>
 /// The single source of truth for the realtime wire vocabulary (M2) — every topic name and
@@ -55,64 +77,108 @@ public static class StreamProtocol
     /// <summary>This host's leaf-service state changes: <c>hosts/{hostId}/services</c> (the live companion
     /// to the REST <c>GET /hosts/{id}/services</c>). The canonical source for service health and running
     /// status — the client hydrates the initial list via REST and applies <see cref="ServicePatch"/> frames
-    /// from here on. Operator-gated like the REST endpoint (systemd unit names, pids, memory).</summary>
+    /// from here on. Gated on <c>api:services.read</c> like the REST endpoint (systemd unit names, pids,
+    /// memory).</summary>
     public static string HostServicesTopic(string hostId) => $"hosts/{hostId}/services";
 
     /// <summary>This host's live aggregated leaf logs: <c>hosts/{hostId}/logs</c> (the live-tail companion to
-    /// the REST <c>GET /hosts/{id}/logs</c>). A <strong>follow-only</strong>, <strong>operator-gated</strong>
-    /// topic — the client hydrates history via REST and applies live lines from here on (patch-only, §3·j).
-    /// One shared <c>journalctl -f</c> per host (<see cref="JournalFollowBridge"/>) feeds it while it has
-    /// subscribers; raw journald can carry secrets, so <see cref="RequiresOperator"/> refuses a viewer's
-    /// subscribe at the socket (defense-in-depth on top of the operator-gated REST endpoint).</summary>
+    /// the REST <c>GET /hosts/{id}/logs</c>). A <strong>follow-only</strong> topic — the client hydrates
+    /// history via REST and applies live lines from here on (patch-only, §3·j). One shared
+    /// <c>journalctl -f</c> per host (<see cref="JournalFollowBridge"/>) feeds it while it has subscribers;
+    /// raw journald can carry secrets, so it is gated on <c>api:logs.read</c> at the socket as well as at
+    /// the REST endpoint (<see cref="Gate"/>).</summary>
     public static string HostLogsTopic(string hostId) => $"hosts/{hostId}/logs";
 
     /// <summary>Does <paramref name="topic"/> name some <c>hosts/{id}/logs</c> topic? (the bridge's idle-gate +
-    /// the operator predicate).</summary>
+    /// the topic's gate).</summary>
     public static bool IsHostLogsTopic(string topic) =>
         topic.StartsWith("hosts/", StringComparison.Ordinal) && topic.EndsWith("/logs", StringComparison.Ordinal);
 
     /// <summary>Does <paramref name="topic"/> name some <c>hosts/{id}/services</c> topic? (the services pump's
-    /// idle-gate + the operator predicate).</summary>
+    /// idle-gate + the topic's gate).</summary>
     public static bool IsHostServicesTopic(string topic) =>
         topic.StartsWith("hosts/", StringComparison.Ordinal) && topic.EndsWith("/services", StringComparison.Ordinal);
 
-    /// <summary>Topics that require <c>operator</c> to subscribe, refused for a viewer at the socket even though
-    /// the <c>/stream</c> handshake is only viewer-gated. Today: the host-logs tail (raw journald can leak
-    /// secrets) and the host-services board (systemd unit names, pids, memory) — both stricter than the
-    /// viewer-gated audit feed, matching their REST endpoint's operator gate.</summary>
-    public static bool RequiresOperator(string topic) => IsHostLogsTopic(topic) || IsHostServicesTopic(topic);
-
     /// <summary>
-    /// The tier a subscription to <paramref name="topic"/> needs. The stream's gate is per topic rather
-    /// than per endpoint: <see cref="MeTopic"/> is news about the caller's own account and needs no
-    /// grant at all, the two operator topics are stricter than the rest, and everything else is the
-    /// viewer floor the panel's reads sit on.
+    /// What reading <paramref name="topic"/> takes. The stream gates per topic, with the action its REST
+    /// companion is gated on, so a frame reaches exactly the readers who could have fetched it.
     /// </summary>
     /// <remarks>
-    /// Fail-closed on anything it does not recognise: a topic name this build has never heard of —
-    /// a future one, a typo, a probe — answers <see cref="KgsmTier.Viewer"/>, so a caller who holds
-    /// nothing can only ever reach the one topic named here as needing nothing.
+    /// <para>
+    /// <see cref="MeTopic"/> is news about the caller's own account and needs nothing. The server
+    /// collections — <see cref="ServersTopic"/>, <see cref="ServersMetricsTopic"/>, <see cref="JobsTopic"/>,
+    /// <see cref="PlayersTopic"/> — are open to subscribe and cut per frame to the servers the reader may
+    /// read (<see cref="StreamHub.Publish"/>'s <c>serverId</c>). One server's metrics or console is gated
+    /// at that server, and a host topic at this node.
+    /// </para>
+    /// <para>
+    /// Fail-closed on anything it does not recognise: a topic this build has never heard of — a future
+    /// one, a typo, a probe — is an Owner's alone, the same answer an undeclared action gets.
+    /// </para>
     /// </remarks>
-    public static KgsmTier MinimumTier(string topic) =>
-        RequiresOperator(topic) ? KgsmTier.Operator
-        : topic == MeTopic ? KgsmTier.None
-        : KgsmTier.Viewer;
+    public static TopicGate Gate(string topic)
+    {
+        if (topic == MeTopic)
+            return new TopicGate(TopicGateKind.Open);
+
+        if (topic is ServersTopic or ServersMetricsTopic or JobsTopic or PlayersTopic)
+            return new TopicGate(TopicGateKind.PerServer, ServerReadAction);
+
+        if (topic == BatchesTopic)
+            return new TopicGate(TopicGateKind.Node, ActionIds.BatchesRead);
+        if (topic == AuditTopic)
+            return new TopicGate(TopicGateKind.Node, ActionIds.AuditRead);
+        if (topic == AlertsTopic)
+            return new TopicGate(TopicGateKind.Node, ActionIds.AlertsRead);
+
+        if (topic.StartsWith("hosts/", StringComparison.Ordinal))
+        {
+            if (topic.EndsWith("/metrics", StringComparison.Ordinal))
+                return new TopicGate(TopicGateKind.Node, ActionIds.MonitorMetricsRead);
+            if (topic.EndsWith("/capabilities", StringComparison.Ordinal))
+                return new TopicGate(TopicGateKind.Node, ActionIds.HostsRead);
+            if (IsHostServicesTopic(topic))
+                return new TopicGate(TopicGateKind.Node, ActionIds.ServicesRead);
+            if (IsHostLogsTopic(topic))
+                return new TopicGate(TopicGateKind.Node, ActionIds.LogsRead);
+        }
+
+        if (ServerOf(topic, "/metrics") is { } metered)
+            return new TopicGate(TopicGateKind.Server, ServerReadAction, metered);
+        if (ServerOf(topic, "/console") is { } console)
+            return new TopicGate(TopicGateKind.Server, ActionIds.ServerConsoleRead, console);
+
+        return new TopicGate(TopicGateKind.OwnerOnly);
+    }
+
+    /// <summary>What a server collection's frames are cut by: reading the server each is about.</summary>
+    public const string ServerReadAction = ActionIds.ServerRead;
+
+    // servers/{id}/<suffix> → id; anything else (including servers/metrics) → null.
+    private static string? ServerOf(string topic, string suffix)
+    {
+        if (!topic.StartsWith("servers/", StringComparison.Ordinal) || !topic.EndsWith(suffix, StringComparison.Ordinal))
+            return null;
+
+        string id = topic["servers/".Length..^suffix.Length];
+        return id.Length > 0 && !id.Contains('/') ? id : null;
+    }
 
     // --- me (the caller's own standing on this host) ---
     /// <summary>What this host says about the <em>caller's own</em> account: <c>me</c>. The live
     /// companion to <c>GET /api/v1/me</c> — the client hydrates there and applies
-    /// <see cref="MePatch"/> frames from here on, so a tier or status an admin changes lands on an
-    /// open panel instead of waiting for a reload.
+    /// <see cref="MePatch"/> and <see cref="MeAccess"/> frames from here on, so a status or access an
+    /// administrator changes lands on an open panel instead of waiting for a reload.
     /// <para>The one topic delivered by <em>audience</em> rather than by subscription alone: a frame
     /// reaches only the connections authenticated as the account it is about, never the host at large
-    /// (<see cref="StreamHub.PublishToAccount"/>). It is also the one topic
-    /// <see cref="MinimumTier"/> puts at <see cref="KgsmTier.None"/> — somebody awaiting approval
-    /// holds no grant on this host and is exactly who needs to hear that it changed.</para></summary>
+    /// (<see cref="StreamHub.PublishToAccount"/>). It is also the one topic <see cref="Gate"/> leaves
+    /// open — somebody awaiting approval holds nothing on this host and is exactly who needs to hear
+    /// that it changed.</para></summary>
     public const string MeTopic = "me";
 
-    /// <summary>The caller's standing changed: <c>data</c> is a <see cref="Contracts.MeStanding"/> —
-    /// the mutable half of <c>GET /api/v1/me</c> (<c>tier</c> + <c>status</c>), in the same wire
-    /// vocabulary that endpoint answers in. The client merges it over what it hydrated.</summary>
+    /// <summary>The caller's account status changed: <c>data</c> is a <see cref="Contracts.MeStanding"/>,
+    /// in the vocabulary <c>GET /api/v1/me</c> answers in. The client merges it over what it
+    /// hydrated.</summary>
     public const string MePatch = "me.patch";
 
     /// <summary>The per-connection coalesce key for <see cref="MePatch"/>: one key for the whole
@@ -211,8 +277,7 @@ public static class StreamProtocol
 
     /// <summary>
     /// A full <see cref="Contracts.BatchView"/> on every member transition, merged by id (patch-only,
-    /// like every other topic here). Viewer-gated, matching the REST reads: a batch names servers and
-    /// verbs, which is what the roster already shows anyone who can see the host.
+    /// like every other topic here). Gated on <c>api:batches.read</c>, matching the REST reads.
     /// </summary>
     public const string BatchPatch = "batch.patch";
 

@@ -41,7 +41,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// <para>
 /// <b>Deliberately not a class-level <see cref="AllowAnonymousAttribute"/></b> — that wins over every
 /// action-level <c>[Authorize]</c> below, because it is resolved at the highest scope it appears, and it
-/// would silently expose the admin-gated roster actions. Each action carries its own.
+/// would silently expose the gated roster actions. Each action carries its own.
 /// </para>
 /// </remarks>
 [ApiController]
@@ -61,7 +61,7 @@ public sealed class MembersController(
 {
     /// <summary><c>GET /api/v1/members</c> — the full roster, enabled and disabled alike.</summary>
     [HttpGet]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.MembersManage)]
     public async Task<MemberListResponse> List(CancellationToken ct)
     {
         IReadOnlyList<MemberRow> rows = await members.ListAsync(ct).ConfigureAwait(false);
@@ -70,12 +70,12 @@ public sealed class MembersController(
 
     /// <summary>
     /// <c>GET /api/v1/members/roster</c> — the browser-facing projection that powers "add one, see all" for
-    /// somebody who is not an admin. Enabled members only: a disabled row is a management state a viewer
-    /// must not see, or be handed a URL for. Every membership state is reported honestly, including the
+    /// somebody who does not manage members. Enabled members only: a disabled row is a management state a
+    /// reader must not see, or be handed a URL for. Every membership state is reported honestly, including the
     /// derived joining; only the enabled filter applies.
     /// </summary>
     [HttpGet("roster")]
-    [Authorize(Policy = AuthPolicy.Viewer)]
+    [RequiresAction(ActionIds.MembersRead)]
     public async Task<ClusterMembersResponse> Roster(CancellationToken ct)
     {
         IReadOnlyList<MemberRow> rows = await members.ListEnabledAsync(ct).ConfigureAwait(false);
@@ -86,12 +86,12 @@ public sealed class MembersController(
     /// <c>GET /api/v1/members/capabilities</c> — which member holds each of the cluster's capabilities.
     /// </summary>
     /// <remarks>
-    /// Viewer-visible, because it is what makes the cluster legible: a member with no servers is not a
+    /// Read with <c>api:members.read</c>, because it is what makes the cluster legible: a member with no servers is not a
     /// broken node, it is the one holding the accounts, and a person looking at the Cluster page needs
     /// to be able to see that. It names members, never addresses or credentials.
     /// </remarks>
     [HttpGet("capabilities")]
-    [Authorize(Policy = AuthPolicy.Viewer)]
+    [RequiresAction(ActionIds.MembersRead)]
     public async Task<ClusterCapabilitiesResponse> Capabilities(CancellationToken ct)
     {
         IReadOnlyList<ClusterAssignment> assignments =
@@ -117,14 +117,14 @@ public sealed class MembersController(
     /// person's and this is where they make it.
     /// </para>
     /// <para>
-    /// The member is not required to be reachable. Reassigning is exactly what an admin does when the
+    /// The member is not required to be reachable. Reassigning is exactly what somebody does when the
     /// holder is <em>gone</em>, and refusing on liveness would block the operation at the only moment
     /// it is needed. It is required to be a member, because a capability assigned to a name nobody
     /// knows is held by nobody while reading as held.
     /// </para>
     /// </remarks>
     [HttpPut("capabilities/{capability}")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.MembersManage)]
     public async Task<IActionResult> AssignCapability(
         string capability, [FromBody] ClusterCapabilityAssignRequest? body, CancellationToken ct)
     {
@@ -153,17 +153,17 @@ public sealed class MembersController(
             assignment.SetBy, Orphaned: false));
     }
 
-    /// <summary><c>POST /api/v1/members</c> — the admin action that starts a join. The exchange itself is
+    /// <summary><c>POST /api/v1/members</c> — the action that starts a join. The exchange itself is
     /// the cluster package's; this is the button that starts one.</summary>
     [HttpPost]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.MembersManage)]
     public async Task<IActionResult> Add([FromBody] MemberAddRequest? body, CancellationToken ct)
     {
         if (body is null || string.IsNullOrWhiteSpace(body.Url))
             return Error(StatusCodes.Status400BadRequest, "invalid_url", "url is required");
 
-        // This request is the one moment this node can learn its own address honestly: an admin reached it
-        // here, through a browser, to run an admin action. A node cannot work that address out for itself,
+        // This request is the one moment this node can learn its own address honestly: a person reached it
+        // here, through a browser, to add a member. A node cannot work that address out for itself,
         // and it needs one before it can tell the member it is about to introduce itself to where to call
         // back.
         await selfIdentity
@@ -205,7 +205,7 @@ public sealed class MembersController(
     /// </para>
     /// </remarks>
     [HttpDelete("{id}")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.MembersRemove)]
     public async Task<IActionResult> Delete(string id, CancellationToken ct)
     {
         // A capability belongs to the cluster and outlives the member holding it, so removing that
@@ -237,7 +237,7 @@ public sealed class MembersController(
     /// <summary><c>PATCH /api/v1/members/{id}</c> — the disable toggle. Only the enabled flag is
     /// settable.</summary>
     [HttpPatch("{id}")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.MembersManage)]
     public async Task<IActionResult> SetEnabled(string id, [FromBody] MemberPatchRequest? body, CancellationToken ct)
     {
         if (body is null)
@@ -253,7 +253,7 @@ public sealed class MembersController(
     /// <summary><c>GET /api/v1/members/{id}/latency</c> — the roster row's last-observed liveness
     /// sample.</summary>
     [HttpGet("{id}/latency")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.MembersManage)]
     public async Task<IActionResult> Latency(string id, CancellationToken ct)
     {
         MemberRow? row = await members.GetAsync(id, ct).ConfigureAwait(false);
@@ -309,19 +309,19 @@ public sealed class MembersController(
     /// <summary><c>GET /api/v1/members/{id}/resources</c> — the server-side relay onto a member's own
     /// capacity.</summary>
     [HttpGet("{id}/resources")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.MembersManage)]
     public Task<IActionResult> MemberResources(string id, CancellationToken ct) => RelayAsync(id, "resources", ct);
 
     /// <summary><c>GET /api/v1/members/{id}/capabilities</c> — the relay onto a member's capability
     /// block.</summary>
     [HttpGet("{id}/capabilities")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.MembersManage)]
     public Task<IActionResult> MemberCapabilities(string id, CancellationToken ct)
         => RelayAsync(id, "capabilities", ct);
 
     /// <summary><c>GET /api/v1/members/{id}/library</c> — the relay onto a member's catalog.</summary>
     [HttpGet("{id}/library")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.MembersManage)]
     public Task<IActionResult> MemberLibrary(string id, CancellationToken ct) => RelayAsync(id, "library", ct);
 
     /// <summary>Relay a read to a member's own surface. A member that is down degrades to a <c>502</c>,

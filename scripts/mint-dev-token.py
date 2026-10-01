@@ -6,8 +6,9 @@ Why this exists
 ---------------
 kgsm-api signs nobody in. Every session it accepts was minted by the cluster's auth anchor
 (kgsm-auth-anchor): an ES256 JWT, audienced to the cluster, stamped with the anchor's issuer, and
-verified against the key the anchor publishes. Authority is not in the token — every request reads
-the caller's tier from the account replica — so a token only means anything if it names an account.
+verified against the key the anchor publishes. Access is not in the token — every request evaluates
+the caller's account from the node's authority replica — so a token only means anything if it names an
+account.
 
 On a trusted dev host that runs the anchor, this signs such a session with the anchor's own private
 key, so an agent identity ("claude") gets a real, attributable bearer without typing a password into
@@ -21,13 +22,13 @@ The private key is read at runtime from the anchor's state directory and never w
 
 Claim shape mirrors SessionTokenService.Mint exactly:
   iss=<anchor issuer>  aud=<cluster id>  sub=local:<usr_ id>
-  tier=<tier>  host=<cluster id>  tkn=access  sid=sid_<hex>  jti=<hex>  uname  disp  scope
+  host=<cluster id>  tkn=access  sid=sid_<hex>  jti=<hex>  uname  disp  scope
   iat/nbf/exp standard.  Header: alg=ES256, kid=<the key's RFC 7638 thumbprint>, which is the id the
   anchor publishes it under.
 
 Usage
 -----
-  ./mint-dev-token.py --account claude                 # admin tier hint, 12h
+  ./mint-dev-token.py --account claude                 # 12h
   ./mint-dev-token.py --account claude --ttl 7d
   ./mint-dev-token.py --account claude --cluster-id kgsm-cluster --issuer kgsm
 """
@@ -128,9 +129,6 @@ def main() -> None:
                     help="the KGSM account to mint for (sub becomes local:<usr_ id>)")
     ap.add_argument("--users-db", default="/var/lib/kgsm/auth/users.db",
                     help="the account store --account is read from")
-    ap.add_argument("--tier", default="admin", choices=["viewer", "operator", "admin"],
-                    help="the token's tier claim. A display hint only — every gate resolves authority "
-                         "from the account replica.")
     ap.add_argument("--ttl", default="12h", help="lifetime: 30m / 12h / 7d (default 12h)")
     ap.add_argument("--key", default="/var/lib/kgsm-auth-anchor/session-signing.pem",
                     help="the anchor's private signing key")
@@ -169,7 +167,6 @@ def main() -> None:
         "iss": issuer,
         "aud": cluster_id,
         "sub": f"local:{user_id}",
-        "tier": args.tier,
         "host": cluster_id,
         "tkn": "access",
         "sid": "sid_" + uuid.uuid4().hex,

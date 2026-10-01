@@ -1,6 +1,4 @@
 using System.Net;
-using System.Net.Http.Headers;
-using System.Text;
 using System.Text.Json;
 
 using Microsoft.AspNetCore.Hosting;
@@ -11,154 +9,89 @@ using TheKrystalShip.Api;
 
 using TheKrystalShip.Api.Realtime;
 
-using Microsoft.Extensions.DependencyInjection;
-
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Users;
-using TheKrystalShip.KGSM.Cluster.Messaging;
 
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// The <c>me</c> topic end to end, through the real pipeline: an admin changes what somebody may do at
-/// the auth anchor, replication delivers it, and that person's open stream hears it on the connection
-/// it already holds.
+/// The <c>me</c> topic and the live connection end to end, through the real pipeline: somebody's access
+/// changes at the auth anchor, replication delivers it to this node's replica, the node is told, and that
+/// person's open stream hears it on the connection it already holds.
 /// </summary>
 /// <remarks>
 /// Every case here uses an identity of its own (<see cref="FakeDiscordResolver.IdentityFor"/>), because
 /// the question is who a frame reaches — and the suite's standing identity is one account that every
-/// call site re-tiers, which would make "reached the right person" unfalsifiable.
+/// call site re-assigns, which would make "reached the right person" unfalsifiable.
 /// </remarks>
 public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>
 {
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(5);
 
-    private HttpClient Bearer(string token)
-    {
-        HttpClient c = factory.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        return c;
-    }
-
     private static bool IsMePatch(JsonElement frame) =>
         frame.GetProperty("topic").GetString() == StreamProtocol.MeTopic
         && frame.GetProperty("type").GetString() == StreamProtocol.MePatch;
 
-    /// <summary>
-    /// What an admin's change at the auth anchor arrives here as: an <c>account.changed</c> message,
-    /// handed to the handler this node registers for it exactly as the cluster bus would.
-    /// </summary>
-    private async Task Retier(string userId, KgsmTier tier, UserStatus? status = null)
-    {
-        SqliteUserStore replica = AuthTestFactory.ReplicaOf(factory.Services);
-        KgsmUser account = (await replica.FindByIdAsync(userId))!;
-        KgsmUser changed = account with
-        {
-            Tier = tier,
-            TierSource = TierSource.Granted,
-            Status = status ?? account.Status,
-            Updated = DateTimeOffset.UtcNow,
-        };
-        var change = new AccountChange(
-            ReplicatedAccount.From(changed, await replica.ListCredentialsAsync(userId)),
-            DateTimeOffset.UtcNow.UtcTicks);
-
-        var envelope = new ClusterEnvelope(
-            Guid.NewGuid().ToString("N"), "account.changed", "test-anchor", DateTimeOffset.UtcNow,
-            JsonSerializer.SerializeToElement(change, AccountReplicationJson.Default.AccountChange));
-
-        IClusterMessageHandler handler = factory.Services.GetServices<IClusterMessageHandler>()
-            .Single(h => h.Type == "account.changed");
-        await handler.HandleAsync(envelope, CancellationToken.None);
-    }
+    private StreamHub Hub => (StreamHub)factory.Services.GetService(typeof(StreamHub))!;
 
     /// <summary>
-    /// The feature: a tier changed at the anchor lands on the affected person's open panel, with no
-    /// reload and no poll. The frame carries the wire vocabulary <c>GET /me</c> answers in, so the
-    /// client merges it over what it hydrated.
+    /// The feature: an approval at the anchor lands on the affected person's open panel, with no reload
+    /// and no poll. The frame carries the vocabulary <c>GET /me</c> answers in, so the client merges it
+    /// over what it hydrated.
     /// </summary>
     [Fact]
-    public async Task ARetierReachesTheAffectedAccountsOpenStream()
+    public async Task AnApprovalReachesTheAffectedAccountsOpenStream()
     {
         KgsmIdentity watcher = FakeDiscordResolver.IdentityFor("me-stream-watcher");
-        string watcherToken = factory.AccessTokenFor(watcher, KgsmTier.Viewer);
-        string watcherId = factory.AccountOf(watcher)!.UserId;
+        string watcherToken = factory.AccessTokenFor(watcher, Persona.None, UserStatus.Pending);
 
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
             factory.CreateClient(), "/api/v1/stream?topics=me", watcherToken);
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(stream);
 
-        await Retier(watcherId, KgsmTier.Operator);
+        factory.SetAccount(watcher, Persona.Viewer, UserStatus.Active);
 
         JsonElement? frame = await frames.WaitForFrame(IsMePatch, Deadline);
         Assert.NotNull(frame);
         JsonElement data = frame!.Value.GetProperty("data");
-        Assert.Equal(KgsmTiers.Operator, data.GetProperty("tier").GetString());
         Assert.Equal(UserStatuses.Active, data.GetProperty("status").GetString());
+        Assert.False(data.TryGetProperty("tier", out _));
     }
 
     /// <summary>
-    /// Per-user delivery, not a broadcast. Somebody else's tier is not news anybody else's panel is
-    /// entitled to — and a topic named for the reader that carried other people's account changes
-    /// would be a directory of who holds what, handed to every viewer on the host.
+    /// Per-account delivery, not a broadcast. Somebody else's account is not news anybody else's panel
+    /// is entitled to — a topic named for the reader that carried other people's changes would be a
+    /// directory of who holds what, handed to every reader on the host.
     /// </summary>
     [Fact]
-    public async Task ARetierReachesNobodyElsesStream()
+    public async Task AnApprovalReachesNobodyElsesStream()
     {
         KgsmIdentity subject = FakeDiscordResolver.IdentityFor("me-stream-subject");
         KgsmIdentity bystander = FakeDiscordResolver.IdentityFor("me-stream-bystander");
-        factory.AccessTokenFor(subject, KgsmTier.Viewer);
-        string bystanderToken = factory.AccessTokenFor(bystander, KgsmTier.Viewer);
-        string subjectId = factory.AccountOf(subject)!.UserId;
+        factory.AccessTokenFor(subject, Persona.None, UserStatus.Pending);
+        string bystanderToken = factory.AccessTokenFor(bystander, Persona.Viewer);
 
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
             factory.CreateClient(), "/api/v1/stream?topics=me", bystanderToken);
         using SseFrameReader frames = await SseTestHelpers.Frames(stream);
 
-        await Retier(subjectId, KgsmTier.Operator);
+        factory.SetAccount(subject, Persona.Viewer, UserStatus.Active);
 
-        // Prove silence, the way the operator-topic drop is proven: one bounded wait with nothing
-        // matching. A frame for somebody else would have been enqueued by the time the handler returned.
+        // Prove silence: one bounded wait with nothing matching. A frame for somebody else would have
+        // been enqueued by the time the change was delivered.
         Assert.Null(await frames.WaitForFrame(IsMePatch, TimeSpan.FromSeconds(1)));
     }
 
     /// <summary>
-    /// The person with the least standing on the host is exactly the one who needs this. Somebody
-    /// awaiting approval holds nothing, connects for news about themselves alone, and hears the
-    /// approval on that connection instead of reloading until an admin gets to them.
+    /// The stream's gate is per topic. A caller holding nothing keeps only the topic that needs nothing;
+    /// the rest of what they asked for delivers nothing, silently.
     /// </summary>
     [Fact]
-    public async Task APendingCallerStreamsForItsOwnStandingAndHearsTheApproval()
-    {
-        KgsmIdentity pending = FakeDiscordResolver.IdentityFor("me-stream-pending");
-        string pendingToken = factory.AccessTokenFor(pending, KgsmTier.None, UserStatus.Pending);
-        string pendingId = factory.AccountOf(pending)!.UserId;
-
-        using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
-            factory.CreateClient(), "/api/v1/stream?topics=me,servers", pendingToken);
-        Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
-        using SseFrameReader frames = await SseTestHelpers.Frames(stream);
-
-        await Retier(pendingId, KgsmTier.Viewer, UserStatus.Active);
-
-        JsonElement? frame = await frames.WaitForFrame(IsMePatch, Deadline);
-        Assert.NotNull(frame);
-        JsonElement data = frame!.Value.GetProperty("data");
-        Assert.Equal(KgsmTiers.Viewer, data.GetProperty("tier").GetString());
-        Assert.Equal(UserStatuses.Active, data.GetProperty("status").GetString());
-    }
-
-    /// <summary>
-    /// The stream's gate is per topic. A caller holding nothing keeps only the topic that needs
-    /// nothing — the rest of what they asked for is dropped at connect, silently, exactly as an
-    /// operator-only topic is for a viewer.
-    /// </summary>
-    [Fact]
-    public async Task ACallerHoldingNothingKeepsOnlyTheTopicThatNeedsNothing()
+    public async Task ACallerHoldingNothingIsSentNothingButTheirOwnStanding()
     {
         KgsmIdentity pending = FakeDiscordResolver.IdentityFor("me-stream-gated");
-        string token = factory.AccessTokenFor(pending, KgsmTier.None, UserStatus.Pending);
+        string token = factory.AccessTokenFor(pending, Persona.None, UserStatus.Pending);
 
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
             factory.CreateClient(), "/api/v1/stream?topics=servers,audit", token);
@@ -169,44 +102,57 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
     }
 
     /// <summary>
-    /// A demotion re-gates the live connection, not only the client drawing it. The operator-only
-    /// topic leaves the subscription set on the connection the reader already holds, so the window
-    /// between the change and their next reconnect is not a window in which they still receive it.
+    /// Access taken away applies to the live connection, not only to the client drawing it: the topic
+    /// the reader no longer reaches stops counting as a subscriber on the connection they already hold.
     /// </summary>
     [Fact]
-    public async Task ADemotionStripsAnOperatorTopicFromTheLiveConnection()
+    public async Task LosingAnActionStopsItsTopicOnTheLiveConnection()
     {
         KgsmIdentity op = FakeDiscordResolver.IdentityFor("me-stream-operator");
-        string opToken = factory.AccessTokenFor(op, KgsmTier.Operator);
-        string opId = factory.AccountOf(op)!.UserId;
+        string opToken = factory.AccessTokenFor(op, Persona.Operator);
 
         string logs = StreamProtocol.HostLogsTopic(AuthTestFactory.HostId);
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
             factory.CreateClient(), $"/api/v1/stream?topics=me,{logs}", opToken);
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
-        using SseFrameReader frames = await SseTestHelpers.Frames(stream);
 
-        var hub = (StreamHub)factory.Services.GetService(typeof(StreamHub))!;
-        Assert.True(hub.HasSubscribers(logs), "the operator's subscription never reached the hub");
+        Assert.True(Hub.HasSubscribers(logs), "the operator's subscription never reached the hub");
 
-        await Retier(opId, KgsmTier.Viewer);
+        factory.SetAccount(op, Persona.Viewer);
 
-        JsonElement? frame = await frames.WaitForFrame(IsMePatch, Deadline);
-        Assert.NotNull(frame);
-        Assert.Equal(KgsmTiers.Viewer, frame!.Value.GetProperty("data").GetProperty("tier").GetString());
-        Assert.False(hub.HasSubscribers(logs), "a demoted reader kept an operator-only subscription");
+        Assert.False(Hub.HasSubscribers(logs), "a reader who lost api:logs.read kept receiving the topic");
     }
 
     /// <summary>
-    /// An account removed at the anchor holds nothing, on the connection it already has: re-gated to
-    /// nothing and told it is no longer known here, the same answer <c>GET /me</c> gives for it.
+    /// Access granted applies the same way: the topic the client asked for starts delivering on the
+    /// connection it already holds.
+    /// </summary>
+    [Fact]
+    public async Task GainingAnActionStartsItsTopicOnTheLiveConnection()
+    {
+        KgsmIdentity viewer = FakeDiscordResolver.IdentityFor("me-stream-promoted");
+        string token = factory.AccessTokenFor(viewer, Persona.Viewer);
+
+        string services = StreamProtocol.HostServicesTopic(AuthTestFactory.HostId);
+        using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
+            factory.CreateClient(), $"/api/v1/stream?topics=me,{services}", token);
+        Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
+        Assert.False(Hub.HasSubscribers(services));
+
+        factory.SetAccount(viewer, Persona.Operator);
+
+        Assert.True(Hub.HasSubscribers(services), "a reader granted api:services.read was not given the topic");
+    }
+
+    /// <summary>
+    /// An account removed at the anchor holds nothing, on the connection it already has: its topics stop,
+    /// and it is told it is no longer known here, the same answer <c>GET /me</c> gives for it.
     /// </summary>
     [Fact]
     public async Task ARemovedAccountLosesItsReachOnTheLiveConnection()
     {
         KgsmIdentity gone = FakeDiscordResolver.IdentityFor("me-stream-removed");
-        string token = factory.AccessTokenFor(gone, KgsmTier.Operator);
-        string goneId = factory.AccountOf(gone)!.UserId;
+        string token = factory.AccessTokenFor(gone, Persona.Operator);
 
         string logs = StreamProtocol.HostLogsTopic(AuthTestFactory.HostId);
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
@@ -214,33 +160,23 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(stream);
 
-        var hub = (StreamHub)factory.Services.GetService(typeof(StreamHub))!;
-        Assert.True(hub.HasSubscribers(logs), "the operator's subscription never reached the hub");
+        Assert.True(Hub.HasSubscribers(logs), "the operator's subscription never reached the hub");
 
-        var envelope = new ClusterEnvelope(
-            Guid.NewGuid().ToString("N"), "account.removed", "test-anchor", DateTimeOffset.UtcNow,
-            JsonSerializer.SerializeToElement(
-                new AccountRemoval(goneId, DateTimeOffset.UtcNow.UtcTicks),
-                AccountReplicationJson.Default.AccountRemoval));
-        await factory.Services.GetServices<IClusterMessageHandler>()
-            .Single(h => h.Type == "account.removed")
-            .HandleAsync(envelope, CancellationToken.None);
+        AuthTestFactory.RemoveAccountOn(factory.Services, gone);
 
         JsonElement? frame = await frames.WaitForFrame(IsMePatch, Deadline);
         Assert.NotNull(frame);
-        JsonElement data = frame!.Value.GetProperty("data");
-        Assert.Equal(KgsmTiers.None, data.GetProperty("tier").GetString());
-        Assert.Equal("unknown", data.GetProperty("status").GetString());
-        Assert.False(hub.HasSubscribers(logs), "a removed account kept an operator-only subscription");
+        Assert.Equal(StreamAccess.UnknownStatus, frame!.Value.GetProperty("data").GetProperty("status").GetString());
+        Assert.False(Hub.HasSubscribers(logs), "a removed account kept receiving a topic");
     }
 
     /// <summary>
-    /// The dev escape hatch is untouched. An auth-disabled host authenticates every caller as a
-    /// synthetic admin, which the per-topic gate admits everywhere — and nothing re-reads an account
-    /// for it, because the subject it names was never given one and asking would answer "stranger".
+    /// The dev escape hatch: an auth-disabled host authenticates every caller as a synthetic Owner, which
+    /// every topic admits — and nothing re-reads an account for it, because the subject it names was never
+    /// given one and asking would answer "stranger".
     /// </summary>
     [Fact]
-    public async Task AnAuthDisabledHostStreamsAsTheSyntheticAdmin()
+    public async Task AnAuthDisabledHostStreamsAsTheSyntheticOwner()
     {
         using WebApplicationFactory<Program> open = factory.WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, config) =>
@@ -257,6 +193,6 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
 
         var hub = (StreamHub)open.Services.GetService(typeof(StreamHub))!;
-        Assert.True(hub.HasSubscribers(logs), "the synthetic admin lost an operator-only topic");
+        Assert.True(hub.HasSubscribers(logs), "the synthetic Owner lost a topic");
     }
 }

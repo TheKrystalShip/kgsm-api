@@ -15,9 +15,10 @@ using TheKrystalShip.KGSM.Core.Scheduling;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// Per-server high-level settings — <c>GET /servers/{id}/settings</c> (Viewer),
-/// <c>PATCH /servers/{id}/settings</c> (Operator) and the maintenance-window preview (Operator). A typed
-/// façade over kgsm config, watchdog desired-state and the scheduler leaf's reading of the windows.
+/// Per-server high-level settings — <c>GET /servers/{id}/settings</c> and the maintenance-window preview
+/// (<c>kgsm:server.config.read</c>), <c>PATCH /servers/{id}/settings</c> (<c>kgsm:server.config.write</c>,
+/// and <c>kgsm:server.windows.write</c> as well when it changes the maintenance windows). A typed façade
+/// over kgsm config, watchdog desired-state and the scheduler leaf's reading of the windows.
 /// </summary>
 /// <remarks>
 /// Reads degrade gracefully (null) when a backing authority is absent or down; writes 503 when the
@@ -26,10 +27,10 @@ namespace TheKrystalShip.Api.Controllers;
 /// </remarks>
 [ApiController]
 [Route("api/v1/servers/{id}/settings")]
-[Authorize(Policy = AuthPolicy.Viewer)]
 public sealed class ServerSettingsController(
     ServerAggregator aggregator,
     LeafRegistry registry,
+    NodeAccess access,
     ILogger<ServerSettingsController> logger) : ControllerBase
 {
     /// <summary>The kgsm config key the whole window list is packed into.</summary>
@@ -42,6 +43,7 @@ public sealed class ServerSettingsController(
     private const int MaxPreviewCount = 20;
 
     [HttpGet]
+    [RequiresAction(ActionIds.ServerConfigRead)]
     public async Task<IActionResult> Get(string id, CancellationToken ct)
     {
         if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
@@ -62,12 +64,19 @@ public sealed class ServerSettingsController(
     }
 
     [HttpPatch]
-    [Authorize(Policy = AuthPolicy.Operator)]
+    [RequiresAction(ActionIds.ServerConfigWrite)]
     public async Task<IActionResult> Patch(string id, [FromBody] ServerSettingsPatch? body, CancellationToken ct)
     {
         if (body is null)
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "a settings body is required");
+
+        // A maintenance window restarts the server on a clock, unattended, so changing them is its own
+        // action on top of changing the server's configuration.
+        if (body.MaintenanceWindows is not null
+            && !await access.AllowsOnServerAsync(User, ActionIds.ServerWindowsWrite, id, ct).ConfigureAwait(false))
+            return Error(StatusCodes.Status403Forbidden, "forbidden",
+                $"changing maintenance windows needs {ActionIds.ServerWindowsWrite}");
 
         if (!TryResolveOrigin(body.Origin, out string origin))
             return Error(StatusCodes.Status400BadRequest, "bad_request",
@@ -272,7 +281,7 @@ public sealed class ServerSettingsController(
     /// </para>
     /// </remarks>
     [HttpPost("maintenance/preview")]
-    [Authorize(Policy = AuthPolicy.Operator)]
+    [RequiresAction(ActionIds.ServerConfigRead)]
     public async Task<IActionResult> PreviewMaintenance(
         string id, [FromBody] MaintenancePreviewRequest? body, CancellationToken ct)
     {
@@ -411,6 +420,7 @@ public sealed class ServerSettingsController(
     // event, the consumer writes the row; no direct audit here). Adds to `applied` on success; on an
     // engine refusal sets `error` to a 400 and returns false so the caller short-circuits (no partial apply
     // past the failing key).
+    [PerformedFor(ActionIds.ServerConfigWrite)]
     private bool TryApplyConfig(
         IInstanceService instances, string id, string key, string value, string? actor, string origin,
         List<string> applied, string appliedName, out IActionResult? error)

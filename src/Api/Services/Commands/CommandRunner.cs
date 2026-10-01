@@ -3,6 +3,7 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Audit;
+using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
@@ -36,7 +37,18 @@ namespace TheKrystalShip.Api.Services.Commands;
 /// <see cref="EngineRecordsItsOwnFailure"/>).</para>
 /// <para><b>Always settles:</b> the verb runs inside try/finally so a started job always reaches a terminal
 /// state — releasing the registry's in-flight slot even if the verb throws.</para>
+/// <para><b>It runs what was admitted.</b> Every job reaching it was started by a route that checked the
+/// person it acts for for the verb's action at the server, or by a batch that checked each member.</para>
 /// </remarks>
+[PerformedFor(ActionIds.ServerStart)]
+[PerformedFor(ActionIds.ServerStop)]
+[PerformedFor(ActionIds.ServerRestart)]
+[PerformedFor(ActionIds.ServerUpdate)]
+[PerformedFor(ActionIds.ServerInstall)]
+[PerformedFor(ActionIds.ServerUninstall)]
+[PerformedFor(ActionIds.ServerMove)]
+[PerformedFor(ActionIds.ServerBackupsCreate)]
+[PerformedFor(ActionIds.ServerBackupsRestore)]
 public sealed class CommandRunner(
     IServiceScopeFactory scopeFactory,
     StreamHub hub,
@@ -420,7 +432,7 @@ public sealed class CommandRunner(
 
     private void Publish(Job job) =>
         hub.Publish(StreamProtocol.JobsTopic, StreamProtocol.JobEntityKey(job.Id),
-            new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, job));
+            new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, job), job.ServerId);
 
     private async Task PublishServerPatchAsync(string serverId)
     {
@@ -428,7 +440,7 @@ public sealed class CommandRunner(
         Server? server = servers.FirstOrDefault(s => string.Equals(s.Id, serverId, StringComparison.Ordinal));
         if (server is not null)
             hub.Publish(StreamProtocol.ServersTopic, StreamProtocol.ServerEntityKey(serverId),
-                new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerPatch, server));
+                new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerPatch, server), serverId);
     }
 
     // The uninstall verify: if the instance has left the roster, push the server.removed tombstone; if it
@@ -441,10 +453,10 @@ public sealed class CommandRunner(
         if (server is not null)
         {
             hub.Publish(StreamProtocol.ServersTopic, StreamProtocol.ServerEntityKey(serverId),
-                new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerPatch, server));
+                new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerPatch, server), serverId);
             return;
         }
         hub.Publish(StreamProtocol.ServersTopic, StreamProtocol.ServerEntityKey(serverId),
-            new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerRemoved, new ServerRemoved(serverId)));
+            new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerRemoved, new ServerRemoved(serverId)), serverId);
     }
 }

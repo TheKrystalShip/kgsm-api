@@ -47,7 +47,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         // HttpClient is collected, which surfaces as a mid-stream IOException rather than a clean fail.
         using HttpClient client = _factory.CreateClient();
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            client, "/api/v1/stream?topics=audit", _factory.AccessToken(KgsmTier.Viewer));
+            client, "/api/v1/stream?topics=audit", _factory.AccessToken(Persona.Viewer));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
@@ -85,7 +85,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
     {
         using HttpClient client = _factory.CreateClient();
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            client, "/api/v1/stream?topics=audit", _factory.AccessToken(KgsmTier.Viewer));
+            client, "/api/v1/stream?topics=audit", _factory.AccessToken(Persona.Viewer));
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
         string instance = $"nopersist-{Guid.NewGuid():N}";
@@ -117,7 +117,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
         // engine history independent of any leaf being installed.
         using HttpClient reader = _factory.CreateClient();
         reader.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _factory.AccessToken(KgsmTier.Viewer));
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _factory.AccessToken(Persona.Viewer));
         HttpResponseMessage page = await reader.GetAsync($"/api/v1/audit?serverId={instance}&limit=200");
         Assert.Equal(HttpStatusCode.OK, page.StatusCode);
 
@@ -142,7 +142,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
     {
         using HttpClient client = _factory.CreateClient();
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            client, "/api/v1/stream?topics=audit", _factory.AccessToken(KgsmTier.Operator));
+            client, "/api/v1/stream?topics=audit", _factory.AccessToken(Persona.Operator));
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
         string instance = $"ready-{Guid.NewGuid():N}";
@@ -275,8 +275,8 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
             new { InstanceName = instance, PlayerName = "bob", PlayerAddr = "95.49.44.91" },
             actor: "system:watchdog", origin: AuditOrigin.System);
 
-        JsonElement operatorRow = await SingleRow(KgsmTier.Operator, instance);
-        JsonElement viewerRow = await SingleRow(KgsmTier.Viewer, instance);
+        JsonElement operatorRow = await SingleRow(Persona.Operator, instance);
+        JsonElement viewerRow = await SingleRow(Persona.Viewer, instance);
 
         Assert.Equal("95.49.44.91", operatorRow.GetProperty("meta").GetProperty("playerAddr").GetString());
         Assert.Equal("bob", operatorRow.GetProperty("meta").GetProperty("playerName").GetString());
@@ -302,8 +302,8 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
             new { InstanceName = instance, Command = "op somebody" },
             actor: "discord:haru", origin: AuditOrigin.Ui);
 
-        JsonElement operatorRow = await SingleRow(KgsmTier.Operator, instance);
-        JsonElement viewerRow = await SingleRow(KgsmTier.Viewer, instance);
+        JsonElement operatorRow = await SingleRow(Persona.Operator, instance);
+        JsonElement viewerRow = await SingleRow(Persona.Viewer, instance);
 
         Assert.Contains("op somebody", operatorRow.GetProperty("summary").GetString()!, StringComparison.Ordinal);
         Assert.DoesNotContain("op somebody", viewerRow.GetProperty("summary").GetString()!, StringComparison.Ordinal);
@@ -328,7 +328,7 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
     {
         using HttpClient client = _factory.CreateClient();
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            client, "/api/v1/stream?topics=audit", _factory.AccessToken(KgsmTier.Operator));
+            client, "/api/v1/stream?topics=audit", _factory.AccessToken(Persona.Operator));
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
         // Appended ONCE, deliberately: the count is the assertion, so the usual re-append-until-seen
@@ -356,14 +356,14 @@ public sealed class AuditJournalRelayTests : IClassFixture<AuditJournalRelayTest
 
         // And the merged read shows the same single fact under the same id — one journal position,
         // one row, whether it arrived live or on a refresh.
-        JsonElement row = await SingleRow(KgsmTier.Operator, instance);
+        JsonElement row = await SingleRow(Persona.Operator, instance);
         Assert.Equal(first.Value.GetProperty("data").GetProperty("id").GetString(),
                      row.GetProperty("id").GetString());
         Assert.Equal("command.failed", row.GetProperty("action").GetString());
     }
 
     /// <summary>The one row for <paramref name="instance"/> on the merged page, read at a given tier.</summary>
-    private async Task<JsonElement> SingleRow(KgsmTier tier, string instance)
+    private async Task<JsonElement> SingleRow(Persona tier, string instance)
     {
         using HttpClient client = _factory.CreateClient();
         client.DefaultRequestHeaders.Authorization =

@@ -401,12 +401,12 @@ public static class EngineEventShaping
     /// <summary>The refusal reason, in words a person reads.</summary>
     /// <remarks>
     /// The two are very different facts and the row must not blur them: one host has actions switched
-    /// off for everybody, the other has a person reaching past their tier. An unrecognised value is
+    /// off for everybody, the other has a person reaching past their access. An unrecognised value is
     /// restated rather than guessed at.
     /// </remarks>
     private static string Declined(string reason) => reason switch
     {
-        AssistantDeclineReasons.Authority => "their tier does not carry it",
+        AssistantDeclineReasons.Authority => "their access does not carry it",
         AssistantDeclineReasons.ActionsDisabled => "this host has actions turned off",
         _ => reason,
     };

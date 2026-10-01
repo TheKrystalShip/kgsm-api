@@ -592,8 +592,8 @@ public sealed class ApiOptions
 
     /// <summary>
     /// Dev escape hatch (<c>Api__AuthDisabled=true</c>). When set, every request is authenticated
-    /// as a synthetic <c>admin</c> and all tier policies pass — the pre-M4 unauthenticated trust
-    /// window, now explicit and loudly logged. Off by default: <strong>auth is on by default</strong>.
+    /// as a synthetic Owner and every action is allowed — an explicit, loudly logged trust window. Off by
+    /// default: <strong>auth is on by default</strong>.
     /// </summary>
     public bool AuthDisabled { get; init; }
 
@@ -607,8 +607,8 @@ public sealed class ApiOptions
 
     /// <summary>
     /// This node's replica of the cluster's accounts (<c>Api__UsersDbPath</c>, default
-    /// <c>/var/lib/kgsm/auth/users.db</c>) — the accounts and their tiers, kept current by replication
-    /// from the auth anchor.
+    /// <c>/var/lib/kgsm/auth/users.db</c>) — the accounts, roles, permissions, assignments and catalog,
+    /// kept current by replication from the auth anchor. This API owns the file; the machine's leaves read it.
     /// </summary>
     /// <remarks>
     /// Deliberately outside <see cref="DbPath"/>. This API's own database is its operational state and
@@ -617,18 +617,6 @@ public sealed class ApiOptions
     /// ecosystem, so a default here is the shared location rather than a guess.
     /// </remarks>
     public string UsersDbPath { get; init; } = UserStoreOptions.DefaultPath;
-
-    /// <summary>
-    /// How long a resolved tier is reused before the account store is read again
-    /// (<c>Api__AuthorityCacheSeconds</c>, default 5, floor 0 = never cache).
-    /// </summary>
-    /// <remarks>
-    /// Authority is resolved on every request rather than read off the token, so this is the
-    /// staleness bound on a demotion: how long after an admin lowers someone's tier that their next
-    /// request can still pass at the old one. The read behind it is a local point query, so there is
-    /// little to buy by making it long.
-    /// </remarks>
-    public int AuthorityCacheSeconds { get; init; } = 5;
 
     /// <summary>Auth is on unless the dev escape hatch is set.</summary>
     public bool AuthEnabled => !AuthDisabled;
@@ -832,7 +820,6 @@ public sealed class ApiOptions
             // own database: the replica belongs to the machine, and a private copy would be one no
             // replication updates and the services beside us cannot see.
             UsersDbPath = BlankFallback(s.UsersDbPath, UserStoreOptions.DefaultPath),
-            AuthorityCacheSeconds = Math.Max(0, s.AuthorityCacheSeconds ?? 5),
             SessionsCacheTtlMs = Math.Max(500, s.SessionsCacheTtlMs ?? 5000),
             // Defaulted, not BlankFallback: an empty value is the deliberate "never join locally".
             LocalAnchorUrl = Defaulted(s.LocalAnchorUrl, "http://127.0.0.1:8098").Trim(),

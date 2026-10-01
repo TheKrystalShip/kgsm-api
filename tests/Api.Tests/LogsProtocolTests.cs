@@ -25,28 +25,28 @@ public sealed class LogsProtocolTests
     public void IsHostLogsTopic_MatchesOnlyHostLogs(string topic, bool expected) =>
         Assert.Equal(expected, StreamProtocol.IsHostLogsTopic(topic));
 
-    [Theory]
-    [InlineData("hosts/hotrod/logs", true)]   // the one operator-gated topic today
-    [InlineData("hosts/hotrod/metrics", false)]
-    [InlineData("audit", false)]              // the audit topic stays viewer-gated
-    [InlineData("servers/factorio/console", false)]
-    public void RequiresOperator_GatesOnlyHostLogs(string topic, bool expected) =>
-        Assert.Equal(expected, StreamProtocol.RequiresOperator(topic));
-
     /// <summary>
-    /// The per-topic gate, and its fail-closed default: a topic name this build has never heard of
-    /// answers the viewer floor, so a caller holding nothing reaches only the one topic named as
-    /// needing nothing.
+    /// The per-topic gate, and its fail-closed default: a topic name this build has never heard of is an
+    /// Owner's alone, so a caller holding nothing reaches only the one topic named as needing nothing.
     /// </summary>
     [Theory]
-    [InlineData("hosts/hotrod/logs", KgsmTier.Operator)]
-    [InlineData("hosts/hotrod/services", KgsmTier.Operator)]
-    [InlineData("me", KgsmTier.None)]
-    [InlineData("servers", KgsmTier.Viewer)]
-    [InlineData("audit", KgsmTier.Viewer)]
-    [InlineData("something-this-build-has-never-heard-of", KgsmTier.Viewer)]
-    public void MinimumTier_GatesEachTopic(string topic, KgsmTier expected) =>
-        Assert.Equal(expected, StreamProtocol.MinimumTier(topic));
+    [InlineData("hosts/hotrod/logs", TopicGateKind.Node, "api:logs.read", null)]
+    [InlineData("hosts/hotrod/services", TopicGateKind.Node, "api:services.read", null)]
+    [InlineData("hosts/hotrod/metrics", TopicGateKind.Node, "monitor:metrics.read", null)]
+    [InlineData("hosts/hotrod/capabilities", TopicGateKind.Node, "api:hosts.read", null)]
+    [InlineData("audit", TopicGateKind.Node, "api:audit.read", null)]
+    [InlineData("alerts", TopicGateKind.Node, "api:alerts.read", null)]
+    [InlineData("batches", TopicGateKind.Node, "api:batches.read", null)]
+    [InlineData("me", TopicGateKind.Open, null, null)]
+    [InlineData("servers", TopicGateKind.PerServer, "kgsm:server.read", null)]
+    [InlineData("servers/metrics", TopicGateKind.PerServer, "kgsm:server.read", null)]
+    [InlineData("jobs", TopicGateKind.PerServer, "kgsm:server.read", null)]
+    [InlineData("players", TopicGateKind.PerServer, "kgsm:server.read", null)]
+    [InlineData("servers/factorio/metrics", TopicGateKind.Server, "kgsm:server.read", "factorio")]
+    [InlineData("servers/factorio/console", TopicGateKind.Server, "kgsm:server.console.read", "factorio")]
+    [InlineData("something-this-build-has-never-heard-of", TopicGateKind.OwnerOnly, null, null)]
+    public void Gate_NamesEachTopicsAction(string topic, TopicGateKind kind, string? action, string? serverId) =>
+        Assert.Equal(new TopicGate(kind, action, serverId), StreamProtocol.Gate(topic));
 
     [Fact]
     public void HostLogEntityKey_IsUniquePerCursor()

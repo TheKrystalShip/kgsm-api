@@ -227,7 +227,7 @@ public sealed class PlayerHistoryService(
                 {
                     hub.Publish(StreamProtocol.PlayersTopic, StreamProtocol.PlayerEntityKey(serverId, playerIdentity),
                         new StreamMessage(StreamProtocol.PlayersTopic, StreamProtocol.PlayersJoin,
-                            new PlayerTransition(serverId, player)));
+                            new PlayerTransition(serverId, player)), serverId);
                 }
             }
         }
@@ -414,7 +414,7 @@ public sealed class PlayerHistoryService(
         // Publish WS frame.
         hub.Publish(StreamProtocol.PlayersTopic, StreamProtocol.PlayerEntityKey(serverId, playerIdentity),
             new StreamMessage(StreamProtocol.PlayersTopic, StreamProtocol.PlayersJoin,
-                new PlayerTransition(serverId, player)));
+                new PlayerTransition(serverId, player)), serverId);
     }
 
     /// <summary>Set a player to <c>offline</c> on <c>player.leave</c>. Updates <c>LastSeen</c>
@@ -445,7 +445,7 @@ public sealed class PlayerHistoryService(
         // Publish WS frame.
         hub.Publish(StreamProtocol.PlayersTopic, StreamProtocol.PlayerEntityKey(serverId, playerIdentity),
             new StreamMessage(StreamProtocol.PlayersTopic, StreamProtocol.PlayersLeave,
-                new PlayerTransition(serverId, player)));
+                new PlayerTransition(serverId, player)), serverId);
     }
 
     /// <summary>Set all players for a server to <c>offline</c> on instance stop/start/restart.
@@ -468,7 +468,7 @@ public sealed class PlayerHistoryService(
         // Publish WS frame.
         hub.Publish(StreamProtocol.PlayersTopic, StreamProtocol.PlayerResetEntityKey(serverId),
             new StreamMessage(StreamProtocol.PlayersTopic, StreamProtocol.PlayersReset,
-                new PlayerReset(serverId)));
+                new PlayerReset(serverId)), serverId);
     }
 
     /// <summary>Ban a player. Sets status to <c>banned</c>, stores the reason, and publishes
@@ -495,7 +495,7 @@ public sealed class PlayerHistoryService(
 
             hub.Publish(StreamProtocol.PlayersTopic, StreamProtocol.PlayerEntityKey(serverId, playerIdentity),
                 new StreamMessage(StreamProtocol.PlayersTopic, StreamProtocol.PlayersBan,
-                    new PlayerTransition(serverId, banned)));
+                    new PlayerTransition(serverId, banned)), serverId);
         }
     }
 
@@ -607,7 +607,7 @@ public sealed class PlayerHistoryService(
 
             hub.Publish(StreamProtocol.PlayersTopic, StreamProtocol.PlayerEntityKey(serverId, playerIdentity),
                 new StreamMessage(StreamProtocol.PlayersTopic, StreamProtocol.PlayersBan,
-                    new PlayerTransition(serverId, lifted)));
+                    new PlayerTransition(serverId, lifted)), serverId);
         }
     }
 

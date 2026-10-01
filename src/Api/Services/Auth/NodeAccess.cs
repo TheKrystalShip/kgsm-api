@@ -37,6 +37,108 @@ public sealed class NodeAccess(
     public Task<AccessReport?> ReportForAccountAsync(string accountId, CancellationToken ct) =>
         access.ReportForAccountAsync(accountId, Targets(), Include(), ct);
 
+    /// <summary>This node, as a target.</summary>
+    public AccessScope NodeTarget => AccessScope.ForNode(options.NodeId);
+
+    /// <summary>
+    /// A server on this node, as a target: its install, once the engine has reported the nonce that
+    /// names it, and this node until then — so a grant on the one install cannot reach a server whose
+    /// install cannot yet be told from a reinstall.
+    /// </summary>
+    public AccessScope ServerTarget(string serverId) =>
+        instances.Roster.TryGetValue(serverId, out var instance) && instance.InstallNonce is { Length: > 0 } nonce
+            ? AccessScope.ForInstance(options.NodeId, serverId, nonce)
+            : NodeTarget;
+
+    /// <summary>
+    /// The target a request names: a server route (<c>api/v1/servers/{id}/…</c>) is that server, and
+    /// everything else is this node — the cluster-wide actions widen from it on their own.
+    /// </summary>
+    public AccessScope TargetOf(HttpContext? http)
+    {
+        if (http?.GetEndpoint() is RouteEndpoint route
+            && route.RoutePattern.RawText is { } pattern
+            && pattern.StartsWith("api/v1/servers/{id}", StringComparison.OrdinalIgnoreCase)
+            && http.Request.RouteValues["id"] is string serverId)
+        {
+            return ServerTarget(serverId);
+        }
+
+        return NodeTarget;
+    }
+
+    /// <summary>
+    /// Whether the caller behind <paramref name="user"/> may perform <paramref name="action"/> at
+    /// <paramref name="target"/>, from this node's replica as it stands.
+    /// </summary>
+    /// <remarks>
+    /// A host run with auth switched off authenticates everybody as its synthetic Owner, so every action
+    /// is allowed there. A caller with no account here is refused everything, and so is every caller
+    /// while the replica cannot be read — authentication has already answered those with an outage.
+    /// </remarks>
+    public async Task<bool> AllowsAsync(ClaimsPrincipal user, string action, AccessScope target, CancellationToken ct = default)
+    {
+        if (options.AuthDisabled)
+            return user.Identity?.IsAuthenticated == true;
+
+        return await AllowsAccountAsync(AccountOf(user), action, target, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The account authentication resolved <paramref name="user"/> to here, or <see langword="null"/>.</summary>
+    public static string? AccountOf(ClaimsPrincipal user) =>
+        user.FindFirst(AccessClaims.Account)?.Value is { Length: > 0 } account ? account : null;
+
+    /// <summary>
+    /// Whether <paramref name="accountId"/> may perform <paramref name="action"/> at
+    /// <paramref name="target"/> — for a credential handed out ahead of use (a download ticket, a push
+    /// button), evaluated again when it is presented. An auth-disabled host allows it; no account, or an
+    /// unreadable replica, refuses it.
+    /// </summary>
+    public async Task<bool> AllowsAccountAsync(string? accountId, string action, AccessScope target, CancellationToken ct = default)
+    {
+        if (options.AuthDisabled)
+            return true;
+
+        if (accountId is null)
+            return false;
+
+        return await access.EvaluatorAsync(ct).ConfigureAwait(false) is { } evaluator
+            && evaluator.Allows(accountId, action, target).Allowed;
+    }
+
+    /// <summary>Whether the caller may perform <paramref name="action"/> on one server of this node.</summary>
+    public Task<bool> AllowsOnServerAsync(ClaimsPrincipal user, string action, string serverId, CancellationToken ct = default) =>
+        AllowsAsync(user, action, ServerTarget(serverId), ct);
+
+    /// <summary>
+    /// The servers among <paramref name="serverIds"/> the caller may perform <paramref name="action"/> on
+    /// — how a collection is cut to what its reader can see (permissions plan §4·c).
+    /// </summary>
+    public async Task<HashSet<string>> AllowedServersAsync(
+        ClaimsPrincipal user, string action, IEnumerable<string> serverIds, CancellationToken ct = default)
+    {
+        HashSet<string> allowed = new(StringComparer.Ordinal);
+        if (options.AuthDisabled)
+        {
+            allowed.UnionWith(serverIds);
+            return allowed;
+        }
+
+        if (AccountOf(user) is not { } account
+            || await access.EvaluatorAsync(ct).ConfigureAwait(false) is not { } evaluator)
+        {
+            return allowed;
+        }
+
+        foreach (string id in serverIds)
+        {
+            if (evaluator.Allows(account, action, ServerTarget(id)).Allowed)
+                allowed.Add(id);
+        }
+
+        return allowed;
+    }
+
     /// <summary>The cluster, this node, and every instance on it with a nonce.</summary>
     public IReadOnlyList<AccessScope> Targets()
     {

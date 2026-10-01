@@ -47,14 +47,14 @@ public sealed class ServerDisplayNameTests
     public async Task Put_Viewer_403()
     {
         // Renaming is a write: a viewer who can read the label cannot change it.
-        HttpResponseMessage resp = await Put(_engine, KgsmTier.Viewer, "labelled", "{\"displayName\":\"x\"}");
+        HttpResponseMessage resp = await Put(_engine, Persona.Viewer, "labelled", "{\"displayName\":\"x\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task Put_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Put(_noEngine, KgsmTier.Operator, "labelled", "{\"displayName\":\"x\"}");
+        HttpResponseMessage resp = await Put(_noEngine, Persona.Operator, "labelled", "{\"displayName\":\"x\"}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
         Assert.Contains("\"code\":\"unavailable\"", await resp.Content.ReadAsStringAsync());
     }
@@ -62,7 +62,7 @@ public sealed class ServerDisplayNameTests
     [Fact]
     public async Task Put_UnknownServer_404()
     {
-        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "does-not-exist", "{\"displayName\":\"x\"}");
+        HttpResponseMessage resp = await Put(_engine, Persona.Operator, "does-not-exist", "{\"displayName\":\"x\"}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
@@ -71,7 +71,7 @@ public sealed class ServerDisplayNameTests
     {
         // Labels are not unique and are not identifiers. Resolving one here would let two servers sharing
         // a name rename each other, so the route only ever means the id.
-        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "Sunday Server", "{\"displayName\":\"x\"}");
+        HttpResponseMessage resp = await Put(_engine, Persona.Operator, "Sunday Server", "{\"displayName\":\"x\"}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
@@ -79,7 +79,7 @@ public sealed class ServerDisplayNameTests
     public async Task Put_EmptyLabel_400()
     {
         // An emptied field must not silently strip a server's name — clearing is DELETE.
-        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "labelled", "{\"displayName\":\"   \"}");
+        HttpResponseMessage resp = await Put(_engine, Persona.Operator, "labelled", "{\"displayName\":\"   \"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -89,7 +89,7 @@ public sealed class ServerDisplayNameTests
     {
         // Sanitizing leaves nothing, so this is the empty case even though the body was not empty —
         // measured after normalization, like the note's cap.
-        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "labelled", "{\"displayName\":\"\\u0007\\u0007\"}");
+        HttpResponseMessage resp = await Put(_engine, Persona.Operator, "labelled", "{\"displayName\":\"\\u0007\\u0007\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 
@@ -97,7 +97,7 @@ public sealed class ServerDisplayNameTests
     public async Task Put_OverCap_400_RejectedNotTruncated()
     {
         string tooLong = new('x', ServerDisplayNameController.MaxLength + 1);
-        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "labelled",
+        HttpResponseMessage resp = await Put(_engine, Persona.Operator, "labelled",
             $"{{\"displayName\":\"{tooLong}\"}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -106,7 +106,7 @@ public sealed class ServerDisplayNameTests
     [Fact]
     public async Task Put_BadOrigin_400()
     {
-        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "labelled",
+        HttpResponseMessage resp = await Put(_engine, Persona.Operator, "labelled",
             "{\"displayName\":\"x\",\"origin\":\"hacker\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
@@ -114,7 +114,7 @@ public sealed class ServerDisplayNameTests
     [Fact]
     public async Task Put_Valid_200_StoresSanitizedLabel_Attributed()
     {
-        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "writable",
+        HttpResponseMessage resp = await Put(_engine, Persona.Operator, "writable",
             "{\"displayName\":\"  Sunday Server \\u2728  \",\"origin\":\"ui\"}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -130,7 +130,7 @@ public sealed class ServerDisplayNameTests
     public async Task Put_Valid_200_ReportsWhatTheEngineStored()
     {
         // The response is a re-read, not an echo of the request: what the engine holds is the answer.
-        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "labelled", "{\"displayName\":\"anything\"}");
+        HttpResponseMessage resp = await Put(_engine, Persona.Operator, "labelled", "{\"displayName\":\"anything\"}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -141,7 +141,7 @@ public sealed class ServerDisplayNameTests
     [Fact]
     public async Task Put_EngineRefuses_500_WithItsOwnDetail()
     {
-        HttpResponseMessage resp = await Put(_engine, KgsmTier.Operator, "refuses", "{\"displayName\":\"x\"}");
+        HttpResponseMessage resp = await Put(_engine, Persona.Operator, "refuses", "{\"displayName\":\"x\"}");
         Assert.Equal(HttpStatusCode.InternalServerError, resp.StatusCode);
         string body = await resp.Content.ReadAsStringAsync();
         Assert.Contains("\"code\":\"engine_refused\"", body);
@@ -151,7 +151,7 @@ public sealed class ServerDisplayNameTests
     [Fact]
     public async Task Delete_ClearsTheLabel_AndReportsTheIdItNowReadsAs()
     {
-        HttpResponseMessage resp = await Delete(_engine, KgsmTier.Operator, "unlabelled");
+        HttpResponseMessage resp = await Delete(_engine, Persona.Operator, "unlabelled");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         // The empty label is what the engine is asked for; the instance then reads as its id, and the
@@ -164,7 +164,7 @@ public sealed class ServerDisplayNameTests
     [Fact]
     public async Task Delete_Viewer_403()
     {
-        HttpResponseMessage resp = await Delete(_engine, KgsmTier.Viewer, "labelled");
+        HttpResponseMessage resp = await Delete(_engine, Persona.Viewer, "labelled");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -173,7 +173,7 @@ public sealed class ServerDisplayNameTests
     {
         // The seam this whole phase fills: `name` is the label somebody reads, `id` is the key. An
         // instance with no label of its own reports its id in both, never a blank name.
-        HttpResponseMessage resp = await Client(_engine, KgsmTier.Viewer).GetAsync("/api/v1/servers");
+        HttpResponseMessage resp = await Client(_engine, Persona.Viewer).GetAsync("/api/v1/servers");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -186,7 +186,7 @@ public sealed class ServerDisplayNameTests
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static HttpClient Client(AuthTestFactory factory, KgsmTier? tier)
+    private static HttpClient Client(AuthTestFactory factory, Persona? tier)
     {
         HttpClient c = factory.CreateClient();
         if (tier is { } t)
@@ -194,11 +194,11 @@ public sealed class ServerDisplayNameTests
         return c;
     }
 
-    private static Task<HttpResponseMessage> Put(AuthTestFactory factory, KgsmTier? tier, string id, string json) =>
+    private static Task<HttpResponseMessage> Put(AuthTestFactory factory, Persona? tier, string id, string json) =>
         Client(factory, tier).PutAsync($"/api/v1/servers/{Uri.EscapeDataString(id)}/display-name",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
-    private static Task<HttpResponseMessage> Delete(AuthTestFactory factory, KgsmTier? tier, string id) =>
+    private static Task<HttpResponseMessage> Delete(AuthTestFactory factory, Persona? tier, string id) =>
         Client(factory, tier).DeleteAsync($"/api/v1/servers/{Uri.EscapeDataString(id)}/display-name");
 
     /// <summary>

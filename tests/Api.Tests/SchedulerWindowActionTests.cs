@@ -36,7 +36,7 @@ public sealed class SchedulerWindowActionTests : IClassFixture<SchedulerWindowAc
     [InlineData("run-now")]
     public async Task Each_verb_reaches_the_scheduler(string verb)
     {
-        HttpResponseMessage resp = await Post(KgsmTier.Operator, verb,
+        HttpResponseMessage resp = await Post(Persona.Operator, verb,
             "{\"instance\":\"factorio-1\",\"window\":\"daily@05:00\"}");
 
         // The socket is not there, so the daemon's absence is what answers — never a 404, which would mean
@@ -48,7 +48,7 @@ public sealed class SchedulerWindowActionTests : IClassFixture<SchedulerWindowAc
     [Fact]
     public async Task Viewer_403()
     {
-        HttpResponseMessage resp = await Post(KgsmTier.Viewer, "postpone",
+        HttpResponseMessage resp = await Post(Persona.Viewer, "postpone",
             "{\"instance\":\"factorio-1\",\"window\":\"daily@05:00\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -64,7 +64,7 @@ public sealed class SchedulerWindowActionTests : IClassFixture<SchedulerWindowAc
     [Fact]
     public async Task An_unknown_verb_400s_naming_the_ones_there_are()
     {
-        HttpResponseMessage resp = await Post(KgsmTier.Operator, "nuke",
+        HttpResponseMessage resp = await Post(Persona.Operator, "nuke",
             "{\"instance\":\"factorio-1\",\"window\":\"daily@05:00\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
 
@@ -78,7 +78,7 @@ public sealed class SchedulerWindowActionTests : IClassFixture<SchedulerWindowAc
     {
         // One instance holds several appointments; the daemon refuses rather than guessing, and so does
         // this — moving the wrong one is worse than refusing.
-        HttpResponseMessage resp = await Post(KgsmTier.Operator, "postpone", "{\"instance\":\"factorio-1\"}");
+        HttpResponseMessage resp = await Post(Persona.Operator, "postpone", "{\"instance\":\"factorio-1\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("window is required", await resp.Content.ReadAsStringAsync());
     }
@@ -88,7 +88,7 @@ public sealed class SchedulerWindowActionTests : IClassFixture<SchedulerWindowAc
     {
         // Past that it is a schedule change, and a schedule change belongs in the instance's own config
         // where it survives a restart of the daemon.
-        HttpResponseMessage resp = await Post(KgsmTier.Operator, "postpone",
+        HttpResponseMessage resp = await Post(Persona.Operator, "postpone",
             "{\"instance\":\"factorio-1\",\"window\":\"daily@05:00\",\"minutes\":900}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("720", await resp.Content.ReadAsStringAsync());
@@ -97,13 +97,13 @@ public sealed class SchedulerWindowActionTests : IClassFixture<SchedulerWindowAc
     [Fact]
     public async Task Another_host_404s()
     {
-        HttpResponseMessage resp = await Client(KgsmTier.Operator).PostAsync(
+        HttpResponseMessage resp = await Client(Persona.Operator).PostAsync(
             "/api/v1/hosts/somewhere-else/services/scheduler/windows/postpone",
             new StringContent("{\"instance\":\"factorio-1\",\"window\":\"daily@05:00\"}", Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
-    private HttpClient Client(KgsmTier? tier)
+    private HttpClient Client(Persona? tier)
     {
         HttpClient c = _factory.CreateClient();
         if (tier is { } t)
@@ -111,7 +111,7 @@ public sealed class SchedulerWindowActionTests : IClassFixture<SchedulerWindowAc
         return c;
     }
 
-    private Task<HttpResponseMessage> Post(KgsmTier? tier, string verb, string json) =>
+    private Task<HttpResponseMessage> Post(Persona? tier, string verb, string json) =>
         Client(tier).PostAsync($"/api/v1/hosts/{_factory.HostIdForTests}/services/scheduler/windows/{verb}",
             new StringContent(json, Encoding.UTF8, "application/json"));
 

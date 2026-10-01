@@ -19,8 +19,8 @@ namespace TheKrystalShip.Api.Controllers;
 /// only authority — no separate "currently online" view.
 /// </summary>
 /// <remarks>
-/// <para><b>Gated at operator</b> — a roster names real people/addresses, a step more sensitive
-/// than a config value or a backup list.</para>
+/// <para><b>Gated per action at the server</b> — the roster on <c>kgsm:server.read</c>, a kick on
+/// <c>kgsm:server.players.kick</c>, a ban and its lifting on <c>kgsm:server.players.ban</c>.</para>
 /// <para><b>Honest-unknown, never a fabricated empty.</b> <see cref="PlayersResponse.Detection"/> is
 /// <see cref="PlayerDetection.Unknown"/> when this host cannot observe the instance's players at all
 /// — presence is unknowable, not "nobody's here", so <see cref="PlayersResponse.Players"/> is forced
@@ -39,7 +39,6 @@ namespace TheKrystalShip.Api.Controllers;
 /// </remarks>
 [ApiController]
 [Route("api/v1/servers/{id}/players")]
-[Authorize(Policy = AuthPolicy.Operator)]
 public sealed class ServerPlayersController(
     ServerAggregator aggregator,
     PlayerHistoryService history,
@@ -58,6 +57,7 @@ public sealed class ServerPlayersController(
     /// </list>
     /// </summary>
     [HttpGet]
+    [RequiresAction(ActionIds.ServerRead)]
     public async Task<IActionResult> Get(string id, CancellationToken ct)
     {
         if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
@@ -93,11 +93,13 @@ public sealed class ServerPlayersController(
     /// <see cref="ModerateAsync"/> for why.
     /// </summary>
     [HttpPost("{playerIdentity}/kick")]
+    [RequiresAction(ActionIds.ServerPlayersKick)]
     public Task<IActionResult> Kick(string id, string playerIdentity, [FromQuery] string? origin, CancellationToken ct)
         => ModerateAsync(id, playerIdentity, ModerationAction.Kick, origin, ct);
 
     /// <summary>Disconnect a player and block them from reconnecting.</summary>
     [HttpPost("{playerIdentity}/ban")]
+    [RequiresAction(ActionIds.ServerPlayersBan)]
     public Task<IActionResult> Ban(string id, string playerIdentity, [FromQuery] string? origin, CancellationToken ct)
         => ModerateAsync(id, playerIdentity, ModerationAction.Ban, origin, ct);
 
@@ -107,6 +109,7 @@ public sealed class ServerPlayersController(
     /// cannot come from a live presence view, and it is scoped to this server because a ban is.
     /// </summary>
     [HttpPost("{playerIdentity}/unban")]
+    [RequiresAction(ActionIds.ServerPlayersBan)]
     public Task<IActionResult> Unban(string id, string playerIdentity, [FromQuery] string? origin, CancellationToken ct)
         => ModerateAsync(id, playerIdentity, ModerationAction.Unban, origin, ct);
 
@@ -142,6 +145,8 @@ public sealed class ServerPlayersController(
     /// <item><c>200</c> — <c>{ serverId, playerIdentity, action, targetKind }</c>.</item>
     /// </list>
     /// </remarks>
+    [PerformedFor(ActionIds.ServerPlayersKick)]
+    [PerformedFor(ActionIds.ServerPlayersBan)]
     private async Task<IActionResult> ModerateAsync(
         string id, string playerIdentity, string action, string? rawOrigin, CancellationToken ct)
     {

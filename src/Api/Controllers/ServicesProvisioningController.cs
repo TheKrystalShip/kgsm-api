@@ -8,15 +8,14 @@ using TheKrystalShip.Api.Services.Leaves;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// The <strong>admin</strong> write half of the host Services panel (the leaf-runtime-provisioning/config
-/// feature) — connect/disconnect a leaf at runtime (Phase 1) and edit a leaf's config (Phase 2). Separate
-/// from the operator-gated read-only <see cref="ServicesController"/>; these mutate, so they are admin-gated
-/// (someone who could SSH to the box anyway). Per-host API: a foreign host id → 404; an unknown /
-/// non-provisionable leaf → 404.
+/// The write half of the host Services panel — connect/disconnect a leaf at runtime
+/// (<c>api:services.manage</c>), read and edit a leaf's configuration (that leaf's own
+/// <c>&lt;leaf&gt;:config.read</c> / <c>&lt;leaf&gt;:config.write</c>), and write the reactor's rules
+/// (<c>reactor:rules.write</c>). Per-host API: a foreign host id → 404; an unknown / non-provisionable
+/// leaf → 404.
 /// </summary>
 [ApiController]
 [Route("api/v1/hosts/{id}/services")]
-[Authorize(Policy = AuthPolicy.Admin)]
 public sealed class ServicesProvisioningController(
     LeafRegistry registry,
     LeafHealthMonitor health,
@@ -25,8 +24,27 @@ public sealed class ServicesProvisioningController(
     LeafConfigCatalog catalog,
     LeafSurfaceRelay relay,
     ApiJournal journal,
+    NodeAccess access,
     ApiOptions options) : ControllerBase
 {
+    /// <summary>
+    /// The action reading or writing <paramref name="leaf"/>'s configuration performs — the leaf's own,
+    /// and the engine's for the engine.
+    /// </summary>
+    private static string ConfigAction(string leaf, bool write) =>
+        string.Equals(leaf, "kgsm", StringComparison.Ordinal)
+            ? (write ? ActionIds.EngineConfigWrite : ActionIds.EngineConfigRead)
+            : (write ? ActionIds.LeafConfigWrite(leaf) : ActionIds.LeafConfigRead(leaf));
+
+    private async Task<IActionResult?> RefuseConfigAsync(string leaf, bool write, CancellationToken ct)
+    {
+        string action = ConfigAction(leaf, write);
+        return await access.AllowsAsync(User, action, access.NodeTarget, ct).ConfigureAwait(false)
+            ? null
+            : StatusCode(StatusCodes.Status403Forbidden,
+                new ErrorEnvelope(new ErrorBody("forbidden", $"this needs {action}")));
+    }
+
     /// <summary>Hands back a leaf's own answer exactly as it gave it — status and bytes both.</summary>
     /// <remarks>
     /// Re-serializing would mean holding the shape here, and a second statement of the descriptor's
@@ -53,12 +71,14 @@ public sealed class ServicesProvisioningController(
     /// <summary><c>POST .../services/{leaf}/connect</c> — provision (connect) a leaf at runtime; re-poll so the
     /// SPA's capability set lights up live; audit. Returns the refreshed leaf row.</summary>
     [HttpPost("{leaf}/connect")]
+    [RequiresAction(ActionIds.ServicesManage)]
     public Task<IActionResult> Connect(string id, string leaf, CancellationToken ct) =>
         SetProvisionedAsync(id, leaf, provisioned: true, ct);
 
     /// <summary><c>POST .../services/{leaf}/disconnect</c> — deprovision (disconnect) a leaf at runtime; re-poll
     /// so the SPA's capability set tears down live; audit. Returns the refreshed leaf row.</summary>
     [HttpPost("{leaf}/disconnect")]
+    [RequiresAction(ActionIds.ServicesManage)]
     public Task<IActionResult> Disconnect(string id, string leaf, CancellationToken ct) =>
         SetProvisionedAsync(id, leaf, provisioned: false, ct);
 
@@ -82,10 +102,14 @@ public sealed class ServicesProvisioningController(
     /// <summary><c>GET .../services/{leaf}/config</c> — the leaf's settable-key manifest joined with the current
     /// overrides (secrets masked). 404 when the leaf is not a config target.</summary>
     [HttpGet("{leaf}/config")]
+    [Authorize]
     public async Task<IActionResult> GetConfig(string id, string leaf, CancellationToken ct)
     {
         if (!IsThisHost(id))
             return NotFound();
+
+        if (await RefuseConfigAsync(leaf, write: false, ct) is { } refused)
+            return refused;
 
         // The leaf answers for itself where it can: it owns the descriptor, the file and the rules.
         if (await relay.SendAsync(leaf, HttpMethod.Get, "config", null, ct) is { } answered)
@@ -99,10 +123,14 @@ public sealed class ServicesProvisioningController(
     /// health-canary → auto-rollback). Unknown key / bad value → 400; secrets are write-only + redacted in the
     /// audit. 404 when the leaf is not a config target.</summary>
     [HttpPut("{leaf}/config")]
+    [Authorize]
     public async Task<IActionResult> PutConfig(string id, string leaf, [FromBody] ComponentConfigUpdate? body, CancellationToken ct)
     {
         if (!IsThisHost(id))
             return NotFound();
+
+        if (await RefuseConfigAsync(leaf, write: true, ct) is { } refused)
+            return refused;
 
         // The leaf applies its own change where it can: it owns the file, the validation and the
         // restart, and it alone knows what the running build will accept.
@@ -174,6 +202,7 @@ public sealed class ServicesProvisioningController(
     /// </para>
     /// </remarks>
     [HttpPut("reactor/rules/{ruleId}")]
+    [RequiresAction(ActionIds.ReactorRulesWrite)]
     public async Task<IActionResult> PutReactorRule(
         string id, string ruleId, [FromServices] ReactorClient reactor, CancellationToken ct)
     {
@@ -249,6 +278,7 @@ public sealed class ServicesProvisioningController(
     /// ordinary "turn this off" writes the rule back with <c>retired</c> set instead of calling here.
     /// </remarks>
     [HttpDelete("reactor/rules/{ruleId}")]
+    [RequiresAction(ActionIds.ReactorRulesWrite)]
     public async Task<IActionResult> DeleteReactorRule(
         string id, string ruleId, [FromServices] ReactorClient reactor, CancellationToken ct)
     {

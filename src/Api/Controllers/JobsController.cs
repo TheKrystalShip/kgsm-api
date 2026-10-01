@@ -28,15 +28,21 @@ namespace TheKrystalShip.Api.Controllers;
 /// the moment it finished would make the outcome unreadable exactly when it is asked for. An id the
 /// registry has never held is a <c>404</c> — never a fabricated "probably fine".
 /// </para>
+/// <para>
+/// A job is read with <c>kgsm:server.read</c> at the server it acted on. A job on a server the caller
+/// may not read is a <c>404</c> like an unknown one, so the id says nothing about servers they cannot see.
+/// </para>
 /// </remarks>
 [ApiController]
 [Route("api/v1/jobs")]
-[Authorize(Policy = AuthPolicy.Viewer)]
-public sealed class JobsController(JobRegistry jobs) : ControllerBase
+[Authorize]
+public sealed class JobsController(JobRegistry jobs, NodeAccess access) : ControllerBase
 {
     /// <summary><c>GET /jobs/{id}</c> → the <see cref="Job"/>, or <c>404</c> for an id this host has no
     /// record of.</summary>
     [HttpGet("{id}")]
-    public IActionResult Get(string id) =>
-        jobs.Get(id) is { } job ? Ok(job) : NotFound();
+    public async Task<IActionResult> Get(string id, CancellationToken ct) =>
+        jobs.Get(id) is { } job && await access.AllowsOnServerAsync(User, ActionIds.ServerRead, job.ServerId, ct)
+            ? Ok(job)
+            : NotFound();
 }

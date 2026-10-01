@@ -56,25 +56,33 @@ public sealed class BlueprintFileApiTests
     }
 
     [Fact]
-    public async Task Read_Viewer_403_ReadIsOperatorPlus()
+    public async Task Read_HoldingLibraryReadOnly_200_ReadOnly()
     {
-        // The catalog listing is viewer-gated, but the FILE is the engine's operational definition of how
-        // a server is launched — operator+, tightening the class-level policy.
-        HttpResponseMessage r = await Client(_engine, KgsmTier.Viewer).GetAsync($"/api/v1/library/{Shipped}/file");
+        // The file is read with kgsm:library.read like the rest of the library; a reader without
+        // kgsm:blueprints.write is handed it read-only.
+        HttpResponseMessage r = await Client(_engine, Persona.Viewer).GetAsync($"/api/v1/library/{Shipped}/file");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        Assert.True((await Json(r)).GetProperty("readOnly").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Read_HoldingNothing_403()
+    {
+        HttpResponseMessage r = await Client(_engine, Persona.None).GetAsync($"/api/v1/library/{Shipped}/file");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
     [Fact]
     public async Task Save_Operator_403_WritesAreAdminOnly()
     {
-        HttpResponseMessage r = await Put(_engine, KgsmTier.Operator, Shipped, Body("name: factorio\n"));
+        HttpResponseMessage r = await Put(_engine, Persona.Operator, Shipped, Body("name: factorio\n"));
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
     [Fact]
     public async Task Revert_Operator_403_WritesAreAdminOnly()
     {
-        HttpResponseMessage r = await Client(_engine, KgsmTier.Operator)
+        HttpResponseMessage r = await Client(_engine, Persona.Operator)
             .DeleteAsync($"/api/v1/library/{Overridden}/file");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
@@ -82,7 +90,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Read_Operator_200_ButReadOnly()
     {
-        JsonElement body = await ReadOk(KgsmTier.Operator, Shipped);
+        JsonElement body = await ReadOk(Persona.Operator, Shipped);
         // An operator may open the editor and may not save — one honest flag, not a hidden 403 on submit.
         Assert.True(body.GetProperty("readOnly").GetBoolean());
     }
@@ -90,7 +98,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Read_Admin_200_NotReadOnly()
     {
-        JsonElement body = await ReadOk(KgsmTier.Admin, Shipped);
+        JsonElement body = await ReadOk(Persona.Owner, Shipped);
         Assert.False(body.GetProperty("readOnly").GetBoolean());
     }
 
@@ -99,14 +107,14 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Read_EngineUnprovisioned_503()
     {
-        HttpResponseMessage r = await Client(_noEngine, KgsmTier.Operator).GetAsync($"/api/v1/library/{Shipped}/file");
+        HttpResponseMessage r = await Client(_noEngine, Persona.Operator).GetAsync($"/api/v1/library/{Shipped}/file");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
     }
 
     [Fact]
     public async Task Read_UnknownBlueprint_404()
     {
-        HttpResponseMessage r = await Client(_engine, KgsmTier.Operator).GetAsync("/api/v1/library/nope/file");
+        HttpResponseMessage r = await Client(_engine, Persona.Operator).GetAsync("/api/v1/library/nope/file");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
@@ -115,7 +123,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Read_ShippedBlueprint_ReportsSystemTierAndNoOverride()
     {
-        JsonElement body = await ReadOk(KgsmTier.Admin, Shipped);
+        JsonElement body = await ReadOk(Persona.Owner, Shipped);
 
         Assert.Equal(Shipped, body.GetProperty("name").GetString());
         Assert.Equal("system", body.GetProperty("tier").GetString());
@@ -132,14 +140,14 @@ public sealed class BlueprintFileApiTests
     {
         // The whole reason this surface reads raw bytes: comments and ordering must survive, which a typed
         // parse-and-re-render round-trip would destroy.
-        JsonElement body = await ReadOk(KgsmTier.Admin, Shipped);
+        JsonElement body = await ReadOk(Persona.Owner, Shipped);
         Assert.Equal(BlueprintTestFactory.ShippedContent, body.GetProperty("content").GetString());
     }
 
     [Fact]
     public async Task Read_OverriddenBlueprint_ReportsUserTierAndOverride()
     {
-        JsonElement body = await ReadOk(KgsmTier.Admin, Overridden);
+        JsonElement body = await ReadOk(Persona.Owner, Overridden);
 
         Assert.Equal("user", body.GetProperty("tier").GetString());
         Assert.True(body.GetProperty("overridesSystem").GetBoolean());
@@ -149,7 +157,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Read_UserOnlyBlueprint_IsUserTierButNotAnOverride()
     {
-        JsonElement body = await ReadOk(KgsmTier.Admin, UserOnly);
+        JsonElement body = await ReadOk(Persona.Owner, UserOnly);
 
         Assert.Equal("user", body.GetProperty("tier").GetString());
         Assert.False(body.GetProperty("overridesSystem").GetBoolean());
@@ -162,7 +170,7 @@ public sealed class BlueprintFileApiTests
     {
         // The engine's catalog is the only runtime source; this factory has no catalog, so the field is
         // honestly null rather than parsed out of the file content.
-        JsonElement body = await ReadOk(KgsmTier.Admin, Shipped);
+        JsonElement body = await ReadOk(Persona.Owner, Shipped);
         Assert.Equal(JsonValueKind.Null, body.GetProperty("runtime").ValueKind);
     }
 
@@ -171,7 +179,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Save_ShippedBlueprint_CreatesAnOverride()
     {
-        HttpResponseMessage r = await Put(_engine, KgsmTier.Admin, Shipped, Body("name: factorio\n# edited\n"));
+        HttpResponseMessage r = await Put(_engine, Persona.Owner, Shipped, Body("name: factorio\n# edited\n"));
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
         JsonElement body = await Json(r);
@@ -189,7 +197,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Save_AnExistingOverride_IsNotACreatedOverride()
     {
-        HttpResponseMessage r = await Put(_engine, KgsmTier.Admin, Overridden, Body("name: palworld\n# again\n"));
+        HttpResponseMessage r = await Put(_engine, Persona.Owner, Overridden, Body("name: palworld\n# again\n"));
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
         JsonElement body = await Json(r);
@@ -200,7 +208,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Save_UserOnlyBlueprint_OverridesNothing()
     {
-        HttpResponseMessage r = await Put(_engine, KgsmTier.Admin, UserOnly, Body("name: teamfortress2\n"));
+        HttpResponseMessage r = await Put(_engine, Persona.Owner, UserOnly, Body("name: teamfortress2\n"));
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
         JsonElement body = await Json(r);
@@ -212,7 +220,7 @@ public sealed class BlueprintFileApiTests
     public async Task Save_WritesTheContentVerbatim()
     {
         const string content = "# a comment the engine keeps\nname: factorio\nruntime: native\n";
-        await Put(_engine, KgsmTier.Admin, Shipped, Body(content));
+        await Put(_engine, Persona.Owner, Shipped, Body(content));
         Assert.Equal(content, _engine.Blueprints.User[Shipped]);
     }
 
@@ -222,7 +230,7 @@ public sealed class BlueprintFileApiTests
         _engine.Blueprints.RejectWith = ["missing required field: native.executable_file",
                                          "runtime must be one of: native, container"];
 
-        HttpResponseMessage r = await Put(_engine, KgsmTier.Admin, Shipped, Body("name: broken\n"));
+        HttpResponseMessage r = await Put(_engine, Persona.Owner, Shipped, Body("name: broken\n"));
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
 
         JsonElement error = (await Json(r)).GetProperty("error");
@@ -242,7 +250,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Save_StaleEtag_412()
     {
-        HttpResponseMessage r = await Put(_engine, KgsmTier.Admin, Shipped,
+        HttpResponseMessage r = await Put(_engine, Persona.Owner, Shipped,
             JsonSerializer.Serialize(new { content = "name: factorio\n", etag = "sha256:deadbeef" }));
         Assert.Equal(HttpStatusCode.PreconditionFailed, r.StatusCode);
         Assert.False(_engine.Blueprints.User.ContainsKey(Shipped));
@@ -251,10 +259,10 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Save_CurrentEtag_200()
     {
-        JsonElement read = await ReadOk(KgsmTier.Admin, Shipped);
+        JsonElement read = await ReadOk(Persona.Owner, Shipped);
         string etag = read.GetProperty("etag").GetString()!;
 
-        HttpResponseMessage r = await Put(_engine, KgsmTier.Admin, Shipped,
+        HttpResponseMessage r = await Put(_engine, Persona.Owner, Shipped,
             JsonSerializer.Serialize(new { content = "name: factorio\n# ok\n", etag }));
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
     }
@@ -262,14 +270,14 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Save_MissingContent_400()
     {
-        HttpResponseMessage r = await Put(_engine, KgsmTier.Admin, Shipped, "{}");
+        HttpResponseMessage r = await Put(_engine, Persona.Owner, Shipped, "{}");
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 
     [Fact]
     public async Task Save_BadOrigin_400()
     {
-        HttpResponseMessage r = await Put(_engine, KgsmTier.Admin, Shipped,
+        HttpResponseMessage r = await Put(_engine, Persona.Owner, Shipped,
             JsonSerializer.Serialize(new { content = "x", origin = "hacker" }));
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
@@ -280,7 +288,7 @@ public sealed class BlueprintFileApiTests
         // Without this the kgsm event — and therefore the echoed audit row — would attribute an admin's
         // browser edit to the service account. There is no direct audit write to check instead: the row
         // comes back through the engine echo, so the provenance has to ride the emit.
-        await Put(_engine, KgsmTier.Admin, Shipped,
+        await Put(_engine, Persona.Owner, Shipped,
             JsonSerializer.Serialize(new { content = "name: factorio\n", origin = "ui" }));
 
         Assert.Equal("ui", _engine.Blueprints.LastWriteOrigin);
@@ -292,7 +300,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Revert_AnOverride_200_AndTheShippedFileServesAgain()
     {
-        HttpResponseMessage r = await Client(_engine, KgsmTier.Admin).DeleteAsync($"/api/v1/library/{Overridden}/file");
+        HttpResponseMessage r = await Client(_engine, Persona.Owner).DeleteAsync($"/api/v1/library/{Overridden}/file");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
         JsonElement body = await Json(r);
@@ -307,7 +315,7 @@ public sealed class BlueprintFileApiTests
     {
         // §0.7 enforced server-side, independently of the SPA hiding the button: there is nothing to
         // revert TO, so this would be a deletion of the only copy masquerading as a revert.
-        HttpResponseMessage r = await Client(_engine, KgsmTier.Admin).DeleteAsync($"/api/v1/library/{UserOnly}/file");
+        HttpResponseMessage r = await Client(_engine, Persona.Owner).DeleteAsync($"/api/v1/library/{UserOnly}/file");
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
 
         JsonElement error = (await Json(r)).GetProperty("error");
@@ -318,14 +326,14 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Revert_ShippedOnlyBlueprint_404_NothingToRemove()
     {
-        HttpResponseMessage r = await Client(_engine, KgsmTier.Admin).DeleteAsync($"/api/v1/library/{Shipped}/file");
+        HttpResponseMessage r = await Client(_engine, Persona.Owner).DeleteAsync($"/api/v1/library/{Shipped}/file");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
     [Fact]
     public async Task Revert_ThreadsTheActorAndOriginIntoTheEngineRemove()
     {
-        await Client(_engine, KgsmTier.Admin).DeleteAsync($"/api/v1/library/{Overridden}/file?origin=ui");
+        await Client(_engine, Persona.Owner).DeleteAsync($"/api/v1/library/{Overridden}/file?origin=ui");
 
         Assert.Equal("ui", _engine.Blueprints.LastRemoveOrigin);
         Assert.False(string.IsNullOrEmpty(_engine.Blueprints.LastRemoveActor));
@@ -334,18 +342,18 @@ public sealed class BlueprintFileApiTests
     // ===== scaffold ===============================================================================
 
     [Fact]
-    public async Task Scaffold_Viewer_403_OperatorPlus()
+    public async Task Scaffold_HoldingNothing_403()
     {
-        HttpResponseMessage r = await Client(_engine, KgsmTier.Viewer).GetAsync("/api/v1/library/scaffold");
+        HttpResponseMessage r = await Client(_engine, Persona.None).GetAsync("/api/v1/library/scaffold");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
     [Fact]
     public async Task Scaffold_Operator_200_ReturnsTheEngineTemplateVerbatim()
     {
-        // Operator+ so an operator reaching the create page can load the buffer even though the POST
-        // below is admin-only.
-        HttpResponseMessage r = await Client(_engine, KgsmTier.Operator).GetAsync("/api/v1/library/scaffold");
+        // kgsm:library.read, so somebody reaching the create page can load the buffer even though the
+        // POST below takes kgsm:blueprints.write.
+        HttpResponseMessage r = await Client(_engine, Persona.Operator).GetAsync("/api/v1/library/scaffold");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
         Assert.Equal(_engine.Blueprints.Scaffold, (await Json(r)).GetProperty("content").GetString());
@@ -357,7 +365,7 @@ public sealed class BlueprintFileApiTests
         _engine.Blueprints.Scaffold = null;
         try
         {
-            HttpResponseMessage r = await Client(_engine, KgsmTier.Operator).GetAsync("/api/v1/library/scaffold");
+            HttpResponseMessage r = await Client(_engine, Persona.Operator).GetAsync("/api/v1/library/scaffold");
             Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
         }
         finally
@@ -371,7 +379,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Create_Operator_403_CreationIsAdminOnly()
     {
-        HttpResponseMessage r = await Post(_engine, KgsmTier.Operator, CreateBody("necesse", "name: necesse\n"));
+        HttpResponseMessage r = await Post(_engine, Persona.Operator, CreateBody("necesse", "name: necesse\n"));
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
@@ -379,7 +387,7 @@ public sealed class BlueprintFileApiTests
     public async Task Create_Admin_200_WritesToTheUserDirShadowingNothing()
     {
         const string name = "necesse";
-        HttpResponseMessage r = await Post(_engine, KgsmTier.Admin, CreateBody(name, "name: necesse\n"));
+        HttpResponseMessage r = await Post(_engine, Persona.Owner, CreateBody(name, "name: necesse\n"));
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
         JsonElement body = await Json(r);
@@ -393,7 +401,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Create_ThreadsTheActorAndOriginIntoTheEngineWrite()
     {
-        await Post(_engine, KgsmTier.Admin, CreateBody("necesse", "name: necesse\n", origin: "ui"));
+        await Post(_engine, Persona.Owner, CreateBody("necesse", "name: necesse\n", origin: "ui"));
 
         Assert.Equal("ui", _engine.Blueprints.LastWriteOrigin);
         Assert.False(string.IsNullOrEmpty(_engine.Blueprints.LastWriteActor));
@@ -402,7 +410,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Create_NameOfAUserBlueprint_409_NameTaken()
     {
-        HttpResponseMessage r = await Post(_engine, KgsmTier.Admin, CreateBody(UserOnly, "name: whatever\n"));
+        HttpResponseMessage r = await Post(_engine, Persona.Owner, CreateBody(UserOnly, "name: whatever\n"));
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Equal("name_taken", (await Json(r)).GetProperty("error").GetProperty("code").GetString());
 
@@ -415,7 +423,7 @@ public sealed class BlueprintFileApiTests
     {
         // A shipped-only name is taken too: creating it here would silently make an override out of what
         // the caller believes is a brand-new game.
-        HttpResponseMessage r = await Post(_engine, KgsmTier.Admin, CreateBody(Shipped, "name: factorio\n"));
+        HttpResponseMessage r = await Post(_engine, Persona.Owner, CreateBody(Shipped, "name: factorio\n"));
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Equal("name_taken", (await Json(r)).GetProperty("error").GetProperty("code").GetString());
         Assert.False(_engine.Blueprints.User.ContainsKey(Shipped));
@@ -426,7 +434,7 @@ public sealed class BlueprintFileApiTests
     {
         _engine.Blueprints.RejectWith = ["missing required field: runtime", "unknown key: lauch_args"];
 
-        HttpResponseMessage r = await Post(_engine, KgsmTier.Admin, CreateBody("necesse", "junk\n"));
+        HttpResponseMessage r = await Post(_engine, Persona.Owner, CreateBody("necesse", "junk\n"));
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
 
         JsonElement error = (await Json(r)).GetProperty("error");
@@ -440,7 +448,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Create_MissingName_400()
     {
-        HttpResponseMessage r = await Post(_engine, KgsmTier.Admin,
+        HttpResponseMessage r = await Post(_engine, Persona.Owner,
             JsonSerializer.Serialize(new { content = "name: x\n" }));
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
@@ -448,7 +456,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Create_MissingContent_400()
     {
-        HttpResponseMessage r = await Post(_engine, KgsmTier.Admin,
+        HttpResponseMessage r = await Post(_engine, Persona.Owner,
             JsonSerializer.Serialize(new { name = "necesse" }));
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
@@ -456,13 +464,13 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Create_EngineUnprovisioned_503()
     {
-        HttpResponseMessage r = await Post(_noEngine, KgsmTier.Admin, CreateBody("necesse", "name: necesse\n"));
+        HttpResponseMessage r = await Post(_noEngine, Persona.Owner, CreateBody("necesse", "name: necesse\n"));
         Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
     }
 
     // ===== helpers ================================================================================
 
-    private async Task<JsonElement> ReadOk(KgsmTier tier, string id)
+    private async Task<JsonElement> ReadOk(Persona tier, string id)
     {
         HttpResponseMessage r = await Client(_engine, tier).GetAsync($"/api/v1/library/{id}/file");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
@@ -477,7 +485,7 @@ public sealed class BlueprintFileApiTests
     private static string CreateBody(string name, string content, string? origin = null) =>
         JsonSerializer.Serialize(new { name, content, origin });
 
-    private static HttpClient Client(AuthTestFactory factory, KgsmTier? tier)
+    private static HttpClient Client(AuthTestFactory factory, Persona? tier)
     {
         HttpClient c = factory.CreateClient();
         if (tier is { } t)
@@ -485,11 +493,11 @@ public sealed class BlueprintFileApiTests
         return c;
     }
 
-    private static Task<HttpResponseMessage> Post(AuthTestFactory f, KgsmTier? tier, string json) =>
+    private static Task<HttpResponseMessage> Post(AuthTestFactory f, Persona? tier, string json) =>
         Client(f, tier).PostAsync("/api/v1/library",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
-    private static Task<HttpResponseMessage> Put(AuthTestFactory f, KgsmTier? tier, string id, string json) =>
+    private static Task<HttpResponseMessage> Put(AuthTestFactory f, Persona? tier, string id, string json) =>
         Client(f, tier).PutAsync($"/api/v1/library/{id}/file",
             new StringContent(json, Encoding.UTF8, "application/json"));
 

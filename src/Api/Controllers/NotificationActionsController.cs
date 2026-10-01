@@ -10,11 +10,13 @@ using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Integrations.WebPush;
 using TheKrystalShip.Api.Services.Players;
 using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.KGSM.Auth.Access;
 using TheKrystalShip.KGSM.Auth.Cluster;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
+
+using ActionIds = TheKrystalShip.Api.Services.Auth.ActionIds;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -34,9 +36,10 @@ namespace TheKrystalShip.Api.Controllers;
 /// unchanged.</item>
 /// <item>It is bound to the device it was staged for. The worker presents its own push endpoint, and a
 /// handle without that endpoint redeems nothing.</item>
-/// <item><b>The tier is resolved here, from the account store, not carried from staging time.</b> Somebody
-/// demoted or switched off between the notification and the tap is refused, exactly as they would be on
-/// any other request.</item>
+/// <item><b>Access is evaluated here, from this node's replica, not carried from staging time.</b> The
+/// staged row names the person, the operation and its target; whether that person may perform the
+/// operation's action at that target is asked at the tap, so somebody whose access changed or who was
+/// switched off between the notification and the tap is refused, exactly as on any other request.</item>
 /// </list>
 /// <para>
 /// <b>It writes no audit row of its own.</b> An update is kgsm's event to emit, so this stamps
@@ -54,7 +57,8 @@ public sealed class NotificationActionsController(
     PushActionStore staged,
     PushSnoozeStore snoozes,
     PushSubscriptionStore subscriptions,
-    Services.Auth.UserDirectory users,
+    MemberAccess access,
+    NodeAccess nodeAccess,
     ServerAggregator aggregator,
     PlayerHistoryService history,
     JobRegistry jobs,
@@ -86,38 +90,38 @@ public sealed class NotificationActionsController(
 
         var identity = new KgsmIdentity(provider, subject, action.Username ?? subject, action.Username ?? subject, null, []);
 
-        AuthorityAnswer authority;
-        try
+        MemberAccessCaller caller = await access.ResolveAsync(identity, ct);
+        switch (caller.Refusal)
         {
-            if (!users.Available)
-                return Unavailable("The account store on this host cannot be read, so nothing can be authorized right now.");
-            authority = await users.Authority.ResolveAsync(identity, ct);
-        }
-        catch (Exception e) when (e is not OperationCanceledException)
-        {
-            // "We could not ask" is a third answer and stays one — never a default grant, never a
-            // denial dressed up as one.
-            logger.LogError(e, "notification action: could not resolve authority for {Handle}", action.UserHandle);
-            return Unavailable("The account store on this host could not be read, so nothing can be authorized right now.");
+            case MemberAccessRefusal.Unavailable:
+                // "We could not ask" is a third answer and stays one — never a default grant, never a
+                // denial dressed up as one.
+                logger.LogError("notification action: could not resolve {Handle}: {Reason}", action.UserHandle, caller.Reason);
+                return Unavailable("The account store on this host could not be read, so nothing can be authorized right now.");
+            case MemberAccessRefusal.AccountDisabled:
+                return Refuse("That account has been switched off.");
+            case MemberAccessRefusal.NoAccount:
+                return Refuse("That account is not known on this host.");
         }
 
-        if (authority.Outcome == AuthorityOutcome.Disabled)
-            return Refuse("That account has been switched off.");
+        // Every operation below asks one action at one target for the person who staged it.
+        Func<string, AccessScope, bool> allows = (actionId, target) =>
+            options.AuthDisabled || caller.Evaluator!.Allows(caller.AccountId!, actionId, target).Allowed;
 
         if (action.Kind == PushActionKind.ServerUpdateAll)
-            return await UpdateAllAsync(action, identity, authority.Tier, ct);
+            return await UpdateAllAsync(action, identity, allows, ct);
 
         if (PushActionKind.VerbFor(action.Kind) is { } verb)
-            return await LifecycleAsync(action, verb, identity, authority.Tier, ct);
+            return await LifecycleAsync(action, verb, identity, allows, ct);
 
         if (PushActionKind.ModerationFor(action.Kind) is { } moderation)
-            return ModerateAsync(action, moderation, identity, authority.Tier);
+            return ModerateAsync(action, moderation, identity, allows);
 
         return action.Kind switch
         {
             PushActionKind.ConditionSnooze => await SnoozeAsync(action, ct),
-            PushActionKind.LeafRestart => await RestartLeafAsync(action, identity, authority.Tier, ct),
-            PushActionKind.SchedulePostpone => await PostponeAsync(action, identity, authority.Tier, ct),
+            PushActionKind.LeafRestart => await RestartLeafAsync(action, identity, allows, ct),
+            PushActionKind.SchedulePostpone => await PostponeAsync(action, identity, allows, ct),
             _ => Refuse("This build does not know how to do that."),
         };
     }
@@ -126,16 +130,16 @@ public sealed class NotificationActionsController(
     /// Restart one of this host's own services.
     /// </summary>
     /// <remarks>
-    /// <b>Admin, like every other way of restarting a leaf from the panel.</b> It interrupts something the
-    /// rest of the host depends on, and the fact that the request arrived from a lock screen changes
-    /// nothing about that. The privilege underneath is the polkit rule scoped to exactly these units, so a
-    /// leaf outside <see cref="LeafCatalog.IsRestartable"/> is refused here rather than shelling a command
-    /// that would be denied.
+    /// <b><c>api:services.manage</c>, like every other way of managing a leaf from the panel.</b> It
+    /// interrupts something the rest of the host depends on, and the fact that the request arrived from a
+    /// lock screen changes nothing about that. The privilege underneath is the polkit rule scoped to exactly
+    /// these units, so a leaf outside <see cref="LeafCatalog.IsRestartable"/> is refused here rather than
+    /// shelling a command that would be denied.
     /// </remarks>
     private async Task<IActionResult> RestartLeafAsync(
-        PushActionEntity action, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
+        PushActionEntity action, KgsmIdentity identity, Func<string, AccessScope, bool> allows, CancellationToken ct)
     {
-        if (tier < KgsmTier.Admin)
+        if (!allows(ActionIds.ServicesManage, nodeAccess.NodeTarget))
             return Refuse("That account is not allowed to restart a service.");
 
         if (!LeafCatalog.IsRestartable(action.Target) || LeafCatalog.Find(action.Target) is not { } leaf)
@@ -160,9 +164,9 @@ public sealed class NotificationActionsController(
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Operator, like every other verb that changes what a server does.</b> Deferring a restart is not
-    /// a settings change — the schedule is untouched and the fire after this one lands where it always
-    /// would have — but it does decide whether a server goes down tonight, which is the operator's call.
+    /// <b><c>scheduler:windows.write</c>, as on the panel.</b> Deferring a restart is not a settings
+    /// change — the schedule is untouched and the fire after this one lands where it always would have —
+    /// but it does decide whether a server goes down tonight.
     /// </para>
     /// <para>
     /// <b>The scheduler enforces nothing, so this does.</b> Its control socket carries no identity: the
@@ -181,9 +185,9 @@ public sealed class NotificationActionsController(
     /// </para>
     /// </remarks>
     private async Task<IActionResult> PostponeAsync(
-        PushActionEntity action, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
+        PushActionEntity action, KgsmIdentity identity, Func<string, AccessScope, bool> allows, CancellationToken ct)
     {
-        if (tier < KgsmTier.Operator)
+        if (!allows(ActionIds.SchedulerWindowsWrite, nodeAccess.NodeTarget))
             return Refuse("That account is not allowed to change when a server restarts.");
 
         if (HttpContext.RequestServices.GetService(typeof(SchedulerClient)) is not SchedulerClient scheduler
@@ -215,19 +219,18 @@ public sealed class NotificationActionsController(
     /// Run one lifecycle verb against the staged server.
     /// </summary>
     /// <remarks>
-    /// The same gates the panel's own command path applies, in the same order — the tier, the observed
-    /// run state, and the one-in-flight claim — because a shortcut from a lock screen must not be a
-    /// shortcut past any of them. Notably the state gate is not softened for arriving late: a person
-    /// tapping Start on a server somebody else already started is told it is already running, rather than
-    /// having the tap quietly do nothing.
+    /// The same gates the panel's own command path applies, in the same order — the verb's action at the
+    /// server, the observed run state, and the one-in-flight claim — because a shortcut from a lock screen
+    /// must not be a shortcut past any of them. Notably the state gate is not softened for arriving late: a
+    /// person tapping Start on a server somebody else already started is told it is already running, rather
+    /// than having the tap quietly do nothing.
     /// </remarks>
     private async Task<IActionResult> LifecycleAsync(
-        PushActionEntity action, string verb, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
+        PushActionEntity action, string verb, KgsmIdentity identity, Func<string, AccessScope, bool> allows, CancellationToken ct)
     {
-        // The ordinal IS the hierarchy (admin ⊇ operator ⊇ viewer) — the same comparison the policy
-        // handler makes for the panel's own command route.
-        if (tier < KgsmTier.Operator)
-            return Refuse($"That account is not allowed to {verb} a server.");
+        if (ActionIds.ForVerb(verb) is not { } verbAction
+            || !allows(verbAction, nodeAccess.ServerTarget(action.Target)))
+            return Refuse($"That account is not allowed to {verb} this server.");
 
         IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct);
         Server? server = servers.FirstOrDefault(s => string.Equals(s.Id, action.Target, StringComparison.Ordinal));
@@ -260,9 +263,9 @@ public sealed class NotificationActionsController(
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Each one runs the same gates, individually.</b> A batch is not a way past the state check or the
-    /// one-in-flight claim — it is the same verb, several times, and a server that cannot take it now says
-    /// so while the others still go.
+    /// <b>Each one runs the same gates, individually.</b> A batch is not a way past the action at each
+    /// server, the state check or the one-in-flight claim — it is the same verb, several times, and a
+    /// server that cannot take it now says so while the others still go.
     /// </para>
     /// <para>
     /// <b>Partial is the normal outcome, so it is what gets reported.</b> Somewhere in a list of five
@@ -271,11 +274,8 @@ public sealed class NotificationActionsController(
     /// </para>
     /// </remarks>
     private async Task<IActionResult> UpdateAllAsync(
-        PushActionEntity action, KgsmIdentity identity, KgsmTier tier, CancellationToken ct)
+        PushActionEntity action, KgsmIdentity identity, Func<string, AccessScope, bool> allows, CancellationToken ct)
     {
-        if (tier < KgsmTier.Operator)
-            return Refuse("That account is not allowed to update a server.");
-
         IReadOnlyList<string> targets = PushActionTargets.Split(action.Subject);
         if (targets.Count == 0)
             return Refuse("That notification named no servers.");
@@ -288,6 +288,7 @@ public sealed class NotificationActionsController(
         {
             Server? server = servers.FirstOrDefault(s => string.Equals(s.Id, id, StringComparison.Ordinal));
             if (server is null) { skipped.Add(id); continue; }
+            if (!allows(ActionIds.ServerUpdate, nodeAccess.ServerTarget(id))) { skipped.Add(id); continue; }
             if (CommandGate.Inadmissible(Contracts.CommandVerb.Update, server.Status) is not null)
             {
                 skipped.Add(id);
@@ -336,15 +337,18 @@ public sealed class NotificationActionsController(
     /// <para>
     /// <b>Everything is re-checked at the tap, because the interval is the point.</b> A notification is
     /// answered minutes later from a lock screen: by then the person may have left, the game may not declare
-    /// this action, and the account may have been demoted. Each of those is reported in the words the person
-    /// will read on the follow-up notification.
+    /// this action, and the account may have lost the action. Each of those is reported in the words the
+    /// person will read on the follow-up notification.
     /// </para>
     /// </remarks>
     private IActionResult ModerateAsync(
-        PushActionEntity action, string moderation, KgsmIdentity identity, KgsmTier tier)
+        PushActionEntity action, string moderation, KgsmIdentity identity, Func<string, AccessScope, bool> allows)
     {
-        if (tier < KgsmTier.Operator)
-            return Refuse($"That account is not allowed to {moderation} a player.");
+        string moderationAction = moderation == Contracts.ModerationAction.Kick
+            ? ActionIds.ServerPlayersKick
+            : ActionIds.ServerPlayersBan;
+        if (!allows(moderationAction, nodeAccess.ServerTarget(action.Target)))
+            return Refuse($"That account is not allowed to {moderation} a player on this server.");
 
         if (string.IsNullOrEmpty(action.Subject))
             return Refuse("That notification did not name a player.");

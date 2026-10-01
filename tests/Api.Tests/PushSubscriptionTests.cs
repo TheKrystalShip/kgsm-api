@@ -50,13 +50,13 @@ public class PushSubscriptionTests(AuthTestFactory factory) : IClassFixture<Auth
     private string OtherUserToken()
     {
         var identity = new KgsmIdentity(KgsmActorProvider.Discord, "999000111", "someone-else", "Someone Else", null, []);
-        return factory.AccessTokenFor(identity, KgsmTier.Viewer);
+        return factory.AccessTokenFor(identity, Persona.Viewer);
     }
 
     [Fact]
     public async Task The_key_endpoint_hands_out_a_usable_application_server_key()
     {
-        HttpClient c = Client(factory.AccessToken(KgsmTier.Viewer));
+        HttpClient c = Client(factory.AccessToken(Persona.Viewer));
         HttpResponseMessage res = await c.GetAsync("/api/v1/push/key");
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
 
@@ -72,7 +72,7 @@ public class PushSubscriptionTests(AuthTestFactory factory) : IClassFixture<Auth
     [Fact]
     public async Task The_key_is_stable_across_calls()
     {
-        HttpClient c = Client(factory.AccessToken(KgsmTier.Viewer));
+        HttpClient c = Client(factory.AccessToken(Persona.Viewer));
         // Regenerating would silently orphan every device already subscribed with the old key.
         JsonElement a = await c.GetFromJsonAsync<JsonElement>("/api/v1/push/key");
         JsonElement b = await c.GetFromJsonAsync<JsonElement>("/api/v1/push/key");
@@ -82,7 +82,7 @@ public class PushSubscriptionTests(AuthTestFactory factory) : IClassFixture<Auth
     [Fact]
     public async Task A_device_registers_and_appears_in_its_owners_list()
     {
-        HttpClient c = Client(factory.AccessToken(KgsmTier.Viewer));
+        HttpClient c = Client(factory.AccessToken(Persona.Viewer));
         string endpoint = "https://fcm.googleapis.com/fcm/send/" + Guid.NewGuid().ToString("N");
 
         HttpResponseMessage res = await c.PostAsJsonAsync("/api/v1/push/subscriptions", Subscription(endpoint));
@@ -97,7 +97,7 @@ public class PushSubscriptionTests(AuthTestFactory factory) : IClassFixture<Auth
     [Fact]
     public async Task Re_subscribing_the_same_browser_updates_one_row_rather_than_adding_another()
     {
-        HttpClient c = Client(factory.AccessToken(KgsmTier.Viewer));
+        HttpClient c = Client(factory.AccessToken(Persona.Viewer));
         string endpoint = "https://fcm.googleapis.com/fcm/send/" + Guid.NewGuid().ToString("N");
 
         await c.PostAsJsonAsync("/api/v1/push/subscriptions", Subscription(endpoint));
@@ -115,7 +115,7 @@ public class PushSubscriptionTests(AuthTestFactory factory) : IClassFixture<Auth
     public async Task One_users_devices_are_invisible_to_another()
     {
         string mineEndpoint = "https://fcm.googleapis.com/fcm/send/" + Guid.NewGuid().ToString("N");
-        HttpClient mine = Client(factory.AccessToken(KgsmTier.Viewer));
+        HttpClient mine = Client(factory.AccessToken(Persona.Viewer));
         await mine.PostAsJsonAsync("/api/v1/push/subscriptions", Subscription(mineEndpoint));
 
         HttpClient theirs = Client(OtherUserToken());
@@ -129,7 +129,7 @@ public class PushSubscriptionTests(AuthTestFactory factory) : IClassFixture<Auth
     public async Task One_user_cannot_revoke_anothers_device()
     {
         string mineEndpoint = "https://fcm.googleapis.com/fcm/send/" + Guid.NewGuid().ToString("N");
-        HttpClient mine = Client(factory.AccessToken(KgsmTier.Viewer));
+        HttpClient mine = Client(factory.AccessToken(Persona.Viewer));
         await mine.PostAsJsonAsync("/api/v1/push/subscriptions", Subscription(mineEndpoint));
 
         HttpClient theirs = Client(OtherUserToken());
@@ -149,7 +149,7 @@ public class PushSubscriptionTests(AuthTestFactory factory) : IClassFixture<Auth
     public async Task A_user_can_revoke_their_own_device()
     {
         string endpoint = "https://fcm.googleapis.com/fcm/send/" + Guid.NewGuid().ToString("N");
-        HttpClient c = Client(factory.AccessToken(KgsmTier.Viewer));
+        HttpClient c = Client(factory.AccessToken(Persona.Viewer));
         await c.PostAsJsonAsync("/api/v1/push/subscriptions", Subscription(endpoint));
 
         HttpResponseMessage res = await c.DeleteAsync(
@@ -168,7 +168,7 @@ public class PushSubscriptionTests(AuthTestFactory factory) : IClassFixture<Auth
     [InlineData("BBBB", "AAAAAAAAAAAAAAAAAAAAAA")]
     public async Task A_malformed_subscription_is_refused_at_registration(string p256dh, string auth)
     {
-        HttpClient c = Client(factory.AccessToken(KgsmTier.Viewer));
+        HttpClient c = Client(factory.AccessToken(Persona.Viewer));
         HttpResponseMessage res = await c.PostAsJsonAsync("/api/v1/push/subscriptions", new
         {
             endpoint = "https://fcm.googleapis.com/fcm/send/" + Guid.NewGuid().ToString("N"),
@@ -180,7 +180,7 @@ public class PushSubscriptionTests(AuthTestFactory factory) : IClassFixture<Auth
     [Fact]
     public async Task A_non_https_endpoint_is_refused()
     {
-        HttpClient c = Client(factory.AccessToken(KgsmTier.Viewer));
+        HttpClient c = Client(factory.AccessToken(Persona.Viewer));
         HttpResponseMessage res = await c.PostAsJsonAsync("/api/v1/push/subscriptions",
             Subscription("http://fcm.googleapis.com/fcm/send/plain"));
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);

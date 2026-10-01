@@ -23,13 +23,13 @@ namespace TheKrystalShip.Api.Controllers;
 /// against each other — the engine knows what a configured port is and this surface does not.
 /// </para>
 /// <para>
-/// Operator-gated, like the rest of the host-internals surface: what is listening on a machine and
-/// under which process is a map of it.
+/// Gated on the firewall's <c>firewall:rules.read</c>: what is listening on a machine and under which
+/// process is a map of it.
 /// </para>
 /// </remarks>
 [ApiController]
 [Route("api/v1/hosts/{id}/ports")]
-[Authorize(Policy = AuthPolicy.Operator)]
+[RequiresAction(ActionIds.FirewallRulesRead)]
 public sealed class HostPortsController(ApiOptions options) : ControllerBase
 {
     /// <summary>

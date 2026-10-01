@@ -25,7 +25,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/servers")]
-[Authorize(Policy = AuthPolicy.Viewer)] // reads — viewer and up; the write below requires operator (M4·a)
+[Authorize]
 public sealed class ServersController(
     ServerAggregator aggregator,
     JobRegistry jobs,
@@ -34,8 +34,13 @@ public sealed class ServersController(
     BatchWorker worker,
     StreamHub hub,
     ApiOptions options,
+    NodeAccess access,
     ILogger<ServersController> logger) : ControllerBase
 {
+    /// <summary>
+    /// Every server on this host the caller may read (<c>kgsm:server.read</c> at each one): a collection is
+    /// cut to its reader rather than refused, so somebody granted one server sees exactly that one.
+    /// </summary>
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<Server>>> GetAll(CancellationToken ct)
     {
@@ -47,7 +52,10 @@ public sealed class ServersController(
         if (!read.EngineRead)
             return Error(StatusCodes.Status503ServiceUnavailable, "engine_unavailable",
                 "the game-server engine could not be read; last-known state is preserved");
-        return Ok(read.Servers);
+
+        HashSet<string> readable = await access.AllowedServersAsync(
+            User, ActionIds.ServerRead, read.Servers.Select(s => s.Id), ct);
+        return Ok(read.Servers.Where(s => readable.Contains(s.Id)).ToList());
     }
 
     /// <summary>
@@ -78,10 +86,13 @@ public sealed class ServersController(
         // "no engine history" into a 500 on the very endpoint that reports there is none.
         IEventJournalHistory? journal = HttpContext.RequestServices.GetService<IEventJournalHistory>();
 
+        HashSet<string> readable = await access.AllowedServersAsync(
+            User, ActionIds.ServerRead, read.Servers.Select(s => s.Id), ct);
+
         string label = string.IsNullOrWhiteSpace(window) ? "7d" : window.Trim().ToLowerInvariant();
         return await AvailabilityQueries.BuildAsync(
             journal,
-            [.. read.Servers.Select(s => s.Id)],
+            [.. read.Servers.Select(s => s.Id).Where(readable.Contains)],
             AvailabilityQueries.ParseWindow(window),
             label,
             DateTimeOffset.UtcNow,
@@ -95,6 +106,7 @@ public sealed class ServersController(
     /// never trigger a per-poll firewall probe). Fuller detail (console, files, players) arrives later.
     /// </summary>
     [HttpGet("{id}")]
+    [RequiresAction(ActionIds.ServerRead)]
     public async Task<ActionResult<Server>> GetById(string id, CancellationToken ct)
     {
         // BaseUrl() lets the detail join build absolute, self-hosted cover/hero URLs for the SPA's hero.
@@ -114,6 +126,8 @@ public sealed class ServersController(
     /// <c>202</c> returns the job and progress arrives on the <c>jobs</c> WS topic.
     /// <list type="bullet">
     /// <item><c>400</c> — unknown/missing verb (the closed set is server-defined).</item>
+    /// <item><c>403</c> — the caller may not perform this verb's action (<c>kgsm:server.start</c>,
+    /// <c>.stop</c>, <c>.restart</c> or <c>.update</c>) on this server.</item>
     /// <item><c>404</c> — unknown server id.</item>
     /// <item><c>409</c> — an obvious no-op/illegal transition against the real status (start-when-running /
     /// stop-when-stopped / update-when-running), or a command already in flight.</item>
@@ -121,13 +135,16 @@ public sealed class ServersController(
     /// </list>
     /// </summary>
     [HttpPost("{id}/commands")]
-    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up (architecture.html §3·e control set)
     public async Task<IActionResult> PostCommand(string id, [FromBody] CommandRequest? body, CancellationToken ct)
     {
         string? verb = body?.Verb?.Trim().ToLowerInvariant();
-        if (!CommandVerb.IsKnown(verb))
+        if (!CommandVerb.IsKnown(verb) || ActionIds.ForVerb(verb) is not { } action)
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "unknown or missing verb; expected one of: start, stop, restart, update");
+
+        // Each verb is its own action, so the gate is decided here, once the verb is known.
+        if (!await access.AllowsOnServerAsync(User, action, id, ct))
+            return Error(StatusCodes.Status403Forbidden, "forbidden", $"'{verb}' on this server needs {action}");
 
         // Provenance to stamp on the engine command (M5) so the resulting kgsm event — and the audit row
         // the consumer writes from it — records the driving surface. Caller-declared, validated against
@@ -197,17 +214,18 @@ public sealed class ServersController(
     /// </para>
     /// <list type="bullet">
     /// <item><c>400</c> — unknown/missing verb, an empty server list, or a bad origin.</item>
+    /// <item>A member the caller may not perform the verb's action on is refused, like one the engine
+    /// would refuse; the rest run.</item>
     /// <item><c>202</c> — accepted: <c>{ batchId, runId, verb, admitted, refused }</c>. A batch where
     /// every member was refused is still a <c>202</c>: the request was well-formed and the answer is
     /// the refusal list, which is information, not an error.</item>
     /// </list>
     /// </summary>
     [HttpPost("commands")]
-    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up, the single-command gate
     public async Task<IActionResult> PostBatchCommand([FromBody] BatchRequest? body, CancellationToken ct)
     {
         string? verb = body?.Verb?.Trim().ToLowerInvariant();
-        if (!CommandVerb.IsKnown(verb))
+        if (!CommandVerb.IsKnown(verb) || ActionIds.ForVerb(verb) is not { } action)
             return Error(StatusCodes.Status400BadRequest, "bad_request",
                 "unknown or missing verb; expected one of: start, stop, restart, update");
 
@@ -234,6 +252,7 @@ public sealed class ServersController(
             return Error(StatusCodes.Status400BadRequest, "bad_request", "serverIds must name at least one server");
 
         IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct);
+        HashSet<string> allowed = await access.AllowedServersAsync(User, action, requested, ct);
         string? actor = AuditPrincipal.ActorString(User);
         string batchId = "batch_" + Guid.NewGuid().ToString("N")[..12];
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -253,6 +272,10 @@ public sealed class ServersController(
                 Refuse(id, "no such server on this host");
                 continue;
             }
+
+            // Each member is gated at its own server: a batch over a set refuses the members the caller
+            // may not act on and runs the rest, as the same requests made one at a time would.
+            if (!allowed.Contains(id)) { Refuse(id, $"needs {action} on this server"); continue; }
 
             string? noop = CommandGate.Inadmissible(verb!, server.Status);
             if (noop is not null) { Refuse(id, noop); continue; }
@@ -338,7 +361,7 @@ public sealed class ServersController(
     /// </list>
     /// </summary>
     [HttpPost]
-    [Authorize(Policy = AuthPolicy.Operator)] // create — operator and up (architecture.html §3·e control set)
+    [RequiresAction(ActionIds.ServerInstall)]
     public IActionResult Install([FromBody] InstallRequest? body)
     {
         string? blueprint = body?.Blueprint?.Trim();
@@ -422,6 +445,7 @@ public sealed class ServersController(
     // Resolve the id the new instance installs under, asking the engine every time so the charset and the
     // roster are checked by the thing that owns both. Returns false with the engine's own message when a
     // caller-named id is unusable; a derived slug never fails the create, it just stops being used.
+    [PerformedFor(ActionIds.ServerInstall)]
     private static bool TryResolveInstanceId(
         IInstanceService instances, string blueprint, string? requestedId, string? displayName,
         out string assignedId, out string? error)
@@ -481,7 +505,7 @@ public sealed class ServersController(
     /// </list>
     /// </summary>
     [HttpDelete("{id}")]
-    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up
+    [RequiresAction(ActionIds.ServerUninstall)]
     public async Task<IActionResult> Uninstall(string id, [FromQuery] string? origin, CancellationToken ct)
     {
         if (!TryResolveOrigin(origin, out string resolvedOrigin))
@@ -529,8 +553,8 @@ public sealed class ServersController(
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Admin, not operator. Every other write here acts on one server; this one shapes where the host
-    /// keeps its data, which is the same authority registering and deregistering a library takes.
+    /// <c>kgsm:server.move</c>, its own action. Every other write here acts on one server alone; this one
+    /// also shapes where the host keeps its data.
     /// </para>
     /// <para>
     /// <b>The job is the operation's span, and run-state is not.</b> The engine starts the instance
@@ -546,7 +570,7 @@ public sealed class ServersController(
     /// </para>
     /// </remarks>
     [HttpPost("{id}/move")]
-    [Authorize(Policy = AuthPolicy.Admin)] // placement shapes the host — the library-CRUD authority
+    [RequiresAction(ActionIds.ServerMove)]
     public async Task<IActionResult> Move(
         string id, [FromBody] MoveServerRequest? body, CancellationToken ct)
     {
@@ -627,7 +651,7 @@ public sealed class ServersController(
     // a client learns about waiting work through the channel it already follows.
     private void PublishJob(Job job) =>
         hub.Publish(StreamProtocol.JobsTopic, StreamProtocol.JobEntityKey(job.Id),
-            new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, job));
+            new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, job), job.ServerId);
 
     // The absolute origin the self-hosted cover/hero serving URLs are built from — the configured public
     // base (reverse-proxy deployments) or the live request's scheme+host. Mirrors LibraryController.BaseUrl().

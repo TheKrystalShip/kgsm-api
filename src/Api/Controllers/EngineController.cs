@@ -18,7 +18,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// </remarks>
 [ApiController]
 [Route("api/v1/hosts/{id}/engine")]
-[Authorize(Policy = AuthPolicy.Operator)]
+[RequiresAction(ActionIds.EngineConfigRead)]
 public sealed class EngineController(EngineInfoService engine, ApiOptions options) : ControllerBase
 {
     /// <summary>

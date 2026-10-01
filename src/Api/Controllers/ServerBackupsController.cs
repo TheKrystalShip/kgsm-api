@@ -15,11 +15,12 @@ using TheKrystalShip.KGSM.Core.Models;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// Per-server backups (Tier-1 ops) — <c>GET /servers/{id}/backups</c> (list), <c>POST /servers/{id}/backups</c>
+/// Per-server backups — <c>GET /servers/{id}/backups</c> (list), <c>POST /servers/{id}/backups</c>
 /// (create), <c>POST /servers/{id}/backups/restore</c> (restore from a named snapshot),
 /// <c>DELETE /servers/{id}/backups/{backupId}</c> (remove one), and the two-step archive download
-/// (<c>POST …/download-ticket</c> then <c>GET …/archive</c>). The list is a viewer-gated synchronous read
-/// (kgsm <c>instances backups</c> is quick); everything that mutates or hands over bytes is operator-gated.
+/// (<c>POST …/download-ticket</c> then <c>GET …/archive</c>). The list is a synchronous read (kgsm
+/// <c>instances backups</c> is quick) on <c>kgsm:server.backups.read</c>; create, restore and the rest each
+/// take their own action at the server, and the download takes <c>kgsm:server.files.read</c>.
 /// <para>
 /// Create and restore are async — they reuse the shared <see cref="JobRegistry"/>/<see cref="CommandRunner"/>
 /// (one job model, one in-flight slot per server) exactly like install/uninstall, returning <c>202</c> + a job.
@@ -36,13 +37,13 @@ namespace TheKrystalShip.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/servers/{id}/backups")]
-[Authorize(Policy = AuthPolicy.Viewer)] // list — viewer and up; create/restore below require operator
 public sealed class ServerBackupsController(
     ServerAggregator aggregator,
     JobRegistry jobs,
     CommandRunner runner,
     BackupDownloadTickets tickets,
     ApiJournal journal,
+    NodeAccess access,
     ILogger<ServerBackupsController> logger) : ControllerBase
 {
     /// <summary>
@@ -56,6 +57,7 @@ public sealed class ServerBackupsController(
     /// </list>
     /// </summary>
     [HttpGet]
+    [RequiresAction(ActionIds.ServerBackupsRead)]
     public async Task<IActionResult> List(string id, CancellationToken ct)
     {
         if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
@@ -107,7 +109,7 @@ public sealed class ServerBackupsController(
     /// </list>
     /// </summary>
     [HttpPost]
-    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up
+    [RequiresAction(ActionIds.ServerBackupsCreate)]
     public async Task<IActionResult> Create(string id, [FromBody] CreateBackupRequest? body, CancellationToken ct)
     {
         if (!TryResolveOrigin(body?.Origin, out string origin))
@@ -142,7 +144,7 @@ public sealed class ServerBackupsController(
     /// </list>
     /// </summary>
     [HttpPost("restore")]
-    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up
+    [RequiresAction(ActionIds.ServerBackupsRestore)]
     public async Task<IActionResult> Restore(string id, [FromBody] RestoreBackupRequest? body, CancellationToken ct)
     {
         string? backup = body?.Backup?.Trim();
@@ -169,7 +171,7 @@ public sealed class ServerBackupsController(
     }
 
     /// <summary>
-    /// Delete one backup (operator). Synchronous — removing a backup is an unlink, not a transfer, so it
+    /// Delete one backup. Synchronous — removing a backup is an unlink, not a transfer, so it
     /// answers within the request and the caller can re-list immediately; there is no job to await and
     /// nothing to show progress for. Audited via the kgsm event echo (<c>backup.deleted</c> →
     /// <c>backup.delete</c>, at warn) — no direct write here.
@@ -184,7 +186,7 @@ public sealed class ServerBackupsController(
     /// </list>
     /// </summary>
     [HttpDelete("{backupId}")]
-    [Authorize(Policy = AuthPolicy.Operator)] // mutation, and an irreversible one — operator and up
+    [RequiresAction(ActionIds.ServerBackupsManage)]
     public async Task<IActionResult> Delete(
         string id, string backupId, [FromQuery] string? origin, CancellationToken ct)
     {
@@ -265,7 +267,7 @@ public sealed class ServerBackupsController(
     /// </para>
     /// </remarks>
     [HttpPost("prune")]
-    [Authorize(Policy = AuthPolicy.Operator)] // mutation, and an irreversible one — operator and up
+    [RequiresAction(ActionIds.ServerBackupsManage)]
     public async Task<IActionResult> Prune(string id, [FromBody] PruneBackupsRequest? body, CancellationToken ct)
     {
         if (body?.Keep is not { } keep || keep < 1)
@@ -337,17 +339,18 @@ public sealed class ServerBackupsController(
     /// </para>
     /// </remarks>
     [HttpPost("{backupId}/pin")]
-    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up
+    [RequiresAction(ActionIds.ServerBackupsManage)]
     public Task<IActionResult> Pin(string id, string backupId, [FromBody] BackupRetentionRequest? body, CancellationToken ct)
         => SetRetentionAsync(id, backupId, body?.Origin, pin: true, ct);
 
     [HttpPost("{backupId}/unpin")]
-    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up
+    [RequiresAction(ActionIds.ServerBackupsManage)]
     public Task<IActionResult> Unpin(string id, string backupId, [FromBody] BackupRetentionRequest? body, CancellationToken ct)
         => SetRetentionAsync(id, backupId, body?.Origin, pin: false, ct);
 
     // Both directions share one path so the gate, the origin vocabulary and the failure shape cannot
     // drift between pinning and unpinning.
+    [PerformedFor(ActionIds.ServerBackupsManage)]
     private async Task<IActionResult> SetRetentionAsync(
         string id, string backupId, string? origin, bool pin, CancellationToken ct)
     {
@@ -392,9 +395,10 @@ public sealed class ServerBackupsController(
     }
 
     /// <summary>
-    /// Mint a short-lived ticket for downloading one backup's archive (operator — a backup carries the
-    /// instance's whole install and saves, so it holds every secret the file browser is operator-gated
-    /// for, in bulk). Returns the handle plus the relative URL to navigate to.
+    /// Mint a short-lived ticket for downloading one backup's archive (<c>kgsm:server.files.read</c> — a
+    /// backup carries the instance's whole install and saves, so it holds every secret the file browser
+    /// guards, in bulk). The ticket is bound to the caller's account. Returns the handle plus the relative
+    /// URL to navigate to.
     /// <list type="bullet">
     /// <item><c>400</c> — a bad origin.</item>
     /// <item><c>404</c> — unknown server id, or no such backup.</item>
@@ -405,7 +409,7 @@ public sealed class ServerBackupsController(
     /// </list>
     /// </summary>
     [HttpPost("{backupId}/download-ticket")]
-    [Authorize(Policy = AuthPolicy.Operator)] // a whole-instance archive — bulk secrets, same tier as file read
+    [RequiresAction(BackupDownloadTicket.Action)]
     public async Task<IActionResult> MintDownloadTicket(
         string id, string backupId, [FromBody] CreateBackupRequest? body, CancellationToken ct)
     {
@@ -438,6 +442,7 @@ public sealed class ServerBackupsController(
 
         (string handle, BackupDownloadTicket ticket) = tickets.Mint(
             id, backupId,
+            NodeAccess.AccountOf(User),
             AuditPrincipal.ActorString(User),
             origin,
             User.FindFirst(KgsmAuthClaims.SessionId)?.Value);
@@ -454,7 +459,8 @@ public sealed class ServerBackupsController(
     /// Stream a backup's archive. Authenticated by the <c>?ticket=</c> alone — a browser navigation
     /// cannot set an Authorization header, and that is the entire reason the ticket exists.
     /// <list type="bullet">
-    /// <item><c>401</c> — missing, expired, or wrong-backup ticket (<c>invalid_ticket</c>).</item>
+    /// <item><c>401</c> — missing, expired, or wrong-backup ticket, or one whose account may no longer
+    /// read this server's files (<c>invalid_ticket</c>).</item>
     /// <item><c>404</c> — no such backup.</item>
     /// <item><c>409</c> — the backup is uncompressed.</item>
     /// <item><c>503</c> — the kgsm engine is not provisioned on this host.</item>
@@ -463,11 +469,19 @@ public sealed class ServerBackupsController(
     /// </summary>
     [HttpGet("{backupId}/archive")]
     [AllowAnonymous] // the ticket IS the credential; no bearer reaches a navigation
-    public IActionResult DownloadArchive(string id, string backupId, [FromQuery] string? ticket)
+    public async Task<IActionResult> DownloadArchive(
+        string id, string backupId, [FromQuery] string? ticket, CancellationToken ct)
     {
-        if (!tickets.TryRedeem(ticket, id, backupId, out BackupDownloadTicket? redeemed, out bool firstRedemption))
+        // The ticket's account is evaluated again here, from the replica: a ticket outlives nothing its
+        // account has since lost. The refusal is the same as an unknown ticket's, so a link says nothing
+        // about why it stopped working.
+        if (await tickets.RedeemAsync(ticket, id, backupId,
+                (t, token) => access.AllowsAccountAsync(t.AccountId, BackupDownloadTicket.Action, access.ServerTarget(t.ServerId), token),
+                ct) is not { } redemption)
             return Error(StatusCodes.Status401Unauthorized, "invalid_ticket",
                 "this download link is invalid or has expired; request the download again");
+
+        BackupDownloadTicket redeemed = redemption.Ticket;
 
         if (HttpContext.RequestServices.GetService(typeof(IInstanceBackups)) is not IInstanceBackups backups)
             return Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
@@ -483,8 +497,8 @@ public sealed class ServerBackupsController(
         // host. Fire-and-forget so a slow audit write never stalls the transfer, and only on the first
         // redemption so a resumed download stays one row. Warn, because bulk data leaving the host is
         // worth seeing in a feed even when it is entirely routine.
-        if (firstRedemption)
-            _ = WriteDownloadAudit(id, backupId, archive, redeemed!);
+        if (redemption.First)
+            _ = WriteDownloadAudit(id, backupId, archive, redeemed);
 
         if (archive.Sha256 is { Length: > 0 } digest)
             Response.Headers["X-Backup-Sha256"] = digest;

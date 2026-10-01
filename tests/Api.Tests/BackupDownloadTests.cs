@@ -64,7 +64,7 @@ public sealed class BackupDownloadTests
     {
         // A backup is the instance's whole install + saves — every secret the file browser is
         // operator-gated for, in one file. Listing backups stays viewer; taking one home does not.
-        HttpResponseMessage resp = await Mint(_engine, KgsmTier.Viewer, Server, Compressed);
+        HttpResponseMessage resp = await Mint(_engine, Persona.Viewer, Server, Compressed);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -78,7 +78,7 @@ public sealed class BackupDownloadTests
     [Fact]
     public async Task Mint_UncompressedBackup_409_Uncompressed()
     {
-        HttpResponseMessage resp = await Mint(_engine, KgsmTier.Operator, Server, Uncompressed);
+        HttpResponseMessage resp = await Mint(_engine, Persona.Operator, Server, Uncompressed);
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -90,21 +90,21 @@ public sealed class BackupDownloadTests
     {
         // Refused at MINT rather than at download: a ticket for something unservable would surface as a
         // broken download two clicks later, with nothing to explain it.
-        HttpResponseMessage resp = await Mint(_engine, KgsmTier.Operator, Server, "no-such-backup");
+        HttpResponseMessage resp = await Mint(_engine, Persona.Operator, Server, "no-such-backup");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task Mint_UnknownServer_404()
     {
-        HttpResponseMessage resp = await Mint(_engine, KgsmTier.Operator, "no-such-server", Compressed);
+        HttpResponseMessage resp = await Mint(_engine, Persona.Operator, "no-such-server", Compressed);
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task Mint_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Mint(_noEngine, KgsmTier.Operator, Server, Compressed);
+        HttpResponseMessage resp = await Mint(_noEngine, Persona.Operator, Server, Compressed);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
 
@@ -174,22 +174,27 @@ public sealed class BackupDownloadTests
 
     // ===== the ticket store's own semantics =========================================================
 
+    private static Task<bool> Allowed(BackupDownloadTicket _, CancellationToken __) => Task.FromResult(true);
+
+    private static Task<bool> Refused(BackupDownloadTicket _, CancellationToken __) => Task.FromResult(false);
+
     [Fact]
-    public void Ticket_ExpiresAfterItsTtl()
+    public async Task Ticket_ExpiresAfterItsTtl()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 9, 12, 0, 0, TimeSpan.Zero));
         var store = new BackupDownloadTickets(clock);
 
-        (string handle, _) = store.Mint("s", "b", "discord:haru", "ui", "sid-1");
-        Assert.True(store.TryRedeem(handle, "s", "b", out _, out bool first));
-        Assert.True(first);
+        (string handle, _) = store.Mint("s", "b", "usr_haru", "discord:haru", "ui", "sid-1");
+        BackupRedemption? first = await store.RedeemAsync(handle, "s", "b", Allowed);
+        Assert.NotNull(first);
+        Assert.True(first.First);
 
         clock.Advance(BackupDownloadTickets.Ttl + TimeSpan.FromSeconds(1));
-        Assert.False(store.TryRedeem(handle, "s", "b", out _, out _));
+        Assert.Null(await store.RedeemAsync(handle, "s", "b", Allowed));
     }
 
     [Fact]
-    public void Ticket_IsRedeemableMoreThanOnce_ButAuditsOnlyOnFirst()
+    public async Task Ticket_IsRedeemableMoreThanOnce_ButAuditsOnlyOnFirst()
     {
         // Deliberately NOT single-use: a resumed or ranged download is a second request for the same
         // bytes, and burning the ticket on first contact would make the resumability this whole design
@@ -197,26 +202,36 @@ public sealed class BackupDownloadTests
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 9, 12, 0, 0, TimeSpan.Zero));
         var store = new BackupDownloadTickets(clock);
 
-        (string handle, _) = store.Mint("s", "b", "discord:haru", "ui", "sid-1");
+        (string handle, _) = store.Mint("s", "b", "usr_haru", "discord:haru", "ui", "sid-1");
 
-        Assert.True(store.TryRedeem(handle, "s", "b", out _, out bool first));
-        Assert.True(first);
-        Assert.True(store.TryRedeem(handle, "s", "b", out _, out bool second));
-        Assert.False(second);
-        Assert.True(store.TryRedeem(handle, "s", "b", out _, out bool third));
-        Assert.False(third);
+        Assert.True((await store.RedeemAsync(handle, "s", "b", Allowed))!.First);
+        Assert.False((await store.RedeemAsync(handle, "s", "b", Allowed))!.First);
+        Assert.False((await store.RedeemAsync(handle, "s", "b", Allowed))!.First);
     }
 
     [Fact]
-    public void Ticket_CarriesTheMintersProvenance()
+    public async Task Ticket_WhoseAccountMayNoLongerDownload_RedeemsNothing_AndSpendsNoAuditRow()
     {
-        // The redeeming request is anonymous, so the row would otherwise have no actor. The ticket is
-        // what carries who asked for it across the two requests.
+        // Evaluated again at redemption: a ticket outlives nothing its account has since lost. A refused
+        // redemption spends nothing, so a download allowed afterwards is still recorded once.
         var store = new BackupDownloadTickets();
-        (string handle, BackupDownloadTicket minted) = store.Mint("s", "b", "discord:haru", "ui", "sid-1");
+        (string handle, _) = store.Mint("s", "b", "usr_haru", "discord:haru", "ui", "sid-1");
 
-        Assert.True(store.TryRedeem(handle, "s", "b", out BackupDownloadTicket? redeemed, out _));
-        Assert.Equal("discord:haru", redeemed!.Actor);
+        Assert.Null(await store.RedeemAsync(handle, "s", "b", Refused));
+        Assert.True((await store.RedeemAsync(handle, "s", "b", Allowed))!.First);
+    }
+
+    [Fact]
+    public async Task Ticket_CarriesTheMintersAccountAndProvenance()
+    {
+        // The redeeming request is anonymous, so the row would otherwise have no actor and the check no
+        // account. The ticket is what carries who asked for it across the two requests.
+        var store = new BackupDownloadTickets();
+        (string handle, BackupDownloadTicket minted) = store.Mint("s", "b", "usr_haru", "discord:haru", "ui", "sid-1");
+
+        BackupDownloadTicket redeemed = (await store.RedeemAsync(handle, "s", "b", Allowed))!.Ticket;
+        Assert.Equal("usr_haru", redeemed.AccountId);
+        Assert.Equal("discord:haru", redeemed.Actor);
         Assert.Equal("ui", redeemed.Origin);
         Assert.Equal("sid-1", redeemed.SessionId);
         Assert.Equal(minted.ExpiresAt, redeemed.ExpiresAt);
@@ -226,14 +241,14 @@ public sealed class BackupDownloadTests
 
     private async Task<JsonElement> MintOk(string server, string backup)
     {
-        HttpResponseMessage resp = await Mint(_engine, KgsmTier.Operator, server, backup);
+        HttpResponseMessage resp = await Mint(_engine, Persona.Operator, server, backup);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         return doc.RootElement.Clone();
     }
 
     private static Task<HttpResponseMessage> Mint(
-        AuthTestFactory f, KgsmTier? tier, string server, string backup)
+        AuthTestFactory f, Persona? tier, string server, string backup)
     {
         HttpClient c = f.CreateClient();
         if (tier is { } t)

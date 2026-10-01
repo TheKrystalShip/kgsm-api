@@ -8,6 +8,8 @@ namespace TheKrystalShip.Api.Services.Backups;
 /// </summary>
 /// <param name="ServerId">The instance the backup belongs to.</param>
 /// <param name="BackupId">The single backup this ticket authorises — and no other.</param>
+/// <param name="AccountId">The account it was minted for, whose access to <see cref="Action"/> at the
+/// server is evaluated again at redemption. <see langword="null"/> on an auth-disabled host.</param>
 /// <param name="Actor">Who minted it, carried so the audit row at redemption names them rather than
 /// the anonymous request that redeems it.</param>
 /// <param name="Origin">The surface that asked for it.</param>
@@ -16,10 +18,20 @@ namespace TheKrystalShip.Api.Services.Backups;
 public sealed record BackupDownloadTicket(
     string ServerId,
     string BackupId,
+    string? AccountId,
     string? Actor,
     string? Origin,
     string? SessionId,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt)
+{
+    /// <summary>What redeeming a ticket performs: reading the server's files, in bulk.</summary>
+    public const string Action = Auth.ActionIds.ServerFilesRead;
+}
+
+/// <summary>One allowed redemption of a ticket.</summary>
+/// <param name="Ticket">The ticket redeemed.</param>
+/// <param name="First">Whether this is the first allowed redemption — the one that writes the audit row.</param>
+public sealed record BackupRedemption(BackupDownloadTicket Ticket, bool First);
 
 /// <summary>
 /// The short-lived tickets that let a browser download a backup archive by plain navigation.
@@ -42,6 +54,10 @@ public sealed record BackupDownloadTicket(
 /// Burning the ticket on first contact would make exactly the resumability that justified this design
 /// impossible, so a ticket is redeemable repeatedly until it expires. The audit row is written once, on
 /// first redemption, so one download is one row rather than one row per TCP hiccup.</para>
+///
+/// <para><strong>Bound to who, what and where.</strong> A ticket names the account it was minted for,
+/// the action redeeming it performs and the server it reaches, and every redemption evaluates that account
+/// again from the replica: a ticket outlives nothing its account has since lost.</para>
 ///
 /// <para>Storage is deliberately in-memory: a ticket outliving the process that minted it has no value,
 /// since the whole point is a window measured in minutes. An API restart invalidates every outstanding
@@ -77,12 +93,13 @@ public sealed class BackupDownloadTickets
     /// <summary>Mints a ticket for one backup and returns its opaque handle.</summary>
     /// <param name="serverId">The instance the backup belongs to.</param>
     /// <param name="backupId">The backup being authorised.</param>
+    /// <param name="accountId">The account minting it, evaluated again at every redemption.</param>
     /// <param name="actor">Who is minting it.</param>
     /// <param name="origin">The surface driving the request.</param>
     /// <param name="sessionId">The minting session, for correlation.</param>
     /// <returns>The handle and the ticket it maps to.</returns>
     public (string Handle, BackupDownloadTicket Ticket) Mint(
-        string serverId, string backupId, string? actor, string? origin, string? sessionId)
+        string serverId, string backupId, string? accountId, string? actor, string? origin, string? sessionId)
     {
         Sweep();
 
@@ -90,7 +107,7 @@ public sealed class BackupDownloadTickets
         // that matters here: the handle IS the credential for its window.
         string handle = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
         var ticket = new BackupDownloadTicket(
-            serverId, backupId, actor, origin, sessionId, _time.GetUtcNow().Add(Ttl));
+            serverId, backupId, accountId, actor, origin, sessionId, _time.GetUtcNow().Add(Ttl));
 
         _tickets[handle] = new Entry { Ticket = ticket };
         return (handle, ticket);
@@ -102,37 +119,41 @@ public sealed class BackupDownloadTickets
     /// <param name="handle">The handle from the URL.</param>
     /// <param name="serverId">The server the request is for — must match what was minted.</param>
     /// <param name="backupId">The backup the request is for — must match what was minted.</param>
-    /// <param name="ticket">The ticket, when valid.</param>
-    /// <param name="firstRedemption">
-    /// True exactly once per ticket, on whichever request wins the race — the caller writes the audit
-    /// row only then, so a resumed download does not log twice.
+    /// <param name="stillAllowed">
+    /// Whether the ticket's account may still perform <see cref="BackupDownloadTicket.Action"/> at its
+    /// server, asked before anything is spent.
     /// </param>
-    /// <returns><c>true</c> when the handle is live and authorises precisely this backup.</returns>
-    public bool TryRedeem(string? handle, string serverId, string backupId,
-        out BackupDownloadTicket? ticket, out bool firstRedemption)
+    /// <param name="ct">Cancels the access check.</param>
+    /// <returns>
+    /// The redemption when the handle is live, authorises precisely this backup and its account may still
+    /// download it; otherwise <see langword="null"/>. <see cref="BackupRedemption.First"/> is true exactly
+    /// once per ticket, on whichever allowed request wins the race — the caller writes the audit row only
+    /// then, so a resumed download does not log twice.
+    /// </returns>
+    public async Task<BackupRedemption?> RedeemAsync(
+        string? handle, string serverId, string backupId,
+        Func<BackupDownloadTicket, CancellationToken, Task<bool>> stillAllowed, CancellationToken ct = default)
     {
-        ticket = null;
-        firstRedemption = false;
-
-        if (string.IsNullOrWhiteSpace(handle)) return false;
-        if (!_tickets.TryGetValue(handle, out Entry? entry)) return false;
+        if (string.IsNullOrWhiteSpace(handle)) return null;
+        if (!_tickets.TryGetValue(handle, out Entry? entry)) return null;
 
         if (_time.GetUtcNow() >= entry.Ticket.ExpiresAt)
         {
             _tickets.TryRemove(handle, out _);
-            return false;
+            return null;
         }
 
         // A ticket names ONE backup. Redeeming it against a different server or backup is refused rather
-        // than honoured for whatever the URL happens to say — otherwise a ticket for a small backup an
-        // operator may download would serve as a ticket for any other, which is the whole authorisation.
+        // than honoured for whatever the URL happens to say — otherwise a ticket for one backup somebody
+        // may download would serve as a ticket for any other, which is the whole authorisation.
         if (!string.Equals(entry.Ticket.ServerId, serverId, StringComparison.Ordinal)
             || !string.Equals(entry.Ticket.BackupId, backupId, StringComparison.Ordinal))
-            return false;
+            return null;
 
-        firstRedemption = Interlocked.Exchange(ref entry.Audited, 1) == 0;
-        ticket = entry.Ticket;
-        return true;
+        if (!await stillAllowed(entry.Ticket, ct).ConfigureAwait(false))
+            return null;
+
+        return new BackupRedemption(entry.Ticket, Interlocked.Exchange(ref entry.Audited, 1) == 0);
     }
 
     /// <summary>Drops expired tickets. Called on mint — the map only grows when someone mints.</summary>

@@ -20,8 +20,8 @@ namespace TheKrystalShip.Api.Realtime;
 /// a fabricated "running"/"stopped". A health probe flip is detected by comparing the cached
 /// <see cref="LeafHealthMonitor.Current"/> capability status, so a leaf that is systemd-active yet failing its
 /// <c>/health</c> correctly emits a patch with the degraded health.</para>
-/// <para><b>Operator-gated at the socket</b> (see <see cref="StreamProtocol.RequiresOperator"/>), matching the
-/// REST endpoint's <c>AuthPolicy.Operator</c> gate.</para>
+/// <para><b>Gated on <c>api:services.read</c> at the socket</b> (see <see cref="StreamProtocol.Gate"/>),
+/// matching the REST endpoint.</para>
 /// </remarks>
 public sealed class ServicesPump(
     StreamHub hub,

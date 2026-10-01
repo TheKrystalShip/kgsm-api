@@ -19,7 +19,7 @@ internal static class TestTokens
     /// A session in the anchor's exact shape — audience, issuer, algorithm, claims — signed by a key
     /// nobody published.
     /// </summary>
-    public static string MintByAnUnpublishedAnchor(KgsmTier tier)
+    public static string MintByAnUnpublishedAnchor()
     {
         using var stranger = EcdsaSessionSigner.Generate();
         var tokens = new SessionTokenService(
@@ -29,19 +29,18 @@ internal static class TestTokens
                 RefreshLifetime: TimeSpan.FromDays(30),
                 Issuer: AuthTestFactory.AnchorIssuer),
             stranger);
-        return tokens.MintAccess(FakeDiscordResolver.Identity, tier, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
+        return tokens.MintAccess(FakeDiscordResolver.Identity, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
     }
 
     /// <summary>
     /// A session signed with a symmetric key, audienced to this node — the kind of token this node would
     /// have to be holding a key to accept, and holds none for.
     /// </summary>
-    public static string MintSymmetric(string signingKey, KgsmTier tier)
+    public static string MintSymmetric(string signingKey)
     {
         var claims = new List<Claim>
         {
             new("sub", FakeDiscordResolver.Identity.Handle),
-            new(KgsmAuthClaims.Tier, KgsmTiers.ToWire(tier)),
             new(KgsmAuthClaims.Host, AuthTestFactory.HostId),
             new(KgsmAuthClaims.TokenKind, KgsmTokenKind.Access),
             new(KgsmAuthClaims.SessionId, "sid_test_" + Guid.NewGuid().ToString("N")),
@@ -63,12 +62,11 @@ internal static class TestTokens
     /// <see cref="KgsmAuthClaims.SessionId"/> — a session nothing could ever end, which this node refuses
     /// to hold open.
     /// </summary>
-    public static string MintAnchorSignedWithoutSid(KgsmTier tier)
+    public static string MintAnchorSignedWithoutSid()
     {
         var claims = new List<Claim>
         {
             new("sub", FakeDiscordResolver.Identity.Handle),
-            new(KgsmAuthClaims.Tier, KgsmTiers.ToWire(tier)),
             new(KgsmAuthClaims.Host, AuthTestFactory.ClusterId),
             new(KgsmAuthClaims.TokenKind, KgsmTokenKind.Access),
             new(KgsmAuthClaims.Username, FakeDiscordResolver.Identity.Username),

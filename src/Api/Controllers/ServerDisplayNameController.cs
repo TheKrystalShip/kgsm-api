@@ -32,7 +32,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// </remarks>
 [ApiController]
 [Route("api/v1/servers/{id}/display-name")]
-[Authorize(Policy = AuthPolicy.Operator)] // writes only — the label itself is read off the Server DTO
+[RequiresAction(ActionIds.ServerConfigWrite)] // writes only — the label itself is read off the Server DTO
 public sealed class ServerDisplayNameController(
     ServerAggregator aggregator,
     InstanceCache cache) : ControllerBase

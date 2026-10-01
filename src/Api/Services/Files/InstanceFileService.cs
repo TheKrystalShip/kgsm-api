@@ -1,3 +1,4 @@
+using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
@@ -128,7 +129,10 @@ public interface IInstanceFileService
 
 /// <summary>The default <see cref="IInstanceFileService"/> — see the interface doc for the delegation
 /// model. Depends on kgsm-lib's transient <see cref="IInstanceFiles"/>, so this is registered transient
-/// too (no captive-dependency singleton).</summary>
+/// too (no captive-dependency singleton). Every call is made for a caller the file routes checked for
+/// the read or the write.</summary>
+[PerformedFor(ActionIds.ServerFilesRead)]
+[PerformedFor(ActionIds.ServerFilesWrite)]
 public sealed class InstanceFileService(IInstanceFiles files) : IInstanceFileService
 {
     public ListResult ListDirectory(string instance, string? relativePath, int maxEntries)

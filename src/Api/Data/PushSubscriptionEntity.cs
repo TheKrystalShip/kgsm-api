@@ -30,7 +30,7 @@ public sealed class PushSubscriptionEntity
     public string? Username { get; set; }
 
     /// <summary>The owning account's provider-qualified handle (<c>provider:subject</c>) — what an
-    /// action staged for this device re-resolves its tier from. <see cref="UserSubject"/> alone cannot
+    /// action staged for this device resolves its account from. <see cref="UserSubject"/> alone cannot
     /// do that job: a subject is unique only within its provider. Null on a row written before a device
     /// reported one, which costs that device its buttons and nothing else, until it re-registers.</summary>
     public string? UserHandle { get; set; }

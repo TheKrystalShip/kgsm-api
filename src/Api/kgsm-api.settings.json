@@ -92,11 +92,9 @@
       // Who every request is attributed to while auth is off, as 'provider:name'.
       // Required whenever AuthDisabled is set; the host refuses to start without it.
       "DisabledAuthActor": "",
-      // This node's replica of the cluster's accounts, kept current by the auth anchor. Every KGSM
-      // service on the machine reads the same file.
+      // This node's replica of the cluster's authority, kept current by the auth anchor. This API owns
+      // it; every other KGSM service on the machine reads the same file.
       "UsersDbPath": "/var/lib/kgsm/auth/users.db",
-      // How long a resolved tier is reused before the replica is read again. The demotion lag. Floor 0.
-      "AuthorityCacheSeconds": 5,
       // How long "has this session been ended" is reused. The sign-out lag on this node. Floor 500.
       "SessionsCacheTtlMs": 5000,
       // This machine's own auth anchor, joined while this node knows no member. Empty turns it off.

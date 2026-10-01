@@ -32,8 +32,8 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// </para>
 /// <para>
 /// <b>Best-effort, always.</b> Every method swallows its failure after logging it. These are written
-/// alongside actions that have already happened — a session already exists, a tier is already
-/// changed — and turning a successful sign-in into an error because recording it did not work trades
+/// alongside actions that have already happened — a session already exists, a service has already
+/// restarted — and turning a successful sign-in into an error because recording it did not work trades
 /// a missing line for a broken door.
 /// </para>
 /// </remarks>
@@ -268,7 +268,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     /// <remarks>
     /// The base logs the generic failure; this adds what the base cannot know — a row nobody will find
     /// later, for an action that did happen. Written alongside actions already completed: a session
-    /// exists, a tier is already changed, so turning a successful sign-in into an error because
+    /// exists, a service has already restarted, so turning a successful sign-in into an error because
     /// recording it did not work would trade a missing line for a broken door.
     /// </remarks>
     private async Task WriteAsync(

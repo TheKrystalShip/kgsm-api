@@ -20,28 +20,29 @@ namespace TheKrystalShip.Api.Controllers;
 /// The installable-game catalog read surface (<c>architecture.html §3·h/§3·i</c>, M8·a). A scrape of this
 /// host's kgsm blueprints (via kgsm-lib) joined with this host's cached RAWG.io cover/metadata, mapped to the
 /// honest <see cref="LibraryEntry"/> shape — no mutation (that is <c>POST /servers</c>, M8·b). The
-/// <c>GET /library</c> listing is viewer-gated; the <c>/{id}/cover</c> + <c>/{id}/hero</c> image endpoints are
+/// <c>GET /library</c> listing and the blueprint file reads take <c>kgsm:library.read</c>, every write
+/// <c>kgsm:blueprints.write</c>; the <c>/{id}/cover</c> + <c>/{id}/hero</c> image endpoints are
 /// <see cref="AllowAnonymousAttribute">anonymous</see> (game art is not sensitive, and a CSS
 /// <c>background:url(...)</c> / <c>&lt;img&gt;</c> never sends the bearer token).
 /// </summary>
 [ApiController]
 [Route("api/v1/library")]
-[Authorize(Policy = AuthPolicy.Viewer)] // reads — viewer and up (M4·a)
 public sealed class LibraryController(
     LibraryAggregator aggregator,
     ApiOptions options,
     LibraryHydrationWorker refresher,
-    BlueprintCache blueprints) : ControllerBase
+    BlueprintCache blueprints,
+    NodeAccess access) : ControllerBase
 {
     /// <summary>
     /// <c>POST /library/refresh</c> — force an immediate full re-fetch of every blueprint's cover + metadata
     /// from Steam/RAWG (the on-demand counterpart to the periodic worker — handy right after a blueprint's
-    /// Steam App ID / rawg_slug is corrected, instead of waiting for the next scheduled run). <strong>Admin</strong>:
-    /// it spends the RAWG budget and rewrites the cache. Returns <c>202</c> (the sweep runs off the request
+    /// Steam App ID / rawg_slug is corrected, instead of waiting for the next scheduled run).
+    /// <c>kgsm:blueprints.write</c>: it spends the RAWG budget and rewrites the cache. Returns <c>202</c> (the sweep runs off the request
     /// thread) or <c>409</c> when a sweep is already in flight (the boot/periodic sweep, or a prior refresh).
     /// </summary>
     [HttpPost("refresh")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.BlueprintsWrite)]
     public IActionResult Refresh() =>
         refresher.RequestRefresh()
             ? Accepted()
@@ -55,6 +56,7 @@ public sealed class LibraryController(
     /// field would fabricate a taxonomy).
     /// </summary>
     [HttpGet]
+    [RequiresAction(ActionIds.LibraryRead)]
     public async Task<IReadOnlyList<LibraryEntry>> Get(
         [FromQuery] string? q,
         [FromQuery] string? category,
@@ -80,22 +82,19 @@ public sealed class LibraryController(
 
     // ---- the blueprint file editor (GET read / PUT save / DELETE revert) --------------------------
     //
-    // Reads are OPERATOR, writes are ADMIN. The class-level [Authorize(Viewer)] is AND-combined by
-    // ASP.NET, so the action-level attributes tighten it (the same idiom as POST /library/refresh above).
-    // A viewer therefore cannot even read a blueprint file: unlike the catalog metadata, the file is the
-    // engine's operational definition of how a game server is launched.
+    // Reads take kgsm:library.read, writes kgsm:blueprints.write.
     //
     // Every path resolution, jail check, engine validation and byte write lives in kgsm-lib's
     // IBlueprintFiles behind IBlueprintFileService — this controller only maps outcomes to status codes
     // and shapes DTOs. No audit row is written here: kgsm emits blueprint.created/.updated/.removed for
     // these writes, so the trail arrives as an event echo like every other engine action. What the
     // controller must do instead is thread actor+origin down into the emit, which is what keeps the
-    // echoed row attributed to the real admin rather than the service account.
+    // echoed row attributed to the person who made the change rather than the service account.
 
     /// <summary>
     /// <c>GET /library/scaffold</c> — the engine's blueprint skeleton (<c>blueprint.tp</c>), for seeding a
-    /// new blueprint's editor buffer. <strong>Operator+</strong>: an operator cannot <c>POST</c> a blueprint
-    /// but does reach the create page, where the buffer loads read-only alongside the assistant hand-off.
+    /// new blueprint's editor buffer. <c>kgsm:library.read</c>: a reader who cannot <c>POST</c> a blueprint
+    /// still reaches the create page, where the buffer loads read-only alongside the assistant hand-off.
     /// <list type="bullet">
     /// <item><c>200</c> — the template (<see cref="BlueprintScaffoldDto"/>).</item>
     /// <item><c>503</c> — the kgsm engine is not provisioned, or reported no templates directory / an
@@ -103,7 +102,7 @@ public sealed class LibraryController(
     /// </list>
     /// </summary>
     [HttpGet("scaffold")]
-    [Authorize(Policy = AuthPolicy.Operator)]
+    [RequiresAction(ActionIds.LibraryRead)]
     public IActionResult Scaffold()
     {
         if (Resolve() is not { } files) return EngineUnavailable();
@@ -115,7 +114,7 @@ public sealed class LibraryController(
     }
 
     /// <summary>
-    /// <c>POST /library</c> — create a new blueprint from editor text. <strong>Admin only</strong>, matching
+    /// <c>POST /library</c> — create a new blueprint from editor text. <c>kgsm:blueprints.write</c>, matching
     /// the save path: authoring a blueprint defines how a game server is installed and launched. The file
     /// lands in kgsm's USER blueprints directory and the ENGINE validates it before anything is committed;
     /// the audit trail arrives as the echo of the <c>blueprint.created</c> kgsm emits.
@@ -130,7 +129,7 @@ public sealed class LibraryController(
     /// </list>
     /// </summary>
     [HttpPost]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.BlueprintsWrite)]
     public IActionResult CreateBlueprint([FromBody] CreateBlueprintRequest? body)
     {
         if (body?.Name is not { Length: > 0 } name)
@@ -172,7 +171,8 @@ public sealed class LibraryController(
 
     /// <summary>
     /// <c>GET /library/{id}/file</c> — a blueprint's raw <c>.bp.yaml</c> text plus an sha256 etag, read
-    /// from whichever blueprints directory the engine resolves it in. <strong>Operator+</strong>.
+    /// from whichever blueprints directory the engine resolves it in. <c>kgsm:library.read</c>; a reader
+    /// without <c>kgsm:blueprints.write</c> gets it with <c>readOnly:true</c>.
     /// <list type="bullet">
     /// <item><c>200</c> — the file (<see cref="BlueprintFileDto"/>).</item>
     /// <item><c>404</c> — no blueprint of that name, or the name/resolved path escapes the jail.</item>
@@ -182,11 +182,12 @@ public sealed class LibraryController(
     /// </list>
     /// </summary>
     [HttpGet("{id}/file")]
-    [Authorize(Policy = AuthPolicy.Operator)]
-    public IActionResult ReadFile(string id)
+    [RequiresAction(ActionIds.LibraryRead)]
+    public async Task<IActionResult> ReadFile(string id, CancellationToken ct)
     {
         if (Resolve() is not { } files) return EngineUnavailable();
 
+        bool canWrite = await access.AllowsAsync(User, ActionIds.BlueprintsWrite, access.NodeTarget, ct);
         BlueprintReadResult r = files.Read(id, options.BlueprintMaxEditBytes);
         return r.Status switch
         {
@@ -197,7 +198,7 @@ public sealed class LibraryController(
                 // exists to fall back to. Surfaced so the client never derives the rule itself; the
                 // DELETE below refuses independently regardless.
                 CanRevert: r.OverridesSystem,
-                ReadOnly: !CallerCanWrite(),
+                ReadOnly: !canWrite,
                 Runtime: RuntimeOf(id),
                 HostId: options.HostId)),
             BlueprintFileOp.Binary => Error(StatusCodes.Status409Conflict, "file_binary",
@@ -212,7 +213,7 @@ public sealed class LibraryController(
     }
 
     /// <summary>
-    /// <c>PUT /library/{id}/file</c> — save the blueprint's file text. <strong>Admin only</strong>.
+    /// <c>PUT /library/{id}/file</c> — save the blueprint's file text. <c>kgsm:blueprints.write</c>.
     /// The write always lands in kgsm's USER blueprints directory, so saving an edit to a shipped
     /// blueprint creates an override that shadows it permanently (<c>createdOverride</c> reports that
     /// transition); the shipped directory is the engine deploy's rsync target and is structurally
@@ -228,7 +229,7 @@ public sealed class LibraryController(
     /// </list>
     /// </summary>
     [HttpPut("{id}/file")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.BlueprintsWrite)]
     public IActionResult SaveFile(string id, [FromBody] SaveBlueprintRequest? body)
     {
         if (body?.Content is not string content)
@@ -273,7 +274,7 @@ public sealed class LibraryController(
 
     /// <summary>
     /// <c>DELETE /library/{id}/file</c> — revert to the shipped blueprint by removing the user-dir
-    /// override. <strong>Admin only</strong>. Refused with <c>409 no_original</c> when this blueprint has
+    /// override. <c>kgsm:blueprints.write</c>. Refused with <c>409 no_original</c> when this blueprint has
     /// no shipped counterpart: deleting then would destroy the only copy rather than restore anything.
     /// The SPA also hides the button, but this API refuses independently.
     /// <list type="bullet">
@@ -284,7 +285,7 @@ public sealed class LibraryController(
     /// </list>
     /// </summary>
     [HttpDelete("{id}/file")]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.BlueprintsWrite)]
     public IActionResult RevertFile(string id, [FromQuery] string? origin)
     {
         if (!TryResolveOrigin(origin, out string resolvedOrigin))
@@ -314,12 +315,6 @@ public sealed class LibraryController(
     private IActionResult EngineUnavailable() =>
         Error(StatusCodes.Status503ServiceUnavailable, "unavailable",
             "the kgsm engine is not provisioned on this host");
-
-    /// <summary>Whether this caller may save — admin, matching the PUT/DELETE policies. An operator gets
-    /// the file with <c>readOnly:true</c>: the editor opens, the buttons don't. Read off the verified
-    /// token's tier claim, never a request field.</summary>
-    private bool CallerCanWrite() =>
-        User.Identity is ClaimsIdentity ci && SessionClaims.ReadTier(ci) >= KgsmTier.Admin;
 
     /// <summary>The blueprint's runtime as the ENGINE reports it in the cached catalog, or <c>null</c> when
     /// it isn't there (brand-new, or malformed enough that the engine won't enumerate it — precisely a file

@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "component": "api",
+  "version": "0.209.0",
+  "actions": [
+    {
+      "id": "alerts.read",
+      "title": "View alerts",
+      "effect": "read",
+      "scope": "node"
+    },
+    {
+      "id": "audit.personal-fields",
+      "title": "See personal details in the audit log",
+      "effect": "read",
+      "scope": "node"
+    },
+    {
+      "id": "audit.read",
+      "title": "View the audit log",
+      "effect": "read",
+      "scope": "node"
+    },
+    {
+      "id": "batches.cancel",
+      "title": "Cancel batches",
+      "effect": "execute",
+      "scope": "node"
+    },
+    {
+      "id": "batches.read",
+      "title": "View batches",
+      "effect": "read",
+      "scope": "node"
+    },
+    {
+      "id": "config.read",
+      "title": "Read Control Panel API settings",
+      "effect": "read",
+      "scope": "node"
+    },
+    {
+      "id": "config.write",
+      "title": "Change Control Panel API settings",
+      "effect": "write",
+      "scope": "node"
+    },
+    {
+      "id": "diagnostics.read",
+      "title": "Run diagnostics",
+      "effect": "read",
+      "scope": "node"
+    },
+    {
+      "id": "hosts.read",
+      "title": "View this host",
+      "effect": "read",
+      "scope": "node"
+    },
+    {
+      "id": "hosts.write",
+      "title": "Change this host's label and region",
+      "effect": "write",
+      "scope": "node"
+    },
+    {
+      "id": "integrations.manage",
+      "title": "Manage notification integrations",
+      "effect": "write",
+      "scope": "cluster"
+    },
+    {
+      "id": "journal.read",
+      "title": "Read Control Panel API logs",
+      "effect": "read",
+      "scope": "node"
+    },
+    {
+      "id": "lifecycle.restart",
+      "title": "Restart Control Panel API",
+      "effect": "execute",
+      "scope": "node"
+    },
+    {
+      "id": "logs.read",
+      "title": "Read this host's service logs",
+      "effect": "read",
+      "scope": "node"
+    },
+    {
+      "id": "members.manage",
+      "title": "Manage the cluster's members",
+      "effect": "write",
+      "scope": "cluster"
+    },
+    {
+      "id": "members.read",
+      "title": "View the cluster's members",
+      "effect": "read",
+      "scope": "cluster"
+    },
+    {
+      "id": "members.remove",
+      "title": "Remove members from the cluster",
+      "effect": "write",
+      "scope": "cluster"
+    },
+    {
+      "id": "push.devices",
+      "title": "Register your own push devices",
+      "effect": "write",
+      "scope": "node",
+      "self": true
+    },
+    {
+      "id": "services.manage",
+      "title": "Connect, disconnect and restart services",
+      "effect": "execute",
+      "scope": "node"
+    },
+    {
+      "id": "services.read",
+      "title": "View this host's services",
+      "effect": "read",
+      "scope": "node"
+    }
+  ],
+  "requires": [
+    {
+      "action": "kgsm:engine.config.read",
+      "scope": "node",
+      "why": "Reads where the engine keeps its libraries and how much memory it may commit."
+    },
+    {
+      "action": "kgsm:library.read",
+      "scope": "node",
+      "why": "Keeps the installable-game catalog current."
+    },
+    {
+      "action": "kgsm:server.backups.read",
+      "scope": "instance",
+      "why": "Counts each server's backups for its card."
+    },
+    {
+      "action": "kgsm:server.console.read",
+      "scope": "instance",
+      "why": "Follows each console the realtime stream carries."
+    },
+    {
+      "action": "kgsm:server.read",
+      "scope": "instance",
+      "why": "Keeps the server roster, run state and players current for the panel and the realtime stream."
+    }
+  ]
+}

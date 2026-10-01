@@ -154,13 +154,13 @@ public sealed class DomainPump(
                     foreach ((string id, Server s) in byId)
                         if (!last.TryGetValue(id, out Server? prev) || CoreChanged(prev, s))
                             hub.Publish(StreamProtocol.ServersTopic, StreamProtocol.ServerEntityKey(id),
-                                new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerPatch, s));
+                                new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerPatch, s), id);
 
                     // Removals -> a tombstone.
                     foreach (string id in last.Keys)
                         if (!byId.ContainsKey(id))
                             hub.Publish(StreamProtocol.ServersTopic, StreamProtocol.ServerEntityKey(id),
-                                new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerRemoved, new ServerRemoved(id)));
+                                new StreamMessage(StreamProtocol.ServersTopic, StreamProtocol.ServerRemoved, new ServerRemoved(id)), id);
 
                     last = byId;
                 }

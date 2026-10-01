@@ -161,26 +161,27 @@ API isn't listening are **not** audited (stateless engine, no backfill) — stat
 
 ## Auth
 
-`GET /audit` is `[Authorize(Policy = viewer)]` — a core read surface ("every 'what happened' view reads
-here"). The `audit` SSE topic rides the same viewer-gated `/stream` connection.
+`GET /audit` takes `api:audit.read` — a core read surface ("every 'what happened' view reads here").
+The `audit` SSE topic takes the same action on the `/stream` connection.
 
 **The gate is on the feed; a few values inside it are on a second one.** `AuditRedaction` takes the
-personal and privileged fields off a row for a reader below operator — a player's connection address,
-what somebody typed at a console, who a moderation action named. Three rules hold it together:
+personal and privileged fields off a row for a reader without `api:audit.personal-fields` — a player's
+connection address, what somebody typed at a console, who a moderation action named. Three rules hold
+it together:
 
 - **Which values those are is the engine's classification, not this API's.** `KgsmEventCatalog`
-  (kgsm-lib) says what each payload field holds; the Control Panel turns "not public" into "operator
-  and above". A field reclassified upstream changes what a viewer sees with no edit here, and a field
-  name is classified the same way on every event that carries it, which is what makes the lookup on a
-  shaped row sound.
+  (kgsm-lib) says what each payload field holds; the Control Panel turns "not public" into "needs
+  `api:audit.personal-fields`". A field reclassified upstream changes what a redacted reader sees with no
+  edit here, and a field name is classified the same way on every event that carries it, which is what
+  makes the lookup on a shaped row sound.
 - **The row is never withheld — only values on it.** Every reader sees that a ban happened and that a
-  command was run, with the same id, timestamp and actor. A shorter feed for one tier would be two
+  command was run, with the same id, timestamp and actor. A shorter feed for some readers would be two
   people reading one host's history and being told different things.
 - **The summary counts as a value.** Two actions print a restricted value in their own sentence
   (`console.input`, the moderation trio), so the redactor rebuilds those through `AuditMapping`'s own
   summary builders — the same call the mapper makes for an event that carried no such value, so the
   two cannot word one row differently.
 
-**The live topic answers the same way.** `AuditService` publishes both shapes and `StreamHub` picks per
-connection (`StreamConnection.IsOperator`, fixed at connect like the subscriptions), because a value
+**The live topic answers the same way.** `AuditService` publishes both shapes (`StreamRedaction`) and
+`StreamHub` picks per connection and per frame from the reader's access as it stands, because a value
 withheld on refresh and pushed live is the same value published, with a delay.

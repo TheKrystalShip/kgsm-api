@@ -8,6 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — every gate is an action, evaluated from the version 2 replica (0.209.0, contracts 1.0.0-dev.14)
+
+- **Every endpoint names the one action it performs** (`[RequiresAction]`, `ActionIds`), evaluated for
+  the caller's account from this node's replica at the target the route names: a server route at that
+  server's install, everything else at this node, a cluster-scoped action at the cluster. Commands are
+  gated per verb (`kgsm:server.start` / `.stop` / `.restart` / `.update`), a batch refuses the members
+  the caller may not act on and runs the rest, a settings patch touching maintenance windows also takes
+  `kgsm:server.windows.write`, and a leaf's configuration takes that leaf's own `config.read` /
+  `config.write`. The action map is `kgsm-docs/plans/permissions.md` §10·i.
+- **Collections are cut to their reader.** `GET /servers`, availability and every server frame on the
+  stream carry only the servers the caller may read; a job on a server they may not read is a `404`.
+- **The stream evaluates every frame.** Topics take the action their REST companion takes, server
+  collections are cut per frame, a topic this build does not know is an Owner's alone, and a change the
+  replica takes applies to open connections at once, both ways — a grant starts a topic as readily as a
+  revocation stops one.
+- **This API owns the machine's replica** (`/var/lib/kgsm/auth/users.db`) at schema version 2: it creates
+  it, sets a version 1 file aside, applies what the anchor publishes and takes its snapshot. The
+  version 1 account replication, the tier policies and `Api__AuthorityCacheSeconds` are gone.
+- **`/me` and `me.patch` carry the account's status and no tier**; what the caller may do is
+  `/me/access`. A removed account's open stream is told `unknown`.
+- **The audit's personal fields need `api:audit.personal-fields`**, on the page and on the live topic;
+  GPU process names need `api:services.read`.
+- **Web Push sends an event only to devices whose owner may read what it is about** — the server, or this
+  node's audit for a host-level event.
+- **A backup download ticket and a push button are bound to the account and evaluated again at
+  redemption.** A ticket refused there spends nothing, so the download allowed afterwards is still
+  recorded once.
+- **The auth-disabled host's caller is a synthetic Owner.**
+- **The build writes `deploy/kgsm-api.leaf.actions.json`** (ComponentConfig 3.2.0-dev.2): the `api:*`
+  actions and the engine reads this API makes as its own service account, and `deploy.sh` and the
+  package install it into `/var/lib/kgsm/leaves/actions/api.json`.
+- Pins `Auth` 4.0.0-dev.3, `Auth.Users` 2.0.0-dev.6, `Auth.Cluster` 1.0.0-dev.18 and, in the tests,
+  `Auth.Testing` 1.0.0-dev.3. The suite seeds personas as roles through a stand-in anchor's snapshot.
+
 ### Added — a server's install nonce, and an auth-disabled host's access (0.208.0, contracts 1.0.0-dev.13)
 
 - **`installNonce` on every server** (list, detail and the `servers` stream): the nonce the engine wrote

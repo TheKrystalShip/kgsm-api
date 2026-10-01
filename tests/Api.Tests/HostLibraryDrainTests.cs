@@ -32,7 +32,7 @@ public sealed class HostLibraryDrainTests : IClassFixture<HostLibraryDrainTests.
     [Fact]
     public async Task Remove_WithDrain_PassesTheTargetToTheEngine()
     {
-        HttpResponseMessage resp = await Delete(KgsmTier.Admin, "ssd", "?drain=archive");
+        HttpResponseMessage resp = await Delete(Persona.Owner, "ssd", "?drain=archive");
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal(("ssd", "archive", false), _factory.Registry.LastRemove);
@@ -41,7 +41,7 @@ public sealed class HostLibraryDrainTests : IClassFixture<HostLibraryDrainTests.
     [Fact]
     public async Task Remove_WithoutDrain_SendsNoTarget()
     {
-        HttpResponseMessage resp = await Delete(KgsmTier.Admin, "ssd");
+        HttpResponseMessage resp = await Delete(Persona.Owner, "ssd");
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal(("ssd", null, false), _factory.Registry.LastRemove);
@@ -52,7 +52,7 @@ public sealed class HostLibraryDrainTests : IClassFixture<HostLibraryDrainTests.
     {
         _factory.Registry.LastRemove = null;
 
-        HttpResponseMessage resp = await Delete(KgsmTier.Admin, "ssd", "?drain=ssd");
+        HttpResponseMessage resp = await Delete(Persona.Owner, "ssd", "?drain=ssd");
 
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Null(_factory.Registry.LastRemove);
@@ -63,7 +63,7 @@ public sealed class HostLibraryDrainTests : IClassFixture<HostLibraryDrainTests.
     {
         // The refusal names the running instances that blocked the drain, and no wording composed here
         // could carry that. 409, not 400: the request is fine and the removal will work once they stop.
-        HttpResponseMessage resp = await Delete(KgsmTier.Admin, "busy", "?drain=archive");
+        HttpResponseMessage resp = await Delete(Persona.Owner, "busy", "?drain=archive");
 
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
         string body = await resp.Content.ReadAsStringAsync();
@@ -74,13 +74,13 @@ public sealed class HostLibraryDrainTests : IClassFixture<HostLibraryDrainTests.
     [Fact]
     public async Task Remove_Operator_403()
     {
-        HttpResponseMessage resp = await Delete(KgsmTier.Operator, "ssd", "?drain=archive");
+        HttpResponseMessage resp = await Delete(Persona.Operator, "ssd", "?drain=archive");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private Task<HttpResponseMessage> Delete(KgsmTier tier, string name, string query = "")
+    private Task<HttpResponseMessage> Delete(Persona tier, string name, string query = "")
     {
         HttpClient c = _factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =

@@ -383,7 +383,7 @@ public sealed class ApiEventMappingTests
             Session(userAgent: "Firefox/1.0"), ApiJournal.LoginEvent, HostId);
         AuditRecord full = AuditMapping.ToRecordDirect(write, "evt_1");
 
-        AuditRecord seen = AuditRedaction.ForViewer(full);
+        AuditRecord seen = AuditRedaction.Redacted(full);
 
         // Same fact, same id, same moment — a shorter feed for one tier would be two people reading one
         // host's history and being told different things.

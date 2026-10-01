@@ -56,7 +56,7 @@ public sealed class MeAccessTests : IDisposable
 
     private static string Token(EcdsaSessionSigner signer, KgsmIdentity who) =>
         new SessionTokenService(new SessionTokenOptions(ClusterId, TimeSpan.FromMinutes(15), TimeSpan.FromDays(30), Issuer), signer)
-            .MintAccess(who, tier: null, "sid_1").Token;
+            .MintAccess(who, "sid_1").Token;
 
     private static HttpRequestMessage Get(string token)
     {
@@ -65,18 +65,29 @@ public sealed class MeAccessTests : IDisposable
         return request;
     }
 
+    /// <summary>A replica that could not be opened.</summary>
+    private sealed class Unopened : IReplicatedAuthority
+    {
+        public SqliteAuthorityStore? Replica => null;
+
+        public string? UnavailableReason => "the replica could not be opened";
+    }
+
     [Fact]
-    public async Task AReplicaAtVersionOne_IsAnOutage_NotAnEmptyAnswer()
+    public async Task AReplicaThatCannotBeRead_IsAnOutage_NotAnEmptyAnswer()
     {
         using EcdsaSessionSigner signer = EcdsaSessionSigner.Generate();
         await using AuthTestFactory factory = new();
-        using WebApplicationFactory<Program> node = Node(factory, signer);
+        using WebApplicationFactory<Program> node = Node(factory, signer, services =>
+        {
+            services.RemoveAll<IReplicatedAuthority>();
+            services.AddSingleton<IReplicatedAuthority>(new Unopened());
+        });
         KgsmIdentity alice = new("discord", "42", "alice", "Alice", null, []);
-        AuthTestFactory.SetAccountOn(node.Services, alice, KgsmTier.Viewer);
 
         HttpResponseMessage response = await node.CreateClient().SendAsync(Get(Token(signer, alice)));
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
         Assert.Equal("authority_unavailable",
             JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetProperty("code").GetString());
     }
@@ -128,9 +139,8 @@ public sealed class MeAccessTests : IDisposable
         await using AuthTestFactory factory = new();
         KgsmIdentity alice = new("discord", "42", "alice", "Alice", null, []);
 
-        // The replica carries the account id this node's version 1 store gave alice, as the upgrade keeps it.
         using WebApplicationFactory<Program> node = Node(factory, signer, ReplicaServices());
-        await SeedReplicaAsync(AuthTestFactory.SetAccountOn(node.Services, alice, KgsmTier.Viewer).UserId);
+        await SeedReplicaAsync("usr_alice");
 
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(node.CreateClient(), "/api/v1/stream?topics=me", Token(signer, alice));
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
@@ -155,7 +165,7 @@ public sealed class MeAccessTests : IDisposable
         await using AuthTestFactory factory = new();
         using WebApplicationFactory<Program> node = Node(factory, signer, ReplicaServices());
         KgsmIdentity alice = new("discord", "42", "alice", "Alice", null, []);
-        await SeedReplicaAsync(AuthTestFactory.SetAccountOn(node.Services, alice, KgsmTier.Viewer).UserId);
+        await SeedReplicaAsync("usr_alice");
 
         HttpResponseMessage response = await node.CreateClient().SendAsync(Get(Token(signer, alice)));
 

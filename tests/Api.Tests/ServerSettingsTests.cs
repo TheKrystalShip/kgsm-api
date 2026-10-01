@@ -51,14 +51,14 @@ public sealed class ServerSettingsTests
     public async Task Get_NoneTier_403()
     {
         // Authenticated but below viewer → 403 (the 401/403 split: identity present, tier too low).
-        HttpResponseMessage resp = await Get(_engine, KgsmTier.None, "factorio-1");
+        HttpResponseMessage resp = await Get(_engine, Persona.None, "factorio-1");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task Get_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Get(_noEngine, KgsmTier.Viewer, "factorio-1");
+        HttpResponseMessage resp = await Get(_noEngine, Persona.Viewer, "factorio-1");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
         Assert.Contains("\"code\":\"unavailable\"", await resp.Content.ReadAsStringAsync());
     }
@@ -66,14 +66,14 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Get_UnknownServer_404()
     {
-        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "does-not-exist");
+        HttpResponseMessage resp = await Get(_engine, Persona.Viewer, "does-not-exist");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task Get_KnownServer_200_AutoUpdateFalse()
     {
-        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-1");
+        HttpResponseMessage resp = await Get(_engine, Persona.Viewer, "factorio-1");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -96,7 +96,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Get_returns_every_maintenance_window_in_the_order_it_is_written()
     {
-        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-backup");
+        HttpResponseMessage resp = await Get(_engine, Persona.Viewer, "factorio-backup");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -118,7 +118,7 @@ public sealed class ServerSettingsTests
     {
         // The arithmetic is the leaf's. With none provisioned there is nothing to relay, and computing it
         // here would be a second opinion that drifts from the daemon's across a DST boundary.
-        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-backup");
+        HttpResponseMessage resp = await Get(_engine, Persona.Viewer, "factorio-backup");
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
 
         foreach (JsonElement window in doc.RootElement.GetProperty("maintenanceWindows").EnumerateArray())
@@ -132,7 +132,7 @@ public sealed class ServerSettingsTests
     public async Task Get_reports_an_unreadable_window_as_invalid_beside_the_ones_that_read()
     {
         // Validity is per window: one that cannot be read disables itself and leaves the rest standing.
-        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-broken");
+        HttpResponseMessage resp = await Get(_engine, Persona.Viewer, "factorio-broken");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -148,7 +148,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Get_returns_Timezone_and_BackupRetention_from_instance_config()
     {
-        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-backup");
+        HttpResponseMessage resp = await Get(_engine, Persona.Viewer, "factorio-backup");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -170,14 +170,14 @@ public sealed class ServerSettingsTests
     public async Task Patch_Viewer_403()
     {
         // Operator-gated: a viewer can read settings but cannot write them.
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Viewer, "factorio-1", "{\"autoUpdate\":true}");
+        HttpResponseMessage resp = await Patch(_engine, Persona.Viewer, "factorio-1", "{\"autoUpdate\":true}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task Patch_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Patch(_noEngine, KgsmTier.Operator, "factorio-1", "{\"autoUpdate\":true}");
+        HttpResponseMessage resp = await Patch(_noEngine, Persona.Operator, "factorio-1", "{\"autoUpdate\":true}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
         Assert.Contains("\"code\":\"unavailable\"", await resp.Content.ReadAsStringAsync());
     }
@@ -185,14 +185,14 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_UnknownServer_404()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "does-not-exist", "{\"autoUpdate\":true}");
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "does-not-exist", "{\"autoUpdate\":true}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task Patch_BadOrigin_400()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1",
             "{\"autoUpdate\":true,\"origin\":\"hacker\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -202,7 +202,7 @@ public sealed class ServerSettingsTests
     public async Task Patch_EmptyBody_400()
     {
         // A literal null body binds to a null patch → the "a settings body is required" 400.
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1", "null");
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1", "null");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -211,7 +211,7 @@ public sealed class ServerSettingsTests
     public async Task Patch_NoFields_400()
     {
         // A body with no recognized settings field (only origin) → 400, nothing applied.
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1", "{\"origin\":\"ui\"}");
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1", "{\"origin\":\"ui\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -219,7 +219,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_AutoUpdate_Operator_200_AppliesField()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1", "{\"autoUpdate\":true}");
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1", "{\"autoUpdate\":true}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -233,7 +233,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_MaintenanceWindows_applies_the_one_packed_key()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1",
             "{\"maintenanceWindows\":[\"daily@05:00/backup\",\"weekly.sun@04:00/backup,restart\"]}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -246,7 +246,7 @@ public sealed class ServerSettingsTests
     public async Task Patch_MaintenanceWindows_empty_list_is_no_maintenance()
     {
         // The only way to express deleting a window, which a sparse field-by-field patch cannot.
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-backup",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-backup",
             "{\"maintenanceWindows\":[]}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -258,7 +258,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_MaintenanceWindows_unreadable_expression_400s_naming_the_offending_text()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1",
             "{\"maintenanceWindows\":[\"weekly.funday@04:00/restart\"]}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
 
@@ -270,7 +270,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_MaintenanceWindows_unknown_task_400s()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1",
             "{\"maintenanceWindows\":[\"daily@05:00/defrag\"]}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("defrag", await resp.Content.ReadAsStringAsync());
@@ -280,7 +280,7 @@ public sealed class ServerSettingsTests
     public async Task Patch_MaintenanceWindows_interval_below_the_floor_400s()
     {
         // The poll resolution is a minute, so anything under ten is below the useful range above it.
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1",
             "{\"maintenanceWindows\":[\"5m/restart\"]}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -289,7 +289,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_MaintenanceWindows_interval_above_the_ceiling_400s()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1",
             "{\"maintenanceWindows\":[\"60d/backup\"]}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -300,7 +300,7 @@ public sealed class ServerSettingsTests
     {
         // The id IS the schedule, so a second window on it is the first written twice — the answer is to
         // merge their task sets rather than to pick one.
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1",
             "{\"maintenanceWindows\":[\"daily@05:00/backup\",\"daily@5:00/restart\"]}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("merge", await resp.Content.ReadAsStringAsync());
@@ -311,7 +311,7 @@ public sealed class ServerSettingsTests
     {
         // Every disruptive task is issued through the watchdog, and the watchdog supervises native
         // instances alone — so this can only ever record a skipped task, every week, silently.
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "terraria-box",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "terraria-box",
             "{\"maintenanceWindows\":[\"weekly.sun@04:00/backup,restart\"]}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
 
@@ -324,7 +324,7 @@ public sealed class ServerSettingsTests
     public async Task Patch_MaintenanceWindows_allows_a_backup_on_a_container()
     {
         // The archive beside the refused restart is the half a container CAN have, and it still fires.
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "terraria-box",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "terraria-box",
             "{\"maintenanceWindows\":[\"daily@05:00/backup\"]}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
     }
@@ -334,7 +334,7 @@ public sealed class ServerSettingsTests
     {
         // The list is read before any key is written, so a rejected window leaves the instance exactly as
         // it was rather than half-applied beside a field that did land.
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1",
             "{\"autoUpdate\":true,\"maintenanceWindows\":[\"never@nowhere/restart\"]}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.DoesNotContain("applied", await resp.Content.ReadAsStringAsync());
@@ -343,7 +343,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_BackupRetention_invalid_low_returns_400()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1", "{\"backupRetention\":0}");
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1", "{\"backupRetention\":0}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -351,7 +351,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_BackupRetention_invalid_high_returns_400()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1", "{\"backupRetention\":101}");
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1", "{\"backupRetention\":101}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -361,7 +361,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Get_Returns_CrashRestart()
     {
-        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-backup");
+        HttpResponseMessage resp = await Get(_engine, Persona.Viewer, "factorio-backup");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -371,7 +371,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Get_Returns_CrashMaxRestarts()
     {
-        HttpResponseMessage resp = await Get(_engine, KgsmTier.Viewer, "factorio-backup");
+        HttpResponseMessage resp = await Get(_engine, Persona.Viewer, "factorio-backup");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -381,7 +381,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_Writes_CrashRestart()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1", "{\"crashRestart\":true}");
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1", "{\"crashRestart\":true}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -392,7 +392,7 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_CrashMaxRestarts_TooLow_Returns400()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1", "{\"crashMaxRestarts\":0}");
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1", "{\"crashMaxRestarts\":0}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -400,14 +400,14 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_CrashMaxRestarts_TooHigh_Returns400()
     {
-        HttpResponseMessage resp = await Patch(_engine, KgsmTier.Operator, "factorio-1", "{\"crashMaxRestarts\":11}");
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1", "{\"crashMaxRestarts\":11}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static HttpClient Client(AuthTestFactory factory, KgsmTier? tier)
+    private static HttpClient Client(AuthTestFactory factory, Persona? tier)
     {
         HttpClient c = factory.CreateClient();
         if (tier is { } t)
@@ -415,10 +415,10 @@ public sealed class ServerSettingsTests
         return c;
     }
 
-    private static Task<HttpResponseMessage> Get(AuthTestFactory factory, KgsmTier? tier, string id) =>
+    private static Task<HttpResponseMessage> Get(AuthTestFactory factory, Persona? tier, string id) =>
         Client(factory, tier).GetAsync($"/api/v1/servers/{id}/settings");
 
-    private static Task<HttpResponseMessage> Patch(AuthTestFactory factory, KgsmTier? tier, string id, string json) =>
+    private static Task<HttpResponseMessage> Patch(AuthTestFactory factory, Persona? tier, string id, string json) =>
         Client(factory, tier).PatchAsync($"/api/v1/servers/{id}/settings",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
@@ -656,7 +656,7 @@ public sealed class ServerSettingsWithWatchdogTests
     [Fact]
     public async Task Get_KnownServer_WithWatchdog_200_AutostartFalse()
     {
-        HttpResponseMessage resp = await Get(_watchdog, KgsmTier.Viewer, "factorio-1");
+        HttpResponseMessage resp = await Get(_watchdog, Persona.Viewer, "factorio-1");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -667,7 +667,7 @@ public sealed class ServerSettingsWithWatchdogTests
     [Fact]
     public async Task Patch_Autostart_Enable_Operator_200_AppliesField()
     {
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1", "{\"autostart\":true}");
+        HttpResponseMessage resp = await Patch(_watchdog, Persona.Operator, "factorio-1", "{\"autostart\":true}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -680,7 +680,7 @@ public sealed class ServerSettingsWithWatchdogTests
     public async Task Patch_Autostart_NoWatchdog_503()
     {
         // No watchdog provisioned → the write cannot proceed; honest 503 rather than a fabricated apply.
-        HttpResponseMessage resp = await Patch(_noWatchdog, KgsmTier.Operator, "factorio-1", "{\"autostart\":true}");
+        HttpResponseMessage resp = await Patch(_noWatchdog, Persona.Operator, "factorio-1", "{\"autostart\":true}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
         Assert.Contains("\"code\":\"unavailable\"", await resp.Content.ReadAsStringAsync());
     }
@@ -688,7 +688,7 @@ public sealed class ServerSettingsWithWatchdogTests
     [Fact]
     public async Task Patch_AutostartAndAutoUpdate_Operator_200_AppliesBothFields()
     {
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Patch(_watchdog, Persona.Operator, "factorio-1",
             "{\"autoUpdate\":true,\"autostart\":true}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -703,7 +703,7 @@ public sealed class ServerSettingsWithWatchdogTests
     [Fact]
     public async Task Patch_CpuPriority_Operator_200_AppliesField()
     {
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1", "{\"cpuPriority\":\"high\"}");
+        HttpResponseMessage resp = await Patch(_watchdog, Persona.Operator, "factorio-1", "{\"cpuPriority\":\"high\"}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -714,7 +714,7 @@ public sealed class ServerSettingsWithWatchdogTests
     [Fact]
     public async Task Patch_MemoryCapMb_Operator_200_AppliesField()
     {
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1", "{\"memoryCapMb\":512}");
+        HttpResponseMessage resp = await Patch(_watchdog, Persona.Operator, "factorio-1", "{\"memoryCapMb\":512}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -725,7 +725,7 @@ public sealed class ServerSettingsWithWatchdogTests
     [Fact]
     public async Task Patch_CpuPriority_Invalid_400()
     {
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1", "{\"cpuPriority\":\"turbo\"}");
+        HttpResponseMessage resp = await Patch(_watchdog, Persona.Operator, "factorio-1", "{\"cpuPriority\":\"turbo\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -733,7 +733,7 @@ public sealed class ServerSettingsWithWatchdogTests
     [Fact]
     public async Task Patch_MemoryCapMb_Negative_400()
     {
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1", "{\"memoryCapMb\":-1}");
+        HttpResponseMessage resp = await Patch(_watchdog, Persona.Operator, "factorio-1", "{\"memoryCapMb\":-1}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -743,7 +743,7 @@ public sealed class ServerSettingsWithWatchdogTests
     [Fact]
     public async Task Patch_MaintenanceWindows_Operator_200_AppliesField()
     {
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Patch(_watchdog, Persona.Operator, "factorio-1",
             "{\"maintenanceWindows\":[\"weekly.sun@04:00/restart\"]}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -757,7 +757,7 @@ public sealed class ServerSettingsWithWatchdogTests
     {
         // The clock resolves an unrecognized zone to this host's local one, so an unchecked typo would
         // silently move every appointment on the instance to a zone nobody chose.
-        HttpResponseMessage resp = await Patch(_watchdog, KgsmTier.Operator, "factorio-1", "{\"timezone\":\"Mars/Olympus\"}");
+        HttpResponseMessage resp = await Patch(_watchdog, Persona.Operator, "factorio-1", "{\"timezone\":\"Mars/Olympus\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -765,9 +765,9 @@ public sealed class ServerSettingsWithWatchdogTests
     // --- The preview: what a window would do, before anybody saves it -----------------------------
 
     [Fact]
-    public async Task Preview_Viewer_403()
+    public async Task Preview_HoldingNothing_403()
     {
-        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Viewer, "factorio-1",
+        HttpResponseMessage resp = await Preview(_watchdog, Persona.None, "factorio-1",
             "{\"expression\":\"daily@05:00/backup\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -776,7 +776,7 @@ public sealed class ServerSettingsWithWatchdogTests
     public async Task Preview_NoExpression_400()
     {
         // A malformed request, as distinct from a badly written window — which is an answer, below.
-        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1", "{}");
+        HttpResponseMessage resp = await Preview(_watchdog, Persona.Operator, "factorio-1", "{}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -784,7 +784,7 @@ public sealed class ServerSettingsWithWatchdogTests
     [Fact]
     public async Task Preview_returns_ascending_fires_a_day_apart()
     {
-        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Preview(_watchdog, Persona.Operator, "factorio-1",
             "{\"expression\":\"daily@05:00/backup\",\"count\":3,\"timezone\":\"UTC\"}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -807,7 +807,7 @@ public sealed class ServerSettingsWithWatchdogTests
     {
         // An interval carries no time of day and no timezone by construction, so every host answers
         // identically and nothing has to be anchored at install time.
-        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Preview(_watchdog, Persona.Operator, "factorio-1",
             "{\"expression\":\"6h/backup\",\"count\":2}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -827,7 +827,7 @@ public sealed class ServerSettingsWithWatchdogTests
     {
         // The endpoint's question is "what does this mean", and "it cannot be read" answers it — which is
         // exactly what an editor renders where the next fire would have gone.
-        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Preview(_watchdog, Persona.Operator, "factorio-1",
             "{\"expression\":\"weekly.funday@04:00/restart\"}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -840,7 +840,7 @@ public sealed class ServerSettingsWithWatchdogTests
     [Fact]
     public async Task Preview_BadTimezone_400()
     {
-        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Preview(_watchdog, Persona.Operator, "factorio-1",
             "{\"expression\":\"daily@05:00/backup\",\"timezone\":\"Mars/Olympus\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -849,7 +849,7 @@ public sealed class ServerSettingsWithWatchdogTests
     [Fact]
     public async Task Preview_clamps_an_outsized_count()
     {
-        HttpResponseMessage resp = await Preview(_watchdog, KgsmTier.Operator, "factorio-1",
+        HttpResponseMessage resp = await Preview(_watchdog, Persona.Operator, "factorio-1",
             "{\"expression\":\"daily@05:00/backup\",\"count\":500}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -862,17 +862,17 @@ public sealed class ServerSettingsWithWatchdogTests
     {
         // Pure: it is the editor's companion, and an editor that saved on every keystroke would be a
         // different feature. The instance's windows are untouched afterwards.
-        await Preview(_watchdog, KgsmTier.Operator, "factorio-backup",
+        await Preview(_watchdog, Persona.Operator, "factorio-backup",
             "{\"expression\":\"30d/backup\"}");
 
-        HttpResponseMessage after = await Get(_watchdog, KgsmTier.Viewer, "factorio-backup");
+        HttpResponseMessage after = await Get(_watchdog, Persona.Viewer, "factorio-backup");
         using JsonDocument doc = JsonDocument.Parse(await after.Content.ReadAsStringAsync());
         Assert.Equal(2, doc.RootElement.GetProperty("maintenanceWindows").GetArrayLength());
     }
 
     // --- helpers (mirror ServerSettingsTests) ------------------------------------------------------
 
-    private static HttpClient Client(AuthTestFactory factory, KgsmTier? tier)
+    private static HttpClient Client(AuthTestFactory factory, Persona? tier)
     {
         HttpClient c = factory.CreateClient();
         if (tier is { } t)
@@ -880,14 +880,14 @@ public sealed class ServerSettingsWithWatchdogTests
         return c;
     }
 
-    private static Task<HttpResponseMessage> Get(AuthTestFactory factory, KgsmTier? tier, string id) =>
+    private static Task<HttpResponseMessage> Get(AuthTestFactory factory, Persona? tier, string id) =>
         Client(factory, tier).GetAsync($"/api/v1/servers/{id}/settings");
 
-    private static Task<HttpResponseMessage> Patch(AuthTestFactory factory, KgsmTier? tier, string id, string json) =>
+    private static Task<HttpResponseMessage> Patch(AuthTestFactory factory, Persona? tier, string id, string json) =>
         Client(factory, tier).PatchAsync($"/api/v1/servers/{id}/settings",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
-    private static Task<HttpResponseMessage> Preview(AuthTestFactory factory, KgsmTier? tier, string id, string json) =>
+    private static Task<HttpResponseMessage> Preview(AuthTestFactory factory, Persona? tier, string id, string json) =>
         Client(factory, tier).PostAsync($"/api/v1/servers/{id}/settings/maintenance/preview",
             new StringContent(json, Encoding.UTF8, "application/json"));
 }

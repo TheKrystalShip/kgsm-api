@@ -10,9 +10,10 @@ using TheKrystalShip.KGSM.Core.Models;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// Per-server editable runtime configuration (Tier-1 ops) — <c>GET /servers/{id}/config</c> (read) and
+/// Per-server editable runtime configuration — <c>GET /servers/{id}/config</c> (read) and
 /// <c>PATCH /servers/{id}/config</c> (write one-or-more <c>key=value</c>). The SPA's settings panel renders
-/// the form from the GET and saves through the PATCH. Reads are viewer-gated; the write is operator-gated.
+/// the form from the GET and saves through the PATCH. Reads take <c>kgsm:server.config.read</c>, the write
+/// <c>kgsm:server.config.write</c>, at the server.
 /// <para>
 /// The engine is the single authority on what is settable: kgsm refuses identity/path/integration keys
 /// (<see cref="ServerConfigMapping.IsEditableKey"/> mirrors that protected set). The PATCH validates every
@@ -28,7 +29,6 @@ namespace TheKrystalShip.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/servers/{id}/config")]
-[Authorize(Policy = AuthPolicy.Viewer)] // reads — viewer and up; the PATCH below requires operator
 public sealed class ServerConfigController(ServerAggregator aggregator) : ControllerBase
 {
     /// <summary>
@@ -43,6 +43,7 @@ public sealed class ServerConfigController(ServerAggregator aggregator) : Contro
     /// </list>
     /// </summary>
     [HttpGet]
+    [RequiresAction(ActionIds.ServerConfigRead)]
     public async Task<IActionResult> Get(string id, CancellationToken ct)
     {
         if (HttpContext.RequestServices.GetService(typeof(IInstanceService)) is not IInstanceService instances)
@@ -77,7 +78,7 @@ public sealed class ServerConfigController(ServerAggregator aggregator) : Contro
     /// </list>
     /// </summary>
     [HttpPatch]
-    [Authorize(Policy = AuthPolicy.Operator)] // mutation — operator and up
+    [RequiresAction(ActionIds.ServerConfigWrite)]
     public async Task<IActionResult> Patch(string id, [FromBody] ServerConfigPatch? body, CancellationToken ct)
     {
         if (body?.Values is not { Count: > 0 } values)

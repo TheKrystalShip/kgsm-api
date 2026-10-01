@@ -11,9 +11,9 @@ using TheKrystalShip.KGSM.Core.Models;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// A server's operator-authored note — <c>GET /servers/{id}/note</c> (Viewer),
-/// <c>PUT</c> (Operator, write) and <c>DELETE</c> (Operator, clear). The note is free text an
-/// operator leaves on a game server: mods to expect, rules, a heads-up before joining.
+/// A server's note — <c>GET /servers/{id}/note</c> (<c>kgsm:server.read</c>), <c>PUT</c> (write) and
+/// <c>DELETE</c> (clear), both <c>kgsm:server.config.write</c>. The note is free text somebody running
+/// a game server leaves on it: mods to expect, rules, a heads-up before joining.
 /// </summary>
 /// <remarks>
 /// <para><b>Engine-owned, not API-local.</b> The note lives in the kgsm instance's own
@@ -30,7 +30,6 @@ namespace TheKrystalShip.Api.Controllers;
 /// </remarks>
 [ApiController]
 [Route("api/v1/servers/{id}/note")]
-[Authorize(Policy = AuthPolicy.Viewer)] // reads — viewer and up; the writes below require operator
 public sealed class ServerNoteController(
     ServerAggregator aggregator,
     InstanceCache cache,
@@ -46,6 +45,7 @@ public sealed class ServerNoteController(
     /// </list>
     /// </summary>
     [HttpGet]
+    [RequiresAction(ActionIds.ServerRead)]
     public async Task<IActionResult> Get(string id, CancellationToken ct)
     {
         if (!TryEngine(out IInstanceService? instances, out IActionResult? unavailable))
@@ -75,7 +75,7 @@ public sealed class ServerNoteController(
     /// </list>
     /// </summary>
     [HttpPut]
-    [Authorize(Policy = AuthPolicy.Operator)]
+    [RequiresAction(ActionIds.ServerConfigWrite)]
     public Task<IActionResult> Put(string id, [FromBody] ServerNoteWrite? body, CancellationToken ct)
     {
         if (body is null || string.IsNullOrWhiteSpace(body.Body))
@@ -107,13 +107,14 @@ public sealed class ServerNoteController(
     /// optional body — a DELETE with a body is awkward for browser clients, and the deleteServer path
     /// already established the query-string form.</remarks>
     [HttpDelete]
-    [Authorize(Policy = AuthPolicy.Operator)]
+    [RequiresAction(ActionIds.ServerConfigWrite)]
     public Task<IActionResult> Delete(
         string id, [FromQuery] string? origin, [FromBody] ServerNoteClear? body, CancellationToken ct)
         => WriteAsync(id, string.Empty, body?.Origin ?? origin, ct);
 
     // The one write path both PUT and DELETE take (a clear is just an empty body) — so the encoding,
     // the attribution stamp and the cache refresh can never diverge between them.
+    [PerformedFor(ActionIds.ServerConfigWrite)]
     private async Task<IActionResult> WriteAsync(string id, string body, string? rawOrigin, CancellationToken ct)
     {
         if (!TryResolveOrigin(rawOrigin, out string origin))

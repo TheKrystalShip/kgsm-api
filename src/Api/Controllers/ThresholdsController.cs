@@ -20,13 +20,12 @@ namespace TheKrystalShip.Api.Controllers;
 /// <para><b>Validation is not restated here.</b> A refused policy comes back with the monitor's own reason
 /// and the rule at fault. Re-implementing those checks would mean maintaining a second copy of rules this
 /// API deliberately does not own, and the two copies would eventually disagree about what is valid.</para>
-/// <para><b>Gates.</b> Read at <b>operator</b>, matching the rest of the host's configuration surface. Write
-/// at <b>admin</b>: a threshold decides what the whole fleet alerts on, and getting it wrong either buries
-/// people in noise or silences a real problem.</para>
+/// <para><b>Gates.</b> The monitor's own actions: read on <c>monitor:thresholds.read</c>, write and reset on
+/// <c>monitor:thresholds.write</c> — a threshold decides what the whole fleet alerts on, and getting it
+/// wrong either buries people in noise or silences a real problem.</para>
 /// </remarks>
 [ApiController]
 [Route("api/v1/hosts/{id}/thresholds")]
-[Authorize(Policy = AuthPolicy.Operator)]
 public sealed class ThresholdsController(
     MonitorClient monitor,
     ApiJournal journal,
@@ -34,6 +33,7 @@ public sealed class ThresholdsController(
 {
     /// <summary><c>GET /hosts/{id}/thresholds</c> → the monitor's policy document, verbatim.</summary>
     [HttpGet]
+    [RequiresAction(ActionIds.MonitorThresholdsRead)]
     public async Task<IActionResult> GetThresholds(string id, CancellationToken ct)
     {
         if (!IsThisHost(id)) return NotFound();
@@ -50,7 +50,7 @@ public sealed class ThresholdsController(
     /// unchanged, and its answer is returned as-is on success or as the frozen error envelope on refusal.
     /// </summary>
     [HttpPut]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.MonitorThresholdsWrite)]
     public async Task<IActionResult> PutThresholds(string id, CancellationToken ct)
     {
         if (!IsThisHost(id)) return NotFound();
@@ -66,7 +66,7 @@ public sealed class ThresholdsController(
     /// a fact about the host rather than a rule set that happens to match today's baseline.
     /// </summary>
     [HttpDelete]
-    [Authorize(Policy = AuthPolicy.Admin)]
+    [RequiresAction(ActionIds.MonitorThresholdsWrite)]
     public async Task<IActionResult> ResetThresholds(string id, CancellationToken ct)
     {
         if (!IsThisHost(id)) return NotFound();

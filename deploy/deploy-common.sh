@@ -339,6 +339,18 @@ PY
         log "leaf descriptor changed → ${dst}"
         install -m 0644 "$LEAF_DESCRIPTOR" "$dst"
     fi
+
+    # The action manifest the build writes beside the descriptor, installed under the same name in
+    # the actions/ directory beside it: what this node reports to the auth anchor as the actions this
+    # component performs, and what the catalog of grantable actions is built from.
+    local manifest="${LEAF_DESCRIPTOR%.json}.actions.json"
+    if [[ -f "$manifest" ]]; then
+        install -d -m 0755 "${LEAF_DESCRIPTOR_DIR}/actions"
+        if ! cmp -s "$manifest" "${LEAF_DESCRIPTOR_DIR}/actions/${LEAF_ID}.json"; then
+            log "action manifest changed → ${LEAF_DESCRIPTOR_DIR}/actions/${LEAF_ID}.json"
+            install -m 0644 "$manifest" "${LEAF_DESCRIPTOR_DIR}/actions/${LEAF_ID}.json"
+        fi
+    fi
 }
 
 # ── The member wire ───────────────────────────────────────────────────────────

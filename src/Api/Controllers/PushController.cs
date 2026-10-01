@@ -14,20 +14,21 @@ namespace TheKrystalShip.Api.Controllers;
 /// <summary>
 /// A person's own push devices.
 /// <para>
-/// Separate from <see cref="IntegrationsController"/>, and at <b>viewer</b> rather than admin, because
-/// these are two different things wearing one word. Admin configures the CHANNEL — is push on, which
-/// events use it — and that stays on the integrations route. Here, any signed-in person registers and
-/// revokes their OWN devices, which nobody else should be able to do for them.
+/// Separate from <see cref="IntegrationsController"/>, and on <c>api:push.devices</c> — a self action
+/// every active person holds — rather than <c>api:integrations.manage</c>, because these are two
+/// different things wearing one word. The channel — is push on, which events use it — is configured on
+/// the integrations route. Here, any active person registers and revokes their OWN devices, which nobody
+/// else should be able to do for them.
 /// </para>
 /// <para>
 /// Every read and write is scoped to the caller's subject. There is deliberately no endpoint that lists
-/// or revokes another user's devices, not even for an admin: the row is a capability to push to
+/// or revokes another person's devices, not even for an Owner: the row is a capability to push to
 /// somebody's phone.
 /// </para>
 /// </summary>
 [ApiController]
 [Route("api/v1/push")]
-[Authorize(Policy = AuthPolicy.Viewer)]
+[RequiresAction(ActionIds.PushDevices)]
 public sealed class PushController(
     PushSubscriptionStore subscriptions,
     PushPreferenceStore preferences,
@@ -115,8 +116,8 @@ public sealed class PushController(
             Endpoint = body.Endpoint,
             UserSubject = subject,
             Username = Username(),
-            // The provider-qualified handle, because an action staged for this device re-resolves its
-            // tier from it and a bare subject is unique only within its provider.
+            // The provider-qualified handle, because an action staged for this device resolves its
+            // account from it and a bare subject is unique only within its provider.
             UserHandle = Handle(),
             P256dh = body.Keys.P256dh,
             Auth = body.Keys.Auth,

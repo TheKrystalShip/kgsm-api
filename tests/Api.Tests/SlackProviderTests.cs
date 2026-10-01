@@ -132,7 +132,7 @@ public sealed class SlackApiTests
     private static HttpClient Admin(AuthTestFactory f)
     {
         HttpClient c = f.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(KgsmTier.Admin));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(Persona.Owner));
         return c;
     }
 

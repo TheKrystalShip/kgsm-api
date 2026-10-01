@@ -332,7 +332,7 @@ public sealed class ReactorClient : IDisposable
     /// (<c>GET /proposals</c>), verbatim.
     /// </summary>
     /// <remarks>
-    /// <b>The body carries redemption handles, so this is operator-gated on the way out.</b> A handle
+    /// <b>The body carries redemption handles, so this is gated on the way out.</b> A handle
     /// is the capability: anything holding one can ask for the action it names. The leaf will not act on
     /// one without a named caller and the API will not hand one to a caller it has not authorised, and
     /// both halves are needed — the leaf cannot know who anybody is, and the API cannot re-derive the

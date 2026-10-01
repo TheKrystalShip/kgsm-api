@@ -9,7 +9,8 @@ namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
 /// Historical metrics endpoints — a <b>verbatim proxy</b> to kgsm-monitor, the single source of truth
-/// for metrics history. The API keeps the routes, the viewer gate, and the entity existence checks
+/// for metrics history. The API keeps the routes, the gates — <c>kgsm:server.read</c> at a server,
+/// <c>monitor:metrics.read</c> at this node for the host's series — and the entity existence checks
 /// (unknown id → 404), then relays the monitor's <c>GET /metrics/history</c> JSON body unchanged (tier
 /// selection, series shaping, and retention all live in the monitor). Monitor absent/unreachable →
 /// an honest empty response (200, never a fabricated curve), the same graceful-degrade the SPA already
@@ -17,7 +18,6 @@ namespace TheKrystalShip.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1")]
-[Authorize(Policy = AuthPolicy.Viewer)]
 public sealed class MetricsHistoryController(
     IMonitorHistoryClient monitor,
     ServerAggregator serverAggregator,
@@ -25,6 +25,7 @@ public sealed class MetricsHistoryController(
     ApiOptions options) : ControllerBase
 {
     [HttpGet("servers/{id}/metrics/history")]
+    [RequiresAction(ActionIds.ServerRead)]
     public async Task<IActionResult> GetServerHistory(
         string id, [FromQuery] string? range, CancellationToken ct)
     {
@@ -37,6 +38,7 @@ public sealed class MetricsHistoryController(
     }
 
     [HttpGet("hosts/{id}/metrics/history")]
+    [RequiresAction(ActionIds.MonitorMetricsRead)]
     public async Task<IActionResult> GetHostHistory(
         string id, [FromQuery] string? range, CancellationToken ct)
     {
@@ -58,6 +60,7 @@ public sealed class MetricsHistoryController(
     /// </para>
     /// </summary>
     [HttpGet("hosts/{id}/services/{leafId}/metrics/history")]
+    [RequiresAction(ActionIds.MonitorMetricsRead)]
     public async Task<IActionResult> GetLeafHistory(
         string id, string leafId, [FromQuery] string? range, CancellationToken ct)
     {
@@ -83,6 +86,7 @@ public sealed class MetricsHistoryController(
     /// </para>
     /// </remarks>
     [HttpGet("hosts/{id}/gpus/{uuid}/metrics/history")]
+    [RequiresAction(ActionIds.MonitorMetricsRead)]
     public async Task<IActionResult> GetGpuHistory(
         string id, string uuid, [FromQuery] string? range, CancellationToken ct)
     {
@@ -102,6 +106,7 @@ public sealed class MetricsHistoryController(
     /// keyed differently, and folding them would put a UUID and a <c>chip/device/tempN</c> in one namespace.
     /// </remarks>
     [HttpGet("hosts/{id}/gpus/metrics/summary")]
+    [RequiresAction(ActionIds.MonitorMetricsRead)]
     public async Task<IActionResult> GetGpuSummary(string id, [FromQuery] string? range, CancellationToken ct)
     {
         if (id != options.HostId)
@@ -122,6 +127,7 @@ public sealed class MetricsHistoryController(
     /// rows, aggregated where they live.
     /// </remarks>
     [HttpGet("hosts/{id}/sensors/metrics/summary")]
+    [RequiresAction(ActionIds.MonitorMetricsRead)]
     public async Task<IActionResult> GetSensorSummary(string id, [FromQuery] string? range, CancellationToken ct)
     {
         if (id != options.HostId)
@@ -138,6 +144,7 @@ public sealed class MetricsHistoryController(
     /// <c>chip/device/tempN</c> and carries the separator a path would be split on.
     /// </summary>
     [HttpGet("hosts/{id}/sensors/metrics/history")]
+    [RequiresAction(ActionIds.MonitorMetricsRead)]
     public async Task<IActionResult> GetSensorHistory(
         string id, [FromQuery] string? sensor, [FromQuery] string? range, CancellationToken ct)
     {

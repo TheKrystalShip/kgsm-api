@@ -16,14 +16,14 @@ namespace TheKrystalShip.Api.Controllers;
 /// journal is not engine data). New lines also arrive live on the <c>hosts/{id}/logs</c> WS topic; this
 /// endpoint is the hydrate/backfill source (the patch-only realtime rule).
 /// <para>
-/// Gated at <b>operator</b> — stricter than the (viewer-gated) audit log on purpose: the audit feed is a
-/// curated, closed-vocabulary action record, whereas raw journald lines are uncurated and can carry stack
-/// traces or secrets. Pagination is keyset on the opaque journald cursor (newest first).
+/// Gated on <c>api:logs.read</c>, its own action apart from the audit log's on purpose: the audit feed is
+/// a curated, closed-vocabulary action record, whereas raw journald lines are uncurated and can carry
+/// stack traces or secrets. Pagination is keyset on the opaque journald cursor (newest first).
 /// </para>
 /// </summary>
 [ApiController]
 [Route("api/v1/hosts/{id}/logs")]
-[Authorize(Policy = AuthPolicy.Operator)]
+[RequiresAction(ActionIds.LogsRead)]
 public sealed class LogsController(JournalReader journal, ApiOptions options, SystemdReader systemd) : ControllerBase
 {
     /// <summary>

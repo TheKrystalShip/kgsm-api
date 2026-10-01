@@ -278,5 +278,5 @@ public sealed class BatchWorker(
 
     private void Publish(Job job) =>
         hub.Publish(StreamProtocol.JobsTopic, StreamProtocol.JobEntityKey(job.Id),
-            new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, job));
+            new StreamMessage(StreamProtocol.JobsTopic, StreamProtocol.JobPatch, job), job.ServerId);
 }

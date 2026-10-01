@@ -19,15 +19,14 @@ namespace TheKrystalShip.Api.Controllers;
 /// (<see cref="LeafHealthMonitor"/>). Host-OS introspection, sourced directly (like the host logs / file
 /// browser), NOT via kgsm-lib.
 /// <para>
-/// Gated at <b>operator</b> — the same host-internals sensitivity as the host logs (unit names, pids,
-/// memory, enablement). The host deep-dive page is already admin-gated on the frontend, so reaching here
-/// clears the read gate. <strong>Read-only in this slice</strong> — start/stop/restart controls are a later
-/// increment (they need a polkit grant scoped to <c>kgsm-*.service</c>, an admin gate, and audit rows).
+/// The board and a leaf's command list take <c>api:services.read</c> — host internals (unit names, pids,
+/// memory, enablement). Each leaf's own surface relayed below takes that leaf's action: the scheduler's
+/// windows, the watchdog's supervision, the monitor's metrics, the speech and bot status, and the
+/// reactor's rules.
 /// </para>
 /// </summary>
 [ApiController]
 [Route("api/v1/hosts/{id}/services")]
-[Authorize(Policy = AuthPolicy.Operator)]
 public sealed class ServicesController(
     ServicesAggregator services,
     LeafCommandStore commands,
@@ -41,6 +40,7 @@ public sealed class ServicesController(
     /// <summary><c>GET /hosts/{id}/services</c> → <c>{ data:[ComponentService] }</c> in catalog order. Per-host
     /// api: the only valid <c>{id}</c> is this host (unknown ⇒ 404, mirroring the other host surfaces).</summary>
     [HttpGet]
+    [RequiresAction(ActionIds.ServicesRead)]
     public async Task<ActionResult<ServicesSnapshot>> GetServices(string id, CancellationToken ct)
     {
         if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
@@ -57,11 +57,12 @@ public sealed class ServicesController(
     /// </summary>
     /// <remarks>
     /// Read-only reference material about a leaf, so it sits with the rest of the read-only Services
-    /// surface at operator rather than behind the admin config gate. Nothing here is interpreted: the
+    /// surface on <c>api:services.read</c> rather than behind the leaf's config action. Nothing here is interpreted: the
     /// manifest's own words for what each command does, and for what the leaf checks before running one,
     /// are passed through — this API cannot verify a gate it does not implement, so it does not restate it.
     /// </remarks>
     [HttpGet("{leaf}/commands")]
+    [RequiresAction(ActionIds.ServicesRead)]
     public async Task<IActionResult> GetCommands(string id, string leaf, CancellationToken ct)
     {
         if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
@@ -95,6 +96,7 @@ public sealed class ServicesController(
     /// disagreeing about when a restart lands. A null field is the leaf's own honest gap.
     /// </remarks>
     [HttpGet("scheduler/schedules")]
+    [RequiresAction(ActionIds.SchedulerWindowsRead)]
     public async Task<IActionResult> GetSchedules(string id, CancellationToken ct)
     {
         if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
@@ -118,9 +120,10 @@ public sealed class ServicesController(
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Operator, and this is the only gate there is.</b> The scheduler's control socket carries no
-    /// identity and its own manifest says so — a unix socket has nobody to check — so the tier check runs
-    /// here, before the socket is dialled, rather than being left to a daemon with no way to apply it.
+    /// <b><c>scheduler:windows.write</c>, and this is the only gate there is.</b> The scheduler's control
+    /// socket carries no identity and its own manifest says so — a unix socket has nobody to check — so the
+    /// check runs here, before the socket is dialled, rather than being left to a daemon with no way to
+    /// apply it.
     /// </para>
     /// <para>
     /// <b>None of these edits a schedule.</b> Each moves a target the daemon holds in memory, so the fire
@@ -137,6 +140,7 @@ public sealed class ServicesController(
     // The route token is `verb`, never `action`: MVC reserves that name for the action method, so a
     // segment spelled `{action}` binds to the method's own name and the route never matches a request.
     [HttpPost("scheduler/windows/{verb}")]
+    [RequiresAction(ActionIds.SchedulerWindowsWrite)]
     public async Task<IActionResult> ControlWindow(
         string id, string verb, [FromBody] SchedulerWindowAction? body, CancellationToken ct)
     {
@@ -197,6 +201,7 @@ public sealed class ServicesController(
     /// can't be read the rows still stand; nothing about them is invented from the table alone.
     /// </remarks>
     [HttpGet("watchdog/supervision")]
+    [RequiresAction(ActionIds.WatchdogSupervisionRead)]
     public async Task<IActionResult> GetSupervision(string id, CancellationToken ct)
     {
         if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
@@ -262,6 +267,7 @@ public sealed class ServicesController(
     /// panel compares them.
     /// </remarks>
     [HttpGet("monitor/stats")]
+    [RequiresAction(ActionIds.MonitorMetricsRead)]
     public async Task<IActionResult> GetMonitorStats(string id, CancellationToken ct)
     {
         if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
@@ -300,6 +306,7 @@ public sealed class ServicesController(
     /// </para>
     /// </remarks>
     [HttpGet("speech/status")]
+    [RequiresAction(ActionIds.SpeechStatusRead)]
     public async Task<IActionResult> GetSpeechStatus(
         string id,
         [FromServices] SystemdReader systemd,
@@ -372,6 +379,7 @@ public sealed class ServicesController(
     /// apart, so the resolved guild travels across untouched rather than being reduced to a boolean here.
     /// </remarks>
     [HttpGet("bot/status")]
+    [RequiresAction(ActionIds.BotStatusRead)]
     public async Task<IActionResult> GetBotStatus(string id, CancellationToken ct)
     {
         if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
@@ -416,6 +424,7 @@ public sealed class ServicesController(
     /// </para>
     /// </remarks>
     [HttpGet("reactor/status")]
+    [RequiresAction(ActionIds.ReactorRulesRead)]
     public async Task<IActionResult> GetReactorStatus(string id, CancellationToken ct)
     {
         if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
@@ -449,12 +458,13 @@ public sealed class ServicesController(
     /// that added it was deployed.
     /// </para>
     /// <para>
-    /// <b>Reference material, so it sits at operator with the rest of this controller.</b> It names no
+    /// <b>Reference material, so it takes <c>reactor:rules.read</c> with the reactor's other reads.</b> It names no
     /// instance, reports no measurement and reveals nothing about what this host is doing — it describes
     /// what the software can do.
     /// </para>
     /// </remarks>
     [HttpGet("reactor/catalog")]
+    [RequiresAction(ActionIds.ReactorRulesRead)]
     public async Task<IActionResult> GetReactorCatalog(string id, CancellationToken ct)
     {
         if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
@@ -492,6 +502,7 @@ public sealed class ServicesController(
     /// </para>
     /// </remarks>
     [HttpGet("reactor/triggers")]
+    [RequiresAction(ActionIds.ReactorRulesRead)]
     public async Task<IActionResult> GetReactorTriggers(
         string id, [FromQuery] int days, CancellationToken ct)
     {
@@ -528,11 +539,12 @@ public sealed class ServicesController(
     /// <para>
     /// <b>A read expressed as a POST, because the rule is the question.</b> Nothing is stored and
     /// nothing is dispatched: the rule does not become one of the host's rules, no decision reaches the
-    /// ledger or the journal, and the gate is not run. That is why it sits at operator with the other
-    /// reads rather than behind the admin write gate.
+    /// ledger or the journal, and the gate is not run. That is why it takes <c>reactor:rules.read</c> with
+    /// the other reads rather than <c>reactor:rules.write</c>.
     /// </para>
     /// </remarks>
     [HttpPost("reactor/preview")]
+    [RequiresAction(ActionIds.ReactorRulesRead)]
     public async Task<IActionResult> PreviewReactorRule(
         string id, CancellationToken ct)
     {
@@ -571,9 +583,9 @@ public sealed class ServicesController(
     /// actually decides on — a confirm dialog without it asks somebody to authorise an action on trust.
     /// </para>
     /// <para>
-    /// <b>The body carries redemption handles, and a handle is the capability.</b> Operator, with the
-    /// rest of this controller, and that is the floor rather than a convenience: anything holding a
-    /// handle can ask for the action it names.
+    /// <b>The body carries redemption handles, and a handle is the capability.</b> It takes
+    /// <c>reactor:rules.read</c>, and that is the floor rather than a convenience: anything holding a
+    /// handle can ask for the action it names, which confirming then gates on its own.
     /// </para>
     /// <para>
     /// The open and recent halves come back in one call because reading them separately would show them
@@ -581,6 +593,7 @@ public sealed class ServicesController(
     /// </para>
     /// </remarks>
     [HttpGet("reactor/proposals")]
+    [RequiresAction(ActionIds.ReactorRulesRead)]
     public async Task<IActionResult> GetReactorProposals(string id, int? days, CancellationToken ct)
     {
         if (!string.Equals(id, options.HostId, StringComparison.OrdinalIgnoreCase))
@@ -603,9 +616,9 @@ public sealed class ServicesController(
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Operator, because that is what performing the action directly requires.</b> Confirming a
-    /// backup or a restore is asking for a backup or a restore, and a proposal must not be a cheaper
-    /// route to either — so the floor is the action's own, neither lower nor invented for proposals.
+    /// <b><c>reactor:rules.write</c>, because confirming is acting through the reactor's rules.</b>
+    /// Confirming a backup or a restore is asking for a backup or a restore on the reactor's say-so, so it
+    /// takes the action that decides what the reactor does, never one lower.
     /// </para>
     /// <para>
     /// <b>The identity is taken from the authenticated principal and never from the body.</b> An
@@ -622,6 +635,7 @@ public sealed class ServicesController(
     /// </para>
     /// </remarks>
     [HttpPost("reactor/proposals/{handle}/confirm")]
+    [RequiresAction(ActionIds.ReactorRulesWrite)]
     public Task<IActionResult> ConfirmReactorProposal(string id, string handle, CancellationToken ct) =>
         RedeemAsync(id, handle, confirm: true, ct);
 
@@ -633,6 +647,7 @@ public sealed class ServicesController(
     /// the offer rather than the world, and it stays a no whatever the world has since done.
     /// </remarks>
     [HttpPost("reactor/proposals/{handle}/dismiss")]
+    [RequiresAction(ActionIds.ReactorRulesWrite)]
     public Task<IActionResult> DismissReactorProposal(string id, string handle, CancellationToken ct) =>
         RedeemAsync(id, handle, confirm: false, ct);
 
@@ -700,6 +715,7 @@ public sealed class ServicesController(
     /// </para>
     /// </remarks>
     [HttpGet("reactor/decisions")]
+    [RequiresAction(ActionIds.ReactorRulesRead)]
     public async Task<IActionResult> GetReactorDecisions(
         string id, [FromQuery] int days, CancellationToken ct)
     {

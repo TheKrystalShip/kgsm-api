@@ -61,19 +61,22 @@ public sealed class MemberActingTests : IClassFixture<AuthTestFactory>
     {
         using WebApplicationFactory<Program> node = Node();
         KgsmIdentity person = Somebody("245717107596197888");
-        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Operator);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Operator);
 
         using HttpClient client = node.CreateClient();
         using HttpResponseMessage response =
             await client.SendAsync(Acting("/api/v1/me", MemberToken(node), person.Handle));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        // The tier came from this node's own replica. Nothing in the request said what it should be,
-        // which is the whole difference between this and forwarding an authority.
         JsonElement me = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
-        Assert.Equal("operator", me.GetProperty("tier").GetString());
         Assert.Equal(person.Handle, me.GetProperty("user").GetProperty("id").GetString());
+
+        // What they may do came from this node's own replica. Nothing in the request said what it should
+        // be, which is the whole difference between this and forwarding an authority.
+        Assert.Equal(HttpStatusCode.OK,
+            (await client.SendAsync(Acting("/api/v1/servers", MemberToken(node), person.Handle))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await client.SendAsync(Acting("/api/v1/integrations", MemberToken(node), person.Handle))).StatusCode);
     }
 
     [Fact]
@@ -96,7 +99,7 @@ public sealed class MemberActingTests : IClassFixture<AuthTestFactory>
     {
         using WebApplicationFactory<Program> node = Node();
         KgsmIdentity person = Somebody("245717107596197889");
-        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Owner);
 
         using HttpClient client = node.CreateClient();
         var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/me");
@@ -125,7 +128,7 @@ public sealed class MemberActingTests : IClassFixture<AuthTestFactory>
     {
         using WebApplicationFactory<Program> node = Node();
         KgsmIdentity person = Somebody("245717107596197890");
-        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin, UserStatus.Disabled);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Owner, UserStatus.Disabled);
 
         using HttpClient client = node.CreateClient();
         using HttpResponseMessage response =
@@ -141,7 +144,7 @@ public sealed class MemberActingTests : IClassFixture<AuthTestFactory>
         // however well-formed the identity it names.
         using WebApplicationFactory<Program> node = Node();
         KgsmIdentity person = Somebody("245717107596197891");
-        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Owner);
 
         using WebApplicationFactory<Program> stranger = _base.WithWebHostBuilder(b =>
             b.ConfigureAppConfiguration((_, c) => c.AddInMemoryCollection(new Dictionary<string, string?>

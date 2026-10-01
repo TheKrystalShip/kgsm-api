@@ -48,7 +48,7 @@ public sealed class ServerMoveTests
     [Fact]
     public async Task Move_MissingLibrary_400()
     {
-        HttpResponseMessage resp = await Post(_engine, KgsmTier.Admin, "stopped-1", "{}");
+        HttpResponseMessage resp = await Post(_engine, Persona.Owner, "stopped-1", "{}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -56,7 +56,7 @@ public sealed class ServerMoveTests
     [Fact]
     public async Task Move_BadOrigin_400()
     {
-        HttpResponseMessage resp = await Post(_engine, KgsmTier.Admin, "stopped-1",
+        HttpResponseMessage resp = await Post(_engine, Persona.Owner, "stopped-1",
             "{\"library\":\"archive\",\"origin\":\"hacker\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
@@ -64,7 +64,7 @@ public sealed class ServerMoveTests
     [Fact]
     public async Task Move_UnknownServer_404()
     {
-        HttpResponseMessage resp = await Post(_engine, KgsmTier.Admin, "not-a-server",
+        HttpResponseMessage resp = await Post(_engine, Persona.Owner, "not-a-server",
             "{\"library\":\"archive\"}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -73,7 +73,7 @@ public sealed class ServerMoveTests
     public async Task Move_UnknownLibrary_400_NamingIt()
     {
         // A name this host does not carry is a client-input problem, like an unknown blueprint on install.
-        HttpResponseMessage resp = await Post(_engine, KgsmTier.Admin, "stopped-1",
+        HttpResponseMessage resp = await Post(_engine, Persona.Owner, "stopped-1",
             "{\"library\":\"nosuch\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("nosuch", await resp.Content.ReadAsStringAsync(), StringComparison.Ordinal);
@@ -84,7 +84,7 @@ public sealed class ServerMoveTests
     {
         // A conflict, not a malformed request: the name is right and the move will work once the disk is
         // back. The path is what tells somebody which one to plug in.
-        HttpResponseMessage resp = await Post(_engine, KgsmTier.Admin, "stopped-1",
+        HttpResponseMessage resp = await Post(_engine, Persona.Owner, "stopped-1",
             "{\"library\":\"away\"}");
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
         Assert.Contains("/mnt/away", await resp.Content.ReadAsStringAsync(), StringComparison.Ordinal);
@@ -93,7 +93,7 @@ public sealed class ServerMoveTests
     [Fact]
     public async Task Move_IntoItsOwnLibrary_409()
     {
-        HttpResponseMessage resp = await Post(_engine, KgsmTier.Admin, "stopped-1",
+        HttpResponseMessage resp = await Post(_engine, Persona.Owner, "stopped-1",
             "{\"library\":\"default\"}");
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
         Assert.Contains("already in library", await resp.Content.ReadAsStringAsync(), StringComparison.Ordinal);
@@ -102,7 +102,7 @@ public sealed class ServerMoveTests
     [Fact]
     public async Task Move_RunningServer_409()
     {
-        HttpResponseMessage resp = await Post(_engine, KgsmTier.Admin, "running-1",
+        HttpResponseMessage resp = await Post(_engine, Persona.Owner, "running-1",
             "{\"library\":\"archive\"}");
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
         Assert.Contains("stop it", await resp.Content.ReadAsStringAsync(), StringComparison.Ordinal);
@@ -114,7 +114,7 @@ public sealed class ServerMoveTests
         // The same rule CommandGate holds for every other verb: an unknown status never blocks. The
         // engine refuses a running instance itself, so guessing here would only refuse a move that would
         // have worked.
-        HttpResponseMessage resp = await Post(_engine, KgsmTier.Admin, "unread-1",
+        HttpResponseMessage resp = await Post(_engine, Persona.Owner, "unread-1",
             "{\"library\":\"archive\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
     }
@@ -122,7 +122,7 @@ public sealed class ServerMoveTests
     [Fact]
     public async Task Move_Accepted_ReturnsAMoveJob()
     {
-        HttpResponseMessage resp = await Post(_engine, KgsmTier.Admin, "stopped-1",
+        HttpResponseMessage resp = await Post(_engine, Persona.Owner, "stopped-1",
             "{\"library\":\"archive\",\"origin\":\"ui\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
@@ -136,7 +136,7 @@ public sealed class ServerMoveTests
     {
         // Placement shapes the host, so it takes the same authority as registering a library — not the
         // operator tier that covers acting on one server.
-        HttpResponseMessage resp = await Post(_engine, KgsmTier.Operator, "stopped-1",
+        HttpResponseMessage resp = await Post(_engine, Persona.Operator, "stopped-1",
             "{\"library\":\"archive\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -151,14 +151,14 @@ public sealed class ServerMoveTests
     [Fact]
     public async Task Move_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Post(_noEngine, KgsmTier.Admin, "anything",
+        HttpResponseMessage resp = await Post(_noEngine, Persona.Owner, "anything",
             "{\"library\":\"archive\"}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static HttpClient Client(AuthTestFactory factory, KgsmTier? tier)
+    private static HttpClient Client(AuthTestFactory factory, Persona? tier)
     {
         HttpClient c = factory.CreateClient();
         if (tier is { } t)
@@ -167,7 +167,7 @@ public sealed class ServerMoveTests
     }
 
     private static Task<HttpResponseMessage> Post(
-        AuthTestFactory factory, KgsmTier? tier, string id, string json) =>
+        AuthTestFactory factory, Persona? tier, string id, string json) =>
         Client(factory, tier).PostAsync($"/api/v1/servers/{id}/move",
             new StringContent(json, Encoding.UTF8, "application/json"));
 

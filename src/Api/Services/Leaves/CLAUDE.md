@@ -12,7 +12,7 @@ capability block (`HostAggregator` reads its cached `Current`) and the `hosts/{i
 (it publishes flips). Two axes, never conflated:
 
 - **`provisioned`** (the capability *set*) is **runtime-flippable** — seeded at startup from config,
-  then an admin can connect/disconnect a leaf live from the Services panel (the DB-backed
+  then somebody holding `api:services.manage` can connect/disconnect a leaf live from the Services panel (the DB-backed
   `LeafRegistry` the monitor reads each tick; the `hosts/{id}/capabilities` patch carries the changed
   *set*, not just each capability's `status`).
 - **`status`** is the live availability. A leaf failing flips only `status`
@@ -67,7 +67,7 @@ consumer needs no provisioning check of its own to stay off a daemon this host h
   read here rather than asked for: the model files measured on disk and the configured voice, both
   resolved through `LeafConfigService` so no path or default is written down twice.
   **It also carries no Link on the Services board** (it is absent from `ProvisionableLeaf`). That axis
-  is a stored connection an admin can turn off, and speech has none to arm: this client runs on a page
+  is a stored connection somebody can turn off, and speech has none to arm: this client runs on a page
   view, feeds no data flow, and the assistant service, the bot and a browser recording a voice note all
   reach the leaf directly. Socket activation is not the reason — the firewall is socket-activated too
   and does carry a Link, because disconnecting it degrades the ports surface.
@@ -110,9 +110,9 @@ one level down because the descriptor scan globs `*.json` at the top and would r
 descriptor. `LeafCommandStore` scans that subdirectory and `GET /hosts/{id}/services/{leaf}/commands`
 serves it **verbatim**: the API holds no idea what any command does, and passes each command's gate
 through without restating it, because it cannot verify a check it does not implement. The catalog is
-keyed by that gate, so a leaf whose commands need different tiers says so and the panel prints it. A
+keyed by that gate, so a leaf whose commands need different access says so and the panel prints it. A
 leaf that ships no manifest is a **404**, not an empty list — most take no commands, and that is a
-different statement. Read-only reference material, so it sits at operator with the rest of
+different statement. Read-only reference material, so it takes `api:services.read` with the rest of
 `ServicesController`. **One schema version is understood**
 (`LeafCommandManifest.SupportedSchemaVersion`); anything else is skipped whole and logged once, never
 half-read. Format: `../leaf-command-manifest.md` at the workspace root.

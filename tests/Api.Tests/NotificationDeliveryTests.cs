@@ -223,7 +223,6 @@ public sealed class NotificationBusTests
                 Origin = AuditOrigin.Ui,
                 UserId = userId,
                 Username = "newcomer",
-                ToTier = KgsmTiers.None,
                 ToStatus = status,
             },
             ApiJournal.UserProvisionedEvent,
@@ -343,7 +342,7 @@ public sealed class NotificationDeliveryE2ETests
     private static HttpClient AdminClient(NotificationDeliveryFactory f)
     {
         HttpClient c = f.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(KgsmTier.Admin));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(Persona.Owner));
         return c;
     }
 

@@ -45,7 +45,7 @@ deploy/setup.sh · deploy.sh        # provision the host once · (re)deploy the 
 ```bash
 dotnet build kgsm-api.slnx                  # build (Debug)
 dotnet run --project src/Api/Api.csproj     # run locally (binds Api__Urls, default :8080)
-dotnet test kgsm-api.slnx                    # xUnit suite (401/403/tier matrix, contracts, behavior)
+dotnet test kgsm-api.slnx                    # xUnit suite (401/403 access matrix, contracts, behavior)
 scripts/smoke.sh                             # build Release + run the HTTP/WS contract checks
 ./deploy/setup.sh                            # ONCE per host — asks for sudo; provisions the headless grant
 ./deploy/deploy.sh                           # build + (re)deploy the live systemd service (no sudo, no prompts)

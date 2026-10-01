@@ -10,14 +10,13 @@ using TheKrystalShip.KGSM.Core.Models.Enums;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// Console scrollback + input — the split console feature (#8). <b>Read</b> (viewer): <c>GET
+/// Console scrollback + input — the split console feature. <b>Read</b> (<c>kgsm:server.console.read</c>): <c>GET
 /// /api/v1/servers/{id}/console?tail=N</c>, a finite, oldest-first tail of a native instance's stdout for
 /// the SPA's console panel to <strong>hydrate</strong> on open/reconnect, after which it follows live
 /// lines on the WS <c>servers/{id}/console</c> topic (the patch-only, no-snapshot-on-subscribe rule — REST
-/// hydrates, WS follows). <b>Write</b> (operator): <c>POST /api/v1/servers/{id}/console</c> delivers an
-/// arbitrary console command to the running native server's input; the effect, if any, streams back on the
-/// same WS topic. The read is viewer-gated (consistent with <c>/audit</c> and <c>/alerts</c>); the write is
-/// operator-gated (at least as privileged as a lifecycle command).
+/// hydrates, WS follows). <b>Write</b> (<c>kgsm:server.console.write</c>): <c>POST
+/// /api/v1/servers/{id}/console</c> delivers an arbitrary console command to the running native server's
+/// input; the effect, if any, streams back on the same WS topic. Both are evaluated at the server.
 /// </summary>
 /// <remarks>
 /// <para><b>Degrade gracefully — never a 500.</b> The durable record is the watchdog's LogFile, read via
@@ -31,7 +30,6 @@ namespace TheKrystalShip.Api.Controllers;
 /// </remarks>
 [ApiController]
 [Route("api/v1/servers/{id}/console")]
-[Authorize(Policy = AuthPolicy.Viewer)]
 public sealed class ServerConsoleController(ILogger<ServerConsoleController> logger) : ControllerBase
 {
     private const int DefaultTail = 200;
@@ -58,6 +56,7 @@ public sealed class ServerConsoleController(ILogger<ServerConsoleController> log
     /// </para>
     /// </remarks>
     [HttpGet]
+    [RequiresAction(ActionIds.ServerConsoleRead)]
     public async Task<IActionResult> Get(string id, [FromQuery] int? tail, [FromQuery] long? before, CancellationToken ct)
     {
         int lines = Math.Clamp(tail ?? DefaultTail, 0, MaxTail);
@@ -94,7 +93,7 @@ public sealed class ServerConsoleController(ILogger<ServerConsoleController> log
     /// <remarks>
     /// <para>
     /// No line budget and no buffering: the bytes are copied from the daemon's response straight to this
-    /// one, so a multi-gigabyte log costs this process a buffer rather than its heap. Viewer-gated like the
+    /// one, so a multi-gigabyte log costs this process a buffer rather than its heap. Gated like the
     /// scrollback read — it is the same output, in one piece.
     /// </para>
     /// <para>
@@ -108,6 +107,7 @@ public sealed class ServerConsoleController(ILogger<ServerConsoleController> log
     /// </list>
     /// </remarks>
     [HttpGet("download")]
+    [RequiresAction(ActionIds.ServerConsoleRead)]
     public async Task<IActionResult> Download(string id, CancellationToken ct)
     {
         if (HttpContext.RequestServices.GetService(typeof(IWatchdogClient)) is not IWatchdogClient watchdog)
@@ -168,7 +168,7 @@ public sealed class ServerConsoleController(ILogger<ServerConsoleController> log
     /// </list>
     /// </summary>
     [HttpPost]
-    [Authorize(Policy = AuthPolicy.Operator)] // a write — operator and up (architecture.html §3·e control set)
+    [RequiresAction(ActionIds.ServerConsoleWrite)]
     public IActionResult Post(string id, [FromBody] ConsoleInputRequest? body)
     {
         string? input = body?.Input;

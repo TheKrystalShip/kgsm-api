@@ -239,8 +239,8 @@ public sealed class HostAggregator(
         Host host = await GetHostAsync(ct).ConfigureAwait(false);
         HostNetwork? net = await network.BuildHostNetworkAsync(ct).ConfigureAwait(false);
 
-        // Unprojected: the caller's tier decides what survives, and only the controller knows it. Serving this
-        // straight to a viewer would name every process on the card — see GpuRedaction.
+        // Unprojected: the caller's access decides what survives, and only the controller knows it. Serving
+        // this straight to every reader would name every process on the card — see GpuRedaction.
         return host with
         {
             Network = net,

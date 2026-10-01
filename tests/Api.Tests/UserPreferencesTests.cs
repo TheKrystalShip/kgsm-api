@@ -34,7 +34,7 @@ public sealed class UserPreferencesTests(AuthTestFactory factory) : IClassFixtur
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Viewer));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Viewer));
         if (device is not null) c.DefaultRequestHeaders.Add(DeviceHeader, device);
         return c;
     }
@@ -295,7 +295,7 @@ public sealed class UserPreferencesTests(AuthTestFactory factory) : IClassFixtur
         // arrange your own panel.
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.None));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.None));
         c.DefaultRequestHeaders.Add(DeviceHeader, "dev_pending");
 
         Assert.Equal(HttpStatusCode.OK, (await Put(c, "t.pending", new { ok = true })).StatusCode);

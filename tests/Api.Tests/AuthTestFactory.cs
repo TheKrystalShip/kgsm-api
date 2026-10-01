@@ -9,7 +9,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 using TheKrystalShip.Api;
-using TheKrystalShip.Api.Services.Auth;
 
 using TheKrystalShip.KGSM.Auth;
 using TheKrystalShip.KGSM.Auth.Users;
@@ -21,11 +20,11 @@ namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
 /// Boots the real API in-process with auth ON, standing in for the cluster's auth anchor with a signer
-/// of its own. Everything else is the production pipeline — the JwtBearer validation against the
-/// anchor's published key, the ended-session check, the authority read from the replica, the tier
-/// policies, the controllers — so the tier matrix exercises the real wiring. The engine/monitor are
-/// left unprovisioned so reads degrade to 200 (empty roster / null capacity) with no external
-/// dependency.
+/// of its own and an authority store of its own (<see cref="TestAuthority"/>). Everything else is the
+/// production pipeline — the JwtBearer validation against the anchor's published key, the ended-session
+/// check, the account read from the replica, the action gates, the controllers — so the access matrix
+/// exercises the real wiring. The engine/monitor are left unprovisioned so reads degrade to 200 (empty
+/// roster / null capacity) with no external dependency.
 /// </summary>
 public class AuthTestFactory : WebApplicationFactory<Program>
 {
@@ -119,14 +118,10 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 // disk — so an unpinned run would read the developer's own live daemons.
                 ["Api:LeafSurfaceRoot"] =
                     Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-surfaces-{Guid.NewGuid():N}"),
-                // Never the default. /var/lib/kgsm/auth/users.db is the MACHINE's real account file,
-                // shared with every KGSM service on the box, and opening it CREATES it — so an unpinned
-                // test run would hand the operator a live accounts file that nobody made.
+                // Never the default. /var/lib/kgsm/auth/users.db is the MACHINE's real replica, shared
+                // with every KGSM service on the box, and this API creates it — so an unpinned test run
+                // would hand the operator a live authority file that nobody made.
                 ["Api:UsersDbPath"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-users-{Guid.NewGuid():N}.db"),
-                // No authority cache. A test that mints a viewer token and then an admin one asks the
-                // same question twice inside any sane TTL, and a cached first answer would make the
-                // second silently wrong. The cache has its own tests, where the TTL is the subject.
-                ["Api:AuthorityCacheSeconds"] = "0",
                 // Never the default. http://127.0.0.1:8098 is where the machine running the suite keeps
                 // its real auth anchor, and a clustered test node with an empty roster would introduce
                 // itself to it. A test about the local join names its own target.
@@ -152,41 +147,44 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     }
 
     /// <summary>
-    /// A session the stand-in anchor minted at <paramref name="tier"/> for the one standing identity,
-    /// whose account on this node is set to match.
+    /// A session the stand-in anchor minted for the one standing identity, whose account on this node
+    /// holds <paramref name="persona"/>.
     /// </summary>
-    public string AccessToken(KgsmTier tier) => MintAccessOn(Services, tier);
+    public string AccessToken(Persona persona) => MintAccessOn(Services, persona);
 
     /// <summary>
     /// A refresh token the stand-in anchor genuinely signed, for proving one is never accepted as a
     /// bearer: a refresh token is spent at the anchor and nowhere else.
     /// </summary>
-    public string RefreshToken(KgsmTier tier)
+    public string RefreshToken(Persona persona)
     {
-        GiveTheFakeIdentityAnAccount(Services, tier);
-        return Anchor.MintRefresh(FakeDiscordResolver.Identity, tier, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
+        GiveTheFakeIdentityAnAccount(Services, persona);
+        return Anchor.MintRefresh(FakeDiscordResolver.Identity, NewSessionId()).Token;
     }
 
     /// <summary>
     /// A session the stand-in anchor minted for <paramref name="identity"/>, with an account on this
-    /// node at <paramref name="tier"/>/<paramref name="status"/> — the whole setup for one person.
+    /// node holding <paramref name="persona"/> at <paramref name="status"/> — the whole setup for one
+    /// person.
     /// </summary>
     /// <remarks>
     /// <see cref="AccessToken"/> mints for the one standing identity, so every token it hands out is
-    /// the same person holding whichever tier was asked for last. A test about who a frame reaches, or
-    /// about one account changing while another watches, needs two people, and this is how it gets
+    /// the same person holding whichever persona was asked for last. A test about who a frame reaches,
+    /// or about one account changing while another watches, needs two people, and this is how it gets
     /// them: <see cref="FakeDiscordResolver.IdentityFor"/> names one, and this gives them a session
     /// and an account of their own.
     /// </remarks>
-    public string AccessTokenFor(KgsmIdentity identity, KgsmTier tier, UserStatus status = UserStatus.Active)
+    public string AccessTokenFor(KgsmIdentity identity, Persona persona, UserStatus status = UserStatus.Active)
     {
-        SetAccount(identity, tier, status);
-        return MintAccess(identity, tier);
+        SetAccount(identity, persona, status);
+        return MintAccess(identity);
     }
 
     /// <summary>A session the stand-in anchor minted for <paramref name="identity"/>, and nothing else.</summary>
-    public static string MintAccess(KgsmIdentity identity, KgsmTier tier) =>
-        Anchor.MintAccess(identity, tier, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
+    public static string MintAccess(KgsmIdentity identity) =>
+        Anchor.MintAccess(identity, NewSessionId()).Token;
+
+    private static string NewSessionId() => "sid_test_" + Guid.NewGuid().ToString("N");
 
     /// <summary>
     /// A session for the standing identity, whose account is set through <paramref name="services"/>.
@@ -196,71 +194,55 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     /// DERIVED factory with its OWN random database, replica and service provider — gets the account
     /// written where its own requests will read it.
     /// </remarks>
-    internal static string MintAccessOn(IServiceProvider services, KgsmTier tier)
+    internal static string MintAccessOn(IServiceProvider services, Persona persona)
     {
-        // A token says what tier it was minted at; the replica says what the holder may do, and the
-        // replica is what every gate reads. So a token minted at a tier only means anything if the
-        // account behind it holds that tier — which is the production rule, not a test convenience.
-        GiveTheFakeIdentityAnAccount(services, tier);
-        return MintAccess(FakeDiscordResolver.Identity, tier);
+        // A token names who; the replica says what they may do, and the replica is what every gate
+        // reads. So a token only means anything once the account behind it holds the persona — which
+        // is the production rule, not a test convenience.
+        GiveTheFakeIdentityAnAccount(services, persona);
+        return MintAccess(FakeDiscordResolver.Identity);
     }
 
-    /// <summary>Create or move the account behind the fake identity to <paramref name="tier"/>.</summary>
-    internal static void GiveTheFakeIdentityAnAccount(IServiceProvider services, KgsmTier tier)
+    /// <summary>Create or move the account behind the fake identity to <paramref name="persona"/>.</summary>
+    internal static void GiveTheFakeIdentityAnAccount(IServiceProvider services, Persona persona)
     {
         // A factory pointed at a replica that will not open is testing exactly that, and minting a
         // token for it must not be the thing that fails.
-        if (services.GetRequiredService<UserDirectory>().Available)
-            SetAccountOn(services, FakeDiscordResolver.Identity, tier);
+        if (services.GetRequiredService<IReplicatedAuthority>().Replica is not null)
+            SetAccountOn(services, FakeDiscordResolver.Identity, persona);
     }
 
     /// <summary>
-    /// Give an identity an account on this node at a tier and status of the test's choosing — what
-    /// replication from the anchor would have delivered.
+    /// Give an identity an account on this node holding a persona at a status of the test's choosing —
+    /// what replication from the anchor would have delivered.
     /// </summary>
-    public KgsmUser SetAccount(KgsmIdentity identity, KgsmTier tier, UserStatus status = UserStatus.Active) =>
-        SetAccountOn(Services, identity, tier, status);
+    public KgsmUser SetAccount(KgsmIdentity identity, Persona persona, UserStatus status = UserStatus.Active) =>
+        SetAccountOn(Services, identity, persona, status);
 
     /// <summary>The account an identity proves here, or <see langword="null"/>.</summary>
-    public KgsmUser? AccountOf(KgsmIdentity identity) =>
-        ReplicaOf(Services).FindByCredentialAsync(identity.Handle).GetAwaiter().GetResult();
+    public KgsmUser? AccountOf(KgsmIdentity identity) => TestAuthority.For(Services).AccountOf(identity);
+
+    /// <summary>The replica file a factory's node reads, opened directly.</summary>
+    internal static SqliteAuthorityStore ReplicaOf(IServiceProvider services) => TestAuthority.For(services).Replica;
 
     /// <summary>
-    /// The replica file a factory's node reads, opened directly — the test's stand-in for replication.
+    /// Set the account at the stand-in anchor, deliver it to the node's replica, and tell the node the
+    /// replica changed — the three steps replication performs.
     /// </summary>
-    /// <remarks>
-    /// This node only ever reads the replica; the anchor is its one writer and reaches it through
-    /// replication. A test plays that part by writing the same file through the account store, which
-    /// is exactly what replication does on the other side.
-    /// </remarks>
-    internal static SqliteUserStore ReplicaOf(IServiceProvider services) =>
-        new(new UserStoreOptions { Path = services.GetRequiredService<ApiOptions>().UsersDbPath });
-
     internal static KgsmUser SetAccountOn(
-        IServiceProvider services, KgsmIdentity identity, KgsmTier tier,
+        IServiceProvider services, KgsmIdentity identity, Persona persona,
         UserStatus status = UserStatus.Active)
     {
-        SqliteUserStore store = ReplicaOf(services);
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        KgsmUser? existing = store.FindByCredentialAsync(identity.Handle).GetAwaiter().GetResult();
-
-        KgsmUser account;
-        if (existing is not null)
-        {
-            account = existing with { Tier = tier, Status = status, Updated = now };
-            store.UpdateAsync(account).GetAwaiter().GetResult();
-        }
-        else
-        {
-            account = new IdentityLinkService(store)
-                .ProvisionAsync(identity, tier, TierSource.Granted, status, now)
-                .GetAwaiter().GetResult().User!;
-        }
-
-        // The cache is off in this factory, but a derived one may not be, and a stale answer here
-        // would look like the gate being wrong rather than the setup being stale.
-        services.GetRequiredService<UserDirectory>().Authority.ForgetAll();
+        KgsmUser account = TestAuthority.For(services).Set(identity, persona, status);
+        services.GetService<AuthorityChangeNotifier>()?.NotifyAsync(CancellationToken.None).GetAwaiter().GetResult();
         return account;
+    }
+
+    /// <summary>Remove the account an identity proves, at the stand-in anchor and on the node.</summary>
+    internal static void RemoveAccountOn(IServiceProvider services, KgsmIdentity identity)
+    {
+        TestAuthority.For(services).Remove(identity);
+        services.GetService<AuthorityChangeNotifier>()?.NotifyAsync(CancellationToken.None).GetAwaiter().GetResult();
     }
 
     /// <summary>
@@ -269,7 +251,7 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     /// <remarks>
     /// That table holds this host's pre-cutover history and nothing appends to it any more — every
     /// producer records what it did in its own journal. Tests that exercise the LOCAL half of the merged
-    /// read (keyset order, filters, the viewer gate) seed it directly, which is what that half reads.
+    /// read (keyset order, filters, the redaction) seed it directly, which is what that half reads.
     /// </remarks>
     public async Task SeedAuditAsync(AuditWrite write)
     {

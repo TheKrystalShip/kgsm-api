@@ -67,9 +67,10 @@ public sealed class MetricsPump(StreamHub hub, MonitorClient monitor, ApiOptions
                         && Environment.TickCount64 - lastRoster >= RosterIntervalMs)
                     {
                         lastRoster = Environment.TickCount64;
-                        hub.Publish(StreamProtocol.ServersMetricsTopic, StreamProtocol.ServersMetricsEntityKey,
-                            new StreamMessage(StreamProtocol.ServersMetricsTopic, StreamProtocol.MetricsRoster,
-                                BuildRoster(snap)));
+                        hub.PublishRows(StreamProtocol.ServersMetricsTopic, StreamProtocol.ServersMetricsEntityKey,
+                            BuildRoster(snap).Servers, row => row.Id,
+                            rows => new StreamMessage(StreamProtocol.ServersMetricsTopic, StreamProtocol.MetricsRoster,
+                                new ServerMetricsRoster(rows)));
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)

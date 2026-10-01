@@ -25,7 +25,7 @@ namespace TheKrystalShip.Api.Tests;
 /// This is what one sign-in for a whole cluster comes down to on the receiving end. The anchor holds
 /// a private key and mints a session audienced to the cluster; this node holds only the public half,
 /// so it can check the signature and can never issue one. Everything the session then resolves to —
-/// the tier, whether the account is switched off — comes from this node's own replica, so nothing on
+/// what it may do, whether the account is switched off — comes from this node's own replica, so nothing on
 /// the request path leaves the machine.
 /// </para>
 /// <para>
@@ -102,19 +102,20 @@ public sealed class ClusterSessionAcceptanceTests
 
         // The account exists here because replication put it here, not because anybody signed in.
         KgsmIdentity person = Somebody("usr_replicated");
-        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Operator);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Operator);
 
-        string token = Anchor(signer).MintAccess(person, KgsmTier.Admin, "sid_from_anchor").Token;
+        string token = Anchor(signer).MintAccess(person, "sid_from_anchor").Token;
 
-        HttpResponseMessage response = await client.SendAsync(Get("/api/v1/me", token));
+        HttpResponseMessage response = await client.SendAsync(Get("/api/v1/me/access", token));
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        JsonElement me = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        JsonElement access = JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
 
-        // Operator, not the admin the token was minted with. Authority is what the replica says now,
-        // and the tier claim is a display hint the resolver overwrites — the same rule a local
-        // session is held to, which is what stops this node and the anchor disagreeing about a person.
-        Assert.Equal("operator", me.GetProperty("tier").GetString());
+        // What the replica's roles grant, and nothing the token could have said: the token names who,
+        // and this node's own copy of the authority says what.
+        Assert.False(access.GetProperty("owner").GetBoolean());
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Get("/api/v1/servers", token))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await client.SendAsync(Get("/api/v1/integrations", token))).StatusCode);
     }
 
     [Fact]
@@ -125,7 +126,7 @@ public sealed class ClusterSessionAcceptanceTests
         using WebApplicationFactory<Program> node = NodeKnowing(factory, Published.Of(signer));
         using HttpClient client = node.CreateClient();
 
-        string token = Anchor(signer).MintAccess(Somebody("usr_stranger"), KgsmTier.Admin, "sid_1").Token;
+        string token = Anchor(signer).MintAccess(Somebody("usr_stranger"), "sid_1").Token;
 
         // A stranger is a real answer, so the session stands and every gate refuses them. Reporting
         // the signature as invalid would send somebody back to a sign-in that would work perfectly.
@@ -142,11 +143,11 @@ public sealed class ClusterSessionAcceptanceTests
         using HttpClient client = node.CreateClient();
 
         KgsmIdentity person = Somebody("usr_switched_off");
-        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin, UserStatus.Disabled);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Owner, UserStatus.Disabled);
 
-        string token = Anchor(signer).MintAccess(person, KgsmTier.Admin, "sid_1").Token;
+        string token = Anchor(signer).MintAccess(person, "sid_1").Token;
 
-        // The switch is a door closing, not a tier being lowered — and it closes on a session minted
+        // The switch is a door closing, not access being narrowed — and it closes on a session minted
         // somewhere else, from a fact this node holds locally.
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Get("/api/v1/me", token))).StatusCode);
     }
@@ -160,10 +161,10 @@ public sealed class ClusterSessionAcceptanceTests
         using HttpClient client = node.CreateClient();
 
         KgsmIdentity person = Somebody("usr_signing_out");
-        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Owner);
 
         const string sid = "sid_to_be_ended";
-        string token = Anchor(signer).MintAccess(person, KgsmTier.Admin, sid).Token;
+        string token = Anchor(signer).MintAccess(person, sid).Token;
         Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(Get("/api/v1/me", token))).StatusCode);
 
         // What the anchor's sign-out fan-out lands as here. The session has no row on this node, so
@@ -184,10 +185,10 @@ public sealed class ClusterSessionAcceptanceTests
         using HttpClient client = node.CreateClient();
 
         KgsmIdentity person = Somebody("usr_two_devices");
-        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Owner);
 
-        string phone = Anchor(signer).MintAccess(person, KgsmTier.Admin, "sid_phone").Token;
-        string laptop = Anchor(signer).MintAccess(person, KgsmTier.Admin, "sid_laptop").Token;
+        string phone = Anchor(signer).MintAccess(person, "sid_phone").Token;
+        string laptop = Anchor(signer).MintAccess(person, "sid_laptop").Token;
 
         await node.Services.GetRequiredService<EndedSessionStore>()
             .RecordRevocationAsync("sid_phone", DateTimeOffset.UtcNow.AddDays(30));
@@ -205,15 +206,15 @@ public sealed class ClusterSessionAcceptanceTests
         using HttpClient client = node.CreateClient();
 
         KgsmIdentity person = Somebody("usr_somebody");
-        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
-        string fromAnchor = Anchor(signer).MintAccess(person, KgsmTier.Admin, "sid_1").Token;
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Owner);
+        string fromAnchor = Anchor(signer).MintAccess(person, "sid_1").Token;
 
         // Nothing to verify against and nothing of its own to fall back on: this node signs nobody in.
         Assert.Equal(
             HttpStatusCode.Unauthorized, (await client.SendAsync(Get("/api/v1/me", fromAnchor))).StatusCode);
         Assert.Equal(
             HttpStatusCode.Unauthorized,
-            (await client.SendAsync(Get("/api/v1/me", AuthTestFactory.MintAccessOn(node.Services, KgsmTier.Admin))))
+            (await client.SendAsync(Get("/api/v1/me", AuthTestFactory.MintAccessOn(node.Services, Persona.Owner))))
                 .StatusCode);
     }
 
@@ -227,9 +228,9 @@ public sealed class ClusterSessionAcceptanceTests
         using HttpClient client = node.CreateClient();
 
         KgsmIdentity person = Somebody("usr_somebody");
-        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Owner);
 
-        string forged = Anchor(stranger).MintAccess(person, KgsmTier.Admin, "sid_1").Token;
+        string forged = Anchor(stranger).MintAccess(person, "sid_1").Token;
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Get("/api/v1/me", forged))).StatusCode);
     }
@@ -243,11 +244,11 @@ public sealed class ClusterSessionAcceptanceTests
         using HttpClient client = node.CreateClient();
 
         KgsmIdentity person = Somebody("usr_somebody");
-        AuthTestFactory.SetAccountOn(node.Services, person, KgsmTier.Admin);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Owner);
 
         // A 30-day credential presented as a 15-minute one. The access-kind gate is what keeps the
         // short-lived bearer short-lived, and it applies to the cluster's sessions like any other.
-        string refresh = Anchor(signer).MintRefresh(person, KgsmTier.Admin, "sid_1").Token;
+        string refresh = Anchor(signer).MintRefresh(person, "sid_1").Token;
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(Get("/api/v1/me", refresh))).StatusCode);
     }

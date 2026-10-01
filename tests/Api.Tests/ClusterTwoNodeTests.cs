@@ -207,7 +207,7 @@ public sealed class ClusterTwoNodeTests
                 "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
 
             using HttpClient clientA = factoryA.CreateClient();
-            string adminToken = AuthTestFactory.MintAccessOn(factoryA.Services, KgsmTier.Admin);
+            string adminToken = AuthTestFactory.MintAccessOn(factoryA.Services, Persona.Owner);
 
             var addRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/members")
             {

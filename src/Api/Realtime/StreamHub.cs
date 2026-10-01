@@ -6,7 +6,8 @@ using Microsoft.Extensions.Options;
 
 using TheKrystalShip.Api.Contracts;
 
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Access;
+using TheKrystalShip.KGSM.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Realtime;
 
@@ -38,7 +39,7 @@ public sealed class StreamHub
     public bool HasSubscribers(string topic)
     {
         foreach (StreamConnection c in _connections.Keys)
-            if (c.IsSubscribed(topic)) return true;
+            if (c.Receives(topic)) return true;
         return false;
     }
 
@@ -69,34 +70,79 @@ public sealed class StreamHub
     /// coalescing per <paramref name="coalesceKey"/> within each connection's outbound queue. Serializes
     /// at most once, and only when there is at least one subscriber.
     /// </summary>
-    /// <param name="belowOperator">
-    /// The message to send instead to a connection held by a reader below operator. Null — the usual
-    /// case — sends <paramref name="message"/> to everybody. This is how a frame whose <em>values</em>
-    /// depend on who is reading reaches both audiences without the topic itself being restricted: the
-    /// audit feed says the same things to everyone, and only the values inside a row differ
-    /// (<c>AuditRedaction</c>). The tier read here is the connection's live one, so a reader demoted
-    /// mid-stream starts getting the redacted variant on the next frame rather than on their next
-    /// reconnect (<see cref="AuthorityChanged"/>).
+    /// <param name="serverId">
+    /// The server the frame is about, on a server collection topic (<see cref="TopicGateKind.PerServer"/>):
+    /// a reader who may not read that server is not sent it. <see langword="null"/> on any other topic.
+    /// </param>
+    /// <param name="redacted">
+    /// The message to send instead to a reader who lacks the action it names. Null — the usual case —
+    /// sends <paramref name="message"/> to everybody who receives the topic. This is how a frame whose
+    /// <em>values</em> depend on who is reading reaches both audiences without the topic itself being
+    /// restricted: the audit feed says the same things to everyone, and only the values inside a row
+    /// differ (<c>AuditRedaction</c>). Access is read per frame, so a reader who loses the action gets
+    /// the redacted variant from the next frame on.
     /// </param>
     public void Publish(
-        string topic, string coalesceKey, StreamMessage message, StreamMessage? belowOperator = null)
+        string topic, string coalesceKey, StreamMessage message,
+        string? serverId = null, StreamRedaction? redacted = null)
     {
         ReadOnlyMemory<byte>? frame = null;
         ReadOnlyMemory<byte>? restricted = null;
 
         foreach (StreamConnection c in _connections.Keys)
         {
-            if (!c.IsSubscribed(topic)) continue;
+            if (!c.Receives(topic)) continue;
 
-            if (belowOperator is not null && !c.IsOperator)
+            if (serverId is not null && !c.Access.Allows(StreamProtocol.ServerReadAction, serverId)) continue;
+
+            if (redacted is not null && !c.Access.Allows(redacted.Action))
             {
-                restricted ??= BuildSseFrame(belowOperator);
+                restricted ??= BuildSseFrame(redacted.Message);
                 c.Enqueue(coalesceKey, restricted.Value);
                 continue;
             }
 
             frame ??= BuildSseFrame(message);
             c.Enqueue(coalesceKey, frame.Value);
+        }
+    }
+
+    /// <summary>
+    /// Route one frame made of per-server <paramref name="rows"/> to every connection receiving
+    /// <paramref name="topic"/>, each cut to the rows whose server its reader may read.
+    /// </summary>
+    /// <remarks>
+    /// Readers who may read the same servers share one serialization: frames are built once per distinct
+    /// set, and on a host where everybody reads everything that is once.
+    /// </remarks>
+    public void PublishRows<T>(
+        string topic, string coalesceKey, IReadOnlyList<T> rows, Func<T, string> serverOf,
+        Func<IReadOnlyList<T>, StreamMessage> render)
+    {
+        Dictionary<string, ReadOnlyMemory<byte>>? frames = null;
+
+        foreach (StreamConnection c in _connections.Keys)
+        {
+            if (!c.Receives(topic)) continue;
+
+            var visible = new List<T>(rows.Count);
+            var signature = new StringBuilder(rows.Count);
+            foreach (T row in rows)
+            {
+                bool allowed = c.Access.Allows(StreamProtocol.ServerReadAction, serverOf(row));
+                signature.Append(allowed ? '1' : '0');
+                if (allowed) visible.Add(row);
+            }
+
+            frames ??= new Dictionary<string, ReadOnlyMemory<byte>>(StringComparer.Ordinal);
+            string key = signature.ToString();
+            if (!frames.TryGetValue(key, out ReadOnlyMemory<byte> frame))
+            {
+                frame = BuildSseFrame(render(visible));
+                frames[key] = frame;
+            }
+
+            c.Enqueue(coalesceKey, frame);
         }
     }
 
@@ -132,39 +178,34 @@ public sealed class StreamHub
     }
 
     /// <summary>
-    /// An account's standing on this host changed: re-gate every live connection it holds, and tell
-    /// each of them.
+    /// This node's replica took a change: every live connection evaluates from
+    /// <paramref name="evaluator"/> from its next frame on, and a reader whose account status moved is
+    /// told on <c>me</c>.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// Two effects, and the order between them is the point. Re-gating comes first and is
-    /// unconditional: a demoted reader stops receiving what their new tier does not reach on this
-    /// connection, without waiting for a reconnect they may never make. The frame is the courtesy
-    /// afterwards, and it goes out whether or not the tier moved, because an approval that leaves the
-    /// tier at <c>none</c> and a status changing under an unchanged tier are both news to the panel
-    /// showing it.
-    /// </para>
-    /// <para>
-    /// Every account change replicated from the auth anchor calls this once the replica has applied
-    /// it, so an admin's change lands on the affected person's open panel at once. The connection's
-    /// own re-check is the backstop, and answers within its own interval.
-    /// </para>
+    /// Called once the replica has applied the change, so an administrator's change lands on the
+    /// affected person's open panel at once. The connection's own re-check is the backstop, and answers
+    /// within its own interval.
     /// </remarks>
-    public void AuthorityChanged(string accountId, KgsmTier tier, string status)
+    public void AccessChanged(AccessEvaluator evaluator)
     {
         foreach (StreamConnection c in _connections.Keys)
-        {
-            if (c.BelongsTo(accountId))
-                c.ApplyTier(tier);
-        }
+            c.AccessChanged(evaluator);
+    }
+}
 
-        PublishToAccount(
-            accountId,
-            StreamProtocol.MeTopic,
-            StreamProtocol.MeEntityKey,
-            new StreamMessage(
-                StreamProtocol.MeTopic,
-                StreamProtocol.MePatch,
-                new MeStanding(KgsmTiers.ToWire(tier), status)));
+/// <summary>The variant of a frame sent to a reader who lacks <paramref name="Action"/>.</summary>
+public sealed record StreamRedaction(string Action, StreamMessage Message);
+
+/// <summary>
+/// Carries every change this node's replica takes to the open streams (<see cref="StreamHub.AccessChanged"/>).
+/// </summary>
+public sealed class StreamAccessRefresh(StreamHub hub, MemberAccess access) : IAuthorityChangeListener
+{
+    /// <inheritdoc />
+    public async Task AuthorityChangedAsync(CancellationToken ct)
+    {
+        if (await access.EvaluatorAsync(ct).ConfigureAwait(false) is { } evaluator)
+            hub.AccessChanged(evaluator);
     }
 }

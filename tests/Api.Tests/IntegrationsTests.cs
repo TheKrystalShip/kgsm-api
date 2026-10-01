@@ -35,7 +35,7 @@ public sealed class IntegrationsApiTests
 
     private static IntegrationsTestFactory NewFactory() => new();
 
-    private static HttpClient Client(IntegrationsTestFactory f, KgsmTier? tier)
+    private static HttpClient Client(IntegrationsTestFactory f, Persona? tier)
     {
         HttpClient c = f.CreateClient();
         if (tier is { } t)
@@ -56,9 +56,9 @@ public sealed class IntegrationsApiTests
     }
 
     [Theory]
-    [InlineData(KgsmTier.Viewer)]
-    [InlineData(KgsmTier.Operator)]
-    public async Task BelowAdmin_403(KgsmTier tier)
+    [InlineData(Persona.Viewer)]
+    [InlineData(Persona.Operator)]
+    public async Task BelowAdmin_403(Persona tier)
     {
         using IntegrationsTestFactory f = NewFactory();
         HttpResponseMessage r = await Client(f, tier).GetAsync("/api/v1/integrations/slack");
@@ -69,7 +69,7 @@ public sealed class IntegrationsApiTests
     public async Task Admin_List_200_ProviderPresent_Unconfigured()
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpResponseMessage r = await Client(f, KgsmTier.Admin).GetAsync("/api/v1/integrations");
+        HttpResponseMessage r = await Client(f, Persona.Owner).GetAsync("/api/v1/integrations");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
         JsonElement[] rows = (await Json(r)).EnumerateArray().ToArray();
         JsonElement slack = rows.Single(e => e.GetProperty("provider").GetString() == "slack");
@@ -88,7 +88,7 @@ public sealed class IntegrationsApiTests
     public async Task UnknownProvider_404_Envelope(string provider)
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpResponseMessage r = await Client(f, KgsmTier.Admin).GetAsync($"/api/v1/integrations/{provider}");
+        HttpResponseMessage r = await Client(f, Persona.Owner).GetAsync($"/api/v1/integrations/{provider}");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await r.Content.ReadAsStringAsync());
     }
@@ -97,7 +97,7 @@ public sealed class IntegrationsApiTests
     public async Task Patch_then_Get_RoundTrips_SecretMaskedNeverEchoed()
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpClient c = Client(f, KgsmTier.Admin);
+        HttpClient c = Client(f, Persona.Owner);
 
         HttpResponseMessage patch = await c.PatchAsJsonAsync("/api/v1/integrations/slack", new
         {
@@ -127,7 +127,7 @@ public sealed class IntegrationsApiTests
     public async Task Patch_BadWebhook_400_Envelope()
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpResponseMessage r = await Client(f, KgsmTier.Admin)
+        HttpResponseMessage r = await Client(f, Persona.Owner)
             .PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = "https://evil.example.com/x" });
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await r.Content.ReadAsStringAsync());
@@ -139,7 +139,7 @@ public sealed class IntegrationsApiTests
     public async Task Patch_UnknownEventOrCadence_400(string json)
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpResponseMessage r = await Client(f, KgsmTier.Admin).PatchAsync("/api/v1/integrations/slack",
+        HttpResponseMessage r = await Client(f, Persona.Owner).PatchAsync("/api/v1/integrations/slack",
             new StringContent(json, System.Text.Encoding.UTF8, "application/json"));
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await r.Content.ReadAsStringAsync());
@@ -149,7 +149,7 @@ public sealed class IntegrationsApiTests
     public async Task Test_Unconfigured_409()
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpResponseMessage r = await Client(f, KgsmTier.Admin).PostAsync("/api/v1/integrations/slack/test", null);
+        HttpResponseMessage r = await Client(f, Persona.Owner).PostAsync("/api/v1/integrations/slack/test", null);
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Contains("\"code\":\"not_configured\"", await r.Content.ReadAsStringAsync());
     }
@@ -158,7 +158,7 @@ public sealed class IntegrationsApiTests
     public async Task Test_Configured_202_RealSendFaked()
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpClient c = Client(f, KgsmTier.Admin);
+        HttpClient c = Client(f, Persona.Owner);
         await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, channelLabel = "#krystal-ops" });
 
         HttpResponseMessage r = await c.PostAsync("/api/v1/integrations/slack/test", null);
@@ -180,7 +180,7 @@ public sealed class IntegrationsApiTests
     {
         using var f = new IntegrationsLoggingFactory();
         HttpClient c = f.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(KgsmTier.Admin));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(Persona.Owner));
 
         const string secretToken = "TOPSECRETtoken99999";
         await c.PatchAsJsonAsync("/api/v1/integrations/slack",

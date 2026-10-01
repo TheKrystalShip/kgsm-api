@@ -2,8 +2,14 @@ using TheKrystalShip.KGSM.WebPush;
 using System.Text.Json;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
+using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Integrations.WebPush;
+using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Access;
+using TheKrystalShip.KGSM.Auth.Cluster;
 using TheKrystalShip.KGSM.Events;
+
+using ActionIds = TheKrystalShip.Api.Services.Auth.ActionIds;
 
 namespace TheKrystalShip.Api.Services.Integrations;
 
@@ -32,6 +38,8 @@ public sealed class WebPushNotificationProvider(
     PushActionStore actions,
     WebPushSender sender,
     Aggregation.InstanceCache instances,
+    MemberAccess memberAccess,
+    NodeAccess nodeAccess,
     ApiOptions options,
     ILogger<WebPushNotificationProvider> logger) : INotificationProvider
 {
@@ -113,9 +121,14 @@ public sealed class WebPushNotificationProvider(
         foreach (PushQuietHoursEntity w in windows)
             if (quietHours.IsQuiet(w, now)) quiet[w.UserSubject] = w;
 
+        // And the FIRST in importance: the device's owner may read what the event is about. A preference
+        // only ever narrows what somebody may see; it never widens it.
+        Func<PushSubscriptionEntity, NotificationEvent, bool> mayRead = await ReadersAsync(devices, ct).ConfigureAwait(false);
+
         bool Wanted(PushSubscriptionEntity d) =>
+            mayRead(d, ev)
             // No stored row means yes — see PushPreferenceEntity: the table holds deviations only.
-            (!prefs.TryGetValue((d.UserSubject, ev.CatalogId), out bool want) || want)
+            && (!prefs.TryGetValue((d.UserSubject, ev.CatalogId), out bool want) || want)
             && !(ev.SubjectKey is { Length: > 0 } c && muted.Contains((d.UserSubject, c)))
             // Inside a quiet window, only what the person said was worth waking them for. The floor is
             // read off the severity the audit row already carries, so this invents no new judgement about
@@ -161,9 +174,11 @@ public sealed class WebPushNotificationProvider(
         if (devices.Count == 0) return new NotificationDeliveryResult(true, null);
 
         IReadOnlyDictionary<(string, string), bool> prefs = await preferences.AllAsync(ct).ConfigureAwait(false);
+        Func<PushSubscriptionEntity, NotificationEvent, bool> mayRead = await ReadersAsync(devices, ct).ConfigureAwait(false);
 
         IReadOnlyList<NotificationEvent> Mine(PushSubscriptionEntity d) =>
-            events.Where(e => !prefs.TryGetValue((d.UserSubject, e.CatalogId), out bool want) || want).ToList();
+            events.Where(e => mayRead(d, e)
+                && (!prefs.TryGetValue((d.UserSubject, e.CatalogId), out bool want) || want)).ToList();
 
         (int sent, string? firstError) = await FanOutAsync(
             devices,
@@ -210,6 +225,60 @@ public sealed class WebPushNotificationProvider(
             device.Endpoint, "Update all", PushActionTargets.Join(updatable), ct).ConfigureAwait(false);
 
         return Payload(payload with { Actions = [new WebPushAction(handle, "Update all")] });
+    }
+
+    /// <summary>
+    /// Whether a device's owner may read what an event is about, evaluated from this node's replica as it
+    /// stands when the fan-out starts.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A notification is a collection of one: an event about a server reaches only people who may read
+    /// that server (<c>kgsm:server.read</c> there), and one about the host — a threshold, a service, an
+    /// account — only people who may read this node's audit, which is the record it is a row of
+    /// (<c>api:audit.read</c>). The SPA's toasts arrive over the realtime stream, which is cut the same way.
+    /// </para>
+    /// <para>
+    /// A device whose owner cannot be resolved — no handle recorded, no account here, a switched-off
+    /// account, or a replica that cannot be read — is sent nothing: what it would be told cannot be
+    /// checked. An auth-disabled host sends to every device.
+    /// </para>
+    /// </remarks>
+    private async Task<Func<PushSubscriptionEntity, NotificationEvent, bool>> ReadersAsync(
+        IReadOnlyList<PushSubscriptionEntity> devices, CancellationToken ct)
+    {
+        if (options.AuthDisabled)
+            return static (_, _) => true;
+
+        var accounts = new Dictionary<string, string?>(StringComparer.Ordinal);
+        AccessEvaluator? evaluator = null;
+        foreach (PushSubscriptionEntity device in devices)
+        {
+            if (device.UserHandle is not { Length: > 0 } handle || accounts.ContainsKey(handle))
+                continue;
+
+            accounts[handle] = null;
+            if (!KgsmActor.TryParse(handle, out string provider, out string subject))
+                continue;
+
+            MemberAccessCaller caller = await memberAccess.ResolveAsync(
+                new KgsmIdentity(provider, subject, subject, subject, null, []), ct).ConfigureAwait(false);
+            if (caller.Refusal == MemberAccessRefusal.None)
+            {
+                accounts[handle] = caller.AccountId;
+                evaluator ??= caller.Evaluator;
+            }
+        }
+
+        if (evaluator is null)
+            return static (_, _) => false;
+
+        return (device, ev) =>
+            device.UserHandle is { Length: > 0 } handle
+            && accounts.TryGetValue(handle, out string? account) && account is not null
+            && (string.IsNullOrEmpty(ev.ServerId)
+                ? evaluator.Allows(account, ActionIds.AuditRead, nodeAccess.NodeTarget).Allowed
+                : evaluator.Allows(account, ActionIds.ServerRead, nodeAccess.ServerTarget(ev.ServerId)).Allowed);
     }
 
     /// <summary>
@@ -276,7 +345,7 @@ public sealed class WebPushNotificationProvider(
     /// has to offer an action at all (most do not); the browser has to have reported that it renders
     /// buttons, because staging a capability for a notification that will never show one leaves a live
     /// handle nobody can use; and the row has to name the account's provider-qualified handle, since a
-    /// redemption re-resolves the tier from it and cannot do that from a bare subject.
+    /// redemption resolves the account from it and cannot do that from a bare subject.
     /// </remarks>
     private async Task<byte[]> PayloadFor(NotificationEvent ev, PushSubscriptionEntity device, CancellationToken ct)
     {

@@ -97,7 +97,7 @@ public sealed class ServerListReadFailureTests
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Viewer));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Viewer));
         return c;
     }
 

@@ -14,10 +14,10 @@ namespace TheKrystalShip.Api.Controllers;
 /// what neither of them is: a key is an opaque string and a value is JSON stored and handed back
 /// verbatim, so a new preference costs no backend change.
 /// <para>
-/// <b>Self-service, at <c>[Authorize]</c> rather than a tier</b> — the same gate as
-/// <see cref="MeController"/>. These are a person's own settings, so somebody waiting on an admin (tier
-/// <c>none</c>) still gets to arrange their own panel; there is deliberately no endpoint that reads or
-/// writes anybody else's, not even for an admin.
+/// <b>Self-service, at <c>[Authorize]</c> rather than an action</b> — the same gate as
+/// <see cref="MeController"/>. These are a person's own settings, so somebody still awaiting approval
+/// gets to arrange their own panel; there is deliberately no endpoint that reads or writes anybody
+/// else's, not even for an Owner.
 /// </para>
 /// <para>
 /// <b>Preferences are per device, and the device names itself.</b> Every device-scoped request carries

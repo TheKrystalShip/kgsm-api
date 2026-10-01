@@ -31,7 +31,7 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
 
     // A real account, because a redemption resolves the tier from the store rather than trusting
     // anything the staged row says about it.
-    private KgsmIdentity Account(string subject, KgsmTier tier)
+    private KgsmIdentity Account(string subject, Persona tier)
     {
         var identity = new KgsmIdentity(KgsmActorProvider.Discord, subject, "tapper-" + subject, "Tapper", null, []);
         factory.SetAccount(identity, tier);
@@ -62,7 +62,7 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
     [Fact]
     public async Task A_handle_is_redeemed_once()
     {
-        KgsmIdentity who = Account("act-single", KgsmTier.Operator);
+        KgsmIdentity who = Account("act-single", Persona.Operator);
         string handle = await StageUpdateAsync(who);
         HttpClient c = factory.CreateClient();
 
@@ -80,7 +80,7 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
     [Fact]
     public async Task A_handle_presented_by_the_wrong_device_is_refused_AND_left_standing()
     {
-        KgsmIdentity who = Account("act-device", KgsmTier.Operator);
+        KgsmIdentity who = Account("act-device", Persona.Operator);
         string handle = await StageUpdateAsync(who);
         HttpClient c = factory.CreateClient();
 
@@ -97,7 +97,7 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
     [Fact]
     public async Task A_handle_with_no_device_named_redeems_nothing()
     {
-        KgsmIdentity who = Account("act-nodevice", KgsmTier.Operator);
+        KgsmIdentity who = Account("act-nodevice", Persona.Operator);
         string handle = await StageUpdateAsync(who);
         HttpClient c = factory.CreateClient();
 
@@ -110,9 +110,9 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
     {
         // Staged while they could act, redeemed after they were demoted. The staged row says nothing
         // about authority, so this is the account store's answer at the moment of the tap.
-        KgsmIdentity who = Account("act-demoted", KgsmTier.Operator);
+        KgsmIdentity who = Account("act-demoted", Persona.Operator);
         string handle = await StageUpdateAsync(who);
-        factory.SetAccount(who, KgsmTier.Viewer);
+        factory.SetAccount(who, Persona.Viewer);
 
         HttpResponseMessage res = await factory.CreateClient()
             .PostAsync($"/api/v1/notifications/actions/{handle}", From(Endpoint));
@@ -124,9 +124,9 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
     [Fact]
     public async Task A_switched_off_account_redeems_nothing()
     {
-        KgsmIdentity who = Account("act-disabled", KgsmTier.Admin);
+        KgsmIdentity who = Account("act-disabled", Persona.Owner);
         string handle = await StageUpdateAsync(who);
-        factory.SetAccount(who, KgsmTier.Admin, TheKrystalShip.KGSM.Auth.Users.UserStatus.Disabled);
+        factory.SetAccount(who, Persona.Owner, TheKrystalShip.KGSM.Auth.Users.UserStatus.Disabled);
 
         HttpResponseMessage res = await factory.CreateClient()
             .PostAsync($"/api/v1/notifications/actions/{handle}", From(Endpoint));
@@ -143,7 +143,7 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
     {
         // A viewer is refused by the tier gate before anything is looked up, and the message names the
         // verb rather than a generic "not allowed" — the person is reading one line on a lock screen.
-        KgsmIdentity who = Account("act-tier-" + verb, KgsmTier.Viewer);
+        KgsmIdentity who = Account("act-tier-" + verb, Persona.Viewer);
         string handle = await Staged.StageAsync(kind, "factorio-01", who.Handle, who.Username, Endpoint, "Go");
 
         HttpResponseMessage res = await factory.CreateClient()
@@ -160,7 +160,7 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
     {
         // Removing a person from a game is a mutation like any other, and reaching it from a lock screen
         // must not be a way around the tier that guards the panel's own route.
-        KgsmIdentity who = Account("act-mod-" + action, KgsmTier.Viewer);
+        KgsmIdentity who = Account("act-mod-" + action, Persona.Viewer);
         string handle = await Staged.StageAsync(
             kind, "factorio-01", who.Handle, who.Username, Endpoint, "Go", subject: "Ana");
 
@@ -176,7 +176,7 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
     {
         // Belt-and-braces against a row staged without a subject: the target is a server, and a kick with
         // no player named must never be allowed to resolve to "whoever the resolver finds first".
-        KgsmIdentity who = Account("act-mod-nosubject", KgsmTier.Operator);
+        KgsmIdentity who = Account("act-mod-nosubject", Persona.Operator);
         string handle = await Staged.StageAsync(
             PushActionKind.PlayerKick, "factorio-01", who.Handle, who.Username, Endpoint, "Kick");
 
@@ -190,7 +190,7 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
     [Fact]
     public async Task Snoozing_silences_that_condition_for_that_person()
     {
-        KgsmIdentity who = Account("act-snooze", KgsmTier.Viewer);
+        KgsmIdentity who = Account("act-snooze", Persona.Viewer);
         const string condition = "host-temp/k10temp/Tctl/";
         const string snoozeEndpoint = "https://push.test/snooze-device";
 
@@ -255,7 +255,7 @@ public class NotificationOriginTests(AuthTestFactory factory) : IClassFixture<Au
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(KgsmTier.Operator));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Operator));
 
         HttpResponseMessage res = await c.PostAsJsonAsync(
             "/api/v1/servers/factorio-01/commands", new { verb = "update", origin = "notification" });

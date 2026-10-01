@@ -22,7 +22,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/v1/alerts")]
-[Authorize(Policy = AuthPolicy.Viewer)]
+[RequiresAction(ActionIds.AlertsRead)]
 public sealed partial class AlertsController(AlertEngine alerts) : ControllerBase
 {
     /// <summary>

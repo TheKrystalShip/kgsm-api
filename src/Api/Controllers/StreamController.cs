@@ -2,11 +2,11 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
-using TheKrystalShip.Api.Infrastructure;
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Auth;
 
 using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.KGSM.Auth.Access;
 using TheKrystalShip.KGSM.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Controllers;
@@ -20,13 +20,11 @@ namespace TheKrystalShip.Api.Controllers;
 /// fan out to, and unregistering on disconnect.
 /// </summary>
 /// <remarks>
-/// <b>The gate is per topic, not per endpoint.</b> Any authenticated caller connects, and each topic
-/// they asked for is kept only if their tier reaches it (<see cref="StreamProtocol.MinimumTier"/>) —
-/// silently, never a 403 on the whole stream. The panel's reads sit at the viewer floor as they
-/// always have; what the per-topic gate adds is somebody holding nothing at all, who connects to hear
-/// about their own account and to hear nothing else. That is the whole of what a pending user is owed
-/// here, and the only alternative — telling them to keep reloading until an admin gets to them — is
-/// worse for exactly the person with the least standing to complain.
+/// <b>The gate is per topic and per frame, not per endpoint.</b> Any authenticated caller connects, and
+/// each topic they asked for delivers only what their access reaches (<see cref="StreamProtocol.Gate"/>)
+/// — silently, never a 403 on the whole stream. Somebody holding nothing at all connects to hear about
+/// their own account and nothing else, which is the whole of what a pending person is owed here; access
+/// granted while the stream is open starts delivering without a reconnect.
 /// </remarks>
 [ApiController]
 [Route("api/v1/stream")]
@@ -34,7 +32,8 @@ namespace TheKrystalShip.Api.Controllers;
 public sealed class StreamController(
     StreamHub hub,
     ClusterSessionRevocations clusterRevocations,
-    UserDirectory users,
+    MemberAccess memberAccess,
+    NodeAccess nodeAccess,
     ApiOptions options,
     IHostApplicationLifetime lifetime,
     ILogger<StreamController> logger) : ControllerBase
@@ -43,7 +42,7 @@ public sealed class StreamController(
     public async Task Get()
     {
         // Parse topics from the query string: ?topics=a,b,c (comma-separated, URL-encoded).
-        // Unknown topics are ignored (forward-compat). Empty/missing = valid stream with no subscriptions.
+        // Unknown topics are kept and reach an Owner alone. Empty/missing = valid stream with no subscriptions.
         List<string> topics = Request.Query["topics"]
             .FirstOrDefault()?
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -51,15 +50,7 @@ public sealed class StreamController(
             .Select(t => t.Trim())
             .ToList() ?? [];
 
-        // Who is streaming, and what they may do. The tier is the one on the claims identity, which
-        // the authority resolution at token validation has already replaced with what the account
-        // store says now — the same value every gate on this request reads.
         ClaimsIdentity? ci = User.Identity as ClaimsIdentity;
-        KgsmIdentity? identity = ci is not null ? SessionClaims.ReadIdentity(ci) : null;
-        KgsmTier tier = ci is not null ? SessionClaims.ReadTier(ci) : KgsmTier.None;
-
-        // Keep only the topics this caller's tier reaches (silent drop, not a 403 on the stream).
-        topics = topics.Where(t => tier >= StreamProtocol.MinimumTier(t)).ToList();
 
         // Set SSE headers — mirrors the proven pattern from AssistantController.Turn.
         Response.StatusCode = StatusCodes.Status200OK;
@@ -83,32 +74,33 @@ public sealed class StreamController(
             ? null
             : async (ct) => !await clusterRevocations.IsRevokedAsync(sid, ct).ConfigureAwait(false);
 
-        // The account this connection is authenticated as, so a change to it can be addressed here,
-        // and the re-read that keeps its authority current for as long as it streams. Both need a real
-        // identity and a readable store. An auth-disabled host has neither: its synthetic principal
-        // names a subject no account was ever created for, and resolving that would answer "stranger"
-        // and re-gate the dev admin down to nothing twenty seconds into every stream.
-        string? accountId = null;
-        Func<CancellationToken, ValueTask<AccountStanding>>? authority = null;
-        if (options.AuthEnabled && identity is not null && users.Available)
+        // Who is reading, evaluated from this node's replica for as long as the connection lasts. The
+        // account is the one authentication stamped on the principal; an auth-disabled host streams to
+        // its synthetic Owner, which no replica holds.
+        StreamAccess access = StreamAccess.Nobody;
+        Func<CancellationToken, ValueTask<AccessEvaluator?>>? evaluate = null;
+        if (options.AuthDisabled)
         {
-            authority = async (ct) => await users.StandingAsync(identity, ct).ConfigureAwait(false);
-            try
+            access = StreamAccess.Unrestricted;
+        }
+        else if (User.FindFirst(AccessClaims.Account)?.Value is { Length: > 0 } accountId)
+        {
+            if (await memberAccess.EvaluatorAsync(HttpContext.RequestAborted) is { } evaluator)
             {
-                accountId = (await users.StandingAsync(identity, HttpContext.RequestAborted)).AccountId;
+                access = StreamAccess.For(accountId, nodeAccess, evaluator);
+                evaluate = async (ct) => await memberAccess.EvaluatorAsync(ct).ConfigureAwait(false);
             }
-            catch (KgsmAuthProviderException e)
+            else
             {
-                // The store answered this request a moment ago at token validation, so this is a
-                // store that has just gone. Stream on unaddressed rather than refusing: the re-check
-                // will fail the same way within its interval and end the connection honestly, which
-                // is the same answer arrived at through the path that already handles it.
-                logger.LogWarning(e, "SSE stream: could not resolve the caller's account; nothing will be addressed to this connection.");
+                // The replica answered this request a moment ago at token validation, so this is a
+                // replica that has just gone. Stream as nobody rather than refusing: the client hears
+                // about its own account and nothing else until it reconnects.
+                logger.LogWarning("SSE stream: the authority replica could not be read; streaming as nobody.");
             }
         }
 
         var connection = new StreamConnection(
-            Response.Body, topics, hub.Json, logger, sessionAlive, tier, accountId, sid, authority);
+            Response.Body, topics, hub.Json, logger, sessionAlive, access, sid, evaluate);
         hub.Add(connection);
         try
         {

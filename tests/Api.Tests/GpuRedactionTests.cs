@@ -25,7 +25,7 @@ public sealed class GpuRedactionTests
     [Fact]
     public void A_context_belonging_to_a_known_unit_is_untouched()
     {
-        var kept = GpuRedaction.ForViewer([Proc(100, "kgsm-llama-chat.service", 8.5, 93)]);
+        var kept = GpuRedaction.Redacted([Proc(100, "kgsm-llama-chat.service", 8.5, 93)]);
 
         GpuProcessSample only = Assert.Single(kept!);
         Assert.Equal(100, only.Pid);
@@ -38,7 +38,7 @@ public sealed class GpuRedactionTests
     [Fact]
     public void An_unattributed_context_loses_its_identity_but_keeps_its_memory()
     {
-        var kept = GpuRedaction.ForViewer([Proc(4242, null, 3.25)]);
+        var kept = GpuRedaction.Redacted([Proc(4242, null, 3.25)]);
 
         GpuProcessSample only = Assert.Single(kept!);
         Assert.Null(only.Pid);
@@ -51,7 +51,7 @@ public sealed class GpuRedactionTests
     {
         // Two anonymous processes must not become two rows a viewer could count — the number of things
         // running is itself something the gate withholds.
-        var kept = GpuRedaction.ForViewer([
+        var kept = GpuRedaction.Redacted([
             Proc(1, null, 1.0, 10),
             Proc(2, null, 2.0, 20),
             Proc(3, "kgsm-speech.service", 1.5, 5),
@@ -69,7 +69,7 @@ public sealed class GpuRedactionTests
     {
         // Memory does not pool across cards, so folding two devices' withheld memory into one row would
         // describe a device that does not exist.
-        var kept = GpuRedaction.ForViewer([
+        var kept = GpuRedaction.Redacted([
             Proc(1, null, 1.0, device: 0),
             Proc(2, null, 4.0, device: 1),
         ]);
@@ -84,7 +84,7 @@ public sealed class GpuRedactionTests
     {
         // Null is "did no work in the sampling window", which a 0 would make indistinguishable from
         // measured-and-idle. Aggregating must not manufacture the number the source declined to give.
-        var kept = GpuRedaction.ForViewer([Proc(1, null, 2.0, sm: null)]);
+        var kept = GpuRedaction.Redacted([Proc(1, null, 2.0, sm: null)]);
 
         Assert.Null(Assert.Single(kept!).SmPct);
     }
@@ -99,7 +99,7 @@ public sealed class GpuRedactionTests
             Proc(3, null, 0.35),
         ];
 
-        var viewer = GpuRedaction.ForViewer(full)!;
+        var viewer = GpuRedaction.Redacted(full)!;
 
         Assert.Equal(full.Sum(p => p.MemUsed), viewer.Sum(p => p.MemUsed), precision: 6);
     }
@@ -107,7 +107,7 @@ public sealed class GpuRedactionTests
     [Fact]
     public void No_processes_at_all_stays_absent()
     {
-        Assert.Null(GpuRedaction.ForViewer(null));
-        Assert.Empty(GpuRedaction.ForViewer([])!);
+        Assert.Null(GpuRedaction.Redacted(null));
+        Assert.Empty(GpuRedaction.Redacted([])!);
     }
 }
