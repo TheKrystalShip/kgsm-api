@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — leaf command manifests are read at schema version 3 only (0.211.0)
+
+**Breaking for the wire.** `GET /hosts/{id}/services/{leaf}/commands` serves `{ schemaVersion, leaf,
+surface, commands }`, each command naming its `action`; a version 2 file keyed by `gates` is skipped
+whole and logged, as is a command naming no action. Both leaves that ship a manifest — the bot and the
+assistant — write version 3.
+
 ### Added — command manifests naming an action per command; the host file names this node (0.210.0)
 
 - **A leaf command manifest at schema version 3** — a `commands` list, each command naming the action

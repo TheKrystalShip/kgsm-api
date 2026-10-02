@@ -18,26 +18,24 @@ public sealed class LeafCommandsApiTests
     private const string Host = AuthTestFactory.HostId;
 
     // The shape kgsm-bot's build emits, trimmed to two commands — one that reads, one that acts, each
-    // under the gate that admits it.
+    // naming the action that admits it.
     private const string BotManifest = """
         {
-          "schemaVersion": 2,
+          "schemaVersion": 3,
           "leaf": "bot",
           "surface": "discord",
-          "gates": {
-            "none": [
-              { "name": "list", "description": "List all game server instances", "mutates": false, "options": [] }
-            ],
-            "operator": [
-              {
-                "name": "start", "description": "Start up a game server", "mutates": true,
-                "options": [
-                  { "name": "instance", "description": "Game server instance",
-                    "type": "string", "required": true, "autocomplete": true }
-                ]
-              }
-            ]
-          }
+          "commands": [
+            { "name": "list", "description": "List all game server instances", "action": "kgsm:server.read",
+              "mutates": false, "options": [] },
+            {
+              "name": "start", "description": "Start up a game server", "action": "kgsm:server.start",
+              "mutates": true,
+              "options": [
+                { "name": "instance", "description": "Game server instance",
+                  "type": "string", "required": true, "autocomplete": true }
+              ]
+            }
+          ]
         }
         """;
 
@@ -76,9 +74,7 @@ public sealed class LeafCommandsApiTests
         }
         """;
 
-    /// <summary>All the commands in a manifest, whichever gate each sits under.</summary>
-    private static JsonElement[] AllCommands(JsonElement body) =>
-        [.. body.GetProperty("gates").EnumerateObject().SelectMany(g => g.Value.EnumerateArray())];
+    private static JsonElement[] AllCommands(JsonElement body) => [.. body.GetProperty("commands").EnumerateArray()];
 
     [Fact]
     public async Task TheManifestReachesTheWireAsTheLeafWroteIt()
@@ -120,12 +116,12 @@ public sealed class LeafCommandsApiTests
         factory.InstallCommands("bot", BotManifest);
 
         JsonElement body = await Get(Client(factory, Persona.Operator), "bot");
-        JsonElement gates = body.GetProperty("gates");
 
-        Assert.Equal(["start"], gates.GetProperty("operator").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
-        Assert.Equal(["list"], gates.GetProperty("none").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
+        Assert.Equal(
+            [("list", "kgsm:server.read"), ("start", "kgsm:server.start")],
+            AllCommands(body).Select(c => (c.GetProperty("name").GetString(), c.GetProperty("action").GetString())));
 
-        JsonElement start = gates.GetProperty("operator").EnumerateArray().Single();
+        JsonElement start = AllCommands(body).Single(c => c.GetProperty("name").GetString() == "start");
         Assert.True(start.GetProperty("mutates").GetBoolean());
         Assert.Equal("Start up a game server", start.GetProperty("description").GetString());
 
@@ -146,8 +142,9 @@ public sealed class LeafCommandsApiTests
     {
         using var factory = new LeafTestFactory();
         factory.InstallCommands("bot", """
-            { "schemaVersion": 2, "leaf": "bot", "surface": "discord",
-              "gates": { "none": [ { "name": "ping", "description": "Check if the bot is responsive", "mutates": false } ] } }
+            { "schemaVersion": 3, "leaf": "bot", "surface": "discord",
+              "commands": [ { "name": "ping", "description": "Check if the bot is responsive",
+                              "action": "bot:status.read", "mutates": false } ] }
             """);
 
         JsonElement body = await Get(Client(factory, Persona.Operator), "bot");
@@ -187,25 +184,24 @@ public sealed class LeafCommandsApiTests
 
     /// <summary>
     /// A file this API cannot trust is skipped whole. Every case here would otherwise reach an operator as
-    /// instructions to type something: a manifest written to a newer schema, one installed under a name that
-    /// is not the leaf it describes, one with a nameless command, and one that is not JSON at all.
+    /// instructions to type something: a manifest written to another schema, one installed under a name
+    /// that is not the leaf it describes, a nameless command, a command naming no action, and one that is
+    /// not JSON at all.
     /// </summary>
     [Theory]
-    // A version this build does not know: the rest of the file may mean something else entirely. The
-    // retired flat-list shape is exactly that — a file still written that way is skipped whole rather
-    // than half-read as though its `gate` meant what this build's `gates` means.
-    [InlineData("""{ "schemaVersion": 99, "leaf": "bot", "surface": "discord", "gates": {} }""")]
-    [InlineData("""{ "schemaVersion": 1, "leaf": "bot", "surface": "discord", "gate": "none", "commands": [] }""")]
+    // A version this build does not know: the rest of the file may mean something else entirely, so a
+    // file still keyed by buckets is skipped whole rather than half-read.
+    [InlineData("""{ "schemaVersion": 99, "leaf": "bot", "surface": "discord", "commands": [] }""")]
+    [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "surface": "discord", "gates": { "none": [] } }""")]
     // Installed under a name that is not the leaf it describes.
-    [InlineData("""{ "schemaVersion": 2, "leaf": "assistant", "surface": "chat", "gates": {} }""")]
+    [InlineData("""{ "schemaVersion": 3, "leaf": "assistant", "surface": "chat", "commands": [] }""")]
     // A nameless command — the panel would print it as something to type.
-    [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "surface": "discord", "gates": { "none": [ { "name": "" } ] } }""")]
+    [InlineData("""{ "schemaVersion": 3, "leaf": "bot", "surface": "discord", "commands": [ { "name": "", "action": "bot:status.read" } ] }""")]
+    // A command naming no action — the panel would print it as open to anybody.
+    [InlineData("""{ "schemaVersion": 3, "leaf": "bot", "surface": "discord", "commands": [ { "name": "ping", "description": "d", "mutates": false } ] }""")]
     // No catalog, and no surface to print.
-    [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "surface": "discord" }""")]
-    // A version 3 file carries a list of commands and nothing else, and every one is named.
-    [InlineData("""{ "schemaVersion": 3, "leaf": "bot", "surface": "discord", "gates": { "none": [] } }""")]
-    [InlineData("""{ "schemaVersion": 3, "leaf": "bot", "surface": "discord", "commands": [ { "name": "" } ] }""")]
-    [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "gates": { "none": [] } }""")]
+    [InlineData("""{ "schemaVersion": 3, "leaf": "bot", "surface": "discord" }""")]
+    [InlineData("""{ "schemaVersion": 3, "leaf": "bot", "commands": [] }""")]
     [InlineData("this is not json")]
     public async Task AManifestThatCannotBeTrustedIsSkipped(string json)
     {

@@ -109,11 +109,10 @@ A leaf that takes typed commands ships a manifest into `commands/` **below** the
 one level down because the descriptor scan globs `*.json` at the top and would read it as a malformed
 descriptor. `LeafCommandStore` scans that subdirectory and `GET /hosts/{id}/services/{leaf}/commands`
 serves it **verbatim**: the API holds no idea what any command does, and passes what each command
-needs through without restating it, because it cannot verify a check it does not implement. At schema
-version 3 every command names the action that admits it; at version 2 the catalog is keyed by a bucket
-the leaf states. Either way a leaf whose commands need different access says so and the panel prints
-it. A leaf that ships no manifest is a **404**, not an empty list — most take no commands, and that is
-a different statement. Read-only reference material, so it takes `api:services.read` with the rest of
-`ServicesController`. **The understood versions are `LeafCommandManifest.SupportedSchemaVersions`**,
-each in its own shape only; anything else is skipped whole and logged once, never half-read. Format:
-`../leaf-command-manifest.md` at the workspace root.
+needs through without restating it, because it cannot verify a check it does not implement. Every
+command names the action that admits it, so a leaf whose commands need different access says so and
+the panel prints it; a command naming none is a file this API skips. A leaf that ships no manifest is a
+**404**, not an empty list — most take no commands, and that is a different statement. Read-only
+reference material, so it takes `api:services.read` with the rest of `ServicesController`. **The
+understood version is `LeafCommandManifest.SupportedSchemaVersion`**; anything else is skipped whole
+and logged once, never half-read. Format: `../leaf-command-manifest.md` at the workspace root.
