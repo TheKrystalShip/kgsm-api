@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — command manifests naming an action per command; the host file names this node (0.210.0)
+
+- **A leaf command manifest at schema version 3** — a `commands` list, each command naming the action
+  that admits it — is read beside version 2's `gates`, each version in its own shape only, and served
+  verbatim. The assistant writes version 3.
+- **The host file names this node** (`Auth.Cluster` 1.0.0-dev.19): the leaves on this machine scope
+  their grants by the node they sit on, read from the file this API already writes for them.
+
 ### Changed — every gate is an action, evaluated from the version 2 replica (0.209.0, contracts 1.0.0-dev.14)
 
 - **Every endpoint names the one action it performs** (`[RequiresAction]`, `ActionIds`), evaluated for

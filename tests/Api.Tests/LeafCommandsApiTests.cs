@@ -55,26 +55,24 @@ public sealed class LeafCommandsApiTests
         return JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
     }
 
-    // The shape kgsm-llm's build emits: the catalog keyed by the gate that admits each command.
+    // The shape kgsm-llm's build emits: every command, each naming the action that admits it.
     private const string AssistantManifest = """
         {
-          "schemaVersion": 2,
+          "schemaVersion": 3,
           "leaf": "assistant",
           "surface": "chat",
-          "gates": {
-            "viewer": [
-              { "name": "compact", "description": "Summarize this conversation", "mutates": true, "options": [] }
-            ],
-            "admin": [
-              {
-                "name": "autorun", "description": "Whether actions run without confirmation", "mutates": true,
-                "options": [
-                  { "name": "state", "description": "Whether auto-run is on.",
-                    "type": "string", "required": false, "autocomplete": true, "values": ["on", "off"] }
-                ]
-              }
-            ]
-          }
+          "commands": [
+            { "name": "compact", "description": "Summarize this conversation", "action": "assistant:chat",
+              "mutates": true, "options": [] },
+            {
+              "name": "autorun", "description": "Whether actions run without confirmation",
+              "action": "assistant:autorun", "mutates": true,
+              "options": [
+                { "name": "state", "description": "Whether auto-run is on.",
+                  "type": "string", "required": false, "autocomplete": true, "values": ["on", "off"] }
+              ]
+            }
+          ]
         }
         """;
 
@@ -94,12 +92,14 @@ public sealed class LeafCommandsApiTests
         Assert.Equal("chat", body.GetProperty("surface").GetString());
 
         // The leaf's own statement about what it checks before running each command. The API cannot verify
-        // a gate it does not implement, so it must neither soften nor restate this.
-        JsonElement gates = body.GetProperty("gates");
-        Assert.Equal(["compact"], gates.GetProperty("viewer").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
-        Assert.Equal(["autorun"], gates.GetProperty("admin").EnumerateArray().Select(c => c.GetProperty("name").GetString()));
+        // a check it does not implement, so it must neither soften nor restate this.
+        Assert.False(body.TryGetProperty("gates", out _));
+        JsonElement[] commands = [.. body.GetProperty("commands").EnumerateArray()];
+        Assert.Equal(
+            [("compact", "assistant:chat"), ("autorun", "assistant:autorun")],
+            commands.Select(c => (c.GetProperty("name").GetString(), c.GetProperty("action").GetString())));
 
-        JsonElement option = gates.GetProperty("admin").EnumerateArray().Single()
+        JsonElement option = commands.Single(c => c.GetProperty("name").GetString() == "autorun")
             .GetProperty("options").EnumerateArray().Single();
         Assert.Equal("state", option.GetProperty("name").GetString());
         Assert.False(option.GetProperty("required").GetBoolean());
@@ -202,6 +202,9 @@ public sealed class LeafCommandsApiTests
     [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "surface": "discord", "gates": { "none": [ { "name": "" } ] } }""")]
     // No catalog, and no surface to print.
     [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "surface": "discord" }""")]
+    // A version 3 file carries a list of commands and nothing else, and every one is named.
+    [InlineData("""{ "schemaVersion": 3, "leaf": "bot", "surface": "discord", "gates": { "none": [] } }""")]
+    [InlineData("""{ "schemaVersion": 3, "leaf": "bot", "surface": "discord", "commands": [ { "name": "" } ] }""")]
     [InlineData("""{ "schemaVersion": 2, "leaf": "bot", "gates": { "none": [] } }""")]
     [InlineData("this is not json")]
     public async Task AManifestThatCannotBeTrustedIsSkipped(string json)

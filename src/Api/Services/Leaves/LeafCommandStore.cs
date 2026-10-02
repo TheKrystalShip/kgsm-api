@@ -21,11 +21,16 @@ public sealed record LeafCommandOption(
 /// One command a person can type at a leaf. <see cref="Mutates"/> separates the commands that act on a
 /// server from the ones that only read — the distinction an operator opens the list to find.
 /// </summary>
+/// <param name="Action">
+/// The action whoever runs the command must hold, in a version 3 manifest, or null when the leaf checks
+/// none. The leaf's own word for its own check; this API neither interprets nor enforces it.
+/// </param>
 public sealed record LeafCommand(
     string Name,
     string Description,
     bool Mutates,
-    IReadOnlyList<LeafCommandOption> Options);
+    IReadOnlyList<LeafCommandOption> Options,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Action = null);
 
 /// <summary>
 /// A leaf's catalog of the commands it answers to, shipped as
@@ -33,26 +38,40 @@ public sealed record LeafCommand(
 /// written) here.
 /// </summary>
 /// <param name="Surface">Where the commands are typed — <c>discord</c> for the bot, <c>chat</c> for the assistant.</param>
-/// <param name="Gates">
-/// The catalog, keyed by what the leaf itself requires of whoever runs the commands in that bucket — a
-/// tier from the shared role map, or <c>none</c> when the leaf checks nothing. The leaf's own word for
-/// its own check; this API neither interprets nor enforces it, and passes it through so the panel can
-/// state who can act without guessing.
+/// <param name="Commands">
+/// The catalog at schema version 3: every command, each naming the action that admits it.
 /// </param>
+/// <param name="Gates">
+/// The catalog at schema version 2, keyed by the bucket the leaf states for whoever runs the commands in
+/// it, or <c>none</c> when the leaf checks nothing.
+/// </param>
+/// <remarks>
+/// Either way the leaf's own word for its own check; this API neither interprets nor enforces it, and
+/// passes it through so the panel can state who can act without guessing.
+/// </remarks>
 public sealed record LeafCommandManifest(
     int SchemaVersion,
     string Leaf,
     string Surface,
-    IReadOnlyDictionary<string, IReadOnlyList<LeafCommand>> Gates)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<LeafCommand>? Commands = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<string, IReadOnlyList<LeafCommand>>? Gates = null)
 {
     /// <summary>
-    /// The only schema version this API understands; anything else is skipped, not guessed at — an
-    /// unknown version means the rest of the file may mean something entirely different.
+    /// The schema versions this API understands; anything else is skipped, not guessed at — an unknown
+    /// version means the rest of the file may mean something entirely different.
     /// </summary>
-    public const int SupportedSchemaVersion = 2;
+    public static readonly IReadOnlySet<int> SupportedSchemaVersions = new HashSet<int> { 2, 3 };
+
+    /// <summary>The version that lists commands each naming its action.</summary>
+    public const int ActionsSchemaVersion = 3;
 
     /// <summary>The gate a leaf states when it checks nothing itself.</summary>
     public const string NoGate = "none";
+
+    /// <summary>Every command the manifest carries, whichever shape it carries them in.</summary>
+    [JsonIgnore]
+    public IEnumerable<LeafCommand> All =>
+        Commands ?? (Gates ?? new Dictionary<string, IReadOnlyList<LeafCommand>>()).Values.SelectMany(b => b);
 }
 
 /// <summary>
@@ -167,10 +186,10 @@ public sealed class LeafCommandStore(ApiOptions options, ILogger<LeafCommandStor
         }
 
         // Version first: an unknown version means the rest of the file may mean something else entirely.
-        if (manifest.SchemaVersion != LeafCommandManifest.SupportedSchemaVersion)
+        if (!LeafCommandManifest.SupportedSchemaVersions.Contains(manifest.SchemaVersion))
         {
             error = $"schemaVersion {manifest.SchemaVersion} is not supported "
-                  + $"(this API understands {LeafCommandManifest.SupportedSchemaVersion})";
+                  + $"(this API understands {string.Join(" and ", LeafCommandManifest.SupportedSchemaVersions.Order())})";
             return null;
         }
 
@@ -188,19 +207,28 @@ public sealed class LeafCommandStore(ApiOptions options, ILogger<LeafCommandStor
             return null;
         }
 
-        if (manifest.Gates is null)
+        // Each version carries its catalog in its own shape, and only that one: a version 3 file listing
+        // gates, or a version 2 file listing commands, is a file this API would be guessing at.
+        if (manifest.SchemaVersion == LeafCommandManifest.ActionsSchemaVersion)
+        {
+            if (manifest.Commands is null || manifest.Gates is not null)
+            {
+                error = "a version 3 manifest carries its commands as a list, each naming its action";
+                return null;
+            }
+        }
+        else if (manifest.Gates is null || manifest.Commands is not null)
         {
             error = "carries no commands";
             return null;
         }
-
-        if (manifest.Gates.Values.Any(bucket => bucket is null))
+        else if (manifest.Gates.Values.Any(bucket => bucket is null))
         {
             error = "a gate carries no command list";
             return null;
         }
 
-        if (manifest.Gates.Values.SelectMany(b => b).Any(c => string.IsNullOrWhiteSpace(c.Name)))
+        if (manifest.All.Any(c => c is null || string.IsNullOrWhiteSpace(c.Name)))
         {
             error = "a command has no name";
             return null;
@@ -208,13 +236,17 @@ public sealed class LeafCommandStore(ApiOptions options, ILogger<LeafCommandStor
 
         // A command that declares no options at all arrives with a null list; the wire says "takes no
         // options", which is what an absent list means, rather than passing the null on to the panel.
-        return manifest with
-        {
-            Gates = manifest.Gates.ToDictionary(
-                g => g.Key,
-                g => (IReadOnlyList<LeafCommand>)[.. g.Value.Select(c => c.Options is null ? c with { Options = [] } : c)],
-                StringComparer.Ordinal),
-        };
+        static LeafCommand Normalized(LeafCommand c) => c.Options is null ? c with { Options = [] } : c;
+
+        return manifest.Commands is not null
+            ? manifest with { Commands = [.. manifest.Commands.Select(Normalized)] }
+            : manifest with
+            {
+                Gates = manifest.Gates!.ToDictionary(
+                    g => g.Key,
+                    g => (IReadOnlyList<LeafCommand>)[.. g.Value.Select(Normalized)],
+                    StringComparer.Ordinal),
+            };
     }
 
     // Log a bad manifest once per revision of that file, so a permanent problem stays visible in the journal

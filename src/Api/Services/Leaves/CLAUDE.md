@@ -108,11 +108,12 @@ own configuration and journal and is reached at its own address, as the cluster 
 A leaf that takes typed commands ships a manifest into `commands/` **below** the descriptor directory —
 one level down because the descriptor scan globs `*.json` at the top and would read it as a malformed
 descriptor. `LeafCommandStore` scans that subdirectory and `GET /hosts/{id}/services/{leaf}/commands`
-serves it **verbatim**: the API holds no idea what any command does, and passes each command's gate
-through without restating it, because it cannot verify a check it does not implement. The catalog is
-keyed by that gate, so a leaf whose commands need different access says so and the panel prints it. A
-leaf that ships no manifest is a **404**, not an empty list — most take no commands, and that is a
-different statement. Read-only reference material, so it takes `api:services.read` with the rest of
-`ServicesController`. **One schema version is understood**
-(`LeafCommandManifest.SupportedSchemaVersion`); anything else is skipped whole and logged once, never
-half-read. Format: `../leaf-command-manifest.md` at the workspace root.
+serves it **verbatim**: the API holds no idea what any command does, and passes what each command
+needs through without restating it, because it cannot verify a check it does not implement. At schema
+version 3 every command names the action that admits it; at version 2 the catalog is keyed by a bucket
+the leaf states. Either way a leaf whose commands need different access says so and the panel prints
+it. A leaf that ships no manifest is a **404**, not an empty list — most take no commands, and that is
+a different statement. Read-only reference material, so it takes `api:services.read` with the rest of
+`ServicesController`. **The understood versions are `LeafCommandManifest.SupportedSchemaVersions`**,
+each in its own shape only; anything else is skipped whole and logged once, never half-read. Format:
+`../leaf-command-manifest.md` at the workspace root.
