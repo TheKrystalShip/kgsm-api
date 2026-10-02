@@ -48,10 +48,19 @@ assignments, the catalog), on every request. The authority for the model is
   the caller's account, evaluated from the replica at the target the route names — a server route
   (`api/v1/servers/{id}`) at that server's install (`instance:<node>/<id>#<nonce>`, or this node while
   the nonce is unknown), everything else at this node; a cluster-scoped action widens to the cluster on
-  its own. Where the action depends on the request — a command's verb, a batch's members, a settings
-  patch touching maintenance windows, a leaf's configuration — the controller asks `NodeAccess` in the
-  body. `ActionIds` names every id this API gates on; `api:*` are declared in
+  its own. Where the action depends on the request — a command's verb, a settings patch touching
+  maintenance windows, a leaf's configuration — the endpoint declares every action it can decide with
+  an `OperationActionsAttribute` (`[ActionByVerb]`, `[ActionWhenPresent]`, `[LeafConfigAction]`), whose
+  entries come from the function the handler checks with (`ActionIds.ForVerb`, `ActionIds.ConfigAction`,
+  the attribute itself), and the controller asks `NodeAccess` in the body. A batch's members are each
+  refused on their own. `ActionIds` names every id this API gates on; `api:*` are declared in
   `ApiActionDeclarations.cs`, every other one in its own component's manifest.
+- **What is enforced is published.** `GET /api/v1/operations` (`ApiOperations`) is built from those
+  attributes on the endpoints as mapped — method, route under `/api/v1`, action, and scope by
+  `NodeAccess.IsServerRoute`, the same test `TargetOf` evaluates with — so a client gates a control on
+  the request it will make and holds no action ids. Every entry a request matches must be held. A gate
+  decided in a handler from anything other than those attributes is a gate no client can see, and
+  `OperationsTests` fails on any `[RequiresAction]` route the document leaves out.
 - **A collection is cut to its reader.** `GET /servers`, availability, and every server frame on the
   stream carry only the servers the caller may read (`NodeAccess.AllowedServersAsync`), so somebody
   granted one server sees that one server. A job is read at the server it acted on and is a `404`

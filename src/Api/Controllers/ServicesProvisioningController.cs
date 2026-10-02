@@ -27,18 +27,9 @@ public sealed class ServicesProvisioningController(
     NodeAccess access,
     ApiOptions options) : ControllerBase
 {
-    /// <summary>
-    /// The action reading or writing <paramref name="leaf"/>'s configuration performs — the leaf's own,
-    /// and the engine's for the engine.
-    /// </summary>
-    private static string ConfigAction(string leaf, bool write) =>
-        string.Equals(leaf, "kgsm", StringComparison.Ordinal)
-            ? (write ? ActionIds.EngineConfigWrite : ActionIds.EngineConfigRead)
-            : (write ? ActionIds.LeafConfigWrite(leaf) : ActionIds.LeafConfigRead(leaf));
-
     private async Task<IActionResult?> RefuseConfigAsync(string leaf, bool write, CancellationToken ct)
     {
-        string action = ConfigAction(leaf, write);
+        string action = ActionIds.ConfigAction(leaf, write);
         return await access.AllowsAsync(User, action, access.NodeTarget, ct).ConfigureAwait(false)
             ? null
             : StatusCode(StatusCodes.Status403Forbidden,
@@ -103,6 +94,7 @@ public sealed class ServicesProvisioningController(
     /// overrides (secrets masked). 404 when the leaf is not a config target.</summary>
     [HttpGet("{leaf}/config")]
     [Authorize]
+    [LeafConfigAction(write: false)]
     public async Task<IActionResult> GetConfig(string id, string leaf, CancellationToken ct)
     {
         if (!IsThisHost(id))
@@ -124,6 +116,7 @@ public sealed class ServicesProvisioningController(
     /// audit. 404 when the leaf is not a config target.</summary>
     [HttpPut("{leaf}/config")]
     [Authorize]
+    [LeafConfigAction(write: true)]
     public async Task<IActionResult> PutConfig(string id, string leaf, [FromBody] ComponentConfigUpdate? body, CancellationToken ct)
     {
         if (!IsThisHost(id))

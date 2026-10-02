@@ -36,6 +36,9 @@ public sealed class ServerSettingsController(
     /// <summary>The kgsm config key the whole window list is packed into.</summary>
     private const string MaintenanceWindowsKey = "maintenance_windows";
 
+    /// <summary>The settings body's field carrying the window list, as it is spelled on the wire.</summary>
+    private const string WindowsField = "maintenanceWindows";
+
     /// <summary>How many fires the preview returns when the caller names no count.</summary>
     private const int DefaultPreviewCount = 5;
 
@@ -65,6 +68,7 @@ public sealed class ServerSettingsController(
 
     [HttpPatch]
     [RequiresAction(ActionIds.ServerConfigWrite)]
+    [ActionWhenPresent(WindowsField, ActionIds.ServerWindowsWrite)]
     public async Task<IActionResult> Patch(string id, [FromBody] ServerSettingsPatch? body, CancellationToken ct)
     {
         if (body is null)
@@ -72,11 +76,12 @@ public sealed class ServerSettingsController(
                 "a settings body is required");
 
         // A maintenance window restarts the server on a clock, unattended, so changing them is its own
-        // action on top of changing the server's configuration.
+        // action on top of changing the server's configuration — the one this route declares for it.
+        string windowsAction = ActionWhenPresentAttribute.For(HttpContext, WindowsField);
         if (body.MaintenanceWindows is not null
-            && !await access.AllowsOnServerAsync(User, ActionIds.ServerWindowsWrite, id, ct).ConfigureAwait(false))
+            && !await access.AllowsOnServerAsync(User, windowsAction, id, ct).ConfigureAwait(false))
             return Error(StatusCodes.Status403Forbidden, "forbidden",
-                $"changing maintenance windows needs {ActionIds.ServerWindowsWrite}");
+                $"changing maintenance windows needs {windowsAction}");
 
         if (!TryResolveOrigin(body.Origin, out string origin))
             return Error(StatusCodes.Status400BadRequest, "bad_request",

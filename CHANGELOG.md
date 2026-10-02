@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — this node publishes its operations (0.214.0)
+
+`GET /api/v1/operations` lists every gated route and the action it requires, in `Auth.Access`'s
+`OperationManifest` shape (pinned at 1.0.0-dev.6), built from the endpoints' own metadata: each
+`[RequiresAction]`, and the actions an endpoint decides from its request — one per lifecycle verb on
+`POST /servers/{id}/commands`, `kgsm:server.windows.write` whenever a settings patch carries
+`maintenanceWindows`, and `{leaf}:config.read`/`.write` on a leaf's configuration with the engine's own
+at `/hosts/{id}/services/kgsm/config`. Those handlers now resolve their action from the same
+declarations. A client gates a control on the request it is about to make and names no action itself.
+
 ### Added — account names, and automation settings on the config surface (0.213.0, contracts 1.0.0-dev.16)
 
 - **`GET /api/v1/accounts/names?id=…`** answers the username behind each account id asked about, from

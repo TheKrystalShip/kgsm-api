@@ -76,6 +76,10 @@ public static class ActionIds
     public const string ReactorRulesRead = "reactor:rules.read";
     public const string ReactorRulesWrite = "reactor:rules.write";
 
+    /// <summary>Every lifecycle verb <see cref="ForVerb"/> answers for — what the operations publish.</summary>
+    public static readonly IReadOnlyList<string> Verbs =
+        [Contracts.CommandVerb.Start, Contracts.CommandVerb.Stop, Contracts.CommandVerb.Restart, Contracts.CommandVerb.Update];
+
     /// <summary>The action a lifecycle verb performs, or <see langword="null"/> for a verb outside the set.</summary>
     public static string? ForVerb(string? verb) => verb switch
     {
@@ -91,4 +95,16 @@ public static class ActionIds
 
     /// <summary>A leaf's standard configuration surface: <c>&lt;leaf&gt;:config.write</c>.</summary>
     public static string LeafConfigWrite(string leaf) => leaf + ":config.write";
+
+    /// <summary>The engine's id among the leaves, whose configuration is the engine's own action.</summary>
+    public const string EngineLeaf = "kgsm";
+
+    /// <summary>
+    /// The action reading or writing <paramref name="leaf"/>'s configuration performs — the leaf's own,
+    /// and the engine's for the engine.
+    /// </summary>
+    public static string ConfigAction(string leaf, bool write) =>
+        string.Equals(leaf, EngineLeaf, StringComparison.Ordinal)
+            ? (write ? EngineConfigWrite : EngineConfigRead)
+            : (write ? LeafConfigWrite(leaf) : LeafConfigRead(leaf));
 }

@@ -135,6 +135,7 @@ public sealed class ServersController(
     /// </list>
     /// </summary>
     [HttpPost("{id}/commands")]
+    [ActionByVerb]
     public async Task<IActionResult> PostCommand(string id, [FromBody] CommandRequest? body, CancellationToken ct)
     {
         string? verb = body?.Verb?.Trim().ToLowerInvariant();

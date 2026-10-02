@@ -50,6 +50,16 @@ public sealed class NodeAccess(
             ? AccessScope.ForInstance(options.NodeId, serverId, nonce)
             : NodeTarget;
 
+    /// <summary>The route parameter a server route names its server by.</summary>
+    public const string ServerParameter = "id";
+
+    /// <summary>
+    /// Whether a route template is a server's — evaluated at that server's install. The operations this
+    /// node publishes say the same, from this one test.
+    /// </summary>
+    public static bool IsServerRoute(string pattern) =>
+        pattern.TrimStart('/').StartsWith("api/v1/servers/{" + ServerParameter + "}", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
     /// The target a request names: a server route (<c>api/v1/servers/{id}/…</c>) is that server, and
     /// everything else is this node — the cluster-wide actions widen from it on their own.
@@ -58,8 +68,8 @@ public sealed class NodeAccess(
     {
         if (http?.GetEndpoint() is RouteEndpoint route
             && route.RoutePattern.RawText is { } pattern
-            && pattern.StartsWith("api/v1/servers/{id}", StringComparison.OrdinalIgnoreCase)
-            && http.Request.RouteValues["id"] is string serverId)
+            && IsServerRoute(pattern)
+            && http.Request.RouteValues[ServerParameter] is string serverId)
         {
             return ServerTarget(serverId);
         }
