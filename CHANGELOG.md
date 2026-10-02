@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — account names, and automation settings on the config surface (0.213.0, contracts 1.0.0-dev.16)
+
+- **`GET /api/v1/accounts/names?id=…`** answers the username behind each account id asked about, from
+  this node's replica, for any signed-in caller; an id the replica does not hold is absent. Surfaces
+  record authors by account id, and this is where a panel turns one into a name.
+- **A config field says whether it switches an automation on** (`automates`) and, where the component
+  serves its own surface, who switched it on (`automationAuthor`). The descriptor fallback marks the
+  field and carries no author, since only the component records one.
+
 ### Added — automations run as the person who set them up (0.212.0, contracts 1.0.0-dev.15)
 
 - **Maintenance windows are written with their author.** `PATCH /servers/{id}/settings` writes the

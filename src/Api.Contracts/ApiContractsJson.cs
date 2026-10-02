@@ -80,4 +80,5 @@ namespace TheKrystalShip.Api.Contracts;
 [JsonSerializable(typeof(LogPage))]
 // And the one shape every refusal arrives in.
 [JsonSerializable(typeof(ErrorEnvelope))]
+[JsonSerializable(typeof(AccountNames))]
 public sealed partial class ApiContractsJson : JsonSerializerContext;

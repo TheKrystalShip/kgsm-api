@@ -329,7 +329,7 @@ public sealed class LeafConfigService(
                     Set: overridden || floorHas, Fingerprint: overridden ? Fingerprint(row!.Value) : null,
                     Floor: null, Effective: null, Source: source,
                     Group: f.Group, Risk: f.Risk, Unit: f.Unit, Min: f.Min, Max: f.Max,
-                    PairedApiKey: f.PairedApiKey, DependsOn: f.DependsOn));
+                    PairedApiKey: f.PairedApiKey, DependsOn: f.DependsOn, Automates: f.Automates));
             }
             else
             {
@@ -340,7 +340,7 @@ public sealed class LeafConfigService(
                     Set: null, Fingerprint: null,
                     Floor: floorHas ? floorValue : null, Effective: effective, Source: source,
                     Group: f.Group, Risk: f.Risk, Unit: f.Unit, Min: f.Min, Max: f.Max,
-                    PairedApiKey: f.PairedApiKey, DependsOn: f.DependsOn));
+                    PairedApiKey: f.PairedApiKey, DependsOn: f.DependsOn, Automates: f.Automates));
             }
         }
 

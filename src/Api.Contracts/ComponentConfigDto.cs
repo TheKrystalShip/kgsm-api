@@ -89,7 +89,14 @@ public sealed record ComponentConfigField(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Min = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] double? Max = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PairedApiKey = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DependsOn = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DependsOn = null,
+    // A setting that switches automated behaviour on. Whoever last set it is the person that automation
+    // runs as, and it runs nothing while nobody is recorded.
+    bool Automates = false,
+    // The account recorded as having set an Automates field. Only the component records it, so it is
+    // null when nobody is recorded, on a field that automates nothing, and on a view a node's API
+    // composed from the descriptor while the component was not answering.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AutomationAuthor = null);
 
 /// <summary>
 /// The <c>PUT /hosts/{id}/services/{leaf}/config</c> body. <see cref="Values"/> sets/replaces overrides
