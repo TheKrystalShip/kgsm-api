@@ -33,6 +33,12 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
         // suite exists to keep honest.
         HttpResponseMessage r = await Client(Persona.Viewer).GetAsync($"/api/v1/hosts/{Host}/thresholds");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
+
+        // The refusal names the action, as every member's does, in the error envelope.
+        using JsonDocument body = JsonDocument.Parse(await r.Content.ReadAsStringAsync());
+        JsonElement error = body.RootElement.GetProperty("error");
+        Assert.Equal("forbidden", error.GetProperty("code").GetString());
+        Assert.Equal("This needs monitor:thresholds.read.", error.GetProperty("message").GetString());
     }
 
     [Fact]

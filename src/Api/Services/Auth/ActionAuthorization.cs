@@ -1,5 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.Extensions.Options;
+
+using TheKrystalShip.Api.Infrastructure;
 
 namespace TheKrystalShip.Api.Services.Auth;
 
@@ -88,5 +91,28 @@ public sealed class ActionAuthorizationHandler(NodeAccess access) : Authorizatio
         HttpContext? http = context.Resource as HttpContext;
         if (await access.AllowsAsync(context.User, requirement.Action, access.TargetOf(http), http?.RequestAborted ?? default))
             context.Succeed(requirement);
+        else
+            context.Fail(new AuthorizationFailureReason(this, requirement.Action));
+    }
+}
+
+/// <summary>
+/// Writes a refused action gate as the <c>403</c> every member answers: the error envelope, saying which
+/// action the request needs. Every other outcome is the framework's.
+/// </summary>
+public sealed class ActionRefusalResultHandler : IAuthorizationMiddlewareResultHandler
+{
+    private readonly AuthorizationMiddlewareResultHandler _default = new();
+
+    /// <inheritdoc />
+    public Task HandleAsync(RequestDelegate next, HttpContext context, AuthorizationPolicy policy, PolicyAuthorizationResult authorizeResult)
+    {
+        string? action = authorizeResult.Forbidden
+            ? authorizeResult.AuthorizationFailure?.FailureReasons
+                .FirstOrDefault(r => r.Handler is ActionAuthorizationHandler)?.Message
+            : null;
+        return action is null
+            ? _default.HandleAsync(next, context, policy, authorizeResult)
+            : ApiErrors.WriteAsync(context, StatusCodes.Status403Forbidden, "forbidden", $"This needs {action}.");
     }
 }

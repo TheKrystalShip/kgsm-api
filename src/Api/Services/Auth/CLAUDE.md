@@ -121,7 +121,8 @@ assignments, the catalog), on every request. The authority for the model is
   Every refusal about the handle is one `404` with one message, because separate answers let somebody
   probe which handles exist.
 - **`401` vs `403` is the load-bearing split.** `401` = no/invalid bearer (challenge); `403` =
-  authenticated, action not held (forbid). Self-service surfaces — `/me`, `/me/access`,
+  authenticated, action not held (forbid), whose envelope says `This needs <action>.`
+  (`ActionRefusalResultHandler`), as every member's refusal does. Self-service surfaces — `/me`, `/me/access`,
   `/me/preferences`, `/stream` — are `[Authorize]` alone, so somebody awaiting approval reads their own
   standing.
 - **Honest failure modes:** the replica unreadable → `502 authority_unavailable`. **Never a default

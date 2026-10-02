@@ -782,6 +782,7 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<LiveAuthority>();
         services.AddSingleton<IAuthorizationPolicyProvider, ActionPolicyProvider>();
         services.AddSingleton<IAuthorizationHandler, ActionAuthorizationHandler>();
+        services.AddSingleton<IAuthorizationMiddlewareResultHandler, ActionRefusalResultHandler>();
 
         // Auth is ON by default; Api__AuthDisabled=true swaps the default scheme for a synthetic-Owner
         // handler so every policy passes (the explicit, loudly-logged dev/open window). When enabled, the

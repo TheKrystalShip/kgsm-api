@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a refused action gate names the action (0.214.1)
+
+A `403` from an action gate carries `{"error":{"code":"forbidden","message":"This needs <action>."}}`,
+as the auth, DNS and assistant members' refusals do, so a caller that made the request learns which
+action it lacks without reading the operations (`ActionRefusalResultHandler`).
+
 ### Added — this node publishes its operations (0.214.0)
 
 `GET /api/v1/operations` lists every gated route and the action it requires, in `Auth.Access`'s
