@@ -21,7 +21,7 @@ public sealed class LeafConfigSurfaceTests
     private const string MonitorUnit = "kgsm-monitor.service";
 
     /// <summary>A monitor descriptor whose floor is one source the test controls.</summary>
-    private static string MonitorDescriptor(string floorPath, string kind = "env-file") => $$"""
+    private static string MonitorDescriptor(string floorPath, string kind = "env-file", bool maintenanceAutomates = false) => $$"""
     {
       "schemaVersion": 1,
       "id": "monitor",
@@ -41,7 +41,7 @@ public sealed class LeafConfigSurfaceTests
           "default": "1000", "min": 100, "unit": "ms", "risk": "safe" },
         { "key": "maintenanceMs", "env": "KGSM_MONITOR_MAINT_MS", "label": "Maintenance interval",
           "description": "Rollup cadence.", "group": "sampling", "type": "int", "default": "60000",
-          "min": 1000, "unit": "ms", "risk": "safe" },
+          "min": 1000, "unit": "ms", "risk": "safe", "automates": {{(maintenanceAutomates ? "true" : "false")}} },
         { "key": "hostId", "env": "KGSM_MONITOR_HOST_ID", "label": "Host id",
           "description": "Identity metrics are stored under.", "group": "sampling", "type": "string",
           "risk": "wiring", "pairedApiKey": "Api__HostId" },
@@ -226,6 +226,25 @@ public sealed class LeafConfigSurfaceTests
 
         Assert.Equal("applied", result.GetProperty("outcome").GetString());
         Assert.Equal(1, f.Units().RestartCount(MonitorUnit));
+    }
+
+    // ── Automations wait for the leaf ─────────────────────────────────────────
+
+    [Theory]
+    [InlineData("""{"values":{"maintenanceMs":"5000"}}""")]
+    [InlineData("""{"reset":["maintenanceMs"]}""")]
+    public async Task An_automation_is_not_changed_while_the_leaf_cannot_record_who_did(string body)
+    {
+        using var f = new LeafConfigTestFactory();
+        f.InstallDescriptor("monitor", MonitorDescriptor(FloorFile(f, ""), maintenanceAutomates: true));
+
+        // No leaf answers on its surface here, so this is the API's own write — and only the leaf
+        // records the author an automation then runs as.
+        HttpResponseMessage resp = await Put(Admin(f), "monitor", body);
+
+        Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
+        Assert.Contains("maintenanceMs", await resp.Content.ReadAsStringAsync());
+        Assert.Equal(0, f.Units().RestartCount(MonitorUnit));
     }
 
     // ── applied_unreachable ───────────────────────────────────────────────────

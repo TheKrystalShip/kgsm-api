@@ -52,6 +52,14 @@ public static class ServerConfigMapping
     public static bool IsNoteKey(string? key) =>
         key is InstanceNote.BodyKey or InstanceNote.UpdatedByKey or InstanceNote.UpdatedAtKey;
 
+    /// <summary>
+    /// Whether <paramref name="key"/> is the maintenance window list. The engine accepts it as a runtime
+    /// value, but the scheduler runs each window as whoever set it, and only the settings surface
+    /// (<c>PATCH /servers/{id}/settings</c>) names that person to the engine alongside the list. Kept out
+    /// of <see cref="IsEditableKey"/> for the same reason as <see cref="IsNoteKey"/>.
+    /// </summary>
+    public static bool IsMaintenanceWindowsKey(string? key) => key is "maintenance_windows";
+
     // The exact mirror of kgsm's __is_protected_instance_config_key (engine authority).
     private static bool IsProtectedKey(string key)
     {
@@ -62,6 +70,8 @@ public static class ServerConfigMapping
             case "runtime":
             case "platform":
             case "install_datetime":
+            case "install_nonce":
+            case "maintenance_windows_author":
             case "is_steam_account_required":
             case "steam_app_id":
             case "client_steam_app_id":

@@ -114,6 +114,16 @@ public sealed class ServerSettingsTests
     }
 
     [Fact]
+    public async Task Get_names_who_the_windows_run_as()
+    {
+        HttpResponseMessage resp = await Get(_engine, Persona.Viewer, "factorio-backup");
+        using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+
+        Assert.Equal("local:usr_windows_author",
+            doc.RootElement.GetProperty("maintenanceWindowsAuthor").GetString());
+    }
+
+    [Fact]
     public async Task Get_leaves_the_next_fire_null_with_no_scheduler_leaf()
     {
         // The arithmetic is the leaf's. With none provisioned there is nothing to relay, and computing it
@@ -233,6 +243,8 @@ public sealed class ServerSettingsTests
     [Fact]
     public async Task Patch_MaintenanceWindows_applies_the_one_packed_key()
     {
+        // The fake engine refuses windows written without an author, so a 200 here is also the caller
+        // being named as the person the scheduler runs them as.
         HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "factorio-1",
             "{\"maintenanceWindows\":[\"daily@05:00/backup\",\"weekly.sun@04:00/backup,restart\"]}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -462,6 +474,7 @@ public sealed class ServerSettingsTests
                 AutoUpdate = false,
                 Runtime = InstanceRuntime.Native,
                 MaintenanceWindows = "daily@05:00/backup;weekly.sun@04:00/backup,restart",
+                MaintenanceWindowsAuthor = "local:usr_windows_author",
                 Timezone = "Europe/Madrid",
                 BackupRetention = 10,
                 CrashRestart = true,
@@ -508,6 +521,14 @@ public sealed class ServerSettingsTests
                 or "crash_restart" or "crash_max_restarts"
                 ? new KgsmResult(0)
                 : new KgsmResult(1, "", $"the engine refused '{key}'");
+
+        // Every caller here holds an account, so a write arriving without its author is the controller
+        // failing to name the person the scheduler will run these windows as.
+        public KgsmResult SetMaintenanceWindows(string instanceName, string packedWindows, string? author,
+            string? actor = null, string? origin = null) =>
+            string.IsNullOrEmpty(author)
+                ? new KgsmResult(1, "", "the windows arrived with no author")
+                : new KgsmResult(0);
 
         public Dictionary<string, Reading<InstanceRuntimeStatus>> GetAllStatuses(bool fast = false) => new();
 

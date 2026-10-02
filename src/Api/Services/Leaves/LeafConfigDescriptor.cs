@@ -206,6 +206,7 @@ public static class LeafConfigDescriptorParser
                 Risk = risk,
                 PairedApiKey = f.PairedApiKey,
                 DependsOn = f.DependsOn,
+                Automates = f.Automates == true,
             });
         }
 
@@ -269,5 +270,6 @@ public static class LeafConfigDescriptorParser
         string? Unit,
         string? Risk,
         string? PairedApiKey,
-        string? DependsOn);
+        string? DependsOn,
+        bool? Automates = null);
 }

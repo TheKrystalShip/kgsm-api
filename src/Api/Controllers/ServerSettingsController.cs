@@ -227,9 +227,9 @@ public sealed class ServerSettingsController(
 
         // The whole window list is one key, replaced wholesale. The scheduler leaf re-reads kgsm config as
         // its source of truth, so persisting the key is the whole apply — nothing is pushed at the daemon.
-        if (packedWindows is not null && !TryApplyConfig(
-                instances, id, MaintenanceWindowsKey, packedWindows, actor, origin,
-                applied, "maintenanceWindows", out IActionResult? mwErr))
+        if (packedWindows is not null && !TryApplyWindows(
+                instances, id, packedWindows, NodeAccess.AccountOf(User), actor, origin,
+                applied, out IActionResult? mwErr))
             return mwErr!;
 
         if (body.Timezone is { } tzPatch && !TryApplyConfig(
@@ -341,7 +341,8 @@ public sealed class ServerSettingsController(
             instance.Timezone,
             instance.BackupRetention,
             instance.CrashRestart,
-            instance.CrashMaxRestarts);
+            instance.CrashMaxRestarts,
+            instance.MaintenanceWindowsAuthor);
 
     /// <summary>
     /// Reads a submitted window list into the one packed value kgsm stores, or says why it will not.
@@ -435,6 +436,28 @@ public sealed class ServerSettingsController(
             return false;
         }
         applied.Add(appliedName);
+        error = null;
+        return true;
+    }
+
+    // Persist the window list with the caller as its author. The scheduler runs each window as that
+    // person, checking at every fire that they still hold what it does, so the engine records the
+    // author beside the list in the same write and nothing else can set it.
+    [PerformedFor(ActionIds.ServerWindowsWrite)]
+    private bool TryApplyWindows(
+        IInstanceService instances, string id, string packedWindows, string? author, string? actor, string origin,
+        List<string> applied, out IActionResult? error)
+    {
+        KgsmResult result = instances.SetMaintenanceWindows(id, packedWindows, author, actor, origin);
+        if (!result.IsSuccess)
+        {
+            error = Error(StatusCodes.Status400BadRequest, "bad_request",
+                string.IsNullOrWhiteSpace(result.Stderr)
+                    ? $"the engine refused '{MaintenanceWindowsKey}' (exit {result.ExitCode})"
+                    : result.Stderr.Trim());
+            return false;
+        }
+        applied.Add("maintenanceWindows");
         error = null;
         return true;
     }

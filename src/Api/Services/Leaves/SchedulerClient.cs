@@ -267,6 +267,9 @@ public sealed record SchedulerInstanceStatus(
 /// unreadable window apart from one that is simply not due.</param>
 /// <param name="LastRun">The last run since the daemon started, or null when it has not run in that time
 /// (the record lives in the daemon's memory, not on disk).</param>
+/// <param name="Author">The account the daemon runs this window as, or null when nobody is recorded.</param>
+/// <param name="Blocked">Why the daemon would not run this window's disruptive tasks now, or null when it
+/// would.</param>
 public sealed record SchedulerWindowStatus(
     string Id,
     string? Kind,
@@ -274,7 +277,9 @@ public sealed record SchedulerWindowStatus(
     bool Valid,
     string? Error,
     DateTimeOffset? NextFireUtc,
-    SchedulerWindowRun? LastRun);
+    SchedulerWindowRun? LastRun,
+    string? Author = null,
+    string? Blocked = null);
 
 /// <summary>
 /// One window run: when it started and finished, how it ended, and a row per task it got to.
@@ -290,8 +295,8 @@ public sealed record SchedulerWindowRun(
 public sealed record SchedulerTaskRun(string Name, string? Outcome, string? Message);
 
 /// <summary>
-/// How a window or one of its tasks ended. Four words rather than a boolean, because "did the maintenance
-/// work" has four genuinely different answers, and collapsing them loses the one a surface should raise.
+/// How a window or one of its tasks ended. Words rather than a boolean, because "did the maintenance work"
+/// has several genuinely different answers, and collapsing them loses the one a surface should raise.
 /// </summary>
 public static class MaintenanceOutcome
 {
@@ -306,4 +311,8 @@ public static class MaintenanceOutcome
 
     /// <summary>An earlier task in the same window failed, so this one never got its turn.</summary>
     public const string Aborted = "aborted";
+
+    /// <summary>It was owed and was refused: the window's author, or the scheduler's own account, does
+    /// not hold what it does on this server.</summary>
+    public const string Blocked = "blocked";
 }

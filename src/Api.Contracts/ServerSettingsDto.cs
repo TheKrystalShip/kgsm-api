@@ -20,6 +20,9 @@ namespace TheKrystalShip.Api.Contracts;
 /// <param name="BackupRetention">How many archives a scheduled prune keeps.</param>
 /// <param name="CrashRestart">Whether the watchdog restarts this instance after a crash.</param>
 /// <param name="CrashMaxRestarts">How many consecutive crash-restarts it attempts before giving up.</param>
+/// <param name="MaintenanceWindowsAuthor">The account that wrote the windows, recorded by the engine with
+/// them. The scheduler runs every window as this person, so a window list with none runs nothing. Null
+/// when nobody is recorded.</param>
 public sealed record ServerSettings(
     string ServerId,
     bool AutoUpdate,
@@ -30,7 +33,8 @@ public sealed record ServerSettings(
     string? Timezone,
     int? BackupRetention,
     bool? CrashRestart,
-    int? CrashMaxRestarts);
+    int? CrashMaxRestarts,
+    string? MaintenanceWindowsAuthor = null);
 
 /// <summary>
 /// One maintenance window: an appointment plus the ordered set of tasks that run when it fires.
@@ -57,6 +61,9 @@ public sealed record ServerSettings(
 /// <param name="NextFireUtc">The next fire, from the scheduler. Null on an invalid window, and null when
 /// the leaf could not be asked — <see cref="Valid"/> beside it is what tells the two apart.</param>
 /// <param name="LastRun">The leaf's record of the last run, or null when it holds none.</param>
+/// <param name="Blocked">Why the scheduler would not run this window's disruptive tasks if it fired now —
+/// its author no longer holds what they do here, or the scheduler's own account does not. Null when it
+/// would run them, and null when the leaf could not be asked.</param>
 public sealed record MaintenanceWindowDto(
     string Id,
     string Expression,
@@ -65,14 +72,15 @@ public sealed record MaintenanceWindowDto(
     bool Valid,
     string? Error,
     DateTimeOffset? NextFireUtc,
-    MaintenanceRunDto? LastRun);
+    MaintenanceRunDto? LastRun,
+    string? Blocked = null);
 
 /// <summary>
 /// One window run, as the scheduler recorded it.
 /// </summary>
 /// <param name="StartedUtc">When the run opened.</param>
 /// <param name="FinishedUtc">When it closed.</param>
-/// <param name="Outcome"><c>ok｜failed｜skipped｜aborted</c> for the window as a whole.</param>
+/// <param name="Outcome"><c>ok｜failed｜skipped｜aborted｜blocked</c> for the window as a whole.</param>
 /// <param name="Tasks">One row per task the run got to, in the order it ran them.</param>
 public sealed record MaintenanceRunDto(
     DateTimeOffset? StartedUtc,
@@ -81,11 +89,12 @@ public sealed record MaintenanceRunDto(
     IReadOnlyList<MaintenanceTaskRunDto> Tasks);
 
 /// <summary>
-/// One task inside a run. The four outcomes are carried as they were recorded — a <c>skipped</c> task did
-/// not apply and a <c>failed</c> one was owed, and reading either as the other misstates what happened.
+/// One task inside a run. The outcomes are carried as they were recorded — a <c>skipped</c> task did not
+/// apply, a <c>failed</c> one was owed, and a <c>blocked</c> one was refused for want of access, and
+/// reading any as another misstates what happened.
 /// </summary>
 /// <param name="Name"><c>backup</c>, <c>update</c> or <c>restart</c>.</param>
-/// <param name="Outcome"><c>ok｜failed｜skipped｜aborted</c>.</param>
+/// <param name="Outcome"><c>ok｜failed｜skipped｜aborted｜blocked</c>.</param>
 /// <param name="Message">The daemon's own words for why. Null when it had nothing to say.</param>
 public sealed record MaintenanceTaskRunDto(string Name, string Outcome, string? Message);
 

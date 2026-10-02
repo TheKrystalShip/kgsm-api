@@ -112,6 +112,12 @@ public sealed class ServerConfigController(ServerAggregator aggregator) : Contro
                 $"the server note is not editable here: use PUT/DELETE /servers/{{id}}/note "
                 + $"(rejected: {string.Join(", ", noteKeys)})");
 
+        // Written here, the window list would carry no author, and the scheduler runs no window nobody
+        // set up. The settings surface writes it with the caller named as its author.
+        if (values.Keys.Any(ServerConfigMapping.IsMaintenanceWindowsKey))
+            return Error(StatusCodes.Status400BadRequest, "bad_request",
+                "maintenance windows are not editable here: use PATCH /servers/{id}/settings");
+
         // actor = the bearer identity (discord:<username>), or null → kgsm's own OS-user fallback.
         string? actor = AuditPrincipal.ActorString(User);
 

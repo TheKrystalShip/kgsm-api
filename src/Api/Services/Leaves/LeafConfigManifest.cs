@@ -49,6 +49,12 @@ public sealed record LeafConfigFieldDef(
     /// <summary>Another field's key that must be set for this one to have any effect. Presentation only —
     /// the API does not enforce it, because the leaf is the authority on its own semantics.</summary>
     public string? DependsOn { get; init; }
+
+    /// <summary>
+    /// A setting that switches automated behaviour on, whose setter the leaf records as its author. Only
+    /// the leaf records that, so this API changes one only through the leaf's own surface.
+    /// </summary>
+    public bool Automates { get; init; }
 }
 
 /// <summary>

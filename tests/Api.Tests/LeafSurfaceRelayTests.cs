@@ -111,7 +111,7 @@ public sealed class LeafSurfaceRelayTests : IDisposable
         Task served = await ServeAsync("monitor", HttpStatusCode.OK, said, cts.Token);
 
         LeafSurfaceAnswer? answer = await Relay()
-            .SendAsync("monitor", HttpMethod.Get, "config", null, cts.Token);
+            .SendAsync("monitor", HttpMethod.Get, "config", null, null, cts.Token);
         await served;
 
         Assert.NotNull(answer);
@@ -130,7 +130,7 @@ public sealed class LeafSurfaceRelayTests : IDisposable
         Task served = await ServeAsync("monitor", HttpStatusCode.BadRequest, said, cts.Token);
 
         LeafSurfaceAnswer? answer = await Relay()
-            .SendAsync("monitor", HttpMethod.Put, "config", """{"values":{"intervalMs":"1"}}""", cts.Token);
+            .SendAsync("monitor", HttpMethod.Put, "config", """{"values":{"intervalMs":"1"}}""", null, cts.Token);
         await served;
 
         Assert.NotNull(answer);
@@ -150,7 +150,7 @@ public sealed class LeafSurfaceRelayTests : IDisposable
         Assert.False(relay.ServesOwnSurface("watchdog"));
         // Null is the caller's cue to read the descriptor itself, which is the same answer a leaf
         // that is DOWN gives — and that is the one case a self-serving component cannot cover.
-        Assert.Null(await relay.SendAsync("watchdog", HttpMethod.Get, "config", null, cts.Token));
+        Assert.Null(await relay.SendAsync("watchdog", HttpMethod.Get, "config", null, null, cts.Token));
     }
 
     [Fact]
@@ -165,7 +165,33 @@ public sealed class LeafSurfaceRelayTests : IDisposable
         LeafSurfaceRelay relay = Relay();
 
         Assert.True(relay.ServesOwnSurface("reactor"), "the file is present, which is all the probe reads");
-        Assert.Null(await relay.SendAsync("reactor", HttpMethod.Get, "config", null, cts.Token));
+        Assert.Null(await relay.SendAsync("reactor", HttpMethod.Get, "config", null, null, cts.Token));
+    }
+
+    [Fact]
+    public async Task TheAccountAskingTravelsWithTheRequest()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Task served = await ServeAsync("scheduler", HttpStatusCode.OK, "{}", cts.Token);
+
+        // The leaf records this account as the author of any automation the change switches on.
+        await Relay().SendAsync("scheduler", HttpMethod.Put, "config",
+            """{"values":{"updateCheckEnabled":"true"}}""", "local:usr_asking", cts.Token);
+        await served;
+
+        Assert.Contains($"{LeafSurfaceRelay.ActingAccountHeader}: local:usr_asking", Requests[0]);
+    }
+
+    [Fact]
+    public async Task NoAccount_SendsNoHeader()
+    {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        Task served = await ServeAsync("scheduler", HttpStatusCode.OK, "{}", cts.Token);
+
+        await Relay().SendAsync("scheduler", HttpMethod.Get, "config", null, null, cts.Token);
+        await served;
+
+        Assert.DoesNotContain(LeafSurfaceRelay.ActingAccountHeader, Requests[0]);
     }
 
     [Fact]

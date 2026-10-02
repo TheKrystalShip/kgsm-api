@@ -306,6 +306,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         public KgsmResult FindConfigPath(string instanceName) => throw new NotImplementedException();
         public KgsmResult GetInstanceConfigValue(string instanceName, string key) => throw new NotImplementedException();
         public KgsmResult SetInstanceConfigValue(string instanceName, string key, string value, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public KgsmResult SetMaintenanceWindows(string instanceName, string packedWindows, string? author, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public InstanceNoteResult SetInstanceNote(string instanceName, string body, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult CreateBackup(string instanceName, string? actor = null, string? origin = null, string? reason = null, string? retention = null) => throw new NotImplementedException();
         public KgsmResult PinBackup(string instanceName, string backupName, string? actor = null, string? origin = null) => throw new NotImplementedException();

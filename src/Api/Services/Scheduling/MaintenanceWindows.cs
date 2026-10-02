@@ -139,7 +139,8 @@ public static class MaintenanceWindows
                 Valid: valid,
                 Error: error,
                 NextFireUtc: row?.NextFireUtc,
-                LastRun: ProjectRun(row?.LastRun)));
+                LastRun: ProjectRun(row?.LastRun),
+                Blocked: row?.Blocked));
         }
 
         return projected;
@@ -158,11 +159,11 @@ public static class MaintenanceWindows
         return new MaintenanceRunDto(run.StartedUtc, run.FinishedUtc, Outcome(run.Outcome), tasks);
     }
 
-    // The daemon writes one of four words. Anything else is a daemon this build does not understand, and
-    // reading it as "ok" would report a success nobody measured.
+    // The daemon writes one of the MaintenanceOutcome words. Anything else is a daemon this build does
+    // not understand, and reading it as "ok" would report a success nobody measured.
     private static string Outcome(string? recorded) =>
         recorded is MaintenanceOutcome.Ok or MaintenanceOutcome.Failed
-            or MaintenanceOutcome.Skipped or MaintenanceOutcome.Aborted
+            or MaintenanceOutcome.Skipped or MaintenanceOutcome.Aborted or MaintenanceOutcome.Blocked
             ? recorded
             : "unknown";
 }

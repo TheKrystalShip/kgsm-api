@@ -112,7 +112,7 @@ public sealed class ServicesProvisioningController(
             return refused;
 
         // The leaf answers for itself where it can: it owns the descriptor, the file and the rules.
-        if (await relay.SendAsync(leaf, HttpMethod.Get, "config", null, ct) is { } answered)
+        if (await relay.SendAsync(leaf, HttpMethod.Get, "config", null, NodeAccess.AccountOf(User), ct) is { } answered)
             return Relayed(answered);
 
         ComponentConfigView? cfg = await config.GetConfigAsync(leaf, ct);
@@ -135,10 +135,10 @@ public sealed class ServicesProvisioningController(
         // The leaf applies its own change where it can: it owns the file, the validation and the
         // restart, and it alone knows what the running build will accept.
         //
-        // The AUDIT stays here, because this is the only side that knows who asked. A leaf reached
-        // over a unix socket has an authenticated caller upstream of it and no way to see one, so a
-        // line written there could name nobody. Keys only, never values, for the reason every other
-        // config line here is written that way.
+        // The leaf is told whose change this is, and records that account as the author of any
+        // automation the change switches on. The AUDIT stays here, because this is the side that
+        // verified who asked; the leaf takes the account on trust from the socket it arrived on. Keys
+        // only, never values, for the reason every other config line here is written that way.
         if (relay.ServesOwnSurface(leaf))
         {
             ComponentConfigUpdate forwarded = body ?? new ComponentConfigUpdate(null, null);
@@ -147,7 +147,7 @@ public sealed class ServicesProvisioningController(
             string json = System.Text.Json.JsonSerializer.Serialize(
                 forwarded, ApiContractsJson.Default.ComponentConfigUpdate);
 
-            if (await relay.SendAsync(leaf, HttpMethod.Put, "config", json, ct) is { } answered)
+            if (await relay.SendAsync(leaf, HttpMethod.Put, "config", json, NodeAccess.AccountOf(User), ct) is { } answered)
             {
                 await journal.ServiceConfigAsync(
                     leaf, null, KeysIn(forwarded), OutcomeOf(answered.Status),
@@ -226,7 +226,10 @@ public sealed class ServicesProvisioningController(
                     "a rule records who wrote it, and this request names nobody")));
         }
 
-        (string? body, int status) = await reactor.WriteRuleAsync(ruleId, rule, actor, ct);
+        // The account too: the rule acts as its author beside the reactor's own service account, so the
+        // leaf records who that is.
+        (string? body, int status) = await reactor.WriteRuleAsync(
+            ruleId, rule, actor, NodeAccess.AccountOf(User), ct);
 
         if (status == 0)
         {

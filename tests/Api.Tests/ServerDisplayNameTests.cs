@@ -283,6 +283,7 @@ public sealed class ServerDisplayNameTests
 
         // --- unused by the rename path: honest NotImplemented (never silently fabricate) ---
         public KgsmResult SetInstanceConfigValue(string instanceName, string key, string value, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public KgsmResult SetMaintenanceWindows(string instanceName, string packedWindows, string? author, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public InstanceNoteResult SetInstanceNote(string instanceName, string body, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public InstanceRuntimeStatus? GetInstanceStatus(string instanceName) => throw new NotImplementedException();
         public ICollection<string> GetLogs(string instanceName, int maxLines = 10) => throw new NotImplementedException();

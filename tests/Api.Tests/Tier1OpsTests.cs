@@ -121,6 +121,25 @@ public sealed class Tier1OpsTests
     }
 
     [Fact]
+    public async Task ConfigPatch_MaintenanceWindows_400_PointsAtTheSettingsRoute()
+    {
+        // Written here the windows would carry no author, and the scheduler runs no window nobody set up.
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, Server,
+            "{\"values\":{\"maintenance_windows\":\"daily@05:00/restart\"}}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("/settings", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task ConfigPatch_WindowsAuthor_400_Protected()
+    {
+        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, Server,
+            "{\"values\":{\"maintenance_windows_author\":\"local:usr_somebody\"}}");
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+        Assert.Contains("maintenance_windows_author", await resp.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task ConfigPatch_EngineRefusesMidApply_400_ReportsAlreadyApplied()
     {
         // The fake refuses the sentinel value "BOOM" (an engine refusal that passes the key pre-check). The
@@ -510,6 +529,8 @@ public sealed class Tier1OpsTests
             _config[key] = value;
             return new KgsmResult(0);
         }
+
+        public KgsmResult SetMaintenanceWindows(string instanceName, string packedWindows, string? author, string? actor = null, string? origin = null) => throw new NotImplementedException();
 
         // The note has its own surface (PUT/DELETE /servers/{id}/note); the config PATCH refuses its
         // keys outright, so this fake never sees a note write.

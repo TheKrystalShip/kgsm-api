@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — automations run as the person who set them up (0.212.0, contracts 1.0.0-dev.15)
+
+- **Maintenance windows are written with their author.** `PATCH /servers/{id}/settings` writes the
+  window list through kgsm-lib `SetMaintenanceWindows` (8.10.0-dev.5), naming the caller's account as
+  the person the scheduler runs every window as. The settings body reports it as
+  `maintenanceWindowsAuthor`, and each window carries the scheduler's `blocked` reason when it would
+  refuse the window's disruptive tasks now; `blocked` joins the run outcomes.
+- **The generic config route refuses `maintenance_windows`** with a `400` pointing at the settings
+  route, and `maintenance_windows_author` and `install_nonce` join the protected keys mirrored from
+  the engine.
+- **A leaf is told who is asking.** Config and command requests relayed to a leaf's own surface carry
+  the caller's account in `Kgsm-Acting-Account`, which the leaf records as the author of any
+  `automates` setting the change switches on. With the leaf not answering, the descriptor fallback
+  refuses to set or reset an `automates` field with a `409`.
+- **The reactor is told whose rule and whose confirmation it is.** A rule write and a proposal
+  redemption both send the caller's account, which the reactor checks its actions against.
+
 ### Changed — leaf command manifests are read at schema version 3 only (0.211.0)
 
 **Breaking for the wire.** `GET /hosts/{id}/services/{leaf}/commands` serves `{ schemaVersion, leaf,
