@@ -281,7 +281,7 @@ public sealed record Server(
     string? InstallNonce = null);
 
 /// <summary>
-/// A server's operator-authored note — free text an Operator writes for players and teammates
+/// A server's note — free text somebody running it writes for players and teammates
 /// (<c>GET/PUT/DELETE /servers/{id}/note</c>, and carried on the <see cref="Server"/> DTO).
 /// </summary>
 /// <remarks>

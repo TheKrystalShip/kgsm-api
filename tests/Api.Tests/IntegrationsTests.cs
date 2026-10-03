@@ -18,7 +18,7 @@ using TheKrystalShip.KGSM.Auth;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// The `/integrations/{provider}` HTTP surface through the real pipeline — admin gate, store, envelope —
+/// The `/integrations/{provider}` HTTP surface through the real pipeline — owner gate, store, envelope —
 /// with the provider's outbound webhook POST faked so no real service is called. Everything asserted here
 /// is <b>provider-agnostic</b> (the gate, the envelope, the sparse-PATCH semantics, the catalog validation,
 /// the never-echoed secret); a provider's own specifics live beside it, in <see cref="SlackProviderTests"/>.
@@ -35,10 +35,10 @@ public sealed class IntegrationsApiTests
 
     private static IntegrationsTestFactory NewFactory() => new();
 
-    private static HttpClient Client(IntegrationsTestFactory f, Persona? tier)
+    private static HttpClient Client(IntegrationsTestFactory f, Persona? persona)
     {
         HttpClient c = f.CreateClient();
-        if (tier is { } t)
+        if (persona is { } t)
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(t));
         return c;
     }
@@ -56,17 +56,17 @@ public sealed class IntegrationsApiTests
     }
 
     [Theory]
-    [InlineData(Persona.Viewer)]
-    [InlineData(Persona.Operator)]
-    public async Task BelowAdmin_403(Persona tier)
+    [InlineData(Persona.Reader)]
+    [InlineData(Persona.Runner)]
+    public async Task BelowOwner_403(Persona persona)
     {
         using IntegrationsTestFactory f = NewFactory();
-        HttpResponseMessage r = await Client(f, tier).GetAsync("/api/v1/integrations/slack");
+        HttpResponseMessage r = await Client(f, persona).GetAsync("/api/v1/integrations/slack");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
     [Fact]
-    public async Task Admin_List_200_ProviderPresent_Unconfigured()
+    public async Task Owner_List_200_ProviderPresent_Unconfigured()
     {
         using IntegrationsTestFactory f = NewFactory();
         HttpResponseMessage r = await Client(f, Persona.Owner).GetAsync("/api/v1/integrations");

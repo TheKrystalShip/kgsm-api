@@ -29,7 +29,7 @@ public sealed class ServerListReadFailureTests
     public async Task FailedRosterRead_returns_503_not_an_empty_200()
     {
         await using var factory = new RosterFactory(roster: null);   // GetAllOrNull → null = read FAILED
-        HttpResponseMessage res = await Viewer(factory).GetAsync("/api/v1/servers");
+        HttpResponseMessage res = await Reader(factory).GetAsync("/api/v1/servers");
 
         Assert.Equal(HttpStatusCode.ServiceUnavailable, res.StatusCode);
         ErrorEnvelope? body = await res.Content.ReadFromJsonAsync<ErrorEnvelope>();
@@ -40,7 +40,7 @@ public sealed class ServerListReadFailureTests
     public async Task GenuinelyEmptyRoster_returns_200_empty_list()
     {
         await using var factory = new RosterFactory(roster: new());  // GetAllOrNull → {} = genuinely zero
-        HttpResponseMessage res = await Viewer(factory).GetAsync("/api/v1/servers");
+        HttpResponseMessage res = await Reader(factory).GetAsync("/api/v1/servers");
 
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         Assert.Equal("[]", (await res.Content.ReadAsStringAsync()).Trim());
@@ -93,11 +93,11 @@ public sealed class ServerListReadFailureTests
         Assert.Equal(new DnsPort(34197, 34197, "udp"), Assert.Single(only.Ports));
     }
 
-    private static HttpClient Viewer(AuthTestFactory factory)
+    private static HttpClient Reader(AuthTestFactory factory)
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Viewer));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Reader));
         return c;
     }
 

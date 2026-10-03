@@ -29,7 +29,7 @@ internal static class TestTokens
                 RefreshLifetime: TimeSpan.FromDays(30),
                 Issuer: AuthTestFactory.AnchorIssuer),
             stranger);
-        return tokens.MintAccess(FakeDiscordResolver.Identity, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
+        return tokens.MintAccess(TestIdentity.Identity, "sid_test_" + Guid.NewGuid().ToString("N")).Token;
     }
 
     /// <summary>
@@ -40,7 +40,7 @@ internal static class TestTokens
     {
         var claims = new List<Claim>
         {
-            new("sub", FakeDiscordResolver.Identity.Handle),
+            new("sub", TestIdentity.Identity.Handle),
             new(KgsmAuthClaims.Host, AuthTestFactory.HostId),
             new(KgsmAuthClaims.TokenKind, KgsmTokenKind.Access),
             new(KgsmAuthClaims.SessionId, "sid_test_" + Guid.NewGuid().ToString("N")),
@@ -66,11 +66,11 @@ internal static class TestTokens
     {
         var claims = new List<Claim>
         {
-            new("sub", FakeDiscordResolver.Identity.Handle),
+            new("sub", TestIdentity.Identity.Handle),
             new(KgsmAuthClaims.Host, AuthTestFactory.ClusterId),
             new(KgsmAuthClaims.TokenKind, KgsmTokenKind.Access),
-            new(KgsmAuthClaims.Username, FakeDiscordResolver.Identity.Username),
-            new(KgsmAuthClaims.Display, FakeDiscordResolver.Identity.Display),
+            new(KgsmAuthClaims.Username, TestIdentity.Identity.Username),
+            new(KgsmAuthClaims.Display, TestIdentity.Identity.Display),
         };
         var descriptor = new SecurityTokenDescriptor
         {

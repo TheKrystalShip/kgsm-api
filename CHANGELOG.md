@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — what served the tier model (0.215.0)
+
+- The audit trail maps no `auth.cluster.vouched` or `user.tier_changed` row and records no `tier`,
+  `peerNode`, `fromTier` or `toTier` meta; the anchor writes none of them. A session ended on somebody
+  else's behalf reads under scope `other`, and a password set by somebody else carries `by: other`.
+- `kgsm-api.requires.json` no longer lists `/etc/kgsm/kgsm-auth.env`, which only the auth anchor reads,
+  and describes the assistant as a services-board entry rather than a relay.
+- Pinned to `TheKrystalShip.KGSM.Lib` 9.0.0-dev.1, `Auth` 4.0.0-dev.4, `Auth.Journal` 2.0.0-dev.1,
+  `Auth.Users` 2.0.0-dev.8 and `Auth.Cluster` 1.0.0-dev.21.
+- Tests: the personas are `Reader` and `Runner` beside `None` and `Owner`, helpers take a `persona`,
+  `ServerOpsTests` and `TestIdentity` replace the tier-named fixtures, and comments name the action a
+  route asks. `scripts/smoke.sh` drops the relay checks and asserts `/me` and `/me/access` as they are.
+
 ### Changed — the docs describe access as actions (0.214.2)
 
 `PLAN.md`, `PLAN-peers.md`, the subsystem `CLAUDE.md`s, the README and the source comments describe

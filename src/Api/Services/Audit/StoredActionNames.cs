@@ -69,7 +69,6 @@ public static class StoredActionNames
 
         ["auth.login"] = "auth.signed_in",
         ["auth.logout"] = "auth.signed_out",
-        ["auth.cluster_session"] = "auth.cluster.vouched",
         ["auth.session.revoke"] = "auth.session.revoked",
         ["auth.session.revoke.all"] = "auth.session.revoked",
         ["auth.session.revoke.admin"] = "auth.session.revoked",
@@ -78,7 +77,6 @@ public static class StoredActionNames
         ["user.provision"] = "user.provisioned",
         ["user.approve"] = "user.approved",
         ["user.disable"] = "user.disabled",
-        ["user.tier_change"] = "user.tier_changed",
         ["user.delete"] = "user.deleted",
         ["user.password"] = "user.password_changed",
 

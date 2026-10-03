@@ -5,9 +5,9 @@ using TheKrystalShip.KGSM.Auth;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// The host-logs realtime vocabulary + the operator-gate predicate. The same <see cref="StreamProtocol.RequiresOperator"/>
-/// the WS subscribe path uses to refuse a viewer's <c>hosts/{id}/logs</c> subscription (raw journald can leak
-/// secrets) is asserted here as a pure unit, alongside the REST tier-gate in <c>TierMatrixTests</c>.
+/// The host-logs realtime vocabulary and the per-topic gate the stream evaluates each frame against, as a
+/// pure unit: a <c>hosts/{id}/logs</c> subscription needs <c>api:logs.read</c>, because raw journald can
+/// leak secrets.
 /// </summary>
 public sealed class LogsProtocolTests
 {

@@ -321,7 +321,7 @@ public sealed class AuditMergeTests : IDisposable
     }
 }
 
-/// <summary>Switch-on-input fake (the FakeDiscordResolver pattern) — deterministic per call, so parallel
+/// <summary>Switch-on-input fake (the TestIdentity pattern) — deterministic per call, so parallel
 /// tests never share mutable state.</summary>
 internal sealed class FakeEventJournal(Func<EventHistoryQuery, EventHistoryPage> respond)
     : IEventJournalHistory

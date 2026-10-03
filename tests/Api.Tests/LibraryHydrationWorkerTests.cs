@@ -261,7 +261,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
         });
         LibraryHydrationWorker worker = Worker(rawg, store, Bp("valheim", slug: "valheim"));
 
-        await worker.SweepAsync(default, force: true); // the admin POST /library/refresh path
+        await worker.SweepAsync(default, force: true); // the POST /library/refresh path
 
         Assert.Equal(1, rawg.Calls); // force bypassed the freshness gate (a non-forced sweep would skip it)
         Assert.Equal("Refetched.", (await store.GetAsync("valheim"))!.Description);

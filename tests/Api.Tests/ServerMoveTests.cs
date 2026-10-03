@@ -134,9 +134,9 @@ public sealed class ServerMoveTests
     [Fact]
     public async Task Move_Operator_403()
     {
-        // Placement shapes the host, so it takes the same authority as registering a library — not the
-        // operator tier that covers acting on one server.
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator, "stopped-1",
+        // Placement shapes the host, so it takes its own action — not the ones that cover acting on one
+        // server.
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner, "stopped-1",
             "{\"library\":\"archive\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -144,7 +144,7 @@ public sealed class ServerMoveTests
     [Fact]
     public async Task Move_NoToken_401()
     {
-        HttpResponseMessage resp = await Post(_engine, tier: null, "stopped-1", "{\"library\":\"archive\"}");
+        HttpResponseMessage resp = await Post(_engine, persona: null, "stopped-1", "{\"library\":\"archive\"}");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
@@ -158,17 +158,17 @@ public sealed class ServerMoveTests
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static HttpClient Client(AuthTestFactory factory, Persona? tier)
+    private static HttpClient Client(AuthTestFactory factory, Persona? persona)
     {
         HttpClient c = factory.CreateClient();
-        if (tier is { } t)
+        if (persona is { } t)
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(t));
         return c;
     }
 
     private static Task<HttpResponseMessage> Post(
-        AuthTestFactory factory, Persona? tier, string id, string json) =>
-        Client(factory, tier).PostAsync($"/api/v1/servers/{id}/move",
+        AuthTestFactory factory, Persona? persona, string id, string json) =>
+        Client(factory, persona).PostAsync($"/api/v1/servers/{id}/move",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
     /// <summary>

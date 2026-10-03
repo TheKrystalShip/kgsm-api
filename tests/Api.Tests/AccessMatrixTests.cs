@@ -58,7 +58,7 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     [Fact]
     public async Task Viewer_Reads_200()
     {
-        HttpClient c = Client(factory.AccessToken(Persona.Viewer));
+        HttpClient c = Client(factory.AccessToken(Persona.Reader));
         Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/api/v1/hosts")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("/api/v1/servers")).StatusCode);
     }
@@ -66,14 +66,14 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     [Fact]
     public async Task Viewer_PostCommand_403()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Viewer)).SendAsync(Command("anything"));
+        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Reader)).SendAsync(Command("anything"));
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
         Assert.Contains("\"code\":\"forbidden\"", await resp.Content.ReadAsStringAsync());
     }
 
     // --- Holding kgsm:server.start clears the command gate (404 = no such server => authorization PASSED) --
     [Theory]
-    [InlineData(Persona.Operator)]
+    [InlineData(Persona.Runner)]
     [InlineData(Persona.Owner)]
     public async Task HoldingTheVerb_PostCommand_PassesTheGate_404(Persona persona)
     {
@@ -89,7 +89,7 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     [Fact]
     public async Task Operator_IntegrationsTheyHoldNoActionFor_403() =>
         Assert.Equal(HttpStatusCode.Forbidden,
-            (await Client(factory.AccessToken(Persona.Operator)).GetAsync("/api/v1/integrations")).StatusCode);
+            (await Client(factory.AccessToken(Persona.Runner)).GetAsync("/api/v1/integrations")).StatusCode);
 
     [Fact]
     public async Task Owner_Integrations_200() =>
@@ -112,13 +112,13 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     public async Task Viewer_Logs_403()
     {
         // A reader of the audit log is not thereby a reader of raw host logs.
-        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Viewer)).GetAsync(LogsPath);
+        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Reader)).GetAsync(LogsPath);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
         Assert.Contains("\"code\":\"forbidden\"", await resp.Content.ReadAsStringAsync());
     }
 
     [Theory]
-    [InlineData(Persona.Operator)]
+    [InlineData(Persona.Runner)]
     [InlineData(Persona.Owner)]
     public async Task HoldingLogsRead_Logs_200(Persona persona)
     {
@@ -130,7 +130,7 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     public async Task Operator_Logs_UnknownHost_404()
     {
         // Past the gate but a foreign host id -> 404, consistent with the rest of the hosts surface.
-        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Operator))
+        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Runner))
             .GetAsync("/api/v1/hosts/not-this-host/logs?limit=1");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -138,7 +138,7 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     [Fact]
     public async Task Operator_Logs_UnknownSource_400()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Operator))
+        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Runner))
             .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/logs?source=bogus");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -159,13 +159,13 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     [Fact]
     public async Task Viewer_Services_403()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Viewer)).GetAsync(ServicesPath);
+        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Reader)).GetAsync(ServicesPath);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
         Assert.Contains("\"code\":\"forbidden\"", await resp.Content.ReadAsStringAsync());
     }
 
     [Theory]
-    [InlineData(Persona.Operator)]
+    [InlineData(Persona.Runner)]
     [InlineData(Persona.Owner)]
     public async Task HoldingServicesRead_Services_200(Persona persona)
     {
@@ -178,7 +178,7 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     [Fact]
     public async Task Operator_Services_UnknownHost_404()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Operator))
+        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Runner))
             .GetAsync("/api/v1/hosts/not-this-host/services");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -238,7 +238,7 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     [Fact]
     public async Task Stream_Sse_WithBearerHeader_Connects()
     {
-        string token = factory.AccessToken(Persona.Viewer);
+        string token = factory.AccessToken(Persona.Reader);
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(Client(), "/api/v1/stream", token);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.StartsWith("text/event-stream", resp.Content.Headers.ContentType?.ToString());
@@ -257,7 +257,7 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     [Fact]
     public async Task Stream_Sse_QueryTokenIgnored()
     {
-        string token = factory.AccessToken(Persona.Viewer);
+        string token = factory.AccessToken(Persona.Reader);
         HttpResponseMessage resp = await SseTestHelpers.OpenStream(Client(), $"/api/v1/stream?access_token={token}");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
@@ -266,7 +266,7 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     [Fact]
     public async Task Stream_Sse_TopicTheReaderMayNotSee_DeliversNothing()
     {
-        string token = factory.AccessToken(Persona.Viewer);
+        string token = factory.AccessToken(Persona.Reader);
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
             Client(), $"/api/v1/stream?topics=hosts/{AuthTestFactory.HostId}/logs", token);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode); // connects — the refusal is silent, not a 403

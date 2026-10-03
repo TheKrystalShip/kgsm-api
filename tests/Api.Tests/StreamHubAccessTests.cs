@@ -52,7 +52,7 @@ public sealed class StreamHubAccessTests : IDisposable
         serverId is null ? AccessScope.ForNode(Node) : AccessScope.ForInstance(Node, serverId, "nonce-" + serverId);
 
     private string Person(string subject, Persona persona, UserStatus status = UserStatus.Active) =>
-        _authority.Set(FakeDiscordResolver.IdentityFor(subject), persona, status).UserId;
+        _authority.Set(TestIdentity.IdentityFor(subject), persona, status).UserId;
 
     private StreamAccess Reader(string accountId) => StreamAccess.For(accountId, _authority.Evaluator(), TargetOf);
 
@@ -68,8 +68,8 @@ public sealed class StreamHubAccessTests : IDisposable
     public void EachConnectionGetsTheAuditVariantItsReaderIsEntitledTo()
     {
         StreamHub hub = NewHub();
-        (StreamConnection op, MemoryStream opBody) = Connect(hub, Reader(Person("hub-op", Persona.Operator)), "audit");
-        (StreamConnection viewer, MemoryStream viewerBody) = Connect(hub, Reader(Person("hub-viewer", Persona.Viewer)), "audit");
+        (StreamConnection op, MemoryStream opBody) = Connect(hub, Reader(Person("hub-op", Persona.Runner)), "audit");
+        (StreamConnection viewer, MemoryStream viewerBody) = Connect(hub, Reader(Person("hub-viewer", Persona.Reader)), "audit");
 
         hub.Publish("audit", "k1",
             new StreamMessage("audit", "audit.append", new { summary = "ran 'op somebody' on mc" }),
@@ -87,8 +87,8 @@ public sealed class StreamHubAccessTests : IDisposable
     public void AFrameWithNoRedactedVariantGoesToEveryReaderOfTheTopic()
     {
         StreamHub hub = NewHub();
-        (StreamConnection op, MemoryStream opBody) = Connect(hub, Reader(Person("hub-op2", Persona.Operator)), "audit");
-        (StreamConnection viewer, MemoryStream viewerBody) = Connect(hub, Reader(Person("hub-viewer2", Persona.Viewer)), "audit");
+        (StreamConnection op, MemoryStream opBody) = Connect(hub, Reader(Person("hub-op2", Persona.Runner)), "audit");
+        (StreamConnection viewer, MemoryStream viewerBody) = Connect(hub, Reader(Person("hub-viewer2", Persona.Reader)), "audit");
 
         hub.Publish("audit", "k1", new StreamMessage("audit", "audit.append", new { summary = "started mc" }));
         DrainAll(op, viewer);
@@ -122,7 +122,7 @@ public sealed class StreamHubAccessTests : IDisposable
         _authority.Grant(scoped, ActionIds.ServerRead, TargetOf("mc"));
 
         (StreamConnection one, MemoryStream oneBody) = Connect(hub, Reader(scoped), "servers");
-        (StreamConnection all, MemoryStream allBody) = Connect(hub, Reader(Person("hub-all", Persona.Viewer)), "servers");
+        (StreamConnection all, MemoryStream allBody) = Connect(hub, Reader(Person("hub-all", Persona.Reader)), "servers");
 
         hub.Publish("servers", "servers:mc", new StreamMessage("servers", "server.patch", new { id = "mc" }), "mc");
         hub.Publish("servers", "servers:ark", new StreamMessage("servers", "server.patch", new { id = "ark" }), "ark");
@@ -160,14 +160,14 @@ public sealed class StreamHubAccessTests : IDisposable
     public void AStatusChangeReachesThatAccountAndNoOther()
     {
         StreamHub hub = NewHub();
-        string alice = Person("hub-alice", Persona.Viewer, UserStatus.Pending);
-        string bob = Person("hub-bob", Persona.Viewer);
+        string alice = Person("hub-alice", Persona.Reader, UserStatus.Pending);
+        string bob = Person("hub-bob", Persona.Reader);
         (StreamConnection aliceLaptop, MemoryStream laptop) = Connect(hub, Reader(alice), "me");
         (StreamConnection alicePhone, MemoryStream phone) = Connect(hub, Reader(alice), "me");
         (StreamConnection bobConn, MemoryStream bobBody) = Connect(hub, Reader(bob), "me");
         (StreamConnection strangerConn, MemoryStream stranger) = Connect(hub, StreamAccess.Nobody, "me");
 
-        Person("hub-alice", Persona.Viewer, UserStatus.Active);
+        Person("hub-alice", Persona.Reader, UserStatus.Active);
         hub.AccessChanged(_authority.Evaluator());
         DrainAll(aliceLaptop, alicePhone, bobConn, strangerConn);
 
@@ -185,10 +185,10 @@ public sealed class StreamHubAccessTests : IDisposable
     public void AConnectionThatDidNotSubscribeToMeIsSentNothing()
     {
         StreamHub hub = NewHub();
-        string alice = Person("hub-alice2", Persona.Viewer, UserStatus.Pending);
+        string alice = Person("hub-alice2", Persona.Reader, UserStatus.Pending);
         (StreamConnection conn, MemoryStream body) = Connect(hub, Reader(alice), "servers");
 
-        Person("hub-alice2", Persona.Viewer, UserStatus.Active);
+        Person("hub-alice2", Persona.Reader, UserStatus.Active);
         hub.AccessChanged(_authority.Evaluator());
         DrainAll(conn);
 
@@ -205,12 +205,12 @@ public sealed class StreamHubAccessTests : IDisposable
     public void LosingAccessStopsTheTopicsAndFlipsTheAuditVariant()
     {
         StreamHub hub = NewHub();
-        string alice = Person("hub-demoted", Persona.Operator);
+        string alice = Person("hub-demoted", Persona.Runner);
         (StreamConnection conn, MemoryStream body) = Connect(hub, Reader(alice), "audit", "hosts/h/services", "hosts/h/logs", "me");
 
         Assert.True(conn.Receives("hosts/h/services"));
 
-        Person("hub-demoted", Persona.Viewer);
+        Person("hub-demoted", Persona.Reader);
         hub.AccessChanged(_authority.Evaluator());
 
         Assert.False(conn.Receives("hosts/h/services"));
@@ -236,12 +236,12 @@ public sealed class StreamHubAccessTests : IDisposable
     public void GainingAccessStartsTheTopicTheClientAskedFor()
     {
         StreamHub hub = NewHub();
-        string alice = Person("hub-promoted", Persona.Viewer);
+        string alice = Person("hub-promoted", Persona.Reader);
         (StreamConnection conn, MemoryStream _) = Connect(hub, Reader(alice), "hosts/h/services", "me");
 
         Assert.False(conn.Receives("hosts/h/services"));
 
-        Person("hub-promoted", Persona.Operator);
+        Person("hub-promoted", Persona.Runner);
         hub.AccessChanged(_authority.Evaluator());
 
         Assert.True(conn.Receives("hosts/h/services"));
@@ -251,7 +251,7 @@ public sealed class StreamHubAccessTests : IDisposable
     public void ATopicThisBuildDoesNotKnowIsAnOwnersAlone()
     {
         StreamHub hub = NewHub();
-        (StreamConnection op, MemoryStream _) = Connect(hub, Reader(Person("hub-op3", Persona.Operator)), "future/topic");
+        (StreamConnection op, MemoryStream _) = Connect(hub, Reader(Person("hub-op3", Persona.Runner)), "future/topic");
         (StreamConnection owner, MemoryStream _) = Connect(hub, Reader(Person("hub-owner", Persona.Owner)), "future/topic");
 
         Assert.False(op.Receives("future/topic"));

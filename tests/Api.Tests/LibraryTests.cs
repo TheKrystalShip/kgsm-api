@@ -386,7 +386,7 @@ public sealed class LibraryAggregatorTests
 /// <summary>
 /// The <c>/library</c> auth gate + the engine-unprovisioned degrade-to-empty, proven through the real
 /// pipeline (the <c>AuthTestFactory</c> leaves the engine unprovisioned). <c>401</c> (no bearer) vs
-/// <c>403</c> (authenticated, tier 'none') is the load-bearing split, as elsewhere.
+/// <c>403</c> (authenticated, action not held) is the load-bearing split, as elsewhere.
 /// </summary>
 public sealed class LibraryEndpointTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>
 {
@@ -417,7 +417,7 @@ public sealed class LibraryEndpointTests(AuthTestFactory factory) : IClassFixtur
     public async Task Viewer_EngineUnprovisioned_200_EmptyArray()
     {
         // Engine unprovisioned → an honest empty catalog, never a 500 (degrade-gracefully).
-        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Viewer)).GetAsync("/api/v1/library");
+        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Reader)).GetAsync("/api/v1/library");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.Equal("[]", (await resp.Content.ReadAsStringAsync()).Trim());
     }

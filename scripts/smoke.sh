@@ -16,11 +16,11 @@
 #   quiet under the metric firehose, and the capability lifecycle: kill the monitor -> metric ticks
 #   fall silent + a capabilities patch reports metrics 'down' (provisioned:true — never "lost"); restart
 #   it -> metrics flips back 'operational' + ticks resume. Degrade AND recover gracefully, capability set fixed.
-#   M4·a (§3·f): auth is ON by default. The M0–M3 checks above run under Api__AuthDisabled=true (the
-#   dev escape hatch — synthetic admin), then a dedicated AUTH-ENABLED instance proves the no-token
-#   sweep: every protected endpoint 401s with the frozen envelope, /health + /api/v1 stay open, and any
-#   /auth path answers 503 — this node signs nobody in. The full 401/403/tier matrix against anchor-signed
-#   sessions is proven in-process by tests/Api.Tests (the anchor stood in for by a signer).
+#   Auth is ON by default. The checks above run under Api__AuthDisabled=true (the dev escape hatch — a
+#   synthetic Owner), then a dedicated AUTH-ENABLED instance proves the no-token sweep: every protected
+#   endpoint 401s with the frozen envelope, /health + /api/v1 stay open, and any /auth path answers 404 —
+#   this node signs nobody in. The 401/403 access matrix against anchor-signed sessions is proven
+#   in-process by tests/Api.Tests (the anchor stood in for by a signer).
 #   The ports surface degrade path (no firewall configured here): `open_ports` is refused as an unknown
 #   verb (there is no on-demand open), the server DETAIL `network` block reports firewall:"absent" +
 #   reachable:null (reserved) + every required open:null (never fabricated false), the list OMITS network
@@ -94,14 +94,6 @@ STUB_DISK=293172125  # diskBytes (Contracts 1.2.0): per-server on-disk footprint
 # M2 realtime: the stdlib SSE client + where it logs the frames it receives.
 SSE_PY="/tmp/kgsm-api-smoke-sse.py"
 SSE_LOG="/tmp/kgsm-api-smoke-sse.log"
-# M7 assistant relay: a TCP HTTP stub serving /health + a canned §5·a /turn SSE that GATES on the relay
-# secret and echoes the forwarded user — the deterministic stub analogue of the M2 stub monitor, proving
-# the API forwards X-Relay-Secret + X-Relay-User and streams the body verbatim (the relay machinery the
-# gate-only checks never reach).
-ASSIST_PORT="$(( PORT + 1 ))"
-ASSIST_URL="http://127.0.0.1:${ASSIST_PORT}"
-REL_SECRET="smoke-relay-secret"
-STUB_ASSIST_PY="/tmp/kgsm-api-smoke-stub-assistant.py"
 
 pass=0; fail=0
 ok()  { printf '  \033[32mPASS\033[0m %s\n' "$1"; pass=$((pass+1)); }
@@ -120,8 +112,7 @@ PIDS=()
 cleanup() {
   for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
   for p in "${PIDS[@]:-}"; do wait "$p" 2>/dev/null; done
-  rm -f "$STUB_SOCK" "$STUB_ASSIST_PY" 2>/dev/null
-  rm -f "${M7_DB:-}" "${M7_DB:-}"-wal "${M7_DB:-}"-shm 2>/dev/null
+  rm -f "$STUB_SOCK" 2>/dev/null
   rm -rf "${SMOKE_STATE:-/nonexistent}" 2>/dev/null
 }
 trap cleanup EXIT
@@ -170,47 +161,6 @@ d=json.load(open('/tmp/kgsm-api-smoke.body'))
 sys.exit(0 if d['capabilities']['metrics']['status']!='unknown' else 1)
 " 2>/dev/null; then return 0; fi
     sleep 0.1
-  done
-  return 1
-}
-
-# start_api_assistant URL SECRET — launch the API (auth still disabled) pointed at a stub assistant +
-# the relay secret, so the M7 relay path can actually execute. Same monitor/watchdog/kgsm wiring as
-# start_api (the absent defaults); only the assistant is added.
-#
-# Uses a DEDICATED, FRESH DB (not the shared $DB). The DB-backed LeafRegistry persists each leaf's
-# provisioned flag and a PERSISTED row OVERRIDES the config seed on the next boot (leaf-runtime-config —
-# so a live connect/disconnect survives a restart). Every prior api instance in this run booted with NO
-# assistant configured, persisting assistant.provisioned=false into $DB; reusing $DB here would carry
-# that false forward and the assistant would never poll healthy no matter the config. A clean DB lets
-# this instance provision the assistant from its config seed.
-M7_DB="${DB%.db}-m7.db"
-start_api_assistant() {
-  rm -f "$M7_DB" "$M7_DB"-wal "$M7_DB"-shm
-  Api__Urls="$BASE" Api__DbPath="$M7_DB" Api__HostId="$HOST_ID" \
-  Api__MonitorSocketPath="$MON_SOCK" Api__WatchdogSocketPath="$WD_SOCK" \
-  Api__KgsmPath="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
-  Api__AssistantBaseUrl="$1" Api__AssistantRelaySecret="$2" \
-    dotnet "$DLL" >/tmp/kgsm-api-smoke-m7.log 2>&1 &
-  SRV=$!; PIDS+=("$SRV")
-  for _ in $(seq 1 $HEALTH_WAIT_TICKS); do curl -fsS "${BASE}/health" >/dev/null 2>&1 && return 0; sleep 0.1; done
-  return 1
-}
-
-# wait_assistant_operational — block until the LeafHealthMonitor has polled the stub assistant's
-# /health and flipped the §4·b assistant capability to 'operational' (so the relay's capability gate
-# admits the call instead of 503-ing on a cold/down read).
-wait_assistant_operational() {
-  # ~30s: the LeafHealthMonitor polls each provisioned leaf's /health every ~2s, so the assistant
-  # capability flips operational within a few polls of the stub being reachable — but this is the 4th
-  # API boot in the run, and on a loaded host the first poll + flip can take longer than a tight window.
-  for _ in $(seq 1 150); do
-    if curl -fsS "${BASE}/api/v1/hosts/${HOST_ID}" -o /tmp/kgsm-api-smoke.body 2>/dev/null && python3 -c "
-import json,sys
-d=json.load(open('/tmp/kgsm-api-smoke.body'))
-sys.exit(0 if d['capabilities']['assistant']['status']=='operational' else 1)
-" 2>/dev/null; then return 0; fi
-    sleep 0.2
   done
   return 1
 }
@@ -362,7 +312,7 @@ sys.exit(0 if ok else 1)
   ok "/hosts/{id} identity card {os,runtime,build,startedAt}; region honest-null"
 else bad "/hosts/{id} identity card (code=$CODE body=$BODY)"; fi
 
-# 12c. PATCH /hosts/{id} (admin — auth disabled here = synthetic admin) edits the identity overrides: set
+# 12c. PATCH /hosts/{id} (api:hosts.write — the synthetic Owner here) edits the identity overrides: set
 #      region+label, prove they surface on the host card AND the open handshake, then clear back to defaults
 #      (empty string => fall back to config; region => null). The runtime-mutable half of the card.
 req PATCH "/api/v1/hosts/${HOST_ID}" -H 'Content-Type: application/json' -d '{"region":"smoke-region","label":"Smoke Box"}'
@@ -500,16 +450,16 @@ sys.exit(0 if (isinstance(d,list) and len(d)>=1 and all('factorio' in (e['id']+e
 fi
 $q_ok && ok "/library?q= filters by id/name (factorio→matches, no-match→[])" || bad "/library q filter (code=$CODE body=$BODY)"
 
-# 15d. POST /library/refresh — the admin on-demand re-fetch trigger. Under the dev escape hatch (synthetic
-#      admin) it returns 202 (the sweep runs off the request thread; with no RAWG key + Steam disabled here it
+# 15d. POST /library/refresh — the on-demand re-fetch trigger. Under the dev escape hatch (the synthetic
+#      Owner) it returns 202 (the sweep runs off the request thread; with no RAWG key + Steam disabled here it
 #      finds nothing to fetch and no-ops). A second immediate call may 202 (prior finished) or 409 (still in
 #      flight) — both are honest, so accept either.
 req POST /api/v1/library/refresh
 [[ "$CODE" == 202 ]] \
-  && ok "POST /library/refresh → 202 (admin on-demand refresh accepted, runs off the request thread)" \
+  && ok "POST /library/refresh → 202 (on-demand refresh accepted, runs off the request thread)" \
   || bad "/library/refresh (code=$CODE body=$BODY)"
 
-# --- Leaf runtime provisioning + config (the Services panel — admin-gated; auth disabled = synthetic admin) ---
+# --- Leaf runtime provisioning + config (the Services panel; the synthetic Owner here) ---
 echo "==> Leaf runtime provisioning + config checks"
 
 # LP1. GET /hosts/{id}/services carries the runtime `provisioned` flag for the four provisionable leaves
@@ -1206,39 +1156,6 @@ sys.exit(0 if ('path' in m and 'sizeBytes' in m and str(m.get('sha256','')).star
     ok "audit: file.write row carries path/size/sha256 — NEVER the content (secret hygiene)"
   else bad "file.write audit row (code=$CODE body=$BODY)"; fi
 
-  # --- M7 assistant turn relay: the gates that run before any upstream call ------
-  echo "==> M7 assistant relay checks — POST /api/v1/assistant/turn (auth + capability gates, no upstream)"
-
-  # The smoke instance configures NO assistant (Api__AssistantBaseUrl unset) -> capability absent, so the
-  # relay degrades to an honest 404 BEFORE any upstream call (degrade-gracefully, never a 500).
-  req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
-  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" && ! grep -q 'ProblemDetails\|tools.ietf.org' <<<"$BODY" \
-    && ok "POST assistant/turn, assistant absent → 404 {error:{code:not_found}} (capability gate)" \
-    || bad "M7 assistant-absent 404 (code=$CODE body=$BODY)"
-
-  # Prompt validation precedes the capability gate -> a blank prompt is a 400 envelope.
-  req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"   "}'
-  [[ "$CODE" == 400 ]] && grep -q '"code":"bad_request"' <<<"$BODY" \
-    && ok "POST assistant/turn blank prompt → 400 {error:{code:bad_request}}" \
-    || bad "M7 blank-prompt 400 (code=$CODE body=$BODY)"
-
-  # The reverse-path read endpoints share the same capability gate: assistant absent → honest 404 envelope.
-  req GET /api/v1/assistant/conversations
-  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" \
-    && ok "GET assistant/conversations, assistant absent → 404 {error:{code:not_found}} (capability gate)" \
-    || bad "reverse-path conversations-absent 404 (code=$CODE body=$BODY)"
-  req GET /api/v1/assistant/conversations/chatA
-  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" \
-    && ok "GET assistant/conversations/{id}, assistant absent → 404 {error:{code:not_found}} (capability gate)" \
-    || bad "reverse-path transcript-absent 404 (code=$CODE body=$BODY)"
-  req DELETE /api/v1/assistant/conversations/chatA
-  [[ "$CODE" == 404 ]] && grep -q '"code":"not_found"' <<<"$BODY" \
-    && ok "DELETE assistant/conversations/{id}, assistant absent → 404 {error:{code:not_found}} (capability gate)" \
-    || bad "reverse-path delete-absent 404 (code=$CODE body=$BODY)"
-
-  echo "  (note: the FULL relay path — identity + secret forwarding + byte-faithful streaming — is proven by the"
-  echo "   dedicated stub-assistant phase below; only a real-model (Ollama) end-to-end remains a live nicety)"
-
   # --- M8·b install / uninstall: the create/delete write path (gate only — NO mutation) ------
   echo "==> M8·b install/uninstall checks — POST /servers + DELETE /servers/{id} (gate/rejection, no mutation)"
 
@@ -1266,25 +1183,33 @@ sys.exit(0 if ('path' in m and 'sizeBytes' in m and str(m.get('sha256','')).star
   echo "   server.install/uninstall audit echo stay out of smoke — a real install mutates the host, so the"
   echo "   mutation happy path was live-validated separately on the trusted host (2026-06-19), like M3's)"
 
-  # --- M8 /me: the identity surface (projects the bearer claims; here the AUTH_DISABLED synthetic admin) ---
-  echo "==> M8 /me checks — GET /api/v1/me (identity + tier + scopes projected from the bearer)"
+  # --- /me: who the caller is, and what they may do (here the auth-disabled synthetic Owner) ---------
+  echo "==> /me checks — GET /api/v1/me + /me/access"
 
-  # 39. Under AUTH_DISABLED the synthetic admin IS the caller -> 200 with its identity + tier:admin + scopes.
-  #     (The tier matrix + the none-tier/no-token cases are proven in tests/Api.Tests; the no-bearer 401 is
-  #     in the auth-enabled sweep below. Here we prove the wire shape: camelCase {user,tier,scopes}.)
+  # Under Api__AuthDisabled the synthetic Owner named by Api__DisabledAuthActor is the caller. /me says who
+  # they are and the account's standing; what they may do is /me/access, which answers an Owner as one.
   req GET /api/v1/me
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 u=d.get('user',{})
-sys.exit(0 if (d.get('tier')=='admin' and u.get('id')=='discord:dev'
-               and u.get('username')=='dev' and isinstance(d.get('scopes'),list)
-               and 'identify' in d['scopes']) else 1)
+sys.exit(0 if (u.get('id')=='local:claude' and u.get('username')=='claude'
+               and isinstance(d.get('scopes'),list) and isinstance(d.get('recentLogins'),list)
+               and isinstance(d.get('status'),str) and 'tier' not in d) else 1)
 " 2>/dev/null; then
-    ok "/me 200 + {user:{id:discord:dev,...}, tier:admin, scopes:[…]} (projects the bearer claims)"
+    ok "/me 200 + {user:{id:local:claude,...}, scopes, recentLogins, status}"
   else bad "/me shape (code=$CODE body=$BODY)"; fi
 
-  # --- M8·c integrations: outbound-notification config (admin; here the AUTH_DISABLED synthetic admin) ---
+  req GET /api/v1/me/access
+  if [[ "$CODE" == 200 ]] && python3 -c "
+import json,sys
+d=json.load(open('/tmp/kgsm-api-smoke.body'))
+sys.exit(0 if d.get('owner') is True else 1)
+" 2>/dev/null; then
+    ok "/me/access 200 + owner:true (the synthetic Owner)"
+  else bad "/me/access shape (code=$CODE body=$BODY)"; fi
+
+  # --- M8·c integrations: outbound-notification config (the synthetic Owner here) ---
   echo "==> M8·c integrations checks — /integrations (slack; config + masked secret; NO real post)"
 
   # 40. GET /integrations lists the registered providers, unconfigured initially. Discord is NOT one of
@@ -1375,168 +1300,14 @@ sys.exit(0 if (wh.get('configured') is True and wh.get('hint','').startswith('�
   stop_api
 fi
 
-# --- M7 stub assistant relay: the FULL relay path (a fresh API pointed at a stub assistant) ---------
-# The gate-only checks above never reach the relay machinery (assistant absent). Here a stub assistant
-# GATES on the relay secret (wrong/absent secret -> 401, which the API maps to 502), so the API reaching
-# 200 PROVES it forwarded the correct X-Relay-Secret; the stub echoes X-Relay-User back in the stream,
-# proving identity forwarding; and the canned §5·a frames coming through verbatim prove the byte relay.
-echo "==> M7 assistant relay — stub assistant (forwards X-Relay-Secret + X-Relay-User; streams §5·a frames verbatim)"
-cat > "$STUB_ASSIST_PY" <<'PYEOF'
-import os, sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-SECRET = os.environ.get("REL_SECRET", "")
-
-class H(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.0"  # connection-close delimits the finite SSE body for the client
-    def log_message(self, *a): pass
-
-    def do_GET(self):
-        if self.path == "/health":
-            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
-            self.wfile.write(b'{"status":"ok"}')
-            return
-        # The reverse-path read endpoints (conversation history). Gate on the relay secret exactly like
-        # /turn — a wrong/absent secret is 401 — and echo the forwarded user so the smoke can assert the
-        # API forwards X-Relay-Secret + X-Relay-User on a READ, and relays the JSON body verbatim.
-        if self.path == "/conversations" or self.path.startswith("/conversations/"):
-            if self.headers.get("X-Relay-Secret") != SECRET:
-                self.send_response(401); self.end_headers(); return
-            user = self.headers.get("X-Relay-User", "")
-            self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers()
-            if self.path == "/conversations":
-                # A canned summary list, tagged with the forwarded user so the smoke sees the scope.
-                self.wfile.write(('[{"id":"chatA","title":"%s asked about factorio","createdAt":"2026-06-26T10:00:00Z","lastActivityAt":"2026-06-26T10:05:00Z","turnCount":2}]' % user).encode())
-            else:
-                cid = self.path[len("/conversations/"):]
-                # A canned transcript echoing the requested chat id + forwarded user, §5·a-shaped turn.
-                self.wfile.write(('{"id":"%s","entries":[{"kind":"turn","createdAt":"2026-06-26T10:00:00Z","turn":{"prompt":"hi from %s","final":"hello","think":false,"thinking":null,"tools":[],"usage":null,"outcome":"ok"}}]}' % (cid, user)).encode())
-            return
-        self.send_response(404); self.end_headers()
-
-    def do_DELETE(self):
-        # Soft-delete one chat. Gate on the relay secret exactly like the reads; 204 (no body) on success —
-        # the assistant hides it from the list but keeps the transcript (the corpus).
-        if self.path.startswith("/conversations/"):
-            if self.headers.get("X-Relay-Secret") != SECRET:
-                self.send_response(401); self.end_headers(); return
-            self.send_response(204); self.end_headers(); return
-        self.send_response(404); self.end_headers()
-
-    def do_POST(self):
-        n = int(self.headers.get("Content-Length", 0) or 0)
-        if n: self.rfile.read(n)
-        if self.path != "/turn":
-            self.send_response(404); self.end_headers(); return
-        # Gate exactly like the real assistant's relay path: a wrong/absent secret is 401.
-        if self.headers.get("X-Relay-Secret") != SECRET:
-            self.send_response(401); self.end_headers(); return
-        user = self.headers.get("X-Relay-User", "")
-        # Echo BOTH authority decisions so the smoke can assert the split: canAct (PROPOSE, operator+
-        # tier, toggle-INDEPENDENT) vs autoAct (AUTO-RUN, admin tier ∧ the per-turn actions toggle).
-        canact = self.headers.get("X-Relay-Can-Act", "")
-        autoact = self.headers.get("X-Relay-Auto-Act", "")
-        # Echo the per-chat conversation id so the smoke can assert the API forwards it (the fresh-
-        # context-window plumbing: body.conversationId -> sanitise -> X-Relay-Conversation-Id).
-        conv = self.headers.get("X-Relay-Conversation-Id", "")
-        self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream")
-        self.end_headers()
-        self.wfile.write(b'event: text.delta\ndata: {"type":"text.delta","text":"relay ok"}\n\n')
-        # A Phase-2 card-bearing tool.result: the `result` card is an "unknown field" to the relay,
-        # so it proves the byte-copy relay (CopyToAsync) passes a structured card through untouched.
-        self.wfile.write(b'event: tool.result\ndata: {"type":"tool.result","id":"tc_0","tool":"run_health_check","summary":"factorio: passed with warnings.","result":{"tool":"run_health_check","confidence":"confirmed","subject":{"resource":"server","id":"factorio"},"data":{"overall":"warn","checks":[{"name":"updates","state":"warn","severity":"update","detail":"Update available."}],"passed":1,"total":2,"skipped":0}}}\n\n')
-        self.wfile.write(('event: done\ndata: {"type":"done","relayUser":"%s","canAct":"%s","autoAct":"%s","conv":"%s"}\n\n' % (user, canact, autoact, conv)).encode())
-
-HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
-PYEOF
-REL_SECRET="$REL_SECRET" python3 "$STUB_ASSIST_PY" "$ASSIST_PORT" >/tmp/kgsm-api-smoke-stub-assistant.log 2>&1 &
-ASSIST_PID=$!; PIDS+=("$ASSIST_PID")
-for _ in $(seq 1 40); do curl -fsS "${ASSIST_URL}/health" >/dev/null 2>&1 && break; sleep 0.1; done
-
-if start_api_assistant "$ASSIST_URL" "$REL_SECRET"; then
-  if wait_assistant_operational; then
-    req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
-    if [[ "$CODE" == 200 ]] \
-       && grep -q 'event: text.delta' <<<"$BODY" \
-       && grep -q 'event: done' <<<"$BODY" \
-       && grep -q '"relayUser":"claude"' <<<"$BODY" \
-       && grep -q 'event: tool.result' <<<"$BODY" \
-       && grep -q '"result":{' <<<"$BODY" \
-       && grep -q '"overall":"warn"' <<<"$BODY" \
-       && grep -q '"confidence":"confirmed"' <<<"$BODY"; then
-      ok "relay 200 SSE: stub gated on the secret (200 ⇒ correct X-Relay-Secret forwarded), X-Relay-User=claude echoed, frames verbatim INCL. a tool.result card (result/overall/confidence survive the byte relay)"
-    else
-      bad "M7 stub relay (code=$CODE body=$BODY; stub log: $(cat /tmp/kgsm-api-smoke-stub-assistant.log 2>/dev/null))"
-    fi
-
-    # Action authority is TWO axes (folded server-side from the caller's verified tier ∧ the toggle):
-    #   canAct  = may PROPOSE — operator+ tier, toggle-INDEPENDENT (proposing is a tier capability).
-    #   autoAct = may AUTO-RUN without confirmation — admin tier ∧ the per-turn `actions` toggle.
-    # No actions flag: an admin (auth-disabled synthetic admin) can still PROPOSE (canAct=true), but
-    # auto-run is OFF (autoAct=false) — the toggle gates auto-run, not proposing.
-    req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
-    { grep -q '"canAct":"true"' <<<"$BODY" && grep -q '"autoAct":"false"' <<<"$BODY"; } \
-      && ok "relay action authority: actions omitted → canAct=true (operator+ may propose), autoAct=false (toggle gates auto-run)" \
-      || bad "M7 authority/no-toggle (expected canAct=true+autoAct=false; body=$BODY)"
-    # actions:true + admin tier ⇒ both: canAct=true AND autoAct=true (auto-run unlocked).
-    req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi","actions":true}'
-    { grep -q '"canAct":"true"' <<<"$BODY" && grep -q '"autoAct":"true"' <<<"$BODY"; } \
-      && ok "relay action authority: actions:true + admin tier → canAct=true AND autoAct=true (toggle ∧ tier folded server-side)" \
-      || bad "M7 authority/toggle-on (expected canAct=true+autoAct=true; body=$BODY)"
-    # Per-chat conversation id: body.conversationId → sanitised → X-Relay-Conversation-Id, so the
-    # assistant scopes memory web:<userId>:<chatId> (each "new chat" = a fresh context window). The "."
-    # is stripped by the [A-Za-z0-9_-] sanitiser, proving the bound is applied (chat.7 → chat7).
-    req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi","conversationId":"chat.7"}'
-    grep -q '"conv":"chat7"' <<<"$BODY" \
-      && ok "relay conversation scope: body.conversationId → X-Relay-Conversation-Id forwarded + sanitised (chat.7→chat7; per-chat fresh context)" \
-      || bad "M7 conversationId forward (expected conv=chat7; body=$BODY)"
-    # Omitted conversationId ⇒ no header ⇒ the assistant keeps the bare per-user key (back-compat).
-    req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
-    grep -q '"conv":""' <<<"$BODY" \
-      && ok "relay conversation scope: omitted conversationId → no X-Relay-Conversation-Id (bare per-user key, back-compat)" \
-      || bad "M7 conversationId omitted (expected empty conv; body=$BODY)"
-
-    # Reverse path: list the caller's own past chats. The API forwards X-Relay-Secret + X-Relay-User on a
-    # GET and relays the assistant's summary JSON verbatim (the stub echoes the forwarded user into the
-    # title → proves the identity reached the leaf).
-    req GET /api/v1/assistant/conversations
-    { [[ "$CODE" == 200 ]] && grep -q '"id":"chatA"' <<<"$BODY" && grep -q '"dev asked about factorio"' <<<"$BODY"; } \
-      && ok "reverse path: GET /assistant/conversations → 200, summary list relayed verbatim (X-Relay-User=claude forwarded on the read)" \
-      || bad "conversations list (code=$CODE body=$BODY)"
-
-    # Reverse path: load one chat's transcript. The {id} is forwarded in the path; the stub echoes it +
-    # the user back, proving the per-chat fetch reaches the leaf scoped to the verified caller.
-    req GET /api/v1/assistant/conversations/chatA
-    { [[ "$CODE" == 200 ]] && grep -q '"id":"chatA"' <<<"$BODY" && grep -q '"prompt":"hi from dev"' <<<"$BODY" && grep -q '"kind":"turn"' <<<"$BODY"; } \
-      && ok "reverse path: GET /assistant/conversations/{id} → 200, transcript relayed verbatim (per-chat fetch scoped to verified caller)" \
-      || bad "conversation transcript (code=$CODE body=$BODY)"
-
-    # Reverse path: soft-delete one chat. The API forwards X-Relay-Secret + X-Relay-User on a DELETE and
-    # returns 204 (the assistant hides it from the list but keeps the transcript — the corpus is retained).
-    req DELETE /api/v1/assistant/conversations/chatA
-    [[ "$CODE" == 204 ]] \
-      && ok "reverse path: DELETE /assistant/conversations/{id} → 204, soft-delete relayed (corpus retained, listing hides it)" \
-      || bad "conversation soft-delete (code=$CODE body=$BODY)"
-  else
-    bad "M7 stub relay: assistant capability never went operational (api log: $(tail -5 /tmp/kgsm-api-smoke-m7.log 2>/dev/null))"
-  fi
-  stop_api
-else
-  bad "M7 stub relay: API never healthy; log: $(tail -20 /tmp/kgsm-api-smoke-m7.log 2>/dev/null)"
-fi
-kill "$ASSIST_PID" 2>/dev/null; wait "$ASSIST_PID" 2>/dev/null
-
-# --- M4·a auth: the no-token sweep (auth ENABLED) --------------------------
-echo "==> M4·a auth checks — AUTH ENABLED instance (no-token sweep; full tier matrix in tests/Api.Tests)"
+# --- auth: the no-token sweep (auth ENABLED) ---------------------------------
+echo "==> auth checks — AUTH ENABLED instance (no-token sweep; the access matrix is in tests/Api.Tests)"
 start_api_auth || { echo "API never healthy (auth-enabled); log:"; tail -20 /tmp/kgsm-api-smoke-auth.log; exit 2; }
 
-# 31. Protected endpoints with NO bearer -> 401 + the frozen {error} envelope (never ProblemDetails).
-#     Includes the diagnostics probes (_dbcheck touches the DB, _throw forces a 500): the secure-by-default
-#     fallback + the admin gate close them, so "protect all prior endpoints" holds with no open back door.
-#     /audit (M5) + /alerts (M6·a) + /library (M8·a) are viewer reads -> also 401 with no bearer.
-#     /me (M8) is [Authorize] (any authenticated caller) -> still 401 with no bearer.
-#     /integrations (M8·c) is admin-gated -> 401 with no bearer (the tier/admin gate is in tests).
+# Protected endpoints with NO bearer -> 401 + the frozen {error} envelope (never ProblemDetails).
+# Includes the diagnostics probes (_dbcheck touches the DB, _throw forces a 500): the secure-by-default
+# fallback and their own action close them, so there is no open back door. /me is [Authorize] (any
+# authenticated caller) -> still 401 with no bearer. Which action each route needs is in tests/Api.Tests.
 auth_401=true
 for p in /api/v1/hosts /api/v1/servers /api/v1/stream /api/v1/audit /api/v1/alerts /api/v1/library /api/v1/me /api/v1/servers/x/console /api/v1/servers/x/files "/api/v1/servers/x/files/content?path=y" /api/v1/integrations /api/v1/integrations/discord /api/v1/integrations/slack /api/v1/_dbcheck /api/v1/_throw /api/v1/servers/x/metrics/history /api/v1/hosts/x/metrics/history; do
   req GET "$p"
@@ -1554,16 +1325,14 @@ req PATCH "/api/v1/hosts/${HOST_ID}" -H 'Content-Type: application/json' -d '{"r
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (PATCH /hosts/{id} -> $CODE $BODY)"; }
 req PUT "/api/v1/servers/x/files/content?path=y" -H 'Content-Type: application/json' -d '{"content":"x"}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (PUT files/content -> $CODE $BODY)"; }
-req POST /api/v1/assistant/turn -H 'Content-Type: application/json' -d '{"prompt":"hi"}'
-[[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST assistant/turn -> $CODE $BODY)"; }
 req POST /api/v1/library/refresh
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST library/refresh -> $CODE $BODY)"; }
-# Leaf runtime provisioning + config (admin-gated): connect + PUT config 401 with no bearer.
+# Leaf runtime provisioning + config: connect + PUT config 401 with no bearer.
 req POST "/api/v1/hosts/${HOST_ID}/services/monitor/connect"
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (POST services/{leaf}/connect -> $CODE $BODY)"; }
 req PUT "/api/v1/hosts/${HOST_ID}/services/monitor/config" -H 'Content-Type: application/json' -d '{"values":{"logLevel":"Debug"}}'
 [[ "$CODE" == 401 ]] && grep -q '"code":"unauthorized"' <<<"$BODY" || { auth_401=false; echo "    (PUT services/{leaf}/config -> $CODE $BODY)"; }
-$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/servers/{id}/files(+content),/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,PATCH /hosts/{id},PUT files/content,POST assistant/turn,POST library/refresh,metrics/history (no open back door)" \
+$auth_401 && ok "no-bearer -> 401 envelope on /hosts,/servers,/stream,/audit,/alerts,/library,/me,/servers/{id}/console,/servers/{id}/files(+content),/integrations,/_dbcheck,/_throw,POST commands,POST+DELETE /servers,PATCH /hosts/{id},PUT files/content,POST library/refresh,metrics/history (no open back door)" \
   || bad "no-bearer 401 sweep (see above)"
 
 # 31b. The library cover/hero image endpoints are [AllowAnonymous] (a CSS background:url / <img> never sends
@@ -1591,11 +1360,11 @@ req GET /auth/login
   && ok "/auth/* -> 404 (this node signs nobody in)" \
   || bad "/auth/* 404 (code=$CODE body=$BODY)"
 
-# Coverage note: the 401/403/tier matrix (viewer/operator/admin) against anchor-signed sessions, the
+# Coverage note: the 401/403 access matrix against anchor-signed sessions and roles in the replica, the
 # ended-session deny-list, a symmetric or sid-less token refused, and the SSE stream's bearer-header auth
 # (incl. the regression test locking that a bare ?access_token= query param authenticates nothing) are
 # proven deterministically in tests/Api.Tests with the anchor stood in for by a signer.
-echo "  (note: the tier matrix against anchor sessions is in tests/Api.Tests)"
+echo "  (note: the access matrix against anchor sessions is in tests/Api.Tests)"
 
 stop_api
 

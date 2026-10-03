@@ -15,17 +15,17 @@ namespace TheKrystalShip.Api.Tests;
 /// M5 audit log, in-process against the real pipeline (the engine is unprovisioned, so the
 /// event-sourced path is exercised by seeding through <see cref="AuditService"/> directly; the live
 /// kgsm-socket path is the trusted-host validation, like M3's happy path). Covers the keyset query
-/// (order, pagination, filters), the viewer gate, the API-internal auth.login write end-to-end, and
+/// (order, pagination, filters), the read gate, the API-internal auth.login write end-to-end, and
 /// the <c>audit</c> SSE append. Each test scopes its rows by a unique serverId/actor so the shared
 /// per-class DB never cross-contaminates assertions.
 /// </summary>
 public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>
 {
-    private HttpClient Viewer()
+    private HttpClient Reader()
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Viewer));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Reader));
         return c;
     }
 
@@ -51,7 +51,7 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     [Fact]
     public async Task GetAudit_Viewer_200_PageShape()
     {
-        HttpResponseMessage r = await Viewer().GetAsync("/api/v1/audit?limit=1");
+        HttpResponseMessage r = await Reader().GetAsync("/api/v1/audit?limit=1");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
         JsonElement body = await Json(r);
         Assert.Equal(JsonValueKind.Array, body.GetProperty("data").ValueKind);
@@ -71,7 +71,7 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         await factory.SeedAuditAsync(ServerWrite("file.written", sid));
         await factory.SeedAuditAsync(ServerWrite("service.config_changed", sid));
 
-        JsonElement body = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}"));
+        JsonElement body = await Json(await Reader().GetAsync($"/api/v1/audit?serverId={sid}"));
         JsonElement[] rows = body.GetProperty("data").EnumerateArray().ToArray();
         Assert.Equal(2, rows.Length);
         Assert.Equal("service.config_changed", rows[0].GetProperty("action").GetString());  // newest first
@@ -96,13 +96,13 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
             await factory.SeedAuditAsync(ServerWrite("file.written", sid));
 
         // Page 1: limit 2 of 3 -> full page + a cursor.
-        JsonElement p1 = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&limit=2"));
+        JsonElement p1 = await Json(await Reader().GetAsync($"/api/v1/audit?serverId={sid}&limit=2"));
         Assert.Equal(2, p1.GetProperty("data").GetArrayLength());
         string cursor = p1.GetProperty("nextCursor").GetString()!;
         Assert.False(string.IsNullOrEmpty(cursor));
 
         // Page 2: the remaining 1 -> short page, no further cursor.
-        JsonElement p2 = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&limit=2&cursor={cursor}"));
+        JsonElement p2 = await Json(await Reader().GetAsync($"/api/v1/audit?serverId={sid}&limit=2&cursor={cursor}"));
         Assert.Equal(1, p2.GetProperty("data").GetArrayLength());
         Assert.Equal(JsonValueKind.Null, p2.GetProperty("nextCursor").ValueKind);
     }
@@ -116,11 +116,11 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         await factory.SeedAuditAsync(ServerWrite("file.written", sid, actor, AuditSeverity.Info));
         await factory.SeedAuditAsync(ServerWrite("service.config_changed", sid, actor, AuditSeverity.Warn));
 
-        JsonElement warn = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn"));
+        JsonElement warn = await Json(await Reader().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn"));
         Assert.Equal(1, warn.GetProperty("data").GetArrayLength());
         Assert.Equal("service.config_changed", warn.GetProperty("data")[0].GetProperty("action").GetString());
 
-        JsonElement byActor = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}"));
+        JsonElement byActor = await Json(await Reader().GetAsync($"/api/v1/audit?actor={actor}"));
         Assert.Equal(2, byActor.GetProperty("data").GetArrayLength()); // both rows share the unique actor
     }
 
@@ -134,7 +134,7 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         await factory.SeedAuditAsync(ServerWrite("service.connected", sid, severity: AuditSeverity.Danger));
 
         // "attention" pushes down as warn,danger → the two, never the info row.
-        JsonElement att = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn,danger"));
+        JsonElement att = await Json(await Reader().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn,danger"));
         string?[] actions = att.GetProperty("data").EnumerateArray().Select(x => x.GetProperty("action").GetString()).ToArray();
         Assert.Equal(2, actions.Length);
         Assert.Contains("service.config_changed", actions);
@@ -142,7 +142,7 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         Assert.DoesNotContain("file.written", actions); // info excluded
 
         // a stray/whitespace entry in the set is dropped, not matched as a blank severity.
-        JsonElement spaced = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn,%20,danger"));
+        JsonElement spaced = await Json(await Reader().GetAsync($"/api/v1/audit?serverId={sid}&severity=warn,%20,danger"));
         Assert.Equal(2, spaced.GetProperty("data").GetArrayLength());
     }
 
@@ -160,12 +160,12 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         await factory.SeedAuditAsync(ServerWrite("service.config_changed", sid));
 
         string since = DateTimeOffset.UtcNow.AddDays(-1).ToString("o");
-        JsonElement body = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&since={Uri.EscapeDataString(since)}"));
+        JsonElement body = await Json(await Reader().GetAsync($"/api/v1/audit?serverId={sid}&since={Uri.EscapeDataString(since)}"));
         Assert.Equal(1, body.GetProperty("data").GetArrayLength());
         Assert.Equal("service.config_changed", body.GetProperty("data")[0].GetProperty("action").GetString());
 
         // a garbage since is ignored (no filter), never a silently empty page.
-        JsonElement all = await Json(await Viewer().GetAsync($"/api/v1/audit?serverId={sid}&since=not-a-date"));
+        JsonElement all = await Json(await Reader().GetAsync($"/api/v1/audit?serverId={sid}&since=not-a-date"));
         Assert.Equal(2, all.GetProperty("data").GetArrayLength());
     }
 
@@ -180,11 +180,11 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
         await factory.SeedAuditAsync(ServerWrite("service.connected", $"s-{Guid.NewGuid():N}", actor));
         await factory.SeedAuditAsync(ServerWrite("file.written", $"n-{Guid.NewGuid():N}", actor));
 
-        JsonElement file = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}&category=file"));
+        JsonElement file = await Json(await Reader().GetAsync($"/api/v1/audit?actor={actor}&category=file"));
         Assert.Equal(1, file.GetProperty("data").GetArrayLength());
         Assert.Equal("file.written", file.GetProperty("data")[0].GetProperty("action").GetString());
 
-        JsonElement service = await Json(await Viewer().GetAsync($"/api/v1/audit?actor={actor}&category=service"));
+        JsonElement service = await Json(await Reader().GetAsync($"/api/v1/audit?actor={actor}&category=service"));
         Assert.Equal(1, service.GetProperty("data").GetArrayLength());
         Assert.Equal("service.connected", service.GetProperty("data")[0].GetProperty("action").GetString());
     }
@@ -194,7 +194,7 @@ public sealed class AuditTests(AuthTestFactory factory) : IClassFixture<AuthTest
     public async Task AuditTopic_DeliversAppend()
     {
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            factory.CreateClient(), "/api/v1/stream?topics=audit", factory.AccessToken(Persona.Viewer));
+            factory.CreateClient(), "/api/v1/stream?topics=audit", factory.AccessToken(Persona.Reader));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 

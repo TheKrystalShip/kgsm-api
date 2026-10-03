@@ -10,7 +10,7 @@ namespace TheKrystalShip.Api.Tests;
 /// <summary>
 /// <c>/hosts/{id}/thresholds</c> — the editor onto kgsm-monitor's threshold policy. This API owns none of
 /// the policy and none of its validation, so what is pinned here is the gate (reading configuration is
-/// operator, changing what the fleet alerts on is admin), the host scoping, and the honest degrade when
+/// operator, changing what the fleet alerts on is owner), the host scoping, and the honest degrade when
 /// there is no monitor to ask.
 /// </summary>
 public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>
@@ -31,7 +31,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
     {
         // Authenticated but below the bar — a different answer from "who are you", and the split this
         // suite exists to keep honest.
-        HttpResponseMessage r = await Client(Persona.Viewer).GetAsync($"/api/v1/hosts/{Host}/thresholds");
+        HttpResponseMessage r = await Client(Persona.Reader).GetAsync($"/api/v1/hosts/{Host}/thresholds");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
 
         // The refusal names the action, as every member's does, in the error envelope.
@@ -46,7 +46,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
     {
         // Reading the thresholds is configuration; changing them decides what the whole fleet alerts on,
         // and an operator who can read them still cannot silence a machine.
-        HttpResponseMessage r = await Client(Persona.Operator)
+        HttpResponseMessage r = await Client(Persona.Runner)
             .PutAsync($"/api/v1/hosts/{Host}/thresholds", Body("""{"rules":[]}"""));
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
@@ -54,7 +54,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
     [Fact]
     public async Task Delete_Operator_403()
     {
-        HttpResponseMessage r = await Client(Persona.Operator).DeleteAsync($"/api/v1/hosts/{Host}/thresholds");
+        HttpResponseMessage r = await Client(Persona.Runner).DeleteAsync($"/api/v1/hosts/{Host}/thresholds");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
@@ -65,7 +65,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
     {
         // Per-host API: the only valid id is this host, and asking about another one is a 404 rather than
         // an attempt to relay somewhere.
-        HttpResponseMessage r = await Client(Persona.Operator).GetAsync("/api/v1/hosts/somewhere-else/thresholds");
+        HttpResponseMessage r = await Client(Persona.Runner).GetAsync("/api/v1/hosts/somewhere-else/thresholds");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
@@ -76,7 +76,7 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
     {
         // The test factory leaves the monitor unprovisioned. "The policy could not be read" is not the same
         // as "this host watches nothing", so it degrades rather than answering with an empty rule set.
-        HttpResponseMessage r = await Client(Persona.Operator).GetAsync($"/api/v1/hosts/{Host}/thresholds");
+        HttpResponseMessage r = await Client(Persona.Runner).GetAsync($"/api/v1/hosts/{Host}/thresholds");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
 
         JsonElement body = await Json(r);
@@ -110,10 +110,10 @@ public sealed class ThresholdsEndpointTests(AuthTestFactory factory) : IClassFix
 
     // --- helpers -------------------------------------------------------------------------------------
 
-    private HttpClient Client(Persona tier)
+    private HttpClient Client(Persona persona)
     {
         HttpClient c = factory.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(tier));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(persona));
         return c;
     }
 

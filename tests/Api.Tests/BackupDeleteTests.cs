@@ -39,7 +39,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         FakeDeleter engine = _f.Engine;
         engine.Reset();
 
-        HttpResponseMessage resp = await Delete(Persona.Operator, Server, Backup, origin: "ui");
+        HttpResponseMessage resp = await Delete(Persona.Runner, Server, Backup, origin: "ui");
         Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
 
         // The row this produces is kgsm's (backup.deleted → backup.delete), so the actor and
@@ -57,7 +57,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         FakeDeleter engine = _f.Engine;
         engine.Reset();
 
-        Assert.Equal(HttpStatusCode.NoContent, (await Delete(Persona.Operator, Server, Backup)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await Delete(Persona.Runner, Server, Backup)).StatusCode);
         Assert.Equal("api", engine.LastOrigin);
     }
 
@@ -67,7 +67,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         FakeDeleter engine = _f.Engine;
         engine.Reset();
 
-        HttpResponseMessage resp = await Delete(Persona.Operator, Server, Backup, origin: "cron");
+        HttpResponseMessage resp = await Delete(Persona.Runner, Server, Backup, origin: "cron");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Equal(0, engine.Calls);
     }
@@ -78,7 +78,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         // "system" is reserved for the engine's own autonomous actions; a caller claiming it would put a
         // human's deletion in the feed as something the host did to itself.
         Assert.Equal(HttpStatusCode.BadRequest,
-            (await Delete(Persona.Operator, Server, Backup, origin: "system")).StatusCode);
+            (await Delete(Persona.Runner, Server, Backup, origin: "system")).StatusCode);
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         FakeDeleter engine = _f.Engine;
         engine.Reset();
 
-        Assert.Equal(HttpStatusCode.Forbidden, (await Delete(Persona.Viewer, Server, Backup)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await Delete(Persona.Reader, Server, Backup)).StatusCode);
         Assert.Equal(0, engine.Calls);
     }
 
@@ -107,7 +107,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         FakeDeleter engine = _f.Engine;
         engine.Reset();
 
-        Assert.Equal(HttpStatusCode.NotFound, (await Delete(Persona.Operator, "no-such-server", Backup)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Delete(Persona.Runner, "no-such-server", Backup)).StatusCode);
         Assert.Equal(0, engine.Calls);
     }
 
@@ -118,7 +118,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         engine.Reset();
         engine.Result = new KgsmResult(1, "", "Backup 'nope' not found for instance 'factorio-1'");
 
-        HttpResponseMessage resp = await Delete(Persona.Operator, Server, "nope");
+        HttpResponseMessage resp = await Delete(Persona.Runner, Server, "nope");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -135,7 +135,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         engine.Reset();
         engine.Throw = new InvalidOperationException("kgsm is gone");
 
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await Delete(Persona.Operator, Server, Backup)).StatusCode);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await Delete(Persona.Runner, Server, Backup)).StatusCode);
     }
 
     [Fact]
@@ -151,7 +151,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         Assert.NotNull(held);
         try
         {
-            HttpResponseMessage resp = await Delete(Persona.Operator, Server, Backup);
+            HttpResponseMessage resp = await Delete(Persona.Runner, Server, Backup);
             Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
             Assert.Equal(0, engine.Calls);
         }
@@ -169,8 +169,8 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
 
         // A synchronous verb that claims the slot and forgets to settle it would wedge the server for
         // every later command, and the symptom (a permanent 409 on start) would point nowhere near here.
-        Assert.Equal(HttpStatusCode.NoContent, (await Delete(Persona.Operator, Server, Backup)).StatusCode);
-        Assert.Equal(HttpStatusCode.NoContent, (await Delete(Persona.Operator, Server, Backup)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await Delete(Persona.Runner, Server, Backup)).StatusCode);
+        Assert.Equal(HttpStatusCode.NoContent, (await Delete(Persona.Runner, Server, Backup)).StatusCode);
         Assert.Equal(2, engine.Calls);
 
         Assert.Null(_f.Services.GetRequiredService<JobRegistry>().InFlightFor(Server));
@@ -183,7 +183,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         engine.Reset();
         engine.Result = new KgsmResult(1, "", "no such backup");
 
-        Assert.Equal(HttpStatusCode.NotFound, (await Delete(Persona.Operator, Server, Backup)).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await Delete(Persona.Runner, Server, Backup)).StatusCode);
         Assert.Null(_f.Services.GetRequiredService<JobRegistry>().InFlightFor(Server));
     }
 
@@ -193,7 +193,7 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
         using var noEngine = new AuthTestFactory();
         HttpClient c = noEngine.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", noEngine.AccessToken(Persona.Operator));
+            new AuthenticationHeaderValue("Bearer", noEngine.AccessToken(Persona.Runner));
 
         HttpResponseMessage resp = await c.DeleteAsync($"/api/v1/servers/{Server}/backups/{Backup}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
@@ -201,10 +201,10 @@ public sealed class BackupDeleteTests : IClassFixture<BackupDeleteTests.DeleteTe
 
     // ===== harness ==================================================================================
 
-    private Task<HttpResponseMessage> Delete(Persona? tier, string server, string backup, string? origin = null)
+    private Task<HttpResponseMessage> Delete(Persona? persona, string server, string backup, string? origin = null)
     {
         HttpClient c = _f.CreateClient();
-        if (tier is { } t)
+        if (persona is { } t)
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _f.AccessToken(t));
 
         string url = $"/api/v1/servers/{server}/backups/{backup}";

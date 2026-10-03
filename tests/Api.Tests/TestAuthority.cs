@@ -22,10 +22,10 @@ public enum Persona
     None,
 
     /// <summary>The reads the panel's pages sit on.</summary>
-    Viewer,
+    Reader,
 
     /// <summary>The reads and everything that runs a server: lifecycle, console, files, backups, players.</summary>
-    Operator,
+    Runner,
 
     /// <summary>Every action, declared or not.</summary>
     Owner,
@@ -49,8 +49,8 @@ internal sealed class TestAuthority
     private readonly SqliteAuthorityStore _anchor;
     private readonly SqliteAuthorityStore _replica;
     private string? _root;
-    private string? _viewers;
-    private string? _operators;
+    private string? _readers;
+    private string? _runners;
 
     private TestAuthority(string replicaPath)
     {
@@ -72,16 +72,16 @@ internal sealed class TestAuthority
     public AccessEvaluator Evaluator() =>
         new(new AuthoritySource(_replica, AuthorityStanding.Replica).CurrentAsync().GetAwaiter().GetResult());
 
-    /// <summary>The reads <see cref="Persona.Viewer"/> holds.</summary>
-    public static readonly IReadOnlySet<string> ViewerActions = new HashSet<string>(StringComparer.Ordinal)
+    /// <summary>The reads <see cref="Persona.Reader"/> holds.</summary>
+    public static readonly IReadOnlySet<string> ReaderActions = new HashSet<string>(StringComparer.Ordinal)
     {
         ActionIds.ServerRead, ActionIds.ServerConfigRead, ActionIds.ServerConsoleRead, ActionIds.ServerBackupsRead,
         ActionIds.LibraryRead, ActionIds.HostsRead, ActionIds.BatchesRead, ActionIds.AlertsRead,
         ActionIds.AuditRead, ActionIds.MembersRead, ActionIds.MonitorMetricsRead,
     };
 
-    /// <summary>What <see cref="Persona.Operator"/> holds on top of the reads.</summary>
-    public static readonly IReadOnlySet<string> OperatorActions = new HashSet<string>(ViewerActions, StringComparer.Ordinal)
+    /// <summary>What <see cref="Persona.Runner"/> holds on top of the reads.</summary>
+    public static readonly IReadOnlySet<string> RunnerActions = new HashSet<string>(ReaderActions, StringComparer.Ordinal)
     {
         ActionIds.ServerStart, ActionIds.ServerStop, ActionIds.ServerRestart, ActionIds.ServerUpdate,
         ActionIds.ServerInstall, ActionIds.ServerUninstall, ActionIds.ServerConfigWrite, ActionIds.ServerWindowsWrite,
@@ -121,11 +121,11 @@ internal sealed class TestAuthority
                 case Persona.Owner:
                     await _anchor.GrantOwnerLocallyAsync(account.Username, "local:test", now);
                     break;
-                case Persona.Viewer:
-                    await EditAsync(root, new Assign(account.UserId, _viewers!, AccessScope.Cluster), now);
+                case Persona.Reader:
+                    await EditAsync(root, new Assign(account.UserId, _readers!, AccessScope.Cluster), now);
                     break;
-                case Persona.Operator:
-                    await EditAsync(root, new Assign(account.UserId, _operators!, AccessScope.Cluster), now);
+                case Persona.Runner:
+                    await EditAsync(root, new Assign(account.UserId, _runners!, AccessScope.Cluster), now);
                     break;
             }
 
@@ -193,8 +193,8 @@ internal sealed class TestAuthority
         await _anchor.GrantOwnerLocallyAsync(account.Username, "local:test", now);
         _root = account.UserId;
 
-        _viewers = await RoleAsync("Viewers", ViewerActions, now);
-        _operators = await RoleAsync("Operators", OperatorActions, now);
+        _readers = await RoleAsync("Readers", ReaderActions, now);
+        _runners = await RoleAsync("Runners", RunnerActions, now);
         return _root;
     }
 

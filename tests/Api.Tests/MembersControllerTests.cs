@@ -20,7 +20,7 @@ namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
 /// <c>MembersController</c> HTTP-contract tests (P0 §9 self-validation checklist items 1 and 4) — the
-/// admin "paste a URL" join-via-seed action's status-code mapping (<c>502</c>/<c>422</c>/<c>409</c>, on
+/// owner "paste a URL" join-via-seed action's status-code mapping (<c>502</c>/<c>422</c>/<c>409</c>, on
 /// top of the <see cref="MemberAddOutcome"/> mapping unit-tested in <see cref="MemberHandshakeServiceTests"/>)
 /// plus the <c>201</c> happy path, and the <c>GET /peers/identity</c> cluster-token auth gate. Boots the
 /// real app (<see cref="AuthTestFactory"/>) with the cluster message bus turned on and
@@ -60,7 +60,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
             }
         });
 
-    private static string AdminToken(WebApplicationFactory<Program> app) =>
+    private static string OwnerToken(WebApplicationFactory<Program> app) =>
         AuthTestFactory.MintAccessOn(app.Services, Persona.Owner);
 
     private static HttpRequestMessage Bearer(HttpMethod method, string path, string token, object? body = null)
@@ -107,7 +107,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
         var handler = new ScriptedHandler(HttpStatusCode.ServiceUnavailable, "");
         using WebApplicationFactory<Program> app = BuildApp(handler);
         using HttpClient client = app.CreateClient();
-        string token = AdminToken(app);
+        string token = OwnerToken(app);
 
         HttpResponseMessage resp = await client.SendAsync(
             Bearer(HttpMethod.Post, "/api/v1/members", token, new { url = "https://node-b.test" }));
@@ -124,7 +124,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
         var handler = new ScriptedHandler(HttpStatusCode.OK, identity);
         using WebApplicationFactory<Program> app = BuildApp(handler);
         using HttpClient client = app.CreateClient();
-        string token = AdminToken(app);
+        string token = OwnerToken(app);
 
         HttpResponseMessage resp = await client.SendAsync(
             Bearer(HttpMethod.Post, "/api/v1/members", token, new { url = "https://node-b.test" }));
@@ -140,7 +140,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
         var handler = new ScriptedHandler(HttpStatusCode.OK, identity);
         using WebApplicationFactory<Program> app = BuildApp(handler);
         using HttpClient client = app.CreateClient();
-        string token = AdminToken(app);
+        string token = OwnerToken(app);
 
         HttpResponseMessage resp = await client.SendAsync(
             Bearer(HttpMethod.Post, "/api/v1/members", token, new { url = "https://node-b.test" }));
@@ -160,7 +160,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
         var handler = new ScriptedHandler(HttpStatusCode.OK, identity);
         using WebApplicationFactory<Program> app = BuildApp(handler);
         using HttpClient client = app.CreateClient();
-        string token = AdminToken(app);
+        string token = OwnerToken(app);
 
         HttpResponseMessage addResp = await client.SendAsync(Bearer(
             HttpMethod.Post, "/api/v1/members", token, new { url = "https://node-b.test", nickname = "Gaming Box" }));
@@ -181,7 +181,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
     {
         using WebApplicationFactory<Program> app = BuildApp();
         using HttpClient client = app.CreateClient();
-        string viewerToken = AuthTestFactory.MintAccessOn(app.Services, Persona.Viewer);
+        string viewerToken = AuthTestFactory.MintAccessOn(app.Services, Persona.Reader);
 
         HttpResponseMessage resp = await client.SendAsync(
             Bearer(HttpMethod.Post, "/api/v1/members", viewerToken, new { url = "https://node-b.test" }));
@@ -249,7 +249,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
         // supersedes, and the row survives as a tombstone until every member has had it.
         using WebApplicationFactory<Program> app = BuildApp();
         using HttpClient client = app.CreateClient();
-        string token = AdminToken(app);
+        string token = OwnerToken(app);
 
         MembersStore members = app.Services.GetRequiredService<MembersStore>();
         MemberRow seeded = MemberRow.New("departing", MemberKind.Node) with
@@ -278,7 +278,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
         using HttpClient client = app.CreateClient();
 
         HttpResponseMessage resp = await client.SendAsync(
-            Bearer(HttpMethod.Delete, "/api/v1/members/no-such-row", AdminToken(app)));
+            Bearer(HttpMethod.Delete, "/api/v1/members/no-such-row", OwnerToken(app)));
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -288,7 +288,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
     {
         using WebApplicationFactory<Program> app = BuildApp();
         using HttpClient client = app.CreateClient();
-        string viewerToken = AuthTestFactory.MintAccessOn(app.Services, Persona.Viewer);
+        string viewerToken = AuthTestFactory.MintAccessOn(app.Services, Persona.Reader);
 
         HttpResponseMessage resp = await client.SendAsync(
             Bearer(HttpMethod.Delete, "/api/v1/members/whatever", viewerToken));

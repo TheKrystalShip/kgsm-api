@@ -29,9 +29,9 @@ public sealed class AnchorNotALeafTests
     {
         using var factory = new LeafTestFactory();
         factory.InstallAnchorDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant-service.service"));
-        HttpClient admin = Client(factory, Persona.Owner);
+        HttpClient owner = Client(factory, Persona.Owner);
 
-        IReadOnlyList<string> ids = await ServiceIds(admin);
+        IReadOnlyList<string> ids = await ServiceIds(owner);
 
         Assert.DoesNotContain("assistant", ids);
         // Every other leaf is untouched — this subtracts one component, it does not narrow the board.
@@ -44,9 +44,9 @@ public sealed class AnchorNotALeafTests
     {
         using var factory = new LeafTestFactory();
         factory.InstallAnchorDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant-service.service"));
-        HttpClient admin = Client(factory, Persona.Owner);
+        HttpClient owner = Client(factory, Persona.Owner);
 
-        HttpResponseMessage resp = await admin.GetAsync($"/api/v1/hosts/{Host}/services/assistant/config");
+        HttpResponseMessage resp = await owner.GetAsync($"/api/v1/hosts/{Host}/services/assistant/config");
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -55,9 +55,9 @@ public sealed class AnchorNotALeafTests
     public async Task WithNoAnchorsDescribed_TheBoardIsTheWholeCatalog()
     {
         using var factory = new LeafTestFactory();
-        HttpClient admin = Client(factory, Persona.Owner);
+        HttpClient owner = Client(factory, Persona.Owner);
 
-        IReadOnlyList<string> ids = await ServiceIds(admin);
+        IReadOnlyList<string> ids = await ServiceIds(owner);
 
         Assert.Contains("assistant", ids);
         Assert.Contains("bot", ids);
@@ -72,9 +72,9 @@ public sealed class AnchorNotALeafTests
         using var factory = new LeafTestFactory();
         factory.InstallDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant-service.service"));
         factory.InstallAnchorDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant-service.service"));
-        HttpClient admin = Client(factory, Persona.Owner);
+        HttpClient owner = Client(factory, Persona.Owner);
 
-        Assert.DoesNotContain("assistant", await ServiceIds(admin));
+        Assert.DoesNotContain("assistant", await ServiceIds(owner));
     }
 
     private static async Task<IReadOnlyList<string>> ServiceIds(HttpClient c)
@@ -84,11 +84,11 @@ public sealed class AnchorNotALeafTests
         return [.. d.GetProperty("data").EnumerateArray().Select(s => s.GetProperty("id").GetString() ?? "")];
     }
 
-    private static HttpClient Client(LeafTestFactory factory, Persona tier)
+    private static HttpClient Client(LeafTestFactory factory, Persona persona)
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(tier));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(persona));
         return c;
     }
 }

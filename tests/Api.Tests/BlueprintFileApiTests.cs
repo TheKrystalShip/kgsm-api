@@ -20,7 +20,7 @@ namespace TheKrystalShip.Api.Tests;
 /// HTTP-contract + auth coverage for the library blueprint editor
 /// (<c>GET/PUT/DELETE /library/{id}/file</c>), proven through the real pipeline with the kgsm-lib
 /// blueprint seam faked against an in-memory pair of blueprint directories. The load-bearing assertions:
-/// the SPLIT gate (operator reads, admin writes — a viewer cannot even read, an operator gets
+/// the SPLIT gate (operator reads, owner writes — a viewer cannot even read, an operator gets
 /// <c>readOnly:true</c>), the override lifecycle (editing a shipped blueprint reports
 /// <c>createdOverride</c>, reverting it is allowed, reverting a user-only one is <c>409 no_original</c>),
 /// the engine's validation errors surfacing verbatim as <c>400 blueprint_invalid</c>, and the etag
@@ -46,12 +46,12 @@ public sealed class BlueprintFileApiTests
         engine.Blueprints.Reset();
     }
 
-    // ===== auth gate (operator reads, admin writes) ================================================
+    // ===== auth gate (operator reads, owner writes) ================================================
 
     [Fact]
     public async Task Read_NoToken_401()
     {
-        HttpResponseMessage r = await Client(_engine, tier: null).GetAsync($"/api/v1/library/{Shipped}/file");
+        HttpResponseMessage r = await Client(_engine, persona: null).GetAsync($"/api/v1/library/{Shipped}/file");
         Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
     }
 
@@ -60,7 +60,7 @@ public sealed class BlueprintFileApiTests
     {
         // The file is read with kgsm:library.read like the rest of the library; a reader without
         // kgsm:blueprints.write is handed it read-only.
-        HttpResponseMessage r = await Client(_engine, Persona.Viewer).GetAsync($"/api/v1/library/{Shipped}/file");
+        HttpResponseMessage r = await Client(_engine, Persona.Reader).GetAsync($"/api/v1/library/{Shipped}/file");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
         Assert.True((await Json(r)).GetProperty("readOnly").GetBoolean());
     }
@@ -73,16 +73,16 @@ public sealed class BlueprintFileApiTests
     }
 
     [Fact]
-    public async Task Save_Operator_403_WritesAreAdminOnly()
+    public async Task Save_Operator_403_WritesAreOwnerOnly()
     {
-        HttpResponseMessage r = await Put(_engine, Persona.Operator, Shipped, Body("name: factorio\n"));
+        HttpResponseMessage r = await Put(_engine, Persona.Runner, Shipped, Body("name: factorio\n"));
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
     [Fact]
-    public async Task Revert_Operator_403_WritesAreAdminOnly()
+    public async Task Revert_Operator_403_WritesAreOwnerOnly()
     {
-        HttpResponseMessage r = await Client(_engine, Persona.Operator)
+        HttpResponseMessage r = await Client(_engine, Persona.Runner)
             .DeleteAsync($"/api/v1/library/{Overridden}/file");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
@@ -90,13 +90,13 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Read_Operator_200_ButReadOnly()
     {
-        JsonElement body = await ReadOk(Persona.Operator, Shipped);
+        JsonElement body = await ReadOk(Persona.Runner, Shipped);
         // An operator may open the editor and may not save — one honest flag, not a hidden 403 on submit.
         Assert.True(body.GetProperty("readOnly").GetBoolean());
     }
 
     [Fact]
-    public async Task Read_Admin_200_NotReadOnly()
+    public async Task Read_Owner_200_NotReadOnly()
     {
         JsonElement body = await ReadOk(Persona.Owner, Shipped);
         Assert.False(body.GetProperty("readOnly").GetBoolean());
@@ -107,14 +107,14 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Read_EngineUnprovisioned_503()
     {
-        HttpResponseMessage r = await Client(_noEngine, Persona.Operator).GetAsync($"/api/v1/library/{Shipped}/file");
+        HttpResponseMessage r = await Client(_noEngine, Persona.Runner).GetAsync($"/api/v1/library/{Shipped}/file");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
     }
 
     [Fact]
     public async Task Read_UnknownBlueprint_404()
     {
-        HttpResponseMessage r = await Client(_engine, Persona.Operator).GetAsync("/api/v1/library/nope/file");
+        HttpResponseMessage r = await Client(_engine, Persona.Runner).GetAsync("/api/v1/library/nope/file");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
@@ -285,7 +285,7 @@ public sealed class BlueprintFileApiTests
     [Fact]
     public async Task Save_ThreadsTheActorAndOriginIntoTheEngineWrite()
     {
-        // Without this the kgsm event — and therefore the echoed audit row — would attribute an admin's
+        // Without this the kgsm event — and therefore the echoed audit row — would attribute an owner's
         // browser edit to the service account. There is no direct audit write to check instead: the row
         // comes back through the engine echo, so the provenance has to ride the emit.
         await Put(_engine, Persona.Owner, Shipped,
@@ -353,7 +353,7 @@ public sealed class BlueprintFileApiTests
     {
         // kgsm:library.read, so somebody reaching the create page can load the buffer even though the
         // POST below takes kgsm:blueprints.write.
-        HttpResponseMessage r = await Client(_engine, Persona.Operator).GetAsync("/api/v1/library/scaffold");
+        HttpResponseMessage r = await Client(_engine, Persona.Runner).GetAsync("/api/v1/library/scaffold");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
         Assert.Equal(_engine.Blueprints.Scaffold, (await Json(r)).GetProperty("content").GetString());
@@ -365,7 +365,7 @@ public sealed class BlueprintFileApiTests
         _engine.Blueprints.Scaffold = null;
         try
         {
-            HttpResponseMessage r = await Client(_engine, Persona.Operator).GetAsync("/api/v1/library/scaffold");
+            HttpResponseMessage r = await Client(_engine, Persona.Runner).GetAsync("/api/v1/library/scaffold");
             Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
         }
         finally
@@ -377,14 +377,14 @@ public sealed class BlueprintFileApiTests
     // ===== create =================================================================================
 
     [Fact]
-    public async Task Create_Operator_403_CreationIsAdminOnly()
+    public async Task Create_Operator_403_CreationIsOwnerOnly()
     {
-        HttpResponseMessage r = await Post(_engine, Persona.Operator, CreateBody("necesse", "name: necesse\n"));
+        HttpResponseMessage r = await Post(_engine, Persona.Runner, CreateBody("necesse", "name: necesse\n"));
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
     [Fact]
-    public async Task Create_Admin_200_WritesToTheUserDirShadowingNothing()
+    public async Task Create_Owner_200_WritesToTheUserDirShadowingNothing()
     {
         const string name = "necesse";
         HttpResponseMessage r = await Post(_engine, Persona.Owner, CreateBody(name, "name: necesse\n"));
@@ -470,9 +470,9 @@ public sealed class BlueprintFileApiTests
 
     // ===== helpers ================================================================================
 
-    private async Task<JsonElement> ReadOk(Persona tier, string id)
+    private async Task<JsonElement> ReadOk(Persona persona, string id)
     {
-        HttpResponseMessage r = await Client(_engine, tier).GetAsync($"/api/v1/library/{id}/file");
+        HttpResponseMessage r = await Client(_engine, persona).GetAsync($"/api/v1/library/{id}/file");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
         return await Json(r);
     }
@@ -485,20 +485,20 @@ public sealed class BlueprintFileApiTests
     private static string CreateBody(string name, string content, string? origin = null) =>
         JsonSerializer.Serialize(new { name, content, origin });
 
-    private static HttpClient Client(AuthTestFactory factory, Persona? tier)
+    private static HttpClient Client(AuthTestFactory factory, Persona? persona)
     {
         HttpClient c = factory.CreateClient();
-        if (tier is { } t)
+        if (persona is { } t)
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(t));
         return c;
     }
 
-    private static Task<HttpResponseMessage> Post(AuthTestFactory f, Persona? tier, string json) =>
-        Client(f, tier).PostAsync("/api/v1/library",
+    private static Task<HttpResponseMessage> Post(AuthTestFactory f, Persona? persona, string json) =>
+        Client(f, persona).PostAsync("/api/v1/library",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
-    private static Task<HttpResponseMessage> Put(AuthTestFactory f, Persona? tier, string id, string json) =>
-        Client(f, tier).PutAsync($"/api/v1/library/{id}/file",
+    private static Task<HttpResponseMessage> Put(AuthTestFactory f, Persona? persona, string id, string json) =>
+        Client(f, persona).PutAsync($"/api/v1/library/{id}/file",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
     /// <summary><see cref="AuthTestFactory"/> with kgsm-lib's blueprint seam swapped for an in-memory pair

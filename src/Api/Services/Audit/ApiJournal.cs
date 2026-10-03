@@ -48,14 +48,12 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     // differently would not throw — it would simply match nothing.
     public const string LoginEvent = AuthEvents.SignedIn;
     public const string LogoutEvent = AuthEvents.SignedOut;
-    public const string ClusterSessionEvent = AuthEvents.ClusterVouched;
     public const string SessionRevokedEvent = AuthEvents.SessionRevoked;
     public const string LockedOutEvent = AuthEvents.LockedOut;
 
     public const string UserProvisionedEvent = AuthEvents.UserProvisioned;
     public const string UserApprovedEvent = AuthEvents.UserApproved;
     public const string UserDisabledEvent = AuthEvents.UserDisabled;
-    public const string UserTierChangedEvent = AuthEvents.UserTierChanged;
     public const string UserDeletedEvent = AuthEvents.UserDeleted;
     public const string UserPasswordChangedEvent = AuthEvents.UserPasswordChanged;
 

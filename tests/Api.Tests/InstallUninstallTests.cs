@@ -22,7 +22,7 @@ namespace TheKrystalShip.Api.Tests;
 /// synchronously on the HTTP response (the happy-path execution mutates the host and is a trusted-host
 /// live-validate, like M3): missing/unknown blueprint → <c>400</c>, unknown server → <c>404</c>,
 /// engine-unprovisioned → <c>503</c>, a valid request → <c>202</c> + a <c>{ job }</c> whose verb is
-/// <c>install</c>/<c>uninstall</c>; operator-gated (viewer → <c>403</c>, no bearer → <c>401</c>). The
+/// <c>install</c>/<c>uninstall</c>; gated on <c>kgsm:server.install</c>/<c>.uninstall</c> (a reader → <c>403</c>, no bearer → <c>401</c>). The
 /// no-double-write invariant is proven too: a completed install writes NO audit row from the API
 /// (kgsm owns <c>server.install</c> via the event echo; the fake engine emits none, so <c>/audit</c> stays
 /// empty — a stray direct write would show up).
@@ -44,7 +44,7 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Install_MissingBlueprint_400()
     {
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator, "{}");
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner, "{}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -54,7 +54,7 @@ public sealed class InstallUninstallTests
     {
         // The fake's generate-id rejects "zzznope" (the EC_BLUEPRINT_NOT_FOUND analog) → a client-input 400,
         // with kgsm's real detail surfaced — nothing is created.
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator, "{\"blueprint\":\"zzznope\"}");
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner, "{\"blueprint\":\"zzznope\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -62,7 +62,7 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Install_BadOrigin_400()
     {
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator,
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner,
             "{\"blueprint\":\"factorio\",\"origin\":\"hacker\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -74,7 +74,7 @@ public sealed class InstallUninstallTests
         // A typed reserved field with the wrong type trips [ApiController]'s model validation BEFORE the
         // action runs. It must STILL return the frozen { error } envelope (invariant #4), never the
         // framework's ValidationProblemDetails — the gotcha the api CLAUDE.md flags for M8's typed bodies.
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator,
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner,
             "{\"blueprint\":\"factorio\",\"port\":\"not-a-number\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         string body = await resp.Content.ReadAsStringAsync();
@@ -87,7 +87,7 @@ public sealed class InstallUninstallTests
     public async Task Install_MalformedJson_400_Envelope()
     {
         // An unparseable body is also a pre-action model-binding failure — same envelope, never ProblemDetails.
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator, "{not valid json");
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner, "{not valid json");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         string body = await resp.Content.ReadAsStringAsync();
         Assert.Contains("\"code\":\"bad_request\"", body);
@@ -97,7 +97,7 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Install_Valid_202_InstallJob_NoAuditDoubleWrite()
     {
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator, "{\"blueprint\":\"factorio\"}");
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner, "{\"blueprint\":\"factorio\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
         JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
@@ -109,7 +109,7 @@ public sealed class InstallUninstallTests
         // No double-write: install is the echo path (kgsm owns server.install). The fake engine emits no
         // event and the API writes no row directly, so the audit feed stays empty — a stray direct write
         // by the command runner would surface here.
-        HttpResponseMessage audit = await Client(_engine, Persona.Viewer).GetAsync("/api/v1/audit");
+        HttpResponseMessage audit = await Client(_engine, Persona.Reader).GetAsync("/api/v1/audit");
         Assert.Equal(HttpStatusCode.OK, audit.StatusCode);
         using JsonDocument page = JsonDocument.Parse(await audit.Content.ReadAsStringAsync());
         Assert.Empty(page.RootElement.GetProperty("data").EnumerateArray());
@@ -123,7 +123,7 @@ public sealed class InstallUninstallTests
     {
         // The Game Port override is validated 1-65535 up front — an out-of-range value is a client-input
         // 400, never passed to kgsm to fail mid-install.
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator,
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner,
             $"{{\"blueprint\":\"factorio\",\"port\":{port}}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -133,7 +133,7 @@ public sealed class InstallUninstallTests
     public async Task Install_ValidPort_202()
     {
         // An in-range Game Port is accepted (and forwarded to the engine — see RunInstall → Install(port:)).
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator,
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner,
             "{\"blueprint\":\"factorio\",\"port\":34250}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
         JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
@@ -146,7 +146,7 @@ public sealed class InstallUninstallTests
         // The label is what a create form asks for. The id is derived from it as a courtesy — a slug the
         // engine validated and echoed back — so the job is keyed on something a person recognises rather
         // than on `factorio-NN`. The label itself never has to survive the charset.
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator,
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner,
             "{\"blueprint\":\"factorio\",\"name\":\"Sunday Server!\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
@@ -159,7 +159,7 @@ public sealed class InstallUninstallTests
     {
         // A label written entirely outside the id charset yields no slug, and that is not a reason to
         // refuse a create: the engine mints its own id and the label rides along untouched.
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator,
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner,
             "{\"blueprint\":\"factorio\",\"name\":\"\\u65e5\\u66dc\\u30b5\\u30fc\\u30d0\\u30fc\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
@@ -172,7 +172,7 @@ public sealed class InstallUninstallTests
     {
         // The derived slug is a courtesy, so a collision falls through to the engine's generated id
         // rather than failing a create nobody asked to be picky about. (The fake roster holds factorio-1.)
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator,
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner,
             "{\"blueprint\":\"factorio\",\"name\":\"Factorio 1\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
@@ -184,7 +184,7 @@ public sealed class InstallUninstallTests
     public async Task Install_ExplicitId_IsHonored()
     {
         // A caller that must know the id in advance names it, and gets exactly that id.
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator,
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner,
             "{\"blueprint\":\"factorio\",\"id\":\"factorio-x1\",\"name\":\"Sunday Server\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
@@ -200,7 +200,7 @@ public sealed class InstallUninstallTests
     {
         // An id the CALLER named is answered honestly — never silently adjusted into a different one,
         // which is the whole reason a caller names it.
-        HttpResponseMessage resp = await Post(_engine, Persona.Operator,
+        HttpResponseMessage resp = await Post(_engine, Persona.Runner,
             $"{{\"blueprint\":\"factorio\",\"id\":\"{id}\"}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
@@ -209,15 +209,15 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Install_Viewer_403()
     {
-        // Operator-gated: a viewer reading /servers cannot create one. (Gate is orthogonal to permissions.)
-        HttpResponseMessage resp = await Post(_engine, Persona.Viewer, "{\"blueprint\":\"factorio\"}");
+        // A reader of /servers cannot create one: installing is kgsm:server.install.
+        HttpResponseMessage resp = await Post(_engine, Persona.Reader, "{\"blueprint\":\"factorio\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task Install_NoToken_401()
     {
-        HttpResponseMessage resp = await Post(_engine, tier: null, "{\"blueprint\":\"factorio\"}");
+        HttpResponseMessage resp = await Post(_engine, persona: null, "{\"blueprint\":\"factorio\"}");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
         Assert.Contains("\"code\":\"unauthorized\"", await resp.Content.ReadAsStringAsync());
     }
@@ -226,7 +226,7 @@ public sealed class InstallUninstallTests
     public async Task Install_EngineUnprovisioned_503()
     {
         // Past the blueprint/origin checks, an unconfigured engine degrades to 503 — not a 500.
-        HttpResponseMessage resp = await Post(_noEngine, Persona.Operator, "{\"blueprint\":\"factorio\"}");
+        HttpResponseMessage resp = await Post(_noEngine, Persona.Runner, "{\"blueprint\":\"factorio\"}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
         Assert.Contains("\"code\":\"unavailable\"", await resp.Content.ReadAsStringAsync());
     }
@@ -236,7 +236,7 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Uninstall_UnknownServer_404()
     {
-        HttpResponseMessage resp = await Delete(_engine, Persona.Operator, "does-not-exist");
+        HttpResponseMessage resp = await Delete(_engine, Persona.Runner, "does-not-exist");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
         Assert.Contains("\"code\":\"not_found\"", await resp.Content.ReadAsStringAsync());
     }
@@ -245,7 +245,7 @@ public sealed class InstallUninstallTests
     public async Task Uninstall_KnownServer_202_UninstallJob()
     {
         // The fake roster carries "factorio-1" (see FakeInstanceService.GetAll) → the gate admits it.
-        HttpResponseMessage resp = await Delete(_engine, Persona.Operator, "factorio-1");
+        HttpResponseMessage resp = await Delete(_engine, Persona.Runner, "factorio-1");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
         JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
@@ -256,7 +256,7 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Uninstall_BadOrigin_400()
     {
-        HttpResponseMessage resp = await Delete(_engine, Persona.Operator, "factorio-1", origin: "hacker");
+        HttpResponseMessage resp = await Delete(_engine, Persona.Runner, "factorio-1", origin: "hacker");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -264,14 +264,14 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Uninstall_Viewer_403()
     {
-        HttpResponseMessage resp = await Delete(_engine, Persona.Viewer, "factorio-1");
+        HttpResponseMessage resp = await Delete(_engine, Persona.Reader, "factorio-1");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task Uninstall_NoToken_401()
     {
-        HttpResponseMessage resp = await Delete(_engine, tier: null, "factorio-1");
+        HttpResponseMessage resp = await Delete(_engine, persona: null, "factorio-1");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
         Assert.Contains("\"code\":\"unauthorized\"", await resp.Content.ReadAsStringAsync());
     }
@@ -279,28 +279,28 @@ public sealed class InstallUninstallTests
     [Fact]
     public async Task Uninstall_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Delete(_noEngine, Persona.Operator, "anything");
+        HttpResponseMessage resp = await Delete(_noEngine, Persona.Runner, "anything");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
         Assert.Contains("\"code\":\"unavailable\"", await resp.Content.ReadAsStringAsync());
     }
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static HttpClient Client(AuthTestFactory factory, Persona? tier)
+    private static HttpClient Client(AuthTestFactory factory, Persona? persona)
     {
         HttpClient c = factory.CreateClient();
-        if (tier is { } t)
+        if (persona is { } t)
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(t));
         return c;
     }
 
-    private static Task<HttpResponseMessage> Post(AuthTestFactory factory, Persona? tier, string json) =>
-        Client(factory, tier).PostAsync("/api/v1/servers",
+    private static Task<HttpResponseMessage> Post(AuthTestFactory factory, Persona? persona, string json) =>
+        Client(factory, persona).PostAsync("/api/v1/servers",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
     private static Task<HttpResponseMessage> Delete(
-        AuthTestFactory factory, Persona? tier, string id, string? origin = null) =>
-        Client(factory, tier).DeleteAsync(
+        AuthTestFactory factory, Persona? persona, string id, string? origin = null) =>
+        Client(factory, persona).DeleteAsync(
             $"/api/v1/servers/{id}" + (origin is null ? "" : $"?origin={origin}"));
 
     /// <summary>
@@ -322,7 +322,7 @@ public sealed class InstallUninstallTests
     }
 
     /// <summary>
-    /// Switch-on-input fake (the project convention, like <c>FakeDiscordResolver</c>): no mutable per-call
+    /// Switch-on-input fake (the project convention, like <c>TestIdentity</c>): no mutable per-call
     /// state. <c>generate-id</c> rejects a sentinel "zzznope" blueprint, applies the engine's own id
     /// charset and roster check to a proposed id, and otherwise returns a deterministic generated id;
     /// install/uninstall succeed; the roster carries one instance so the uninstall gate has something to

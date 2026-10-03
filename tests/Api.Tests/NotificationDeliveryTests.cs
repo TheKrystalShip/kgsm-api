@@ -59,7 +59,7 @@ public sealed class NotificationMappingTests
     [InlineData("player_join")]
     [InlineData("server_empty")]
     public void The_two_events_other_people_drive_arrive_switched_off(string catalogId) =>
-        // Their rate is set by how popular a server is, not by what the host does, so an admin turns them
+        // Their rate is set by how popular a server is, not by what the host does, so an owner turns them
         // on deliberately — adding them must not change what an already-configured host sends.
         Assert.False(NotificationCatalog.DefaultRule(catalogId).Enabled);
 
@@ -252,7 +252,7 @@ public sealed class NotificationBusTests
     {
         NotificationBus bus = NewBus();
         // A host whose policy activates on sight writes the same action with a different status, and
-        // asking an admin to approve what is already approved is worse than saying nothing.
+        // asking an owner to approve what is already approved is worse than saying nothing.
         bus.Publish(ProvisionRow("usr_auto", "active"));
         // The barrier: the channel is FIFO, so receiving this proves the first was dropped, not delayed.
         bus.Publish(ProvisionRow("usr_waiting", "pending"));
@@ -339,7 +339,7 @@ public sealed class NotificationDeliveryE2ETests
     private const string Webhook = "https://hooks.slack.com/services/T777/B777/e2esecrettoken";
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
-    private static HttpClient AdminClient(NotificationDeliveryFactory f)
+    private static HttpClient OwnerClient(NotificationDeliveryFactory f)
     {
         HttpClient c = f.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(Persona.Owner));
@@ -364,7 +364,7 @@ public sealed class NotificationDeliveryE2ETests
     public async Task Crash_AuditRow_DeliversNotification()
     {
         using var f = new NotificationDeliveryFactory();
-        HttpClient c = AdminClient(f);
+        HttpClient c = OwnerClient(f);
         await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, enabled = true });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
@@ -381,7 +381,7 @@ public sealed class NotificationDeliveryE2ETests
     public async Task DisabledProvider_DoesNotDeliver_EvenWithWebhook()
     {
         using var f = new NotificationDeliveryFactory();
-        HttpClient c = AdminClient(f);
+        HttpClient c = OwnerClient(f);
         // Provider OFF but a webhook is set, and a second enabled provider is the barrier... there is only one
         // provider, so prove the gate the deterministic way: the disabled provider is enabled mid-flight is a
         // race, so instead we assert no delivery within a generous bound (the positive test shows sub-second
@@ -399,7 +399,7 @@ public sealed class NotificationDeliveryE2ETests
     public async Task DisabledRule_Gated_OnlineStillDelivers()
     {
         using var f = new NotificationDeliveryFactory();
-        HttpClient c = AdminClient(f);
+        HttpClient c = OwnerClient(f);
         await c.PatchAsJsonAsync("/api/v1/integrations/slack", new
         {
             webhook = Webhook,
@@ -421,7 +421,7 @@ public sealed class NotificationDeliveryE2ETests
     public async Task OnceCadence_DeliversTheFirst_AndSuppressesTheRest()
     {
         using var f = new NotificationDeliveryFactory();
-        HttpClient c = AdminClient(f);
+        HttpClient c = OwnerClient(f);
         await c.PatchAsJsonAsync("/api/v1/integrations/slack", new
         {
             webhook = Webhook,
@@ -448,7 +448,7 @@ public sealed class NotificationDeliveryE2ETests
     public async Task DigestCadence_HoldsItBack_RatherThanDroppingIt()
     {
         using var f = new NotificationDeliveryFactory();
-        HttpClient c = AdminClient(f);
+        HttpClient c = OwnerClient(f);
         await c.PatchAsJsonAsync("/api/v1/integrations/slack", new
         {
             webhook = Webhook,
@@ -477,7 +477,7 @@ public sealed class NotificationDeliveryE2ETests
     public async Task ADueDigest_GoesOutAsOneMessage()
     {
         using var f = new NotificationDeliveryFactory();
-        HttpClient c = AdminClient(f);
+        HttpClient c = OwnerClient(f);
         await c.PatchAsJsonAsync("/api/v1/integrations/slack", new
         {
             webhook = Webhook,
@@ -506,7 +506,7 @@ public sealed class NotificationDeliveryE2ETests
     public async Task RepeatedCrash_SuppressedWithinWindow()
     {
         using var f = new NotificationDeliveryFactory();
-        HttpClient c = AdminClient(f);
+        HttpClient c = OwnerClient(f);
         await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, enabled = true });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();
@@ -538,7 +538,7 @@ public sealed class NotificationDeliveryE2ETests
     public async Task TwoConditionsOnOneHost_BothDeliver_AndARepeatDoesNot()
     {
         using var f = new NotificationDeliveryFactory();
-        HttpClient c = AdminClient(f);
+        HttpClient c = OwnerClient(f);
         await c.PatchAsJsonAsync("/api/v1/integrations/slack", new { webhook = Webhook, enabled = true });
 
         AuditService audit = f.Services.GetRequiredService<AuditService>();

@@ -118,17 +118,16 @@ public sealed class KgsmAuditConsumer(
     /// the raw hook rather than through a typed handler.
     /// </summary>
     /// <remarks>
-    /// Matched on the type alone, deliberately. The account events are written by this API on a host
-    /// that holds its own accounts and by the cluster's auth anchor when one holds them instead, and
-    /// both journals are read here — so a sign-in reaches an open browser as soon as it is recorded
-    /// whichever of the two recorded it.
+    /// Matched on the type alone, deliberately: the account events are written by the cluster's auth
+    /// anchor and read here from its journal, so a sign-in reaches an open browser as soon as it is
+    /// recorded, whichever producer's journal carried it.
     /// </remarks>
     private static readonly HashSet<string> OwnEventTypes = new(StringComparer.Ordinal)
     {
-        ApiJournal.LoginEvent, ApiJournal.LogoutEvent, ApiJournal.ClusterSessionEvent,
+        ApiJournal.LoginEvent, ApiJournal.LogoutEvent,
         ApiJournal.SessionRevokedEvent, ApiJournal.LockedOutEvent,
         ApiJournal.UserProvisionedEvent, ApiJournal.UserApprovedEvent, ApiJournal.UserDisabledEvent,
-        ApiJournal.UserTierChangedEvent, ApiJournal.UserDeletedEvent, ApiJournal.UserPasswordChangedEvent,
+        ApiJournal.UserDeletedEvent, ApiJournal.UserPasswordChangedEvent,
         ApiJournal.IdentityLinkedEvent, ApiJournal.IdentityUnlinkedEvent,
         ApiJournal.ServiceConnectedEvent, ApiJournal.ServiceDisconnectedEvent,
         ApiJournal.ServiceConfigChangedEvent, ApiJournal.ServiceRestartedEvent,

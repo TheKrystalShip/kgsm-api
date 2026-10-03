@@ -16,18 +16,18 @@ using TheKrystalShip.KGSM.Auth;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// Coverage for the Tier-1 ops write/read surfaces — per-server config (<c>GET</c>/<c>PATCH /servers/{id}/config</c>),
+/// Coverage for a server's operational write/read surfaces — per-server config (<c>GET</c>/<c>PATCH /servers/{id}/config</c>),
 /// the <c>update</c> command verb, and backups (<c>GET</c>/<c>POST /servers/{id}/backups</c>,
 /// <c>POST /servers/{id}/backups/restore</c>) — proven through the real pipeline with the engine seam faked
 /// (a switch-on-input <see cref="FakeOpsInstanceService"/>, the project convention). The load-bearing
-/// contracts asserted synchronously on the HTTP response: the gate (404/409/503/400), the auth tiers
-/// (viewer-read / operator-write), and the editable-key boundary (protected keys ⇒ 400, nothing applied).
-/// The async happy path mutates the host and is a trusted-host live-validate (like M3/M8·b); here the 202 +
+/// contracts asserted synchronously on the HTTP response: the gate (404/409/503/400), each route's action
+/// (a reader reads, a runner writes), and the editable-key boundary (protected keys ⇒ 400, nothing applied).
+/// The async happy path mutates the host and is validated live on a trusted host; here the 202 +
 /// job shape and the no-double-write invariant (update/backup are the kgsm echo path — the API writes no
 /// audit row, so /audit stays empty) are what's verified.
 /// </summary>
-public sealed class Tier1OpsTests
-    : IClassFixture<Tier1OpsTests.EngineTestFactory>, IClassFixture<AuthTestFactory>
+public sealed class ServerOpsTests
+    : IClassFixture<ServerOpsTests.EngineTestFactory>, IClassFixture<AuthTestFactory>
 {
     private const string Server = "factorio-1";   // in the fake roster (stopped by default)
     private const string Running = "valheim-1";   // in the fake roster, reported RUNNING
@@ -35,7 +35,7 @@ public sealed class Tier1OpsTests
     private readonly EngineTestFactory _engine;   // fake engine registered → the gate's real branches
     private readonly AuthTestFactory _noEngine;   // engine unprovisioned → the 503 degrade
 
-    public Tier1OpsTests(EngineTestFactory engine, AuthTestFactory noEngine)
+    public ServerOpsTests(EngineTestFactory engine, AuthTestFactory noEngine)
     {
         _engine = engine;
         _noEngine = noEngine;
@@ -46,7 +46,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigGet_Known_200_EditableMap()
     {
-        HttpResponseMessage resp = await Client(_engine, Persona.Viewer).GetAsync($"/api/v1/servers/{Server}/config");
+        HttpResponseMessage resp = await Client(_engine, Persona.Reader).GetAsync($"/api/v1/servers/{Server}/config");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -71,21 +71,21 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigGet_Unknown_404()
     {
-        HttpResponseMessage resp = await Client(_engine, Persona.Viewer).GetAsync("/api/v1/servers/nope/config");
+        HttpResponseMessage resp = await Client(_engine, Persona.Reader).GetAsync("/api/v1/servers/nope/config");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task ConfigGet_NoToken_401()
     {
-        HttpResponseMessage resp = await Client(_engine, tier: null).GetAsync($"/api/v1/servers/{Server}/config");
+        HttpResponseMessage resp = await Client(_engine, persona: null).GetAsync($"/api/v1/servers/{Server}/config");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
     [Fact]
     public async Task ConfigGet_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Client(_noEngine, Persona.Viewer).GetAsync($"/api/v1/servers/{Server}/config");
+        HttpResponseMessage resp = await Client(_noEngine, Persona.Reader).GetAsync($"/api/v1/servers/{Server}/config");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
         Assert.Contains("\"code\":\"unavailable\"", await resp.Content.ReadAsStringAsync());
     }
@@ -95,7 +95,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_Valid_200_AppliedAndFreshConfig()
     {
-        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, Server,
+        HttpResponseMessage resp = await Patch(_engine, Persona.Runner, Server,
             "{\"values\":{\"auto_update\":\"false\",\"level_name\":\"newworld\"}}");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
@@ -112,7 +112,7 @@ public sealed class Tier1OpsTests
     public async Task ConfigPatch_ProtectedKey_400_NothingApplied()
     {
         // A protected key trips the pre-check → 400 before any write (stricter than the engine, not a bypass).
-        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, Server,
+        HttpResponseMessage resp = await Patch(_engine, Persona.Runner, Server,
             "{\"values\":{\"auto_update\":\"true\",\"install_dir\":\"/evil\"}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         string body = await resp.Content.ReadAsStringAsync();
@@ -124,7 +124,7 @@ public sealed class Tier1OpsTests
     public async Task ConfigPatch_MaintenanceWindows_400_PointsAtTheSettingsRoute()
     {
         // Written here the windows would carry no author, and the scheduler runs no window nobody set up.
-        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, Server,
+        HttpResponseMessage resp = await Patch(_engine, Persona.Runner, Server,
             "{\"values\":{\"maintenance_windows\":\"daily@05:00/restart\"}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("/settings", await resp.Content.ReadAsStringAsync());
@@ -133,7 +133,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_WindowsAuthor_400_Protected()
     {
-        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, Server,
+        HttpResponseMessage resp = await Patch(_engine, Persona.Runner, Server,
             "{\"values\":{\"maintenance_windows_author\":\"local:usr_somebody\"}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("maintenance_windows_author", await resp.Content.ReadAsStringAsync());
@@ -145,7 +145,7 @@ public sealed class Tier1OpsTests
         // The fake refuses the sentinel value "BOOM" (an engine refusal that passes the key pre-check). The
         // first key applies, the second is refused → 400 surfacing the real stderr AND the already-applied key
         // (honest about the non-atomic partial state).
-        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, Server,
+        HttpResponseMessage resp = await Patch(_engine, Persona.Runner, Server,
             "{\"values\":{\"level_name\":\"ok\",\"save_command\":\"BOOM\"}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         string body = await resp.Content.ReadAsStringAsync();
@@ -156,7 +156,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_EmptyBody_400()
     {
-        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, Server, "{\"values\":{}}");
+        HttpResponseMessage resp = await Patch(_engine, Persona.Runner, Server, "{\"values\":{}}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("at least one", await resp.Content.ReadAsStringAsync());
     }
@@ -164,7 +164,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_BadOrigin_400()
     {
-        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, Server,
+        HttpResponseMessage resp = await Patch(_engine, Persona.Runner, Server,
             "{\"values\":{\"auto_update\":\"true\"},\"origin\":\"hacker\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
@@ -172,7 +172,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_Unknown_404()
     {
-        HttpResponseMessage resp = await Patch(_engine, Persona.Operator, "nope",
+        HttpResponseMessage resp = await Patch(_engine, Persona.Runner, "nope",
             "{\"values\":{\"auto_update\":\"true\"}}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -180,7 +180,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_Viewer_403()
     {
-        HttpResponseMessage resp = await Patch(_engine, Persona.Viewer, Server,
+        HttpResponseMessage resp = await Patch(_engine, Persona.Reader, Server,
             "{\"values\":{\"auto_update\":\"true\"}}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -188,7 +188,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task ConfigPatch_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Patch(_noEngine, Persona.Operator, Server,
+        HttpResponseMessage resp = await Patch(_noEngine, Persona.Runner, Server,
             "{\"values\":{\"auto_update\":\"true\"}}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
@@ -199,7 +199,7 @@ public sealed class Tier1OpsTests
     public async Task Update_Valid_202_UpdateJob_NoAuditDoubleWrite()
     {
         // factorio-1 is reported STOPPED → admissible. 202 + an update job.
-        HttpResponseMessage resp = await Command(_engine, Persona.Operator, Server, "{\"verb\":\"update\"}");
+        HttpResponseMessage resp = await Command(_engine, Persona.Runner, Server, "{\"verb\":\"update\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
         JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
@@ -208,7 +208,7 @@ public sealed class Tier1OpsTests
 
         // No double-write: update is the echo path (kgsm owns server.update). The fake emits no event and the
         // runner writes no row directly, so /audit stays empty — a stray direct write would surface here.
-        HttpResponseMessage audit = await Client(_engine, Persona.Viewer).GetAsync("/api/v1/audit");
+        HttpResponseMessage audit = await Client(_engine, Persona.Reader).GetAsync("/api/v1/audit");
         using JsonDocument page = JsonDocument.Parse(await audit.Content.ReadAsStringAsync());
         Assert.Empty(page.RootElement.GetProperty("data").EnumerateArray());
     }
@@ -218,7 +218,7 @@ public sealed class Tier1OpsTests
     {
         // valheim-1 is reported RUNNING → kgsm refuses an update on a running instance; the gate 409s it
         // synchronously rather than accepting a doomed job.
-        HttpResponseMessage resp = await Command(_engine, Persona.Operator, Running, "{\"verb\":\"update\"}");
+        HttpResponseMessage resp = await Command(_engine, Persona.Runner, Running, "{\"verb\":\"update\"}");
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
         Assert.Contains("must be stopped", await resp.Content.ReadAsStringAsync());
     }
@@ -226,7 +226,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task Update_Viewer_403()
     {
-        HttpResponseMessage resp = await Command(_engine, Persona.Viewer, Server, "{\"verb\":\"update\"}");
+        HttpResponseMessage resp = await Command(_engine, Persona.Reader, Server, "{\"verb\":\"update\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -234,7 +234,7 @@ public sealed class Tier1OpsTests
     public async Task Update_UnknownVerb_400_StillRejected()
     {
         // Sanity that the closed set didn't widen: a junk verb is still 400.
-        HttpResponseMessage resp = await Command(_engine, Persona.Operator, Server, "{\"verb\":\"frobnicate\"}");
+        HttpResponseMessage resp = await Command(_engine, Persona.Runner, Server, "{\"verb\":\"frobnicate\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 
@@ -243,7 +243,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupsList_Known_200_CarriesManifestDetail()
     {
-        HttpResponseMessage resp = await Client(_engine, Persona.Viewer).GetAsync($"/api/v1/servers/{Server}/backups");
+        HttpResponseMessage resp = await Client(_engine, Persona.Reader).GetAsync($"/api/v1/servers/{Server}/backups");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -289,7 +289,7 @@ public sealed class Tier1OpsTests
     [InlineData("unpin")]
     public async Task BackupRetention_Known_204(string verb)
     {
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Operator,
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Runner,
             $"/api/v1/servers/{Server}/backups/factorio-01-20260621T100000Z-aaaaaa/{verb}", "{}");
         Assert.Equal(HttpStatusCode.NoContent, resp.StatusCode);
     }
@@ -298,7 +298,7 @@ public sealed class Tier1OpsTests
     public async Task BackupPin_UnknownBackup_404()
     {
         // The engine owns the name set; an id it does not list is refused rather than written to.
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Operator,
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Runner,
             $"/api/v1/servers/{Server}/backups/not-a-backup/pin", "{}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -306,7 +306,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupPin_UnknownServer_404()
     {
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Operator,
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Runner,
             "/api/v1/servers/nope/backups/whatever/pin", "{}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -315,7 +315,7 @@ public sealed class Tier1OpsTests
     public async Task BackupPin_Viewer_403()
     {
         // Changing what rotation may delete is a mutation, gated like every other one.
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Viewer,
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Reader,
             $"/api/v1/servers/{Server}/backups/factorio-01-20260621T100000Z-aaaaaa/pin", "{}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -323,7 +323,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupPin_BadOrigin_400()
     {
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Operator,
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Runner,
             $"/api/v1/servers/{Server}/backups/factorio-01-20260621T100000Z-aaaaaa/pin",
             "{\"origin\":\"telepathy\"}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
@@ -332,7 +332,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupPin_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await PostJson(_noEngine, Persona.Operator,
+        HttpResponseMessage resp = await PostJson(_noEngine, Persona.Runner,
             $"/api/v1/servers/{Server}/backups/factorio-01-20260621T100000Z-aaaaaa/pin", "{}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
@@ -340,21 +340,21 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupsList_Unknown_404()
     {
-        HttpResponseMessage resp = await Client(_engine, Persona.Viewer).GetAsync("/api/v1/servers/nope/backups");
+        HttpResponseMessage resp = await Client(_engine, Persona.Reader).GetAsync("/api/v1/servers/nope/backups");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task BackupsList_NoToken_401()
     {
-        HttpResponseMessage resp = await Client(_engine, tier: null).GetAsync($"/api/v1/servers/{Server}/backups");
+        HttpResponseMessage resp = await Client(_engine, persona: null).GetAsync($"/api/v1/servers/{Server}/backups");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 
     [Fact]
     public async Task BackupsList_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Client(_noEngine, Persona.Viewer).GetAsync($"/api/v1/servers/{Server}/backups");
+        HttpResponseMessage resp = await Client(_noEngine, Persona.Reader).GetAsync($"/api/v1/servers/{Server}/backups");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
 
@@ -363,7 +363,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupCreate_Valid_202_CreateJob()
     {
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Operator, $"/api/v1/servers/{Server}/backups", "{}");
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Runner, $"/api/v1/servers/{Server}/backups", "{}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
         JsonElement job = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("job");
@@ -374,21 +374,21 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupCreate_Unknown_404()
     {
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Operator, "/api/v1/servers/nope/backups", "{}");
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Runner, "/api/v1/servers/nope/backups", "{}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task BackupCreate_Viewer_403()
     {
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Viewer, $"/api/v1/servers/{Server}/backups", "{}");
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Reader, $"/api/v1/servers/{Server}/backups", "{}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     [Fact]
     public async Task BackupCreate_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await PostJson(_noEngine, Persona.Operator, $"/api/v1/servers/{Server}/backups", "{}");
+        HttpResponseMessage resp = await PostJson(_noEngine, Persona.Runner, $"/api/v1/servers/{Server}/backups", "{}");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
 
@@ -397,7 +397,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupRestore_Valid_202_RestoreJob()
     {
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Operator,
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Runner,
             $"/api/v1/servers/{Server}/backups/restore", "{\"backup\":\"factorio-01-20260621T100000Z-aaaaaa\"}");
         Assert.Equal(HttpStatusCode.Accepted, resp.StatusCode);
 
@@ -409,7 +409,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupRestore_MissingBackupName_400()
     {
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Operator,
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Runner,
             $"/api/v1/servers/{Server}/backups/restore", "{}");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("backup name is required", await resp.Content.ReadAsStringAsync());
@@ -418,7 +418,7 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupRestore_Unknown_404()
     {
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Operator,
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Runner,
             "/api/v1/servers/nope/backups/restore", "{\"backup\":\"x.bak\"}");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -426,34 +426,34 @@ public sealed class Tier1OpsTests
     [Fact]
     public async Task BackupRestore_Viewer_403()
     {
-        HttpResponseMessage resp = await PostJson(_engine, Persona.Viewer,
+        HttpResponseMessage resp = await PostJson(_engine, Persona.Reader,
             $"/api/v1/servers/{Server}/backups/restore", "{\"backup\":\"x.bak\"}");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     // ===== helpers =================================================================================
 
-    private static HttpClient Client(AuthTestFactory factory, Persona? tier)
+    private static HttpClient Client(AuthTestFactory factory, Persona? persona)
     {
         HttpClient c = factory.CreateClient();
-        if (tier is { } t)
+        if (persona is { } t)
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(t));
         return c;
     }
 
-    private static Task<HttpResponseMessage> Patch(AuthTestFactory f, Persona? tier, string id, string json) =>
-        Client(f, tier).PatchAsync($"/api/v1/servers/{id}/config",
+    private static Task<HttpResponseMessage> Patch(AuthTestFactory f, Persona? persona, string id, string json) =>
+        Client(f, persona).PatchAsync($"/api/v1/servers/{id}/config",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
-    private static Task<HttpResponseMessage> Command(AuthTestFactory f, Persona? tier, string id, string json) =>
-        Client(f, tier).PostAsync($"/api/v1/servers/{id}/commands",
+    private static Task<HttpResponseMessage> Command(AuthTestFactory f, Persona? persona, string id, string json) =>
+        Client(f, persona).PostAsync($"/api/v1/servers/{id}/commands",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
-    private static Task<HttpResponseMessage> PostJson(AuthTestFactory f, Persona? tier, string path, string json) =>
-        Client(f, tier).PostAsync(path, new StringContent(json, Encoding.UTF8, "application/json"));
+    private static Task<HttpResponseMessage> PostJson(AuthTestFactory f, Persona? persona, string path, string json) =>
+        Client(f, persona).PostAsync(path, new StringContent(json, Encoding.UTF8, "application/json"));
 
     /// <summary><see cref="AuthTestFactory"/> with a fake <see cref="IInstanceService"/> registered so the
-    /// Tier-1 ops gates exercise their real branches (roster lookup, config read/write, backup list, the
+    /// gates exercise their real branches (roster lookup, config read/write, backup list, the
     /// running-status update gate) without a live kgsm.</summary>
     public sealed class EngineTestFactory : AuthTestFactory
     {

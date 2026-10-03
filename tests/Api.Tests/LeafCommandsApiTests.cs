@@ -39,10 +39,10 @@ public sealed class LeafCommandsApiTests
         }
         """;
 
-    private static HttpClient Client(LeafTestFactory f, Persona tier)
+    private static HttpClient Client(LeafTestFactory f, Persona persona)
     {
         HttpClient c = f.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(tier));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(persona));
         return c;
     }
 
@@ -82,7 +82,7 @@ public sealed class LeafCommandsApiTests
         using var factory = new LeafTestFactory();
         factory.InstallCommands("assistant", AssistantManifest);
 
-        JsonElement body = await Get(Client(factory, Persona.Operator), "assistant");
+        JsonElement body = await Get(Client(factory, Persona.Runner), "assistant");
 
         Assert.Equal("assistant", body.GetProperty("leaf").GetString());
         Assert.Equal("chat", body.GetProperty("surface").GetString());
@@ -115,7 +115,7 @@ public sealed class LeafCommandsApiTests
         using var factory = new LeafTestFactory();
         factory.InstallCommands("bot", BotManifest);
 
-        JsonElement body = await Get(Client(factory, Persona.Operator), "bot");
+        JsonElement body = await Get(Client(factory, Persona.Runner), "bot");
 
         Assert.Equal(
             [("list", "kgsm:server.read"), ("start", "kgsm:server.start")],
@@ -147,7 +147,7 @@ public sealed class LeafCommandsApiTests
                               "action": "bot:status.read", "mutates": false } ] }
             """);
 
-        JsonElement body = await Get(Client(factory, Persona.Operator), "bot");
+        JsonElement body = await Get(Client(factory, Persona.Runner), "bot");
 
         Assert.Empty(AllCommands(body).Single().GetProperty("options").EnumerateArray());
     }
@@ -161,7 +161,7 @@ public sealed class LeafCommandsApiTests
     {
         using var factory = new LeafTestFactory();
         factory.InstallCommands("bot", BotManifest);
-        HttpClient client = Client(factory, Persona.Operator);
+        HttpClient client = Client(factory, Persona.Runner);
 
         HttpResponseMessage resp = await client.GetAsync($"/api/v1/hosts/{Host}/services/monitor/commands");
 
@@ -176,7 +176,7 @@ public sealed class LeafCommandsApiTests
         using var factory = new LeafTestFactory();
         factory.InstallCommands("bot", BotManifest);
 
-        HttpResponseMessage resp = await Client(factory, Persona.Operator)
+        HttpResponseMessage resp = await Client(factory, Persona.Runner)
             .GetAsync("/api/v1/hosts/some-other-box/services/bot/commands");
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
@@ -208,7 +208,7 @@ public sealed class LeafCommandsApiTests
         using var factory = new LeafTestFactory();
         factory.InstallCommands("bot", json);
 
-        HttpResponseMessage resp = await Client(factory, Persona.Operator)
+        HttpResponseMessage resp = await Client(factory, Persona.Runner)
             .GetAsync($"/api/v1/hosts/{Host}/services/bot/commands");
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
@@ -222,7 +222,7 @@ public sealed class LeafCommandsApiTests
         factory.InstallCommands("bot", BotManifest);
         factory.InstallCommands("assistant", "{ oh dear");
 
-        JsonElement body = await Get(Client(factory, Persona.Operator), "bot");
+        JsonElement body = await Get(Client(factory, Persona.Runner), "bot");
 
         Assert.Equal(2, AllCommands(body).Length);
     }
@@ -239,8 +239,8 @@ public sealed class LeafCommandsApiTests
         string path = $"/api/v1/hosts/{Host}/services/bot/commands";
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await factory.CreateClient().GetAsync(path)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await Client(factory, Persona.Viewer).GetAsync(path)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await Client(factory, Persona.Operator).GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await Client(factory, Persona.Reader).GetAsync(path)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Client(factory, Persona.Runner).GetAsync(path)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await Client(factory, Persona.Owner).GetAsync(path)).StatusCode);
     }
 }

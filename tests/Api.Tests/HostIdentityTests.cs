@@ -20,7 +20,7 @@ namespace TheKrystalShip.Api.Tests;
 /// <list type="bullet">
 ///   <item>the build version is the assembly's REAL informational version (never a fabricated semver);</item>
 ///   <item>region is honest-unknown (present-as-null on the host, omitted on the handshake) until declared;</item>
-///   <item>the edit is admin-only (the 401/403 split) and config seeds the default while an override wins.</item>
+///   <item>the edit is owner-only (the 401/403 split) and config seeds the default while an override wins.</item>
 /// </list>
 /// Fresh factory per test (the IntegrationsApiTests pattern): each gets an isolated DB + store, so a PATCH
 /// in one test can't bleed into another.
@@ -40,7 +40,7 @@ public sealed class HostIdentityTests
     public async Task Host_Identity_RuntimeFields_Present_OnListAndDetail()
     {
         using var f = new AuthTestFactory();
-        HttpClient c = Client(f, Persona.Viewer);
+        HttpClient c = Client(f, Persona.Reader);
 
         using JsonDocument list = await GetJson(c, "/api/v1/hosts");
         AssertIdentityShape(list.RootElement.EnumerateArray().Single().GetProperty("identity"));
@@ -98,7 +98,7 @@ public sealed class HostIdentityTests
         // The host's panelVersion (route version) and the handshake version still agree; build is additive.
         using var f = new AuthTestFactory();
         using JsonDocument root = await GetJson(f.CreateClient(), "/api/v1");
-        using JsonDocument hosts = await GetJson(Client(f, Persona.Viewer), "/api/v1/hosts");
+        using JsonDocument hosts = await GetJson(Client(f, Persona.Reader), "/api/v1/hosts");
 
         string handshakeVersion = root.RootElement.GetProperty("version").GetString()!;
         JsonElement host = hosts.RootElement.EnumerateArray().Single();
@@ -111,12 +111,12 @@ public sealed class HostIdentityTests
     // --- PATCH /hosts/{id} — the edit path ---------------------------------------------------------
 
     [Fact]
-    public async Task Patch_Admin_SetsRegionAndLabel_ReflectedEverywhere()
+    public async Task Patch_Owner_SetsRegionAndLabel_ReflectedEverywhere()
     {
         using var f = new AuthTestFactory();
-        HttpClient admin = Client(f, Persona.Owner);
+        HttpClient owner = Client(f, Persona.Owner);
 
-        HttpResponseMessage patch = await admin.PatchAsJsonAsync(
+        HttpResponseMessage patch = await owner.PatchAsJsonAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "eu-west", label = "Hotrod" });
         Assert.Equal(HttpStatusCode.OK, patch.StatusCode);
 
@@ -125,8 +125,8 @@ public sealed class HostIdentityTests
         Assert.Equal("Hotrod", patched.GetProperty("label").GetString());
         Assert.Equal("eu-west", patched.GetProperty("identity").GetProperty("region").GetString());
 
-        // And it persists / is visible to a fresh viewer read.
-        using JsonDocument list = await GetJson(Client(f, Persona.Viewer), "/api/v1/hosts");
+        // And it persists / is visible to a fresh read.
+        using JsonDocument list = await GetJson(Client(f, Persona.Reader), "/api/v1/hosts");
         JsonElement host = list.RootElement.EnumerateArray().Single();
         Assert.Equal("Hotrod", host.GetProperty("label").GetString());
         Assert.Equal("eu-west", host.GetProperty("identity").GetProperty("region").GetString());
@@ -141,11 +141,11 @@ public sealed class HostIdentityTests
     public async Task Patch_Sparse_OnlyPresentFieldsChange()
     {
         using var f = new AuthTestFactory();
-        HttpClient admin = Client(f, Persona.Owner);
+        HttpClient owner = Client(f, Persona.Owner);
 
-        await admin.PatchAsJsonAsync($"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "us-east", label = "Box" });
+        await owner.PatchAsJsonAsync($"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "us-east", label = "Box" });
         // A second patch touching only region must leave the label intact.
-        HttpResponseMessage second = await admin.PatchAsJsonAsync(
+        HttpResponseMessage second = await owner.PatchAsJsonAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "us-west" });
         JsonElement host = JsonDocument.Parse(await second.Content.ReadAsStringAsync()).RootElement;
         Assert.Equal("us-west", host.GetProperty("identity").GetProperty("region").GetString());
@@ -156,11 +156,11 @@ public sealed class HostIdentityTests
     public async Task Patch_BlankString_ClearsOverride_BackToConfigDefault()
     {
         using var f = new AuthTestFactory();
-        HttpClient admin = Client(f, Persona.Owner);
+        HttpClient owner = Client(f, Persona.Owner);
 
-        await admin.PatchAsJsonAsync($"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "eu-west", label = "Hotrod" });
+        await owner.PatchAsJsonAsync($"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "eu-west", label = "Hotrod" });
         // Empty string clears: region -> null (no config default), label -> the host id (config default).
-        HttpResponseMessage cleared = await admin.PatchAsJsonAsync(
+        HttpResponseMessage cleared = await owner.PatchAsJsonAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "", label = "" });
         JsonElement host = JsonDocument.Parse(await cleared.Content.ReadAsStringAsync()).RootElement;
         Assert.Equal(JsonValueKind.Null, host.GetProperty("identity").GetProperty("region").ValueKind);
@@ -178,12 +178,12 @@ public sealed class HostIdentityTests
     }
 
     [Theory]
-    [InlineData(Persona.Viewer)]
-    [InlineData(Persona.Operator)]
-    public async Task Patch_BelowAdmin_403(Persona tier)
+    [InlineData(Persona.Reader)]
+    [InlineData(Persona.Runner)]
+    public async Task Patch_BelowOwner_403(Persona persona)
     {
         using var f = new AuthTestFactory();
-        HttpResponseMessage r = await Client(f, tier).PatchAsJsonAsync(
+        HttpResponseMessage r = await Client(f, persona).PatchAsJsonAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "eu-west" });
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
@@ -216,7 +216,7 @@ public sealed class HostIdentityTests
     {
         using var f = new RegionConfiguredFactory();
         // The configured Api__Region is the default on both the host card and the handshake.
-        using JsonDocument list = await GetJson(Client(f, Persona.Viewer), "/api/v1/hosts");
+        using JsonDocument list = await GetJson(Client(f, Persona.Reader), "/api/v1/hosts");
         Assert.Equal("configured-region",
             list.RootElement.EnumerateArray().Single().GetProperty("identity").GetProperty("region").GetString());
         using JsonDocument root = await GetJson(f.CreateClient(), "/api/v1");
@@ -225,17 +225,17 @@ public sealed class HostIdentityTests
         // An override wins over the config default.
         await Client(f, Persona.Owner).PatchAsJsonAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}", new { region = "override-region" });
-        using JsonDocument after = await GetJson(Client(f, Persona.Viewer), "/api/v1/hosts");
+        using JsonDocument after = await GetJson(Client(f, Persona.Reader), "/api/v1/hosts");
         Assert.Equal("override-region",
             after.RootElement.EnumerateArray().Single().GetProperty("identity").GetProperty("region").GetString());
     }
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private static HttpClient Client(AuthTestFactory f, Persona tier)
+    private static HttpClient Client(AuthTestFactory f, Persona persona)
     {
         HttpClient c = f.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(tier));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(persona));
         return c;
     }
 

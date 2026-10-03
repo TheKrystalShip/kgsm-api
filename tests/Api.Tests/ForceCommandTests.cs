@@ -15,7 +15,7 @@ namespace TheKrystalShip.Api.Tests;
 /// leave them believing they had bypassed something. <c>false</c> is the default and passes everywhere,
 /// so a client that always sends the field is unaffected.
 /// <para>
-/// The gate is <b>operator</b>, not admin — the same tier that may start a server. The judgement it
+/// The gate is the verb's own action, not Owner — the same action that may start a server. The judgement it
 /// takes is "this blueprint's declared figure is wrong for this server", which anyone running these
 /// servers day to day is in a position to make.
 /// </para>
@@ -28,7 +28,7 @@ public sealed class ForceCommandTests(AuthTestFactory factory) : IClassFixture<A
     {
         HttpClient authed = factory.CreateClient();
         authed.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Operator));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Runner));
         return authed;
     }
 
@@ -65,7 +65,7 @@ public sealed class ForceCommandTests(AuthTestFactory factory) : IClassFixture<A
     {
         HttpClient authed = OperatorClient();
 
-        // Operator, not admin. Reaching the 404 proves the body and the tier both passed; the server id
+        // A runner, not an Owner. Reaching the 404 proves the body and the action both passed; the server id
         // is what it then failed on.
         HttpResponseMessage resp = await authed.PostAsync("/api/v1/servers/nope/commands",
             Body("""{"verb":"start","force":true}"""));

@@ -12,7 +12,7 @@ namespace TheKrystalShip.Api.Tests;
 /// Phase 2 (runtime config) coverage — the GET manifest⋈overrides read view (secrets masked), and the PUT
 /// apply broker through its real write→render→restart→canary→rollback flow with the systemd/probe seams
 /// faked: applied (1 restart), rolled-back (bad value → 2 restarts, snapshot restored), unchanged (no
-/// restart), reset (override deleted), unknown-key/invalid-value 400s, the admin gate, and the redacted audit.
+/// restart), reset (override deleted), unknown-key/invalid-value 400s, the owner gate, and the redacted audit.
 /// Each test uses its own factory (fresh DB + overrides dir) so override state never leaks.
 /// </summary>
 public sealed class LeafConfigTests
@@ -26,7 +26,7 @@ public sealed class LeafConfigTests
     public async Task GetConfig_Monitor_ManifestShape()
     {
         using var f = new LeafConfigTestFactory();
-        JsonElement cfg = await Json(Admin(f).GetAsync($"/api/v1/hosts/{Host}/services/monitor/config"));
+        JsonElement cfg = await Json(Owner(f).GetAsync($"/api/v1/hosts/{Host}/services/monitor/config"));
 
         Assert.Equal("monitor", cfg.GetProperty("id").GetString());
         Assert.Equal(MonitorUnit, cfg.GetProperty("unit").GetString());
@@ -49,7 +49,7 @@ public sealed class LeafConfigTests
     public async Task GetConfig_NonConfigTargetLeaf_404()
     {
         using var f = new LeafConfigTestFactory();
-        HttpResponseMessage resp = await Admin(f).GetAsync($"/api/v1/hosts/{Host}/services/bot/config");
+        HttpResponseMessage resp = await Owner(f).GetAsync($"/api/v1/hosts/{Host}/services/bot/config");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
@@ -57,7 +57,7 @@ public sealed class LeafConfigTests
     public async Task GetConfig_Operator_403()
     {
         using var f = new LeafConfigTestFactory();
-        HttpResponseMessage resp = await Client(f, Persona.Operator).GetAsync($"/api/v1/hosts/{Host}/services/monitor/config");
+        HttpResponseMessage resp = await Client(f, Persona.Runner).GetAsync($"/api/v1/hosts/{Host}/services/monitor/config");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -66,9 +66,9 @@ public sealed class LeafConfigTests
     public async Task PutConfig_Applied_WritesOverride_RestartsOnce_RendersFile_Audits()
     {
         using var f = new LeafConfigTestFactory();
-        HttpClient admin = Admin(f);
+        HttpClient owner = Owner(f);
 
-        JsonElement result = await Json(Put(admin, "monitor", """{"values":{"logLevel":"Debug","intervalMs":"2000"}}"""));
+        JsonElement result = await Json(Put(owner, "monitor", """{"values":{"logLevel":"Debug","intervalMs":"2000"}}"""));
         Assert.Equal("applied", result.GetProperty("outcome").GetString());
         Assert.Equal("operational", result.GetProperty("health").GetProperty("status").GetString());
 
@@ -89,7 +89,7 @@ public sealed class LeafConfigTests
         Assert.Contains("KGSM_MONITOR_INTERVAL_MS=2000", text);
 
         // A service.config audit row lists the changed keys + outcome — never a value.
-        JsonElement audit = await Json(admin.GetAsync("/api/v1/audit"));
+        JsonElement audit = await Json(owner.GetAsync("/api/v1/audit"));
         JsonElement row = audit.GetProperty("data").EnumerateArray()
             .First(r => r.GetProperty("action").GetString() == "service.config_changed");
         Assert.Equal("applied", row.GetProperty("meta").GetProperty("outcome").GetString());
@@ -101,13 +101,13 @@ public sealed class LeafConfigTests
     public async Task PutConfig_Secret_WriteOnly_MaskedOnRead_NotInAudit()
     {
         using var f = new LeafConfigTestFactory();
-        HttpClient admin = Admin(f);
+        HttpClient owner = Owner(f);
         const string secret = "tvly-SUPER-SECRET-KEY-1234";
 
-        await Put(admin, "assistant", "{\"values\":{\"webSearchApiKey\":\"" + secret + "\"}}");
+        await Put(owner, "assistant", "{\"values\":{\"webSearchApiKey\":\"" + secret + "\"}}");
 
         // GET masks the secret: value null, set true, never the value itself.
-        HttpResponseMessage getResp = await admin.GetAsync($"/api/v1/hosts/{Host}/services/assistant/config");
+        HttpResponseMessage getResp = await owner.GetAsync($"/api/v1/hosts/{Host}/services/assistant/config");
         string getBody = await getResp.Content.ReadAsStringAsync();
         Assert.DoesNotContain(secret, getBody); // the secret never crosses back to the client
         JsonElement key = JsonDocument.Parse(getBody).RootElement.GetProperty("fields").EnumerateArray()
@@ -117,7 +117,7 @@ public sealed class LeafConfigTests
         Assert.True(key.GetProperty("set").GetBoolean());
 
         // The audit trail records the KEY but never the secret value.
-        string auditBody = await (await admin.GetAsync("/api/v1/audit")).Content.ReadAsStringAsync();
+        string auditBody = await (await owner.GetAsync("/api/v1/audit")).Content.ReadAsStringAsync();
         Assert.DoesNotContain(secret, auditBody);
         Assert.Contains("webSearchApiKey", auditBody);
     }
@@ -127,10 +127,10 @@ public sealed class LeafConfigTests
     public async Task PutConfig_BadValue_RollsBack_RestartsTwice_RestoresSnapshot()
     {
         using var f = new LeafConfigTestFactory();
-        HttpClient admin = Admin(f);
+        HttpClient owner = Owner(f);
 
         // The sentinel value the fake probe treats as unhealthy → the apply must roll back.
-        JsonElement result = await Json(Put(admin, "assistant",
+        JsonElement result = await Json(Put(owner, "assistant",
             "{\"values\":{\"webSearchApiKey\":\"" + FakeLeafProbe.UnhealthyValue + "\"}}"));
 
         Assert.Equal("rolled_back", result.GetProperty("outcome").GetString());
@@ -138,14 +138,14 @@ public sealed class LeafConfigTests
         Assert.Equal(2, f.Units().RestartCount(AssistantUnit));
 
         // Snapshot restored: the override is gone (it had no prior value).
-        JsonElement cfg = await Json(admin.GetAsync($"/api/v1/hosts/{Host}/services/assistant/config"));
+        JsonElement cfg = await Json(owner.GetAsync($"/api/v1/hosts/{Host}/services/assistant/config"));
         JsonElement key = cfg.GetProperty("fields").EnumerateArray()
             .First(x => x.GetProperty("key").GetString() == "webSearchApiKey");
         Assert.False(key.GetProperty("overridden").GetBoolean());
         Assert.False(key.GetProperty("set").GetBoolean());
 
         // The rollback is audited (warn).
-        JsonElement audit = await Json(admin.GetAsync("/api/v1/audit"));
+        JsonElement audit = await Json(owner.GetAsync("/api/v1/audit"));
         JsonElement row = audit.GetProperty("data").EnumerateArray()
             .First(r => r.GetProperty("action").GetString() == "service.config_changed");
         Assert.Equal("rolled_back", row.GetProperty("meta").GetProperty("outcome").GetString());
@@ -156,12 +156,12 @@ public sealed class LeafConfigTests
     public async Task PutConfig_SameValue_Unchanged_NoRestart()
     {
         using var f = new LeafConfigTestFactory();
-        HttpClient admin = Admin(f);
+        HttpClient owner = Owner(f);
 
-        await Put(admin, "monitor", """{"values":{"logLevel":"Warning"}}""");          // applied (1 restart)
+        await Put(owner, "monitor", """{"values":{"logLevel":"Warning"}}""");          // applied (1 restart)
         Assert.Equal(1, f.Units().RestartCount(MonitorUnit));
 
-        JsonElement again = await Json(Put(admin, "monitor", """{"values":{"logLevel":"Warning"}}"""));
+        JsonElement again = await Json(Put(owner, "monitor", """{"values":{"logLevel":"Warning"}}"""));
         Assert.Equal("unchanged", again.GetProperty("outcome").GetString());
         Assert.Equal(1, f.Units().RestartCount(MonitorUnit));                            // still 1 — no restart
     }
@@ -171,15 +171,15 @@ public sealed class LeafConfigTests
     public async Task PutConfig_Reset_DeletesOverride()
     {
         using var f = new LeafConfigTestFactory();
-        HttpClient admin = Admin(f);
+        HttpClient owner = Owner(f);
 
-        await Put(admin, "monitor", """{"values":{"logLevel":"Debug"}}""");
+        await Put(owner, "monitor", """{"values":{"logLevel":"Debug"}}""");
         Assert.True(File.Exists(Path.Combine(f.OverridesDir, "monitor.env")));
 
-        JsonElement reset = await Json(Put(admin, "monitor", """{"reset":["logLevel"]}"""));
+        JsonElement reset = await Json(Put(owner, "monitor", """{"reset":["logLevel"]}"""));
         Assert.Equal("applied", reset.GetProperty("outcome").GetString());
 
-        JsonElement cfg = await Json(admin.GetAsync($"/api/v1/hosts/{Host}/services/monitor/config"));
+        JsonElement cfg = await Json(owner.GetAsync($"/api/v1/hosts/{Host}/services/monitor/config"));
         JsonElement ll = cfg.GetProperty("fields").EnumerateArray().First(x => x.GetProperty("key").GetString() == "logLevel");
         Assert.False(ll.GetProperty("overridden").GetBoolean());
         // No overrides left → the file is removed (reset-to-floor).
@@ -191,7 +191,7 @@ public sealed class LeafConfigTests
     public async Task PutConfig_UnknownKey_400()
     {
         using var f = new LeafConfigTestFactory();
-        HttpResponseMessage resp = await Put(Admin(f), "monitor", """{"values":{"nope":"x"}}""");
+        HttpResponseMessage resp = await Put(Owner(f), "monitor", """{"values":{"nope":"x"}}""");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await resp.Content.ReadAsStringAsync());
     }
@@ -200,7 +200,7 @@ public sealed class LeafConfigTests
     public async Task PutConfig_InvalidEnum_400()
     {
         using var f = new LeafConfigTestFactory();
-        HttpResponseMessage resp = await Put(Admin(f), "monitor", """{"values":{"logLevel":"Loud"}}""");
+        HttpResponseMessage resp = await Put(Owner(f), "monitor", """{"values":{"logLevel":"Loud"}}""");
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 
@@ -208,7 +208,7 @@ public sealed class LeafConfigTests
     public async Task PutConfig_NonConfigTargetLeaf_404()
     {
         using var f = new LeafConfigTestFactory();
-        HttpResponseMessage resp = await Put(Admin(f), "bot", """{"values":{"logLevel":"Debug"}}""");
+        HttpResponseMessage resp = await Put(Owner(f), "bot", """{"values":{"logLevel":"Debug"}}""");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
@@ -216,17 +216,17 @@ public sealed class LeafConfigTests
     public async Task PutConfig_Operator_403()
     {
         using var f = new LeafConfigTestFactory();
-        HttpResponseMessage resp = await Put(Client(f, Persona.Operator), "monitor", """{"values":{"logLevel":"Debug"}}""");
+        HttpResponseMessage resp = await Put(Client(f, Persona.Runner), "monitor", """{"values":{"logLevel":"Debug"}}""");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     // ---- helpers ----------------------------------------------------------------------------------
-    private static HttpClient Admin(LeafConfigTestFactory f) => Client(f, Persona.Owner);
+    private static HttpClient Owner(LeafConfigTestFactory f) => Client(f, Persona.Owner);
 
-    private static HttpClient Client(LeafConfigTestFactory factory, Persona? tier)
+    private static HttpClient Client(LeafConfigTestFactory factory, Persona? persona)
     {
         HttpClient c = factory.CreateClient();
-        if (tier is { } t)
+        if (persona is { } t)
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(t));
         return c;
     }

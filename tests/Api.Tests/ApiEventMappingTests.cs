@@ -24,33 +24,27 @@ public sealed class ApiEventMappingTests
     private const string HostId = "hotrod";
     private static readonly DateTimeOffset When = DateTimeOffset.Parse("2026-08-12T10:00:00Z");
 
-    private static AuthSessionEventData Session(
-        string provider = "discord", string? peerNode = null, string? userAgent = null) => new()
-        {
-            Timestamp = When,
-            Actor = $"{provider}:haru",
-            Origin = AuditOrigin.Ui,
-            UserId = "usr_abc",
-            Username = "haru",
-            Identity = $"{provider}:haru",
-            Provider = provider,
-            Tier = "operator",
-            Sid = "sid_1",
-            UserAgent = userAgent,
-            PeerNode = peerNode,
-        };
+    private static AuthSessionEventData Session(string provider = "discord", string? userAgent = null) => new()
+    {
+        Timestamp = When,
+        Actor = $"{provider}:haru",
+        Origin = AuditOrigin.Ui,
+        UserId = "usr_abc",
+        Username = "haru",
+        Identity = $"{provider}:haru",
+        Provider = provider,
+        Sid = "sid_1",
+        UserAgent = userAgent,
+    };
 
     private static UserAccountEventData Account(
-        string? fromTier = null, string? toTier = null, string? fromStatus = null,
-        string? toStatus = null, bool? byHolder = null) => new()
+        string? fromStatus = null, string? toStatus = null, bool? byHolder = null) => new()
         {
             Timestamp = When,
-            Actor = "discord:admin",
+            Actor = "discord:manager",
             Origin = AuditOrigin.Ui,
             UserId = "usr_target",
             Username = "someone",
-            FromTier = fromTier,
-            ToTier = toTier,
             FromStatus = fromStatus,
             ToStatus = toStatus,
             ByHolder = byHolder,
@@ -89,17 +83,6 @@ public sealed class ApiEventMappingTests
     }
 
     [Fact]
-    public void A_vouched_session_names_the_node_that_asserted_it()
-    {
-        AuditWrite row = AuditMapping.FromAuthSessionEvent(
-            Session(peerNode: "node-b"), ApiJournal.ClusterSessionEvent, HostId);
-
-        Assert.Equal("auth.cluster.vouched", row.Action);
-        Assert.Contains("node-b", row.Summary, StringComparison.Ordinal);
-        Assert.Equal("node-b", row.Meta!["peerNode"]);
-    }
-
-    [Fact]
     public void A_login_carries_the_session_it_opened()
     {
         // The pairing a logout is matched against, and the whole reason a revocation can be traced to
@@ -107,7 +90,6 @@ public sealed class ApiEventMappingTests
         AuditWrite row = AuditMapping.FromAuthSessionEvent(Session(), ApiJournal.LoginEvent, HostId);
 
         Assert.Equal("sid_1", row.Meta!["sid"]);
-        Assert.Equal("operator", row.Meta["tier"]);
     }
 
     [Fact]
@@ -126,9 +108,9 @@ public sealed class ApiEventMappingTests
     [Theory]
     [InlineData("self", "auth.session.revoked", AuditSeverity.Info)]
     [InlineData("all", "auth.session.revoked", AuditSeverity.Info)]
-    // An admin ending somebody else's session is the substantial-power case; a person managing their
-    // own is routine, and a trail that shouted equally about both would be no easier to read.
-    [InlineData("admin", "auth.session.revoked", AuditSeverity.Warn)]
+    // Ending somebody else's session is the substantial-power case; a person managing their own is
+    // routine, and a trail that shouted equally about both would be no easier to read.
+    [InlineData("other", "auth.session.revoked", AuditSeverity.Warn)]
     public void A_revocation_maps_its_scope_to_an_action_and_a_weight(
         string scope, string action, string severity)
     {
@@ -149,43 +131,27 @@ public sealed class ApiEventMappingTests
     }
 
     [Fact]
-    public void An_admin_revocation_says_whose_sessions_ended_not_only_who_ended_them()
+    public void Revoking_somebody_elses_says_whose_sessions_ended_not_only_who_ended_them()
     {
         // The two are different people on exactly the rows where it matters. Collapsing them would make
-        // "who was logged out" unanswerable for every admin action.
+        // "who was logged out" unanswerable for every such revocation.
         AuditWrite row = AuditMapping.FromSessionRevokedEvent(new AuthSessionRevokedData
         {
             Timestamp = When,
-            Actor = "discord:admin",
+            Actor = "discord:manager",
             Origin = AuditOrigin.Ui,
-            Scope = "admin",
+            Scope = "other",
             UserId = "usr_target",
             Username = "someone",
             Count = 3,
         }, HostId);
 
-        Assert.Equal("admin", row.Actor.Name);
+        Assert.Equal("manager", row.Actor.Name);
         Assert.Contains("someone", row.Summary, StringComparison.Ordinal);
         Assert.Equal("3", row.Meta!["count"]);
     }
 
     // ---- accounts -----------------------------------------------------------------------------
-
-    [Fact]
-    public void A_tier_change_records_both_ends_of_the_move()
-    {
-        // With the account store as this host's sole authority, this row is the ONLY record that
-        // anybody's permissions ever moved.
-        AuditWrite row = AuditMapping.FromUserAccountEvent(
-            Account(fromTier: "viewer", toTier: "admin"), ApiJournal.UserTierChangedEvent, HostId);
-
-        Assert.Equal("user.tier_changed", row.Action);
-        Assert.Equal(AuditSeverity.Warn, row.Severity);
-        Assert.Equal("viewer", row.Meta!["fromTier"]);
-        Assert.Equal("admin", row.Meta["toTier"]);
-        Assert.Contains("viewer", row.Summary, StringComparison.Ordinal);
-        Assert.Contains("admin", row.Summary, StringComparison.Ordinal);
-    }
 
     [Fact]
     public void Being_switched_off_and_being_sent_back_for_approval_are_different_sentences()
@@ -220,7 +186,7 @@ public sealed class ApiEventMappingTests
 
         Assert.Contains("set the password on", theirs.Summary, StringComparison.Ordinal);
         Assert.Equal(AuditSeverity.Warn, theirs.Severity);
-        Assert.Equal("admin", theirs.Meta!["by"]);
+        Assert.Equal("other", theirs.Meta!["by"]);
     }
 
     [Fact]
@@ -229,20 +195,19 @@ public sealed class ApiEventMappingTests
         // An account did not exist a moment ago, so there is no "from". A from/to pair here would be a
         // previous state nobody was ever in.
         AuditWrite row = AuditMapping.FromUserAccountEvent(
-            Account(toTier: "viewer", toStatus: "pending"), ApiJournal.UserProvisionedEvent, HostId);
+            Account(toStatus: "pending"), ApiJournal.UserProvisionedEvent, HostId);
 
-        Assert.False(row.Meta!.ContainsKey("fromTier"));
-        Assert.False(row.Meta.ContainsKey("from"));
-        Assert.Equal("viewer", row.Meta["toTier"]);
+        Assert.False(row.Meta!.ContainsKey("from"));
+        Assert.Equal("pending", row.Meta["to"]);
     }
 
     [Fact]
-    public void An_account_row_names_the_admin_as_actor_and_the_account_as_target()
+    public void An_account_row_names_who_acted_as_actor_and_the_account_as_target()
     {
         AuditWrite row = AuditMapping.FromUserAccountEvent(
             Account(toStatus: "active"), ApiJournal.UserApprovedEvent, HostId);
 
-        Assert.Equal("admin", row.Actor.Name);           // who did it
+        Assert.Equal("manager", row.Actor.Name);         // who did it
         Assert.Equal("usr_target", row.Target!.Id);      // to whom
         Assert.Equal("someone", row.Meta!["username"]);
     }
@@ -363,21 +328,21 @@ public sealed class ApiEventMappingTests
     // ---- the classification the redactor reads --------------------------------------------------
 
     [Fact]
-    public void The_values_that_identify_a_person_are_withheld_below_operator()
+    public void The_values_that_identify_a_person_are_withheld_without_the_personal_fields_action()
     {
         // AuditRedaction builds its restricted set from the catalog's field sensitivities, so this
         // asserts the two ends meet: classified Personal upstream, actually withheld here.
         Assert.True(AuditRedaction.IsRestricted("identity"));
         Assert.True(AuditRedaction.IsRestricted("userAgent"));
 
-        // And the counterweight — a trail that recorded authority changing and named nobody would not
+        // And the counterweight — a trail that recorded accounts changing and named nobody would not
         // be a safer log.
         Assert.False(AuditRedaction.IsRestricted("username"));
-        Assert.False(AuditRedaction.IsRestricted("tier"));
+        Assert.False(AuditRedaction.IsRestricted("sid"));
     }
 
     [Fact]
-    public void A_viewer_keeps_the_row_and_loses_only_the_personal_values()
+    public void A_reader_without_personal_fields_keeps_the_row_and_loses_only_the_personal_values()
     {
         AuditWrite write = AuditMapping.FromAuthSessionEvent(
             Session(userAgent: "Firefox/1.0"), ApiJournal.LoginEvent, HostId);
@@ -385,14 +350,14 @@ public sealed class ApiEventMappingTests
 
         AuditRecord seen = AuditRedaction.Redacted(full);
 
-        // Same fact, same id, same moment — a shorter feed for one tier would be two people reading one
-        // host's history and being told different things.
+        // Same fact, same id, same moment — a shorter feed for one reader would be two people reading
+        // one host's history and being told different things.
         Assert.Equal(full.Id, seen.Id);
         Assert.Equal(full.Action, seen.Action);
         Assert.Equal(full.Ts, seen.Ts);
 
         Assert.False(seen.Meta!.ContainsKey("userAgent"));
         Assert.False(seen.Meta.ContainsKey("identity"));
-        Assert.Equal("operator", seen.Meta["tier"]);
+        Assert.Equal("sid_1", seen.Meta["sid"]);
     }
 }

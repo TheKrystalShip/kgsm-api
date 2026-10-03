@@ -15,7 +15,7 @@ namespace TheKrystalShip.Api.Tests;
 /// Slack, a <see cref="WebhookNotificationProvider"/>. <see cref="SlackProviderTests"/> proves the Slack
 /// specifics in isolation (mask/validate/format/send, the mrkdwn + escaping care, the subteam ping) with a
 /// recording HTTP handler; <see cref="SlackApiTests"/> proves it through the real pipeline (the registered
-/// provider list, the §-shaped view, the admin gate, the masked round-trip).
+/// provider list, the §-shaped view, the owner gate, the masked round-trip).
 /// </summary>
 public sealed class SlackProviderTests
 {
@@ -124,12 +124,12 @@ public sealed class SlackProviderTests
 }
 
 /// <summary>The Slack provider through the real pipeline — proving the abstraction is wired (the provider
-/// list reflects what the real Startup registers) and the §-shaped Slack view + admin gate.
+/// list reflects what the real Startup registers) and the §-shaped Slack view + owner gate.
 /// Uses <see cref="AuthTestFactory"/> directly (no provider/HTTP swap): every assertion here is reachable
 /// without an outbound call (list/describe/patch + the unconfigured-`/test` 409 short-circuits before HTTP).</summary>
 public sealed class SlackApiTests
 {
-    private static HttpClient Admin(AuthTestFactory f)
+    private static HttpClient Owner(AuthTestFactory f)
     {
         HttpClient c = f.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(Persona.Owner));
@@ -143,7 +143,7 @@ public sealed class SlackApiTests
     public async Task List_IncludesSlack_AndNotDiscord()
     {
         using var f = new AuthTestFactory();
-        JsonElement rows = await Json(await Admin(f).GetAsync("/api/v1/integrations"));
+        JsonElement rows = await Json(await Owner(f).GetAsync("/api/v1/integrations"));
         List<string?> ids = rows.EnumerateArray().Select(e => e.GetProperty("provider").GetString()).ToList();
         Assert.Contains("slack", ids);
         // Discord is kgsm-bot's channel; this API offers no second route to it.
@@ -154,7 +154,7 @@ public sealed class SlackApiTests
     public async Task Get_Slack_NoBotField_Unconfigured()
     {
         using var f = new AuthTestFactory();
-        HttpResponseMessage r = await Admin(f).GetAsync("/api/v1/integrations/slack");
+        HttpResponseMessage r = await Owner(f).GetAsync("/api/v1/integrations/slack");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
         JsonElement body = await Json(r);
         Assert.Equal("slack", body.GetProperty("provider").GetString());
@@ -166,7 +166,7 @@ public sealed class SlackApiTests
     public async Task Patch_then_Get_Slack_RoundTrips_SecretMaskedNeverEchoed()
     {
         using var f = new AuthTestFactory();
-        HttpClient c = Admin(f);
+        HttpClient c = Owner(f);
         const string webhook = "https://hooks.slack.com/services/T11/B22/realslacksecrettoken";
 
         HttpResponseMessage patch = await c.PatchAsJsonAsync("/api/v1/integrations/slack",
@@ -186,7 +186,7 @@ public sealed class SlackApiTests
     public async Task Patch_Slack_BadWebhook_400()
     {
         using var f = new AuthTestFactory();
-        HttpResponseMessage r = await Admin(f).PatchAsJsonAsync("/api/v1/integrations/slack",
+        HttpResponseMessage r = await Owner(f).PatchAsJsonAsync("/api/v1/integrations/slack",
             new { webhook = "https://discord.com/api/webhooks/1/tok" }); // a Discord URL is not a Slack webhook
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
         Assert.Contains("\"code\":\"bad_request\"", await r.Content.ReadAsStringAsync());
@@ -196,7 +196,7 @@ public sealed class SlackApiTests
     public async Task Test_Slack_Unconfigured_409()
     {
         using var f = new AuthTestFactory();
-        HttpResponseMessage r = await Admin(f).PostAsync("/api/v1/integrations/slack/test", null);
+        HttpResponseMessage r = await Owner(f).PostAsync("/api/v1/integrations/slack/test", null);
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Contains("\"code\":\"not_configured\"", await r.Content.ReadAsStringAsync());
     }

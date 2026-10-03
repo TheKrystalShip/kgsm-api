@@ -44,7 +44,7 @@ public sealed class AssistantPublicUrlTests
     private static async Task<JsonElement> AssistantCapability(PublicUrlFactory factory)
     {
         HttpClient c = factory.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Viewer));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Reader));
         HttpResponseMessage resp = await c.GetAsync($"/api/v1/hosts/{Host}");
         JsonElement host = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.Clone();
         return host.GetProperty("capabilities").GetProperty("assistant");

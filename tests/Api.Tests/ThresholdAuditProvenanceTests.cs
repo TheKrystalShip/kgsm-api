@@ -65,7 +65,7 @@ public sealed class ThresholdAuditProvenanceTests(AuthTestFactory factory) : ICl
         await factory.SeedAuditAsync(BreachWrite(marker));
         await factory.SeedAuditAsync(ClearWrite(marker));
 
-        HttpClient c = Client(Persona.Operator);
+        HttpClient c = Client(Persona.Runner);
 
         var byMonitor = await Actions(c, "/api/v1/audit?actor=monitor&limit=200", marker);
         Assert.Contains("host.threshold.breached", byMonitor);
@@ -89,7 +89,7 @@ public sealed class ThresholdAuditProvenanceTests(AuthTestFactory factory) : ICl
         string marker = "thr-" + Guid.NewGuid().ToString("N")[..8];
         await factory.SeedAuditAsync(BreachWrite(marker));
 
-        HttpClient c = Client(Persona.Operator);
+        HttpClient c = Client(Persona.Runner);
         Assert.Single(await Actions(c, "/api/v1/audit?limit=200", marker));
     }
 
@@ -99,7 +99,7 @@ public sealed class ThresholdAuditProvenanceTests(AuthTestFactory factory) : ICl
         string marker = "thr-" + Guid.NewGuid().ToString("N")[..8];
         await factory.SeedAuditAsync(BreachWrite(marker));
 
-        HttpClient c = Client(Persona.Operator);
+        HttpClient c = Client(Persona.Runner);
         JsonElement page = await Json(await c.GetAsync("/api/v1/audit?actor=monitor&limit=200"));
         JsonElement row = page.GetProperty("data").EnumerateArray()
             .First(r => r.GetProperty("summary").GetString()!.Contains(marker));
@@ -142,10 +142,10 @@ public sealed class ThresholdAuditProvenanceTests(AuthTestFactory factory) : ICl
             .ToList();
     }
 
-    private HttpClient Client(Persona tier)
+    private HttpClient Client(Persona persona)
     {
         HttpClient c = factory.CreateClient();
-        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(tier));
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(persona));
         return c;
     }
 

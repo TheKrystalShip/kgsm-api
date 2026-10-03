@@ -61,7 +61,7 @@ public sealed class MemberActingTests : IClassFixture<AuthTestFactory>
     {
         using WebApplicationFactory<Program> node = Node();
         KgsmIdentity person = Somebody("245717107596197888");
-        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Operator);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Runner);
 
         using HttpClient client = node.CreateClient();
         using HttpResponseMessage response =

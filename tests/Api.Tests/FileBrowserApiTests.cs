@@ -38,27 +38,27 @@ public sealed class FileBrowserApiTests
         _noEngine = noEngine;
     }
 
-    // ===== auth gate (operator for read AND write) =================================================
+    // ===== auth gate (kgsm:server.files.read / .write) ==============================================
 
     [Fact]
     public async Task List_NoToken_401()
     {
-        HttpResponseMessage r = await Client(_engine, tier: null).GetAsync($"/api/v1/servers/{Server}/files");
+        HttpResponseMessage r = await Client(_engine, persona: null).GetAsync($"/api/v1/servers/{Server}/files");
         Assert.Equal(HttpStatusCode.Unauthorized, r.StatusCode);
     }
 
     [Fact]
     public async Task List_Viewer_403_ReadIsOperatorPlus()
     {
-        // Even LISTING is operator+ (file contents routinely hold secrets) — a viewer is forbidden.
-        HttpResponseMessage r = await Client(_engine, Persona.Viewer).GetAsync($"/api/v1/servers/{Server}/files");
+        // Even LISTING needs kgsm:server.files.read (file contents routinely hold secrets) — a reader is forbidden.
+        HttpResponseMessage r = await Client(_engine, Persona.Reader).GetAsync($"/api/v1/servers/{Server}/files");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
     [Fact]
     public async Task Save_Viewer_403()
     {
-        HttpResponseMessage r = await Put(_engine, Persona.Viewer, "edit.cfg", "{\"content\":\"x\"}");
+        HttpResponseMessage r = await Put(_engine, Persona.Reader, "edit.cfg", "{\"content\":\"x\"}");
         Assert.Equal(HttpStatusCode.Forbidden, r.StatusCode);
     }
 
@@ -67,14 +67,14 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task List_UnknownServer_404()
     {
-        HttpResponseMessage r = await Client(_engine, Persona.Operator).GetAsync("/api/v1/servers/nope/files");
+        HttpResponseMessage r = await Client(_engine, Persona.Runner).GetAsync("/api/v1/servers/nope/files");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
     [Fact]
     public async Task List_EngineUnprovisioned_503()
     {
-        HttpResponseMessage r = await Client(_noEngine, Persona.Operator).GetAsync($"/api/v1/servers/{Server}/files");
+        HttpResponseMessage r = await Client(_noEngine, Persona.Runner).GetAsync($"/api/v1/servers/{Server}/files");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, r.StatusCode);
     }
 
@@ -83,7 +83,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task List_Root_200_DirsFirst()
     {
-        HttpResponseMessage r = await Client(_engine, Persona.Operator).GetAsync($"/api/v1/servers/{Server}/files");
+        HttpResponseMessage r = await Client(_engine, Persona.Runner).GetAsync($"/api/v1/servers/{Server}/files");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await r.Content.ReadAsStringAsync());
@@ -101,7 +101,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Read_TextFile_200()
     {
-        HttpResponseMessage r = await Client(_engine, Persona.Operator)
+        HttpResponseMessage r = await Client(_engine, Persona.Runner)
             .GetAsync($"/api/v1/servers/{Server}/files/content?path=server.cfg");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
@@ -114,7 +114,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Read_Binary_409_FileBinary()
     {
-        HttpResponseMessage r = await Client(_engine, Persona.Operator)
+        HttpResponseMessage r = await Client(_engine, Persona.Runner)
             .GetAsync($"/api/v1/servers/{Server}/files/content?path=blob.bin");
         Assert.Equal(HttpStatusCode.Conflict, r.StatusCode);
         Assert.Contains("\"code\":\"file_binary\"", await r.Content.ReadAsStringAsync());
@@ -123,7 +123,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Read_TraversalEscape_404()
     {
-        HttpResponseMessage r = await Client(_engine, Persona.Operator)
+        HttpResponseMessage r = await Client(_engine, Persona.Runner)
             .GetAsync($"/api/v1/servers/{Server}/files/content?path=../../../../etc/passwd");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
@@ -135,7 +135,7 @@ public sealed class FileBrowserApiTests
     {
         // A unique secret in the content — it must NOT appear in the audit row (only path/size/sha256).
         const string secret = "rcon_password=SUPER_SECRET_TOKEN_42";
-        HttpResponseMessage put = await Put(_engine, Persona.Operator, "edit.cfg",
+        HttpResponseMessage put = await Put(_engine, Persona.Runner, "edit.cfg",
             JsonSerializer.Serialize(new { content = secret + "\n", origin = "ui" }));
         Assert.Equal(HttpStatusCode.OK, put.StatusCode);
 
@@ -144,7 +144,7 @@ public sealed class FileBrowserApiTests
 
         // The file.written audit row exists, scoped to the server, with path/size/sha256 meta — and the
         // raw audit response NEVER contains the secret content (the regression that matters most).
-        HttpResponseMessage auditResp = await Client(_engine, Persona.Operator).GetAsync("/api/v1/audit?serverId=" + Server);
+        HttpResponseMessage auditResp = await Client(_engine, Persona.Runner).GetAsync("/api/v1/audit?serverId=" + Server);
         string auditJson = await auditResp.Content.ReadAsStringAsync();
         Assert.DoesNotContain("SUPER_SECRET_TOKEN_42", auditJson);
 
@@ -162,7 +162,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Save_StaleEtag_412()
     {
-        HttpResponseMessage r = await Put(_engine, Persona.Operator, "edit.cfg",
+        HttpResponseMessage r = await Put(_engine, Persona.Runner, "edit.cfg",
             JsonSerializer.Serialize(new { content = "x\n", etag = "sha256:deadbeef" }));
         Assert.Equal(HttpStatusCode.PreconditionFailed, r.StatusCode);
     }
@@ -170,7 +170,7 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Save_NonExistent_404_NoCreate()
     {
-        HttpResponseMessage r = await Put(_engine, Persona.Operator, "does-not-exist.cfg",
+        HttpResponseMessage r = await Put(_engine, Persona.Runner, "does-not-exist.cfg",
             JsonSerializer.Serialize(new { content = "x" }));
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
@@ -178,30 +178,30 @@ public sealed class FileBrowserApiTests
     [Fact]
     public async Task Save_MissingContent_400()
     {
-        HttpResponseMessage r = await Put(_engine, Persona.Operator, "edit.cfg", "{}");
+        HttpResponseMessage r = await Put(_engine, Persona.Runner, "edit.cfg", "{}");
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 
     [Fact]
     public async Task Save_BadOrigin_400()
     {
-        HttpResponseMessage r = await Put(_engine, Persona.Operator, "edit.cfg",
+        HttpResponseMessage r = await Put(_engine, Persona.Runner, "edit.cfg",
             "{\"content\":\"x\",\"origin\":\"hacker\"}");
         Assert.Equal(HttpStatusCode.BadRequest, r.StatusCode);
     }
 
     // ===== helpers ================================================================================
 
-    private static HttpClient Client(AuthTestFactory factory, Persona? tier)
+    private static HttpClient Client(AuthTestFactory factory, Persona? persona)
     {
         HttpClient c = factory.CreateClient();
-        if (tier is { } t)
+        if (persona is { } t)
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(t));
         return c;
     }
 
-    private static Task<HttpResponseMessage> Put(AuthTestFactory f, Persona? tier, string path, string json) =>
-        Client(f, tier).PutAsync($"/api/v1/servers/{Server}/files/content?path={Uri.EscapeDataString(path)}",
+    private static Task<HttpResponseMessage> Put(AuthTestFactory f, Persona? persona, string path, string json) =>
+        Client(f, persona).PutAsync($"/api/v1/servers/{Server}/files/content?path={Uri.EscapeDataString(path)}",
             new StringContent(json, Encoding.UTF8, "application/json"));
 
     /// <summary><see cref="AuthTestFactory"/> with a fake <see cref="IInstanceService"/> whose

@@ -275,8 +275,8 @@ public sealed class ServerSettingsController(
     /// <remarks>
     /// <para>
     /// <b>Pure.</b> Nothing is written, nothing is pushed at the scheduler, and the instance is read only
-    /// for the timezone the caller did not supply. Operator all the same: it is the editor's companion, and
-    /// the editor is the writer.
+    /// for the timezone the caller did not supply, so it asks <c>kgsm:server.config.read</c> like any other
+    /// read of the settings.
     /// </para>
     /// <para>
     /// <b>An expression that cannot be read is an answer, not a failure.</b> The result carries

@@ -38,13 +38,13 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
     public async Task LosingAnActionLandsOnTheNextRequestWithTheSameToken()
     {
         // The token names who and nothing else; what the gate reads is the replica.
-        string token = factory.AccessToken(Persona.Operator);
+        string token = factory.AccessToken(Persona.Runner);
         using HttpClient client = Bearing(factory, token);
 
         // 404 = past the gate, no such server. 403 = refused by the gate.
         Assert.Equal(HttpStatusCode.NotFound, (await StartAServer(client)).StatusCode);
 
-        factory.SetAccount(FakeDiscordResolver.Identity, Persona.Viewer);
+        factory.SetAccount(TestIdentity.Identity, Persona.Reader);
 
         Assert.Equal(HttpStatusCode.Forbidden, (await StartAServer(client)).StatusCode);
     }
@@ -52,11 +52,11 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
     [Fact]
     public async Task GainingAnActionLandsOnTheNextRequestToo()
     {
-        string token = factory.AccessToken(Persona.Viewer);
+        string token = factory.AccessToken(Persona.Reader);
         using HttpClient client = Bearing(factory, token);
         Assert.Equal(HttpStatusCode.Forbidden, (await StartAServer(client)).StatusCode);
 
-        factory.SetAccount(FakeDiscordResolver.Identity, Persona.Operator);
+        factory.SetAccount(TestIdentity.Identity, Persona.Runner);
 
         Assert.Equal(HttpStatusCode.NotFound, (await StartAServer(client)).StatusCode);
     }
@@ -70,7 +70,7 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
         using HttpClient client = Bearing(factory, token);
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/v1/me")).StatusCode);
 
-        factory.SetAccount(FakeDiscordResolver.Identity, Persona.Owner, UserStatus.Disabled);
+        factory.SetAccount(TestIdentity.Identity, Persona.Owner, UserStatus.Disabled);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/api/v1/me")).StatusCode);
     }
@@ -82,7 +82,7 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
         // person is being asked to wait, the other is being told this is not their host.
         string token = factory.AccessToken(Persona.Owner);
         using HttpClient client = Bearing(factory, token);
-        factory.SetAccount(FakeDiscordResolver.Identity, Persona.Owner, UserStatus.Pending);
+        factory.SetAccount(TestIdentity.Identity, Persona.Owner, UserStatus.Pending);
 
         HttpResponseMessage me = await client.GetAsync("/api/v1/me");
 
@@ -99,7 +99,7 @@ public sealed class LiveAuthorityTests(AuthTestFactory factory) : IClassFixture<
         // from them, so their session stands and every gate refuses it.
         string token = factory.AccessToken(Persona.Owner);
         using HttpClient client = Bearing(factory, token);
-        AuthTestFactory.RemoveAccountOn(factory.Services, FakeDiscordResolver.Identity);
+        AuthTestFactory.RemoveAccountOn(factory.Services, TestIdentity.Identity);
 
         HttpResponseMessage me = await client.GetAsync("/api/v1/me");
 

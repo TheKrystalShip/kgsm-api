@@ -210,9 +210,9 @@ public class StreamConnectionTests
     public async Task RunAsync_rereads_the_replica_and_tells_the_reader_when_their_status_moves()
     {
         TestAuthority authority = NewAuthority();
-        KgsmIdentity alice = FakeDiscordResolver.IdentityFor("conn-alice");
-        string id = authority.Set(alice, Persona.Operator, UserStatus.Pending).UserId;
-        authority.Set(alice, Persona.Operator);
+        KgsmIdentity alice = TestIdentity.IdentityFor("conn-alice");
+        string id = authority.Set(alice, Persona.Runner, UserStatus.Pending).UserId;
+        authority.Set(alice, Persona.Runner);
 
         using var cts = new CancellationTokenSource();
         var body = new MemoryStream();
@@ -225,7 +225,7 @@ public class StreamConnectionTests
         Assert.True(conn.Receives("hosts/h/services"), "an unchanged replica must not take anything away");
         Assert.DoesNotContain("me.patch", Encoding.UTF8.GetString(body.ToArray()), StringComparison.Ordinal);
 
-        authority.Set(alice, Persona.Viewer, UserStatus.Disabled);
+        authority.Set(alice, Persona.Reader, UserStatus.Disabled);
 
         DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
         while (conn.Receives("hosts/h/services") && DateTime.UtcNow < deadline)
@@ -240,7 +240,6 @@ public class StreamConnectionTests
         string written = Encoding.UTF8.GetString(body.ToArray());
         Assert.Contains("\"topic\":\"me\"", written, StringComparison.Ordinal);
         Assert.Contains("\"status\":\"disabled\"", written, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"tier\"", written, StringComparison.Ordinal);
 
         cts.Cancel();
         await run;
@@ -283,7 +282,7 @@ public class StreamConnectionTests
     public async Task RunAsync_pushes_nothing_while_the_status_holds()
     {
         TestAuthority authority = NewAuthority();
-        string id = authority.Set(FakeDiscordResolver.IdentityFor("conn-steady"), Persona.Viewer).UserId;
+        string id = authority.Set(TestIdentity.IdentityFor("conn-steady"), Persona.Reader).UserId;
 
         using var cts = new CancellationTokenSource();
         var body = new MemoryStream();

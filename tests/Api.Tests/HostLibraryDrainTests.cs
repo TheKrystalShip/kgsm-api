@@ -74,17 +74,17 @@ public sealed class HostLibraryDrainTests : IClassFixture<HostLibraryDrainTests.
     [Fact]
     public async Task Remove_Operator_403()
     {
-        HttpResponseMessage resp = await Delete(Persona.Operator, "ssd", "?drain=archive");
+        HttpResponseMessage resp = await Delete(Persona.Runner, "ssd", "?drain=archive");
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
     // --- helpers -----------------------------------------------------------------------------------
 
-    private Task<HttpResponseMessage> Delete(Persona tier, string name, string query = "")
+    private Task<HttpResponseMessage> Delete(Persona persona, string name, string query = "")
     {
         HttpClient c = _factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _factory.AccessToken(tier));
+            new AuthenticationHeaderValue("Bearer", _factory.AccessToken(persona));
         return c.DeleteAsync($"/api/v1/hosts/{TestHostId}/libraries/{name}{query}");
     }
 

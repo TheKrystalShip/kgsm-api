@@ -1015,13 +1015,12 @@ public static class AuditMapping
 
     // ---- events a surface records rather than the engine ---------------------------------------
     //
-    // Nothing runs an engine command for signing somebody in, changing an account's authority or
-    // reconfiguring a leaf, so whoever performed it records the fact and the sentence is shaped here,
-    // at read time, the same as for any other producer's journal. Nothing about these mappers knows
-    // which journal a line came from — the account ones are written by this API on a host that holds
-    // its own accounts, and by the cluster's auth anchor when one holds them instead.
+    // Nothing runs an engine command for signing somebody in, changing an account or reconfiguring a
+    // leaf, so whoever performed it records the fact and the sentence is shaped here, at read time, the
+    // same as for any other producer's journal. The account ones are written by the cluster's auth
+    // anchor; nothing about these mappers depends on which journal a line came from.
 
-    /// <summary>Map an <c>auth.signed_in</c> / <c>auth.signed_out</c> / <c>auth.cluster.vouched</c> event.</summary>
+    /// <summary>Map an <c>auth.signed_in</c> / <c>auth.signed_out</c> event.</summary>
     /// <remarks>
     /// What separates "logged in" from "signed in with a password" is the identity PROVIDER, which is
     /// on the record — not which code path ran. A wording change here therefore applies to every row
@@ -1035,9 +1034,6 @@ public static class AuditMapping
         string summary = type switch
         {
             ApiJournal.LogoutEvent => $"{who} logged out",
-            ApiJournal.ClusterSessionEvent => string.IsNullOrEmpty(d.PeerNode)
-                ? $"{who} joined via a cluster vouch"
-                : $"{who} joined via a cluster vouch from node '{d.PeerNode}'",
             // A local credential and a bounce through an external provider are different enough that a
             // reader auditing access wants them apart, and the provider is what says which.
             _ when string.Equals(d.Provider, "local", StringComparison.OrdinalIgnoreCase) =>
@@ -1046,12 +1042,10 @@ public static class AuditMapping
         };
 
         var meta = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (!string.IsNullOrEmpty(d.Tier)) meta["tier"] = d.Tier!;
         if (!string.IsNullOrEmpty(d.Sid)) meta["sid"] = d.Sid!;
         if (!string.IsNullOrEmpty(d.UserId)) meta["userId"] = d.UserId!;
         if (!string.IsNullOrEmpty(d.Identity)) meta["identity"] = d.Identity;
         if (!string.IsNullOrEmpty(d.UserAgent)) meta["userAgent"] = d.UserAgent!;
-        if (!string.IsNullOrEmpty(d.PeerNode)) meta["peerNode"] = d.PeerNode!;
 
         return ApiWrite(d, type, AuditSeverity.Info, target: null, hostId, summary, meta);
     }
@@ -1080,7 +1074,7 @@ public static class AuditMapping
         (string severity, string summary) = d.Scope switch
         {
             SessionRevokeScopes.All => (AuditSeverity.Info, $"{who} logged out everywhere ({count} session(s))"),
-            SessionRevokeScopes.Admin => (AuditSeverity.Warn, $"{who} revoked {sessions} belonging to {d.Username}"),
+            SessionRevokeScopes.Other => (AuditSeverity.Warn, $"{who} revoked {sessions} belonging to {d.Username}"),
 
             // Nobody acted at the moment this happened, so it names no actor. The account was
             // switched off earlier — already its own row — and this is when the access actually
@@ -1138,10 +1132,9 @@ public static class AuditMapping
             summary, meta);
     }
 
-    /// <summary>Map one of the six <c>user.*</c> events to its account action.</summary>
+    /// <summary>Map one of the <c>user.*</c> events to its account action.</summary>
     /// <remarks>
     /// These are the trail's most sensitive rows: each records an account changing at the auth anchor.
-    /// A row journalled with a tier names it, and is shaped as it was written.
     /// </remarks>
     public static AuditWrite FromUserAccountEvent(UserAccountEventData d, string type, string hostId)
     {
@@ -1151,10 +1144,7 @@ public static class AuditMapping
         string name = d.Username;
         (string severity, string summary) = type switch
         {
-            ApiJournal.UserProvisionedEvent => (AuditSeverity.Warn,
-                string.IsNullOrEmpty(d.ToTier)
-                    ? $"{who} created the account '{name}'"
-                    : $"{who} created the account '{name}' with the {d.ToTier} tier"),
+            ApiJournal.UserProvisionedEvent => (AuditSeverity.Warn, $"{who} created the account '{name}'"),
 
             ApiJournal.UserApprovedEvent => (AuditSeverity.Warn, $"{who} approved the account '{name}'"),
 
@@ -1164,9 +1154,6 @@ public static class AuditMapping
                 !string.Equals(d.ToStatus, "disabled", StringComparison.OrdinalIgnoreCase) =>
                 (AuditSeverity.Warn, $"{who} returned the account '{name}' to awaiting approval"),
             ApiJournal.UserDisabledEvent => (AuditSeverity.Danger, $"{who} disabled the account '{name}'"),
-
-            ApiJournal.UserTierChangedEvent => (AuditSeverity.Warn,
-                $"{who} changed '{name}' from {d.FromTier ?? "none"} to {d.ToTier ?? "none"}"),
 
             ApiJournal.UserDeletedEvent => (AuditSeverity.Danger, $"{who} deleted the account '{name}'"),
 
@@ -1179,11 +1166,9 @@ public static class AuditMapping
 
         var meta = new Dictionary<string, string>(StringComparer.Ordinal) { ["username"] = name };
         if (!string.IsNullOrEmpty(d.UserId)) meta["userId"] = d.UserId!;
-        if (!string.IsNullOrEmpty(d.FromTier)) meta["fromTier"] = d.FromTier!;
-        if (!string.IsNullOrEmpty(d.ToTier)) meta["toTier"] = d.ToTier!;
         if (!string.IsNullOrEmpty(d.FromStatus)) meta["from"] = d.FromStatus!;
         if (!string.IsNullOrEmpty(d.ToStatus)) meta["to"] = d.ToStatus!;
-        if (d.ByHolder is { } held) meta["by"] = held ? "self" : "admin";
+        if (d.ByHolder is { } held) meta["by"] = held ? "self" : "other";
 
         AuditTarget? target = string.IsNullOrEmpty(d.UserId)
             ? null

@@ -63,8 +63,7 @@ public sealed class AnchorSourcedAuditTests
         AuthSessionEventData data = Roundtrip<AuthSessionEventData>(
             AuthEventPayloads.Session(
                 userId: "usr_abc", username: "haru", identity: "discord:245717107596197888",
-                provider: "discord", tier: "admin", sid: "sid_1", userAgent: "Firefox",
-                peerNode: null));
+                provider: "discord", sid: "sid_1", userAgent: "Firefox"));
 
         // Every field, because the failure this guards is silent: a name spelled differently by one
         // writer deserializes to null and the row renders with something missing and nothing
@@ -73,10 +72,8 @@ public sealed class AnchorSourcedAuditTests
         Assert.Equal("haru", data.Username);
         Assert.Equal("discord:245717107596197888", data.Identity);
         Assert.Equal("discord", data.Provider);
-        Assert.Equal("admin", data.Tier);
         Assert.Equal("sid_1", data.Sid);
         Assert.Equal("Firefox", data.UserAgent);
-        Assert.Null(data.PeerNode);
     }
 
     [Fact]
@@ -84,18 +81,16 @@ public sealed class AnchorSourcedAuditTests
     {
         UserAccountEventData data = Roundtrip<UserAccountEventData>(
             AuthEventPayloads.Account(
-                userId: "usr_target", username: "someone", fromTier: "none", toTier: "operator",
+                userId: "usr_target", username: "someone",
                 fromStatus: "pending", toStatus: "active", byHolder: null));
 
         Assert.Equal("usr_target", data.UserId);
         Assert.Equal("someone", data.Username);
-        Assert.Equal("none", data.FromTier);
-        Assert.Equal("operator", data.ToTier);
         Assert.Equal("pending", data.FromStatus);
         Assert.Equal("active", data.ToStatus);
 
-        // A real null rather than false. "The distinction does not apply" and "an administrator did
-        // it" are different facts, and reading the first as the second reports every provisioning as
+        // A real null rather than false. "The distinction does not apply" and "somebody else did it"
+        // are different facts, and reading the first as the second reports every provisioning as
         // somebody else's doing.
         Assert.Null(data.ByHolder);
     }
@@ -121,14 +116,12 @@ public sealed class AnchorSourcedAuditTests
     {
         AuthSessionEventData data = Stamped(
             Roundtrip<AuthSessionEventData>(AuthEventPayloads.Session(
-                "usr_abc", "haru", "discord:haru", "discord", "admin", "sid_1", null, null)),
+                "usr_abc", "haru", "discord:haru", "discord", "sid_1", null)),
             "discord:haru");
 
         AuditWrite row = AuditMapping.FromAuthSessionEvent(data, AuthEvents.SignedIn, HostId);
 
-        // The sentence a reader has always seen. It comes from the PROVIDER on the record, not from
-        // which code path ran — which is what lets the same wording cover a row written before an
-        // anchor existed and one written after.
+        // The sentence comes from the PROVIDER on the record, not from which code path ran.
         Assert.Equal("haru logged in", row.Summary);
         Assert.Equal(AuditSeverity.Info, row.Severity);
         Assert.Equal("haru", row.Actor.Name);
@@ -140,7 +133,7 @@ public sealed class AnchorSourcedAuditTests
     {
         AuthSessionEventData data = Stamped(
             Roundtrip<AuthSessionEventData>(AuthEventPayloads.Session(
-                "usr_abc", "haru", "local:usr_abc", "local", "viewer", "sid_1", null, null)),
+                "usr_abc", "haru", "local:usr_abc", "local", "sid_1", null)),
             "local:haru");
 
         // A reader auditing access wants a local credential and a bounce through an external provider
@@ -218,11 +211,11 @@ public sealed class AnchorSourcedAuditTests
     {
         AuthSessionRevokedData data = Stamped(
             Roundtrip<AuthSessionRevokedData>(AuthEventPayloads.SessionRevoked(
-                SessionRevokeScopes.Admin, "usr_target", "someone", "sid_1", 1)),
-            "discord:admin");
+                SessionRevokeScopes.Other, "usr_target", "someone", "sid_1", 1)),
+            "discord:haru");
 
         Assert.Equal(
-            "admin revoked a session belonging to someone",
+            "haru revoked a session belonging to someone",
             AuditMapping.FromSessionRevokedEvent(data, HostId).Summary);
     }
 
@@ -236,7 +229,6 @@ public sealed class AnchorSourcedAuditTests
     [InlineData(AuthEvents.UserProvisioned)]
     [InlineData(AuthEvents.UserApproved)]
     [InlineData(AuthEvents.UserDisabled)]
-    [InlineData(AuthEvents.UserTierChanged)]
     [InlineData(AuthEvents.UserDeleted)]
     [InlineData(AuthEvents.UserPasswordChanged)]
     [InlineData(AuthEvents.IdentityLinked)]
@@ -249,7 +241,7 @@ public sealed class AnchorSourcedAuditTests
         AuditRecord? row = EngineEventShaping.Shape(
             new EventHistoryEntry(
                 Id: "evt_1", Ts: When, Type: type, Instance: null, Blueprint: null,
-                Actor: "discord:admin", Origin: AuditOrigin.Ui, Hostname: "hotrod",
+                Actor: "discord:haru", Origin: AuditOrigin.Ui, Hostname: "hotrod",
                 Data: PayloadFor(type), Producer: "kgsm-auth-anchor"),
             HostId);
 
@@ -267,9 +259,8 @@ public sealed class AnchorSourcedAuditTests
     {
         Action<Utf8JsonWriter> payload = type switch
         {
-            AuthEvents.SignedIn or AuthEvents.SignedOut or AuthEvents.ClusterVouched =>
-                AuthEventPayloads.Session(
-                    "usr_abc", "haru", "discord:haru", "discord", "admin", "sid_1", null, null),
+            AuthEvents.SignedIn or AuthEvents.SignedOut =>
+                AuthEventPayloads.Session("usr_abc", "haru", "discord:haru", "discord", "sid_1", null),
 
             AuthEvents.SessionRevoked => AuthEventPayloads.SessionRevoked(
                 SessionRevokeScopes.Withdrawn, "usr_abc", "haru", "sid_1", 1),
@@ -280,8 +271,7 @@ public sealed class AnchorSourcedAuditTests
             AuthEvents.IdentityLinked or AuthEvents.IdentityUnlinked =>
                 AuthEventPayloads.Identity("usr_abc", "haru", "discord", "discord:haru"),
 
-            _ => AuthEventPayloads.Account(
-                "usr_target", "someone", "none", "operator", "pending", "active", null),
+            _ => AuthEventPayloads.Account("usr_target", "someone", "pending", "active", null),
         };
 
         var buffer = new MemoryStream();

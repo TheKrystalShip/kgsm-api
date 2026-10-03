@@ -9,7 +9,7 @@ namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
 /// Phase 1 (dynamic provisioning) coverage — connect/disconnect a leaf at runtime: the registry+capability
-/// flip, the <c>capabilities.patch</c> SSE emit, the audit row, the admin gate (operator 403 / no token 401),
+/// flip, the <c>capabilities.patch</c> SSE emit, the audit row, the owner gate (operator 403 / no token 401),
 /// the foreign-host / unknown-leaf 404s, and persistence across a simulated restart. Each mutating test uses
 /// its own factory (fresh DB) so the registry state never leaks between tests.
 /// </summary>
@@ -23,24 +23,24 @@ public sealed class LeafProvisioningTests
     public async Task Connect_Monitor_FlipsProvisioned_AndAudits()
     {
         using var factory = new LeafTestFactory();
-        HttpClient admin = Client(factory, Persona.Owner);
+        HttpClient owner = Client(factory, Persona.Owner);
 
         // Baseline: monitor absent (provisioned:false) on the capability block + the Services row.
-        Assert.False(await MetricsProvisioned(admin));
-        Assert.False(await ServiceProvisioned(admin, MonitorUnitless));
+        Assert.False(await MetricsProvisioned(owner));
+        Assert.False(await ServiceProvisioned(owner, MonitorUnitless));
 
-        HttpResponseMessage resp = await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
+        HttpResponseMessage resp = await owner.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         JsonElement row = JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
         Assert.Equal(MonitorUnitless, row.GetProperty("id").GetString());
         Assert.True(row.GetProperty("provisioned").GetBoolean());
 
         // The capability block + the Services row now report provisioned:true.
-        Assert.True(await MetricsProvisioned(admin));
-        Assert.True(await ServiceProvisioned(admin, MonitorUnitless));
+        Assert.True(await MetricsProvisioned(owner));
+        Assert.True(await ServiceProvisioned(owner, MonitorUnitless));
 
         // A service.connect audit row landed, targeting the leaf, actor = the caller.
-        JsonElement audit = await Json(admin.GetAsync("/api/v1/audit"));
+        JsonElement audit = await Json(owner.GetAsync("/api/v1/audit"));
         JsonElement[] rows = audit.GetProperty("data").EnumerateArray().ToArray();
         JsonElement connect = rows.First(r => r.GetProperty("action").GetString() == "service.connected");
         Assert.Equal("leaf", connect.GetProperty("target").GetProperty("kind").GetString());
@@ -53,18 +53,18 @@ public sealed class LeafProvisioningTests
     public async Task Disconnect_Reverses_AndAudits()
     {
         using var factory = new LeafTestFactory();
-        HttpClient admin = Client(factory, Persona.Owner);
+        HttpClient owner = Client(factory, Persona.Owner);
 
-        await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
-        Assert.True(await MetricsProvisioned(admin));
+        await owner.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
+        Assert.True(await MetricsProvisioned(owner));
 
-        HttpResponseMessage resp = await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/disconnect", null);
+        HttpResponseMessage resp = await owner.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/disconnect", null);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         Assert.False(JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement.GetProperty("provisioned").GetBoolean());
 
-        Assert.False(await MetricsProvisioned(admin));
+        Assert.False(await MetricsProvisioned(owner));
 
-        JsonElement audit = await Json(admin.GetAsync("/api/v1/audit"));
+        JsonElement audit = await Json(owner.GetAsync("/api/v1/audit"));
         Assert.Contains(audit.GetProperty("data").EnumerateArray(),
             r => r.GetProperty("action").GetString() == "service.disconnected");
     }
@@ -81,7 +81,7 @@ public sealed class LeafProvisioningTests
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
-        HttpClient admin = Client(factory, Persona.Owner);
+        HttpClient owner = Client(factory, Persona.Owner);
 
         // Connect repeatedly across the read window so the subscription is certainly live before the flip we
         // observe (the LeafProvisioningController flip is idempotent → re-connecting stays provisioned:true).
@@ -89,8 +89,8 @@ public sealed class LeafProvisioningTests
         DateTime deadline = DateTime.UtcNow.AddSeconds(10);
         while (DateTime.UtcNow < deadline)
         {
-            await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
-            await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/disconnect", null);
+            await owner.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
+            await owner.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/disconnect", null);
             JsonElement? got = await frames.WaitForFrame(
                 f => f.GetProperty("type").GetString() == "capabilities.patch", TimeSpan.FromMilliseconds(500));
             if (got is not null)
@@ -106,12 +106,12 @@ public sealed class LeafProvisioningTests
         Assert.True(env.GetProperty("data").TryGetProperty("metrics", out _)); // the full capability block
     }
 
-    // ---- admin gate -------------------------------------------------------------------------------
+    // ---- owner gate -------------------------------------------------------------------------------
     [Fact]
     public async Task Connect_Operator_403()
     {
         using var factory = new LeafTestFactory();
-        HttpResponseMessage resp = await Client(factory, Persona.Operator)
+        HttpResponseMessage resp = await Client(factory, Persona.Runner)
             .PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
@@ -120,7 +120,7 @@ public sealed class LeafProvisioningTests
     public async Task Connect_NoToken_401()
     {
         using var factory = new LeafTestFactory();
-        HttpResponseMessage resp = await Client(factory, tier: null)
+        HttpResponseMessage resp = await Client(factory, persona: null)
             .PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
@@ -156,16 +156,16 @@ public sealed class LeafProvisioningTests
         {
             using (var first = new LeafTestFactory(db))
             {
-                HttpClient admin = Client(first, Persona.Owner);
-                await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
-                Assert.True(await ServiceProvisioned(admin, MonitorUnitless));
+                HttpClient owner = Client(first, Persona.Owner);
+                await owner.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/connect", null);
+                Assert.True(await ServiceProvisioned(owner, MonitorUnitless));
             } // dispose → host stops → the SQLite row is committed
 
             // A second process pointed at the SAME db must load the persisted flip on startup (no re-connect).
             using var second = new LeafTestFactory(db);
-            HttpClient admin2 = Client(second, Persona.Owner);
-            Assert.True(await ServiceProvisioned(admin2, MonitorUnitless));
-            Assert.True(await MetricsProvisioned(admin2));
+            HttpClient owner2 = Client(second, Persona.Owner);
+            Assert.True(await ServiceProvisioned(owner2, MonitorUnitless));
+            Assert.True(await MetricsProvisioned(owner2));
         }
         finally { try { File.Delete(db); } catch { /* best effort */ } }
     }
@@ -180,10 +180,10 @@ public sealed class LeafProvisioningTests
         {
             using (var first = new LeafTestFactory(db, socket))
             {
-                HttpClient admin = Client(first, Persona.Owner);
-                Assert.True(await ServiceProvisioned(admin, MonitorUnitless)); // config seeds it provisioned
-                await admin.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/disconnect", null);
-                Assert.False(await ServiceProvisioned(admin, MonitorUnitless));
+                HttpClient owner = Client(first, Persona.Owner);
+                Assert.True(await ServiceProvisioned(owner, MonitorUnitless)); // config seeds it provisioned
+                await owner.PostAsync($"/api/v1/hosts/{Host}/services/{MonitorUnitless}/disconnect", null);
+                Assert.False(await ServiceProvisioned(owner, MonitorUnitless));
             }
 
             // Same config, so nothing about the host moved — the operator's disconnect stands.
@@ -209,9 +209,9 @@ public sealed class LeafProvisioningTests
 
             // The endpoint is gone from config now — and no runtime flip ever recorded a contrary intent.
             using var deconfigured = new LeafTestFactory(db);
-            HttpClient admin = Client(deconfigured, Persona.Owner);
-            Assert.False(await ServiceProvisioned(admin, MonitorUnitless));
-            Assert.False(await MetricsProvisioned(admin));
+            HttpClient owner = Client(deconfigured, Persona.Owner);
+            Assert.False(await ServiceProvisioned(owner, MonitorUnitless));
+            Assert.False(await MetricsProvisioned(owner));
         }
         finally { try { File.Delete(db); } catch { /* best effort */ } }
     }
@@ -253,10 +253,10 @@ public sealed class LeafProvisioningTests
     }
 
     // ---- helpers ----------------------------------------------------------------------------------
-    private static HttpClient Client(LeafTestFactory factory, Persona? tier)
+    private static HttpClient Client(LeafTestFactory factory, Persona? persona)
     {
         HttpClient c = factory.CreateClient();
-        if (tier is { } t)
+        if (persona is { } t)
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(t));
         return c;
     }

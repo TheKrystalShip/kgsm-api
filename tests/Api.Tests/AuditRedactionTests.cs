@@ -6,12 +6,12 @@ using TheKrystalShip.KGSM.Events;
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// What an audit row looks like to a reader below operator.
+/// What an audit row looks like to a reader without <c>api:audit.personal-fields</c>.
 /// </summary>
 /// <remarks>
-/// The property under all of it: the trail is the same length whoever reads it. A viewer sees every
-/// row an operator does — that somebody was banned, that a command was run — and only the values
-/// inside a row differ. Two people reading the same feed and being told a different history is the
+/// The property under all of it: the trail is the same length whoever reads it. A reader without the
+/// action sees every row a reader with it does — that somebody was banned, that a command was run —
+/// and only the values inside a row differ. Two people reading the same feed and being told a different history is the
 /// failure this must not have.
 /// </remarks>
 public sealed class AuditRedactionTests
@@ -27,20 +27,20 @@ public sealed class AuditRedactionTests
 
     /// <summary>
     /// The decision this implements: a player's connection address is shown on the Control Panel, and
-    /// to operators. Their in-game name is not the same fact and stays — a roster that named nobody
-    /// would answer nobody's question.
+    /// to whoever holds the personal-fields action. Their in-game name is not the same fact and stays —
+    /// a roster that named nobody would answer nobody's question.
     /// </summary>
     [Fact]
-    public void APlayersAddressNeedsOperator_TheirNameDoesNot()
+    public void APlayersAddressNeedsPersonalFields_TheirNameDoesNot()
     {
-        AuditRecord viewer = AuditRedaction.Redacted(Row(
+        AuditRecord reader = AuditRedaction.Redacted(Row(
             "player.joined", "bob joined mc",
             ("playerName", "bob"), ("playerAddr", "95.49.44.91"), ("sessionKey", "abc")));
 
-        Assert.False(viewer.Meta!.ContainsKey("playerAddr"));
-        Assert.Equal("bob", viewer.Meta["playerName"]);
-        Assert.Equal("abc", viewer.Meta["sessionKey"]);
-        Assert.Equal("bob joined mc", viewer.Summary);
+        Assert.False(reader.Meta!.ContainsKey("playerAddr"));
+        Assert.Equal("bob", reader.Meta["playerName"]);
+        Assert.Equal("abc", reader.Meta["sessionKey"]);
+        Assert.Equal("bob joined mc", reader.Summary);
     }
 
     /// <summary>
@@ -51,16 +51,16 @@ public sealed class AuditRedactionTests
     [Fact]
     public void AConsoleCommandLeavesTheSummaryTooNotJustTheMeta()
     {
-        AuditRecord viewer = AuditRedaction.Redacted(Row(
+        AuditRecord reader = AuditRedaction.Redacted(Row(
             "console.input.sent", "ran 'op somebody' on mc", ("command", "op somebody")));
 
-        Assert.Null(viewer.Meta);
-        Assert.DoesNotContain("op somebody", viewer.Summary, StringComparison.Ordinal);
-        Assert.Equal("sent a console command to mc", viewer.Summary);
+        Assert.Null(reader.Meta);
+        Assert.DoesNotContain("op somebody", reader.Summary, StringComparison.Ordinal);
+        Assert.Equal("sent a console command to mc", reader.Summary);
     }
 
     /// <summary>
-    /// The sentence a viewer reads is the one the mapper itself writes for an event that carried no
+    /// The sentence a reader reads is the one the mapper itself writes for an event that carried no
     /// command — the same function, not a second wording of it. That is what stops the two drifting
     /// the first time either is reworded.
     /// </summary>
@@ -72,49 +72,49 @@ public sealed class AuditRedactionTests
         AuditWrite carriedNothing = AuditMapping.FromInputSentEvent(
             new InstanceInputSentData { InstanceName = "mc", Command = "" }, "h1");
 
-        AuditRecord viewer = AuditRedaction.Redacted(
+        AuditRecord reader = AuditRedaction.Redacted(
             Row("console.input.sent", carried.Summary, ("command", "op somebody")));
 
-        Assert.Equal(carriedNothing.Summary, viewer.Summary);
+        Assert.Equal(carriedNothing.Summary, reader.Summary);
     }
 
     /// <summary>
     /// A moderation target may be a name or an address and <em>the event does not say which</em> — the
     /// game's blueprint does. The catalog calls that conditional and tells a consumer that cannot
-    /// resolve it to treat it as personal; this surface cannot, so a viewer is told a ban happened
+    /// resolve it to treat it as personal; this surface cannot, so a reader is told a ban happened
     /// without being told whose address it might be.
     /// </summary>
     [Fact]
     public void AModerationTargetNeedsOperatorBecauseItMayBeAnAddress()
     {
-        AuditRecord viewer = AuditRedaction.Redacted(Row(
+        AuditRecord reader = AuditRedaction.Redacted(Row(
             "player.banned", "banned 95.49.44.91 on mc",
             ("target", "95.49.44.91"), ("command", "/ban 95.49.44.91")));
 
-        Assert.Null(viewer.Meta);
-        Assert.Equal("banned a player on mc", viewer.Summary);
-        Assert.DoesNotContain("95.49", viewer.Summary, StringComparison.Ordinal);
+        Assert.Null(reader.Meta);
+        Assert.Equal("banned a player on mc", reader.Summary);
+        Assert.DoesNotContain("95.49", reader.Summary, StringComparison.Ordinal);
     }
 
     /// <summary>
     /// <b>The row is never withheld, only values on it.</b> Every action still appears, with its
-    /// timestamp, its actor and its server intact — an audit feed that showed a viewer fewer rows
+    /// timestamp, its actor and its server intact — an audit feed that showed a reader fewer rows
     /// would be telling two people different histories of the same host.
     /// </summary>
     [Fact]
     public void TheRowSurvivesEverythingTakenOffIt()
     {
         AuditRecord full = Row("player.banned", "banned bob on mc", ("target", "bob"));
-        AuditRecord viewer = AuditRedaction.Redacted(full);
+        AuditRecord reader = AuditRedaction.Redacted(full);
 
-        Assert.Equal(full.Id, viewer.Id);
-        Assert.Equal(full.Ts, viewer.Ts);
-        Assert.Equal(full.Action, viewer.Action);
-        Assert.Equal(full.Actor, viewer.Actor);
-        Assert.Equal(full.Origin, viewer.Origin);
-        Assert.Equal(full.Severity, viewer.Severity);
-        Assert.Equal(full.ServerId, viewer.ServerId);
-        Assert.Equal(full.Target, viewer.Target);
+        Assert.Equal(full.Id, reader.Id);
+        Assert.Equal(full.Ts, reader.Ts);
+        Assert.Equal(full.Action, reader.Action);
+        Assert.Equal(full.Actor, reader.Actor);
+        Assert.Equal(full.Origin, reader.Origin);
+        Assert.Equal(full.Severity, reader.Severity);
+        Assert.Equal(full.ServerId, reader.ServerId);
+        Assert.Equal(full.Target, reader.Target);
     }
 
     /// <summary>A row carrying nothing restricted is handed back as it came, identity included.</summary>

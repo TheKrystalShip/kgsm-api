@@ -20,7 +20,7 @@ namespace TheKrystalShip.Api.Tests;
 ///   peer (cluster-token authed + disable-gated), a lean honest projection of its own §4·a/§4·b/§8·a
 ///   surfaces.</item>
 ///   <item><c>GET /peers/{id}/{resources|capabilities|library}</c> — the server-side node-proxy relay
-///   (admin-gated), which mints a service token and fans the read out to the peer's <c>self/*</c>.</item>
+///   (owner-gated), which mints a service token and fans the read out to the peer's <c>self/*</c>.</item>
 /// </list>
 /// Reuses the <see cref="ClusterNodeFactory"/> harness + routing trick from <see cref="ClusterTwoNodeTests"/>
 /// so the two-node happy path crosses the real mint/validate/gate/project code on both sides.
@@ -135,7 +135,7 @@ public sealed class ClusterResourceRelayTests
         finally { DeleteBestEffort(db); }
     }
 
-    // ── 2. {id}/* relay (server-side node-proxy, admin-gated) ─────────────────────────────────────
+    // ── 2. {id}/* relay (server-side node-proxy, owner-gated) ─────────────────────────────────────
 
     [Fact]
     public async Task PeerResources_UnknownId_Returns404()
@@ -210,15 +210,15 @@ public sealed class ClusterResourceRelayTests
     }
 
     [Fact]
-    public async Task PeerResources_ViewerToken_Returns403_RelayIsAdminGated()
+    public async Task PeerResources_ViewerToken_Returns403_RelayIsOwnerGated()
     {
-        string db = NewDb("relay-viewer");
+        string db = NewDb("relay-reader");
         try
         {
             await using var node = new ClusterNodeFactory("node-a", "host-a", Secret, dbPath: db);
             using HttpClient client = node.CreateClient();
             var request = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members/peer-b/resources");
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(Persona.Viewer));
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", node.AccessToken(Persona.Reader));
 
             HttpResponseMessage resp = await client.SendAsync(request);
 

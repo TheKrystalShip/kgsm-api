@@ -14,17 +14,17 @@ namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
 /// The <c>GET /servers/{id}/metrics/history</c> and <c>GET /hosts/{id}/metrics/history</c> endpoints,
-/// now a <b>verbatim proxy</b> to kgsm-monitor. Exercises the viewer auth gate, the 404 existence
+/// now a <b>verbatim proxy</b> to kgsm-monitor. Exercises the read gate, the 404 existence
 /// checks, the monitor-absent empty-degrade (the base factory leaves the monitor unprovisioned), and
 /// the verbatim relay of a monitor response (via a fake <see cref="IMonitorHistoryClient"/>).
 /// </summary>
 public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>
 {
-    private HttpClient Viewer()
+    private HttpClient Reader()
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Viewer));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Reader));
         return c;
     }
 
@@ -84,14 +84,14 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
     [Fact]
     public async Task ServerHistory_UnknownId_404()
     {
-        HttpResponseMessage r = await Viewer().GetAsync("/api/v1/servers/nonexistent/metrics/history");
+        HttpResponseMessage r = await Reader().GetAsync("/api/v1/servers/nonexistent/metrics/history");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
     [Fact]
     public async Task HostHistory_UnknownId_404()
     {
-        HttpResponseMessage r = await Viewer().GetAsync("/api/v1/hosts/nonexistent/metrics/history");
+        HttpResponseMessage r = await Reader().GetAsync("/api/v1/hosts/nonexistent/metrics/history");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
 
@@ -100,7 +100,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
     [Fact]
     public async Task HostHistory_MonitorAbsent_200_EmptySeriesShape()
     {
-        HttpResponseMessage r = await Viewer()
+        HttpResponseMessage r = await Reader()
             .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/metrics/history?range=1h");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
@@ -126,7 +126,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
     [Fact]
     public async Task LeafHistory_UnknownLeaf_404()
     {
-        HttpResponseMessage r = await Viewer()
+        HttpResponseMessage r = await Reader()
             .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/services/not-a-leaf/metrics/history");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
@@ -134,7 +134,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
     [Fact]
     public async Task LeafHistory_UnknownHost_404()
     {
-        HttpResponseMessage r = await Viewer()
+        HttpResponseMessage r = await Reader()
             .GetAsync("/api/v1/hosts/nonexistent/services/monitor/metrics/history");
         Assert.Equal(HttpStatusCode.NotFound, r.StatusCode);
     }
@@ -144,7 +144,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
     {
         // The leaf exists; its history doesn't (never running since the monitor started, or a monitor too
         // old to sample leaves). Those are different facts and the second one is not a missing entity.
-        HttpResponseMessage r = await Viewer()
+        HttpResponseMessage r = await Reader()
             .GetAsync($"/api/v1/hosts/{AuthTestFactory.HostId}/services/monitor/metrics/history?range=1h");
         Assert.Equal(HttpStatusCode.OK, r.StatusCode);
 
@@ -167,7 +167,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         using WebApplicationFactoryWithFake fakeFactory = new(monitorBody);
         HttpClient client = fakeFactory.Factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", AuthTestFactory.MintAccessOn(fakeFactory.Factory.Services, Persona.Viewer));
+            "Bearer", AuthTestFactory.MintAccessOn(fakeFactory.Factory.Services, Persona.Reader));
 
         HttpResponseMessage r = await client.GetAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}/services/watchdog/metrics/history?range=1h");
@@ -191,7 +191,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         using WebApplicationFactoryWithFake fakeFactory = new(monitorBody);
         HttpClient client = fakeFactory.Factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", AuthTestFactory.MintAccessOn(fakeFactory.Factory.Services, Persona.Viewer));
+            "Bearer", AuthTestFactory.MintAccessOn(fakeFactory.Factory.Services, Persona.Reader));
 
         HttpResponseMessage r = await client.GetAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}/metrics/history?range=1h");

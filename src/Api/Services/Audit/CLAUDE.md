@@ -83,9 +83,9 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
   **The actor is `system:monitor`** — the ecosystem's autonomous-emitter form, the same one kgsm-watchdog
   stamps as `system:watchdog`. A bare `system` would make these indistinguishable from every other
   unattended action. The identity comes from the **journal the line was read from**, never from a field in
-  the payload: a claim about identity made inside data is one this API cannot check. `origin` stays `system` — no surface drove it, and the closed origin vocabulary has no
-  per-component value (the `auth.cluster_session` precedent: identity detail goes in the row, the
-  vocabulary is not widened).
+  the payload: a claim about identity made inside data is one this API cannot check. `origin` stays
+  `system` — no surface drove it, and the closed origin vocabulary has no per-component value:
+  identity detail goes in the row, and the vocabulary is not widened for it.
 - **`command.*` is what this API observed and nobody else can.** kgsm emits an event when a verb
   *works*; a verb that fails or is refused exits non-zero and emits nothing, and a batch member
   cancelled in the queue never reaches the engine — so there is no echo to ride and no double-write

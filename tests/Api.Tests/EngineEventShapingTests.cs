@@ -309,7 +309,7 @@ public sealed class EngineEventShapingTests
     {
         var item = new EventHistoryEntry(
             "evt_dec", Ts, AssistantEvents.ActionDeclined, null, null, "discord:haru", "assistant", null,
-            Data(new { Tool = "server_command", DeclineReason = "authority", Tier = "viewer", Instance = "mc" }));
+            Data(new { Tool = "server_command", DeclineReason = "authority", Instance = "mc" }));
 
         AuditRecord? shaped = EngineEventShaping.Shape(item, HostId);
 
@@ -340,7 +340,7 @@ public sealed class EngineEventShapingTests
 
         Assert.NotNull(shaped);
         Assert.Contains("host has actions turned off", shaped!.Summary);
-        Assert.DoesNotContain("tier", shaped.Summary);
+        Assert.DoesNotContain("access does not carry it", shaped.Summary);
     }
 
     /// <summary>A staged action awaiting a person becomes a row; nothing has run, so the engine has none.</summary>
@@ -564,7 +564,7 @@ public sealed class BlueprintEventShapingTests
         // A blueprint is the TEMPLATE servers are installed from, not a server — so a serverId here would
         // make `GET /audit?serverId=factorio` return an edit that never touched any instance.
         Assert.Null(shaped.ServerId);
-        Assert.Equal("haru", shaped.Actor.Name);   // the real admin, not the service account
+        Assert.Equal("haru", shaped.Actor.Name);   // the real person, not the service account
         Assert.Equal("ui", shaped.Origin);
         Assert.Equal("user", shaped.Meta!["tier"]);
         Assert.Equal("true", shaped.Meta["overridesSystem"]);

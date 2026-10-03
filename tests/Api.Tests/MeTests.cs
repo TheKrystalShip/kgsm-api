@@ -38,7 +38,7 @@ public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFac
     [Fact]
     public async Task Viewer_200_ProjectsTheIdentitySnapshotAndScopes()
     {
-        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Viewer)).GetAsync("/api/v1/me");
+        HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Reader)).GetAsync("/api/v1/me");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         JsonElement body = await Json(resp);
@@ -68,7 +68,7 @@ public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFac
     [Fact]
     public async Task PendingAccount_200_ReportsPending()
     {
-        KgsmIdentity waiting = FakeDiscordResolver.IdentityFor("me-pending");
+        KgsmIdentity waiting = TestIdentity.IdentityFor("me-pending");
         string token = factory.AccessTokenFor(waiting, Persona.None, UserStatus.Pending);
 
         HttpResponseMessage resp = await Client(token).GetAsync("/api/v1/me");
@@ -79,7 +79,7 @@ public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFac
     [Fact]
     public async Task Stranger_200_ReportsUnknown()
     {
-        string token = AuthTestFactory.MintAccess(FakeDiscordResolver.IdentityFor("me-stranger"));
+        string token = AuthTestFactory.MintAccess(TestIdentity.IdentityFor("me-stranger"));
 
         HttpResponseMessage resp = await Client(token).GetAsync("/api/v1/me");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);

@@ -18,8 +18,7 @@ namespace TheKrystalShip.Api.Tests;
 /// <summary>
 /// Coverage for <c>GET /servers/{id}/players</c> (the permanent player roster), proven through the
 /// real pipeline with the engine seam faked (the project's <c>FakeOpsInstanceService</c> convention —
-/// see <c>Tier1OpsTests</c>). Load-bearing: **operator**-gated (the roster contract's explicit call, unlike the
-/// viewer-gated read on other server sub-resources); the honest <c>unknown</c>-vs-<c>configured</c>-empty
+/// see <c>ServerOpsTests</c>). Load-bearing: the read gate; the honest <c>unknown</c>-vs-<c>configured</c>-empty
 /// distinction (the roster contract's central rule — a game with no detection must NEVER read as "0 players online");
 /// and that the live roster (<see cref="PlayerHistoryService"/>, pre-seeded here the same way the audit
 /// consumer would drive it) actually surfaces through the endpoint when detection IS configured.
@@ -41,10 +40,10 @@ public sealed class ServerPlayersControllerTests
         _noEngine = noEngine;
     }
 
-    private static HttpClient Client(AuthTestFactory f, Persona? tier)
+    private static HttpClient Client(AuthTestFactory f, Persona? persona)
     {
         HttpClient c = f.CreateClient();
-        if (tier is { } t)
+        if (persona is { } t)
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(t));
         return c;
     }
@@ -67,14 +66,14 @@ public sealed class ServerPlayersControllerTests
     [Fact]
     public async Task UnknownServerId_404()
     {
-        HttpResponseMessage resp = await Client(_engine, Persona.Operator).GetAsync("/api/v1/servers/nope/players");
+        HttpResponseMessage resp = await Client(_engine, Persona.Runner).GetAsync("/api/v1/servers/nope/players");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Client(_noEngine, Persona.Operator).GetAsync($"/api/v1/servers/{Detected}/players");
+        HttpResponseMessage resp = await Client(_noEngine, Persona.Runner).GetAsync($"/api/v1/servers/{Detected}/players");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
 
@@ -83,7 +82,7 @@ public sealed class ServerPlayersControllerTests
     {
         // The central honesty rule (§5): nothing observes this instance → detection:"unknown" and
         // players MUST be [] regardless of whatever the history projection holds for this id.
-        HttpResponseMessage resp = await Client(_engine, Persona.Operator).GetAsync($"/api/v1/servers/{NoDetection}/players");
+        HttpResponseMessage resp = await Client(_engine, Persona.Runner).GetAsync($"/api/v1/servers/{NoDetection}/players");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -95,7 +94,7 @@ public sealed class ServerPlayersControllerTests
     public async Task Configured_NobodyConnected_HonestEmptyRoster_NotUnknown()
     {
         // Detection configured, nobody joined yet — a REAL empty, distinct from "unknown".
-        HttpResponseMessage resp = await Client(_engine, Persona.Operator).GetAsync($"/api/v1/servers/{JoinOnly}/players");
+        HttpResponseMessage resp = await Client(_engine, Persona.Runner).GetAsync($"/api/v1/servers/{JoinOnly}/players");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -112,7 +111,7 @@ public sealed class ServerPlayersControllerTests
     [Fact]
     public async Task RconPolled_IsConfigured_ThoughItDeclaresNoLogPatterns()
     {
-        HttpResponseMessage resp = await Client(_engine, Persona.Operator).GetAsync($"/api/v1/servers/{RconOnly}/players");
+        HttpResponseMessage resp = await Client(_engine, Persona.Runner).GetAsync($"/api/v1/servers/{RconOnly}/players");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -128,7 +127,7 @@ public sealed class ServerPlayersControllerTests
     public async Task SupervisorUnreachable_Unknown_NotConfigured()
     {
         using var factory = new UnreachableWatchdogFactory();
-        HttpResponseMessage resp = await Client(factory, Persona.Operator).GetAsync($"/api/v1/servers/{Detected}/players");
+        HttpResponseMessage resp = await Client(factory, Persona.Runner).GetAsync($"/api/v1/servers/{Detected}/players");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -146,7 +145,7 @@ public sealed class ServerPlayersControllerTests
         history.Join(Detected, sessionKey: "76561198000000000", id: "76561198000000000",
             name: "Heisen", addr: null, since);
 
-        HttpResponseMessage resp = await Client(_engine, Persona.Operator).GetAsync($"/api/v1/servers/{Detected}/players");
+        HttpResponseMessage resp = await Client(_engine, Persona.Runner).GetAsync($"/api/v1/servers/{Detected}/players");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());

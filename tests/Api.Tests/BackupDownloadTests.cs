@@ -20,7 +20,7 @@ namespace TheKrystalShip.Api.Tests;
 /// </summary>
 /// <remarks>
 /// The ticket is the authorisation for bytes leaving the host, so what is asserted here is mostly what
-/// must NOT work: an absent ticket, a ticket for a different backup, an expired one, and a viewer holding
+/// must NOT work: an absent ticket, a ticket for a different backup, an expired one, and a reader holding
 /// a valid bearer. The engine seam is faked (<see cref="FakeBackups"/>) — the jail itself is kgsm-lib's
 /// and is proven in <c>InstanceBackupsTests</c> against a real temp-dir jail.
 /// </remarks>
@@ -63,8 +63,9 @@ public sealed class BackupDownloadTests
     public async Task Mint_Viewer_403()
     {
         // A backup is the instance's whole install + saves — every secret the file browser is
-        // operator-gated for, in one file. Listing backups stays viewer; taking one home does not.
-        HttpResponseMessage resp = await Mint(_engine, Persona.Viewer, Server, Compressed);
+        // gated on, in one file. Listing backups is kgsm:server.backups.read; taking one home is
+        // kgsm:server.files.read.
+        HttpResponseMessage resp = await Mint(_engine, Persona.Reader, Server, Compressed);
         Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
     }
 
@@ -78,7 +79,7 @@ public sealed class BackupDownloadTests
     [Fact]
     public async Task Mint_UncompressedBackup_409_Uncompressed()
     {
-        HttpResponseMessage resp = await Mint(_engine, Persona.Operator, Server, Uncompressed);
+        HttpResponseMessage resp = await Mint(_engine, Persona.Runner, Server, Uncompressed);
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
 
         using JsonDocument doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
@@ -90,21 +91,21 @@ public sealed class BackupDownloadTests
     {
         // Refused at MINT rather than at download: a ticket for something unservable would surface as a
         // broken download two clicks later, with nothing to explain it.
-        HttpResponseMessage resp = await Mint(_engine, Persona.Operator, Server, "no-such-backup");
+        HttpResponseMessage resp = await Mint(_engine, Persona.Runner, Server, "no-such-backup");
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task Mint_UnknownServer_404()
     {
-        HttpResponseMessage resp = await Mint(_engine, Persona.Operator, "no-such-server", Compressed);
+        HttpResponseMessage resp = await Mint(_engine, Persona.Runner, "no-such-server", Compressed);
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
 
     [Fact]
     public async Task Mint_EngineUnprovisioned_503()
     {
-        HttpResponseMessage resp = await Mint(_noEngine, Persona.Operator, Server, Compressed);
+        HttpResponseMessage resp = await Mint(_noEngine, Persona.Runner, Server, Compressed);
         Assert.Equal(HttpStatusCode.ServiceUnavailable, resp.StatusCode);
     }
 
@@ -241,17 +242,17 @@ public sealed class BackupDownloadTests
 
     private async Task<JsonElement> MintOk(string server, string backup)
     {
-        HttpResponseMessage resp = await Mint(_engine, Persona.Operator, server, backup);
+        HttpResponseMessage resp = await Mint(_engine, Persona.Runner, server, backup);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
         return doc.RootElement.Clone();
     }
 
     private static Task<HttpResponseMessage> Mint(
-        AuthTestFactory f, Persona? tier, string server, string backup)
+        AuthTestFactory f, Persona? persona, string server, string backup)
     {
         HttpClient c = f.CreateClient();
-        if (tier is { } t)
+        if (persona is { } t)
             c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(t));
         return c.PostAsync($"/api/v1/servers/{server}/backups/{backup}/download-ticket",
             new StringContent("""{"origin":"ui"}""", Encoding.UTF8, "application/json"));

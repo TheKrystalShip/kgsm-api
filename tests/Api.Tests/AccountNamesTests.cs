@@ -32,7 +32,7 @@ public sealed class AccountNamesTests(AuthTestFactory factory) : IClassFixture<A
     {
         // Somebody holding nothing may ask: being shown an author is not an action.
         HttpClient c = Client(Persona.None);
-        KgsmUser me = TestAuthority.For(factory.Services).AccountOf(FakeDiscordResolver.Identity)!;
+        KgsmUser me = TestAuthority.For(factory.Services).AccountOf(TestIdentity.Identity)!;
 
         HttpResponseMessage resp = await c.GetAsync(
             $"/api/v1/accounts/names?id={Uri.EscapeDataString(me.UserId)}&id=local:usr_nobody");
@@ -48,7 +48,7 @@ public sealed class AccountNamesTests(AuthTestFactory factory) : IClassFixture<A
     public async Task TooManyIds_400()
     {
         string query = string.Join("&", Enumerable.Range(0, 51).Select(i => "id=local:usr_" + i));
-        HttpResponseMessage resp = await Client(Persona.Viewer).GetAsync("/api/v1/accounts/names?" + query);
+        HttpResponseMessage resp = await Client(Persona.Reader).GetAsync("/api/v1/accounts/names?" + query);
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 }

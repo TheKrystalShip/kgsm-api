@@ -159,7 +159,7 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     public string RefreshToken(Persona persona)
     {
         GiveTheFakeIdentityAnAccount(Services, persona);
-        return Anchor.MintRefresh(FakeDiscordResolver.Identity, NewSessionId()).Token;
+        return Anchor.MintRefresh(TestIdentity.Identity, NewSessionId()).Token;
     }
 
     /// <summary>
@@ -171,7 +171,7 @@ public class AuthTestFactory : WebApplicationFactory<Program>
     /// <see cref="AccessToken"/> mints for the one standing identity, so every token it hands out is
     /// the same person holding whichever persona was asked for last. A test about who a frame reaches,
     /// or about one account changing while another watches, needs two people, and this is how it gets
-    /// them: <see cref="FakeDiscordResolver.IdentityFor"/> names one, and this gives them a session
+    /// them: <see cref="TestIdentity.IdentityFor"/> names one, and this gives them a session
     /// and an account of their own.
     /// </remarks>
     public string AccessTokenFor(KgsmIdentity identity, Persona persona, UserStatus status = UserStatus.Active)
@@ -200,7 +200,7 @@ public class AuthTestFactory : WebApplicationFactory<Program>
         // reads. So a token only means anything once the account behind it holds the persona — which
         // is the production rule, not a test convenience.
         GiveTheFakeIdentityAnAccount(services, persona);
-        return MintAccess(FakeDiscordResolver.Identity);
+        return MintAccess(TestIdentity.Identity);
     }
 
     /// <summary>Create or move the account behind the fake identity to <paramref name="persona"/>.</summary>
@@ -209,7 +209,7 @@ public class AuthTestFactory : WebApplicationFactory<Program>
         // A factory pointed at a replica that will not open is testing exactly that, and minting a
         // token for it must not be the thing that fails.
         if (services.GetRequiredService<IReplicatedAuthority>().Replica is not null)
-            SetAccountOn(services, FakeDiscordResolver.Identity, persona);
+            SetAccountOn(services, TestIdentity.Identity, persona);
     }
 
     /// <summary>

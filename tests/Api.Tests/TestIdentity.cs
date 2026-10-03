@@ -7,12 +7,12 @@ namespace TheKrystalShip.Api.Tests;
 /// signed in through Discord.
 /// </summary>
 /// <remarks>
-/// A session carries who someone is and nothing about what they may do: the tier every gate reads is
-/// the one on the account the identity proves in this node's replica. So a test chooses a person here
-/// and sets their account separately (<see cref="AuthTestFactory.SetAccount"/>), which is the same
-/// split production has.
+/// A session carries who someone is and nothing about what they may do: every gate reads the roles held
+/// by the account the identity proves in this node's replica. So a test chooses a person here and sets
+/// their account separately (<see cref="AuthTestFactory.SetAccount"/>), which is the same split
+/// production has.
 /// </remarks>
-public static class FakeDiscordResolver
+public static class TestIdentity
 {
     /// <summary>The standing identity every <see cref="AuthTestFactory.AccessToken"/> names.</summary>
     public static readonly KgsmIdentity Identity =

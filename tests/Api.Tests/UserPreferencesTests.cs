@@ -34,7 +34,7 @@ public sealed class UserPreferencesTests(AuthTestFactory factory) : IClassFixtur
     {
         HttpClient c = factory.CreateClient();
         c.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Viewer));
+            new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.Reader));
         if (device is not null) c.DefaultRequestHeaders.Add(DeviceHeader, device);
         return c;
     }
@@ -56,7 +56,7 @@ public sealed class UserPreferencesTests(AuthTestFactory factory) : IClassFixtur
     /// overwrite an enable performs, since while sync is on every device READS the synced record.</summary>
     private async Task<IReadOnlyList<PreferenceRow>> Slot(string device) =>
         await factory.Services.GetRequiredService<UserPreferenceStore>()
-            .SlotAsync(FakeDiscordResolver.Identity.Handle, device);
+            .SlotAsync(TestIdentity.Identity.Handle, device);
 
     [Fact]
     public async Task A_write_comes_back_on_the_device_that_made_it()
@@ -288,7 +288,7 @@ public sealed class UserPreferencesTests(AuthTestFactory factory) : IClassFixtur
     }
 
     [Fact]
-    public async Task Somebody_waiting_on_an_admin_still_owns_their_own_preferences()
+    public async Task Somebody_waiting_on_an_owner_still_owns_their_own_preferences()
     {
         // Tier `none` — an account awaiting approval. Their own settings are self-service, so the gate is
         // [Authorize] and not a tier: being unable to see the fleet is not a reason to be unable to

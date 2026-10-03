@@ -207,13 +207,13 @@ public sealed class ClusterTwoNodeTests
                 "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
 
             using HttpClient clientA = factoryA.CreateClient();
-            string adminToken = AuthTestFactory.MintAccessOn(factoryA.Services, Persona.Owner);
+            string ownerToken = AuthTestFactory.MintAccessOn(factoryA.Services, Persona.Owner);
 
             var addRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/members")
             {
                 Content = JsonContent.Create(new { url = "http://node-b", nickname = "Node B" }),
             };
-            addRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+            addRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
             HttpResponseMessage addResp = await clientA.SendAsync(addRequest);
 
             Assert.Equal(HttpStatusCode.Created, addResp.StatusCode);
@@ -222,7 +222,7 @@ public sealed class ClusterTwoNodeTests
             Assert.True(added.GetProperty("enabled").GetBoolean());
 
             var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/members");
-            listRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+            listRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ownerToken);
             HttpResponseMessage listResp = await clientA.SendAsync(listRequest);
             JsonElement peers = JsonDocument.Parse(await listResp.Content.ReadAsStringAsync())
                 .RootElement.GetProperty("members");
@@ -238,7 +238,7 @@ public sealed class ClusterTwoNodeTests
     {
         // The fresh cluster of one: nobody can sign in to add a member until the node knows who holds
         // the accounts, so the node takes that step itself against the configured local address. Node B
-        // stands in for the anchor, reached through the same handshake an admin's paste would use.
+        // stands in for the anchor, reached through the same handshake an owner's paste would use.
         const string secret = "two-node-local-join-secret";
         string dbA = NewDbPath("a-localjoin"), dbB = NewDbPath("b-localjoin");
         string founded = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-founded-{Guid.NewGuid():N}");
@@ -271,7 +271,7 @@ public sealed class ClusterTwoNodeTests
     public async Task ANodeOnAMachineThatDidNotFoundItsClusterWaitsToBeAdded()
     {
         // A machine given another cluster's secret — joining, or a founding machine that has moved — is
-        // joined by an admin. Introducing itself would put the anchor beside it, which holds nothing in
+        // joined by an owner. Introducing itself would put the anchor beside it, which holds nothing in
         // this cluster, in the roster as a member nobody asked for.
         const string secret = "two-node-joined-machine-secret";
         string dbA = NewDbPath("a-notfounded"), dbB = NewDbPath("b-notfounded");

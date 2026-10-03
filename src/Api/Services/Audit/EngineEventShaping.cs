@@ -95,7 +95,7 @@ public static class EngineEventShaping
                         ? $"refused {d.Tool} — {Declined(d.DeclineReason)}"
                         : $"refused {d.Tool} on {d.Instance} — {Declined(d.DeclineReason)}",
                     hostId, d.Instance,
-                    Meta(("tool", d.Tool), ("reason", d.DeclineReason), ("tier", d.Tier)))),
+                    Meta(("tool", d.Tool), ("reason", d.DeclineReason)))),
 
             AssistantEvents.ActionProposed => Map<AssistantActionProposedEventData>(item,
                 d => Assistant(item, item.Type, AuditSeverity.Info,
@@ -200,11 +200,10 @@ public static class EngineEventShaping
             "host.threshold.breached" => Map<HostThresholdBreachedData>(item, d => AuditMapping.FromThresholdBreachedEvent(d, hostId)),
             "host.threshold.cleared" => Map<HostThresholdClearedData>(item, d => AuditMapping.FromThresholdClearedEvent(d, hostId)),
 
-            // The account events: what a person's access did. Shaped here like any other producer's —
-            // nothing about these mappers knows which journal a line came from, which is what keeps
-            // one code path serving the whole merged feed whether this API wrote the line or the
-            // cluster's auth anchor did.
-            ApiJournal.LoginEvent or ApiJournal.LogoutEvent or ApiJournal.ClusterSessionEvent =>
+            // The account events: what a person's access did, as the cluster's auth anchor recorded
+            // it. Shaped here like any other producer's — nothing about these mappers knows which
+            // journal a line came from, which keeps one code path serving the whole merged feed.
+            ApiJournal.LoginEvent or ApiJournal.LogoutEvent =>
                 Map<AuthSessionEventData>(item, d => AuditMapping.FromAuthSessionEvent(d, item.Type, hostId)),
             ApiJournal.SessionRevokedEvent =>
                 Map<AuthSessionRevokedData>(item, d => AuditMapping.FromSessionRevokedEvent(d, hostId)),
@@ -212,7 +211,7 @@ public static class EngineEventShaping
                 Map<AuthLockedOutData>(item, d => AuditMapping.FromLockedOutEvent(d, hostId)),
 
             ApiJournal.UserProvisionedEvent or ApiJournal.UserApprovedEvent
-                or ApiJournal.UserDisabledEvent or ApiJournal.UserTierChangedEvent
+                or ApiJournal.UserDisabledEvent
                 or ApiJournal.UserDeletedEvent or ApiJournal.UserPasswordChangedEvent =>
                 Map<UserAccountEventData>(item, d => AuditMapping.FromUserAccountEvent(d, item.Type, hostId)),
 

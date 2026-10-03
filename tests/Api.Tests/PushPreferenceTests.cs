@@ -94,7 +94,7 @@ public class PushPreferenceTests(AuthTestFactory factory) : IClassFixture<AuthTe
     public async Task The_view_reports_the_hosts_own_rule_beside_the_personal_one()
     {
         HttpClient c = Client();
-        // Admin turns an event off for the whole channel.
+        // An Owner turns an event off for the whole channel.
         await c.PatchAsJsonAsync("/api/v1/integrations/webpush",
             new { events = new[] { new { id = "installed", enabled = false } } });
 

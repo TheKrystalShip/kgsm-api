@@ -35,7 +35,7 @@ public sealed record ClusterRelayResult(ClusterRelayStatus Status, string? Paylo
 /// </summary>
 /// <remarks>
 /// Same node-to-node addressing (the peer's pinned candidate) and reused named <see cref="System.Net.Http.HttpClient"/>
-/// (<see cref="OutboxDrainer.HttpClientName"/>, 10s timeout) as the vouch relay and the outbox drainer, so
+/// (<see cref="OutboxDrainer.HttpClientName"/>, 10s timeout) as the outbox drainer, so
 /// every node-to-node call shares one bounded, mint-authenticated client. A down peer degrades to
 /// <see cref="ClusterRelayStatus.Unreachable"/> — never a 500 (the P2 honesty rule).
 /// </remarks>
@@ -51,8 +51,7 @@ public sealed class ClusterPeerRelay(
     /// is returned untouched on success.</summary>
     public async Task<ClusterRelayResult> RelayGetAsync(string peerId, string leaf, CancellationToken ct)
     {
-        // A non-cluster node has an empty roster, so this
-        // reads as an explicit "unknown node," matching the vouch relay's early-out.
+        // A non-cluster node has an empty roster, so this reads as an explicit "unknown node".
         if (!cluster.Enabled)
             return new ClusterRelayResult(ClusterRelayStatus.UnknownNode, null, null);
 
@@ -63,8 +62,8 @@ public sealed class ClusterPeerRelay(
             return new ClusterRelayResult(ClusterRelayStatus.Disabled, null, null);
 
         MintedClusterToken token = clusterTokens.Mint();
-        // The pinned candidate — the same address GossipWorker/OutboxDrainer/the vouch relay reach this
-        // peer's own HTTP surface on.
+        // The pinned candidate — the same address GossipWorker and OutboxDrainer reach this peer's own
+        // HTTP surface on.
         string url = $"{peer.Url.TrimEnd('/')}/api/v1/members/self/{leaf}";
 
         HttpClient http = httpClientFactory.CreateClient(OutboxDrainer.HttpClientName);

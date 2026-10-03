@@ -19,7 +19,7 @@ same treatment before the suite runs on a live machine.
   delivered — so the JwtBearer pipeline verifies the stand-in anchor's sessions exactly as production
   verifies the real one's.
 - **Access comes from roles in the replica, never from the token.** A caller is a `Persona` — `None`,
-  `Viewer`, `Operator`, `Owner` — and each is a real role in the replica holding the actions listed in
+  `Reader`, `Runner`, `Owner` — and each is a real role in the replica holding the actions listed in
   `TestAuthority` (`Owner` holds everything). `TestAuthority` is the stand-in anchor: an authority store
   of its own beside the factory's replica, where accounts, roles and assignments are made, and from
   which the anchor's snapshot is delivered into the replica after every change. `SetAccountOn` then
@@ -31,10 +31,10 @@ same treatment before the suite runs on a live machine.
   `WithWebHostBuilder` has its own replica, so mint for it with
   `AuthTestFactory.MintAccessOn(derived.Services, persona)`. The refusal shapes a node must hold are in
   `TestTokens`: a session signed by a key nobody published, a symmetric token, and an anchor-signed one
-  with no `sid`. `AccessToken` mints for the **one standing identity** (`FakeDiscordResolver.Identity`),
+  with no `sid`. `AccessToken` mints for the **one standing identity** (`TestIdentity.Identity`),
   so every token it hands out is the same person holding whichever persona was asked for last. A case
   about **who** something reaches, or about one account changing while another watches, needs two
-  people: `FakeDiscordResolver.IdentityFor(subject)` names one and `factory.AccessTokenFor(identity,
+  people: `TestIdentity.IdentityFor(subject)` names one and `factory.AccessTokenFor(identity,
   persona, status)` gives them a session and an account of their own; `AuthTestFactory.RemoveAccountOn`
   takes an account away.
 - **`/api/v1/stream` (fetch-based SSE; protocol: `../../src/Api/Realtime/CLAUDE.md`)** is

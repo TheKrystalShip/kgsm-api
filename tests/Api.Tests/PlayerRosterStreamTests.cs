@@ -25,7 +25,7 @@ public sealed class PlayerRosterStreamTests(AuthTestFactory factory) : IClassFix
     {
         string serverId = $"sse-reset-{Guid.NewGuid():N}";
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            factory.CreateClient(), "/api/v1/stream?topics=players", factory.AccessToken(Persona.Viewer));
+            factory.CreateClient(), "/api/v1/stream?topics=players", factory.AccessToken(Persona.Reader));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 
@@ -60,7 +60,7 @@ public sealed class PlayerRosterStreamTests(AuthTestFactory factory) : IClassFix
     {
         string serverId = $"sse-reset-empty-{Guid.NewGuid():N}";
         using HttpResponseMessage resp = await SseTestHelpers.OpenStream(
-            factory.CreateClient(), "/api/v1/stream?topics=players", factory.AccessToken(Persona.Viewer));
+            factory.CreateClient(), "/api/v1/stream?topics=players", factory.AccessToken(Persona.Reader));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(resp);
 

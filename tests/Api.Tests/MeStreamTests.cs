@@ -20,7 +20,7 @@ namespace TheKrystalShip.Api.Tests;
 /// person's open stream hears it on the connection it already holds.
 /// </summary>
 /// <remarks>
-/// Every case here uses an identity of its own (<see cref="FakeDiscordResolver.IdentityFor"/>), because
+/// Every case here uses an identity of its own (<see cref="TestIdentity.IdentityFor"/>), because
 /// the question is who a frame reaches — and the suite's standing identity is one account that every
 /// call site re-assigns, which would make "reached the right person" unfalsifiable.
 /// </remarks>
@@ -42,7 +42,7 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task AnApprovalReachesTheAffectedAccountsOpenStream()
     {
-        KgsmIdentity watcher = FakeDiscordResolver.IdentityFor("me-stream-watcher");
+        KgsmIdentity watcher = TestIdentity.IdentityFor("me-stream-watcher");
         string watcherToken = factory.AccessTokenFor(watcher, Persona.None, UserStatus.Pending);
 
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
@@ -50,7 +50,7 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
         using SseFrameReader frames = await SseTestHelpers.Frames(stream);
 
-        factory.SetAccount(watcher, Persona.Viewer, UserStatus.Active);
+        factory.SetAccount(watcher, Persona.Reader, UserStatus.Active);
 
         JsonElement? frame = await frames.WaitForFrame(IsMePatch, Deadline);
         Assert.NotNull(frame);
@@ -67,16 +67,16 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task AnApprovalReachesNobodyElsesStream()
     {
-        KgsmIdentity subject = FakeDiscordResolver.IdentityFor("me-stream-subject");
-        KgsmIdentity bystander = FakeDiscordResolver.IdentityFor("me-stream-bystander");
+        KgsmIdentity subject = TestIdentity.IdentityFor("me-stream-subject");
+        KgsmIdentity bystander = TestIdentity.IdentityFor("me-stream-bystander");
         factory.AccessTokenFor(subject, Persona.None, UserStatus.Pending);
-        string bystanderToken = factory.AccessTokenFor(bystander, Persona.Viewer);
+        string bystanderToken = factory.AccessTokenFor(bystander, Persona.Reader);
 
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
             factory.CreateClient(), "/api/v1/stream?topics=me", bystanderToken);
         using SseFrameReader frames = await SseTestHelpers.Frames(stream);
 
-        factory.SetAccount(subject, Persona.Viewer, UserStatus.Active);
+        factory.SetAccount(subject, Persona.Reader, UserStatus.Active);
 
         // Prove silence: one bounded wait with nothing matching. A frame for somebody else would have
         // been enqueued by the time the change was delivered.
@@ -90,7 +90,7 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task ACallerHoldingNothingIsSentNothingButTheirOwnStanding()
     {
-        KgsmIdentity pending = FakeDiscordResolver.IdentityFor("me-stream-gated");
+        KgsmIdentity pending = TestIdentity.IdentityFor("me-stream-gated");
         string token = factory.AccessTokenFor(pending, Persona.None, UserStatus.Pending);
 
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
@@ -108,8 +108,8 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task LosingAnActionStopsItsTopicOnTheLiveConnection()
     {
-        KgsmIdentity op = FakeDiscordResolver.IdentityFor("me-stream-operator");
-        string opToken = factory.AccessTokenFor(op, Persona.Operator);
+        KgsmIdentity op = TestIdentity.IdentityFor("me-stream-operator");
+        string opToken = factory.AccessTokenFor(op, Persona.Runner);
 
         string logs = StreamProtocol.HostLogsTopic(AuthTestFactory.HostId);
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
@@ -118,7 +118,7 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
 
         Assert.True(Hub.HasSubscribers(logs), "the operator's subscription never reached the hub");
 
-        factory.SetAccount(op, Persona.Viewer);
+        factory.SetAccount(op, Persona.Reader);
 
         Assert.False(Hub.HasSubscribers(logs), "a reader who lost api:logs.read kept receiving the topic");
     }
@@ -130,8 +130,8 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task GainingAnActionStartsItsTopicOnTheLiveConnection()
     {
-        KgsmIdentity viewer = FakeDiscordResolver.IdentityFor("me-stream-promoted");
-        string token = factory.AccessTokenFor(viewer, Persona.Viewer);
+        KgsmIdentity viewer = TestIdentity.IdentityFor("me-stream-promoted");
+        string token = factory.AccessTokenFor(viewer, Persona.Reader);
 
         string services = StreamProtocol.HostServicesTopic(AuthTestFactory.HostId);
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(
@@ -139,7 +139,7 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
         Assert.Equal(HttpStatusCode.OK, stream.StatusCode);
         Assert.False(Hub.HasSubscribers(services));
 
-        factory.SetAccount(viewer, Persona.Operator);
+        factory.SetAccount(viewer, Persona.Runner);
 
         Assert.True(Hub.HasSubscribers(services), "a reader granted api:services.read was not given the topic");
     }
@@ -151,8 +151,8 @@ public sealed class MeStreamTests(AuthTestFactory factory) : IClassFixture<AuthT
     [Fact]
     public async Task ARemovedAccountLosesItsReachOnTheLiveConnection()
     {
-        KgsmIdentity gone = FakeDiscordResolver.IdentityFor("me-stream-removed");
-        string token = factory.AccessTokenFor(gone, Persona.Operator);
+        KgsmIdentity gone = TestIdentity.IdentityFor("me-stream-removed");
+        string token = factory.AccessTokenFor(gone, Persona.Runner);
 
         string logs = StreamProtocol.HostLogsTopic(AuthTestFactory.HostId);
         using HttpResponseMessage stream = await SseTestHelpers.OpenStream(

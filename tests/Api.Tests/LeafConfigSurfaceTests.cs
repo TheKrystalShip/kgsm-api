@@ -60,7 +60,7 @@ public sealed class LeafConfigSurfaceTests
         using var f = new LeafConfigTestFactory();
         f.InstallDescriptor("monitor", MonitorDescriptor(FloorFile(f, "")));
 
-        JsonElement cfg = await Json(Admin(f).GetAsync(ConfigUrl("monitor")));
+        JsonElement cfg = await Json(Owner(f).GetAsync(ConfigUrl("monitor")));
 
         Assert.True(cfg.GetProperty("fromDescriptor").GetBoolean());
         Assert.Equal("restart", cfg.GetProperty("applyMode").GetString());
@@ -79,7 +79,7 @@ public sealed class LeafConfigSurfaceTests
     {
         using var f = new LeafConfigTestFactory();   // no descriptors installed
 
-        JsonElement cfg = await Json(Admin(f).GetAsync(ConfigUrl("monitor")));
+        JsonElement cfg = await Json(Owner(f).GetAsync(ConfigUrl("monitor")));
 
         // Nothing regresses while descriptors roll out repo by repo — but the panel is told the surface is
         // the short built-in one, not the leaf's full declaration.
@@ -96,9 +96,9 @@ public sealed class LeafConfigSurfaceTests
         using var f = new LeafConfigTestFactory();
         // The leaf's own config sets one key; the other two are left to the leaf's coded default.
         f.InstallDescriptor("monitor", MonitorDescriptor(FloorFile(f, "KGSM_MONITOR_MAINT_MS=30000\n")));
-        await Put(Admin(f), "monitor", """{"values":{"intervalMs":"2500"}}""");
+        await Put(Owner(f), "monitor", """{"values":{"intervalMs":"2500"}}""");
 
-        JsonElement cfg = await Json(Admin(f).GetAsync(ConfigUrl("monitor")));
+        JsonElement cfg = await Json(Owner(f).GetAsync(ConfigUrl("monitor")));
 
         JsonElement interval = Field(cfg, "intervalMs");
         Assert.Equal("override", interval.GetProperty("source").GetString());
@@ -125,7 +125,7 @@ public sealed class LeafConfigSurfaceTests
         f.InstallDescriptor("monitor", MonitorDescriptor(
             Path.Combine(f.OverridesDir, "no-such-unit.service").Replace("\\", "/"), kind: "systemd-unit"));
 
-        JsonElement cfg = await Json(Admin(f).GetAsync(ConfigUrl("monitor")));
+        JsonElement cfg = await Json(Owner(f).GetAsync(ConfigUrl("monitor")));
         JsonElement socket = Field(cfg, "socketPath");
 
         Assert.Equal("unknown", socket.GetProperty("source").GetString());
@@ -153,7 +153,7 @@ public sealed class LeafConfigSurfaceTests
         }
         """);
 
-        HttpResponseMessage resp = await Admin(f).GetAsync(ConfigUrl("assistant"));
+        HttpResponseMessage resp = await Owner(f).GetAsync(ConfigUrl("assistant"));
         string body = await resp.Content.ReadAsStringAsync();
         JsonElement key = Field(JsonDocument.Parse(body).RootElement, "webSearchApiKey");
 
@@ -176,13 +176,13 @@ public sealed class LeafConfigSurfaceTests
         f.InstallDescriptor("monitor", MonitorDescriptor(FloorFile(f, "")));
         f.UnwireDropIn(MonitorUnit);   // a host that never ran setup-leaf-config.sh
 
-        JsonElement cfg = await Json(Admin(f).GetAsync(ConfigUrl("monitor")));
+        JsonElement cfg = await Json(Owner(f).GetAsync(ConfigUrl("monitor")));
         Assert.False(cfg.GetProperty("editable").GetBoolean());
         Assert.Contains("setup-leaf-config.sh", cfg.GetProperty("editableReason").GetString());
 
         // A write would render a file nothing reads and then fail at the restart — refuse it up front, and
         // as a 409: nothing about the request is malformed.
-        HttpResponseMessage resp = await Put(Admin(f), "monitor", """{"values":{"intervalMs":"2500"}}""");
+        HttpResponseMessage resp = await Put(Owner(f), "monitor", """{"values":{"intervalMs":"2500"}}""");
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
         Assert.Equal(0, f.Units().RestartCount(MonitorUnit));
     }
@@ -193,7 +193,7 @@ public sealed class LeafConfigSurfaceTests
         using var f = new LeafConfigTestFactory();
         f.InstallDescriptor("monitor", MonitorDescriptor(FloorFile(f, "")));
 
-        JsonElement cfg = await Json(Admin(f).GetAsync(ConfigUrl("monitor")));
+        JsonElement cfg = await Json(Owner(f).GetAsync(ConfigUrl("monitor")));
 
         Assert.True(cfg.GetProperty("editable").GetBoolean());
         Assert.False(cfg.TryGetProperty("editableReason", out _));
@@ -209,7 +209,7 @@ public sealed class LeafConfigSurfaceTests
 
         // The monitor silently discards an interval under 100ms and keeps its default. Accepting it would
         // report a change that never happened — the bound comes from the leaf's own descriptor, not from here.
-        HttpResponseMessage resp = await Put(Admin(f), "monitor", """{"values":{"intervalMs":"50"}}""");
+        HttpResponseMessage resp = await Put(Owner(f), "monitor", """{"values":{"intervalMs":"50"}}""");
 
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
         Assert.Contains("at least 100 ms", await resp.Content.ReadAsStringAsync());
@@ -222,7 +222,7 @@ public sealed class LeafConfigSurfaceTests
         using var f = new LeafConfigTestFactory();
         f.InstallDescriptor("monitor", MonitorDescriptor(FloorFile(f, "")));
 
-        JsonElement result = await Json(Put(Admin(f), "monitor", """{"values":{"intervalMs":"100"}}"""));
+        JsonElement result = await Json(Put(Owner(f), "monitor", """{"values":{"intervalMs":"100"}}"""));
 
         Assert.Equal("applied", result.GetProperty("outcome").GetString());
         Assert.Equal(1, f.Units().RestartCount(MonitorUnit));
@@ -240,7 +240,7 @@ public sealed class LeafConfigSurfaceTests
 
         // No leaf answers on its surface here, so this is the API's own write — and only the leaf
         // records the author an automation then runs as.
-        HttpResponseMessage resp = await Put(Admin(f), "monitor", body);
+        HttpResponseMessage resp = await Put(Owner(f), "monitor", body);
 
         Assert.Equal(HttpStatusCode.Conflict, resp.StatusCode);
         Assert.Contains("maintenanceMs", await resp.Content.ReadAsStringAsync());
@@ -255,7 +255,7 @@ public sealed class LeafConfigSurfaceTests
         using var f = new LeafConfigTestFactory();
         f.InstallDescriptor("monitor", MonitorDescriptor(FloorFile(f, "")));
 
-        JsonElement result = await Json(Put(Admin(f), "monitor",
+        JsonElement result = await Json(Put(Owner(f), "monitor",
             $$$"""{"values":{"socketPath":"{{{FakeLeafReachability.UnreachableValue}}}"}}"""));
 
         // The unit came back up — the liveness canary is green — so this is NOT a rollback. The change was
@@ -277,7 +277,7 @@ public sealed class LeafConfigSurfaceTests
         f.InstallDescriptor("monitor", MonitorDescriptor(FloorFile(f, "")));
 
         // The sentinel would report unreachable if consulted — but intervalMs is a safe field, so it is not.
-        JsonElement result = await Json(Put(Admin(f), "monitor", """{"values":{"intervalMs":"2500"}}"""));
+        JsonElement result = await Json(Put(Owner(f), "monitor", """{"values":{"intervalMs":"2500"}}"""));
         Assert.Equal("applied", result.GetProperty("outcome").GetString());
     }
 
@@ -287,7 +287,7 @@ public sealed class LeafConfigSurfaceTests
         using var f = new LeafConfigTestFactory();
         f.InstallDescriptor("monitor", MonitorDescriptor(FloorFile(f, "")));
 
-        JsonElement result = await Json(Put(Admin(f), "monitor",
+        JsonElement result = await Json(Put(Owner(f), "monitor",
             $$$"""{"values":{"socketPath":"{{{FakeLeafReachability.NoSignalValue}}}"}}"""));
 
         // Nothing was measured. Reporting a break on an absence of evidence would fabricate a status.
@@ -302,7 +302,7 @@ public sealed class LeafConfigSurfaceTests
 
         // hostId is wiring and pairs with Api__HostId. Setting the leaf's to something else means the
         // monitor stores its metrics under one identity and this API queries another.
-        JsonElement result = await Json(Put(Admin(f), "monitor", """{"values":{"hostId":"some-other-host"}}"""));
+        JsonElement result = await Json(Put(Owner(f), "monitor", """{"values":{"hostId":"some-other-host"}}"""));
 
         Assert.Equal("applied_unreachable", result.GetProperty("outcome").GetString());
         string message = result.GetProperty("message").GetString()!;
@@ -316,7 +316,7 @@ public sealed class LeafConfigSurfaceTests
         using var f = new LeafConfigTestFactory();
         f.InstallDescriptor("monitor", MonitorDescriptor(FloorFile(f, "")));
 
-        JsonElement result = await Json(Put(Admin(f), "monitor", $$$"""{"values":{"hostId":"{{{Host}}}"}}"""));
+        JsonElement result = await Json(Put(Owner(f), "monitor", $$$"""{"values":{"hostId":"{{{Host}}}"}}"""));
 
         Assert.Equal("applied", result.GetProperty("outcome").GetString());
     }
@@ -340,7 +340,7 @@ public sealed class LeafConfigSurfaceTests
         }
         """);
 
-        JsonElement board = await Json(Admin(f).GetAsync($"/api/v1/hosts/{Host}/services"));
+        JsonElement board = await Json(Owner(f).GetAsync($"/api/v1/hosts/{Host}/services"));
         JsonElement row = board.GetProperty("data").EnumerateArray()
             .First(s => s.GetProperty("id").GetString() == "weatherwatch");
 
@@ -352,7 +352,7 @@ public sealed class LeafConfigSurfaceTests
         Assert.False(string.IsNullOrEmpty(row.GetProperty("state").GetString()));
 
         // And its configuration surface is served with no rebuild of this API.
-        JsonElement cfg = await Json(Admin(f).GetAsync(ConfigUrl("weatherwatch")));
+        JsonElement cfg = await Json(Owner(f).GetAsync(ConfigUrl("weatherwatch")));
         Assert.True(cfg.GetProperty("fromDescriptor").GetBoolean());
         Assert.Equal("Weather Watch", cfg.GetProperty("displayName").GetString());
     }
@@ -373,7 +373,7 @@ public sealed class LeafConfigSurfaceTests
         return path.Replace("\\", "/");
     }
 
-    private static HttpClient Admin(LeafConfigTestFactory f)
+    private static HttpClient Owner(LeafConfigTestFactory f)
     {
         HttpClient c = f.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", f.AccessToken(Persona.Owner));

@@ -102,7 +102,7 @@ public sealed class ClusterSessionAcceptanceTests
 
         // The account exists here because replication put it here, not because anybody signed in.
         KgsmIdentity person = Somebody("usr_replicated");
-        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Operator);
+        AuthTestFactory.SetAccountOn(node.Services, person, Persona.Runner);
 
         string token = Anchor(signer).MintAccess(person, "sid_from_anchor").Token;
 
