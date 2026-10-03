@@ -92,7 +92,7 @@ card** row in `PLAN.md §6`.
 
 ## Runtime leaf configuration — one-time setup
 
-The Services panel lets an admin edit a leaf's configuration at runtime; the API delivers it as an
+The Services panel edits a leaf's configuration at runtime (`<leaf>:config.write`); the API delivers it as an
 **override** (never editing the leaf's own deployed config) and applies it by restarting the leaf. That
 needs a tiny bit of one-time privileged wiring — and **`./deploy/setup.sh` does it for you**, by
 calling `deploy/setup-leaf-config.sh` as part of provisioning the host. So a fresh checkout reaches a

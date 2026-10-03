@@ -9,7 +9,7 @@ namespace TheKrystalShip.Api.Services.Library;
 /// than a configurable interval (default 7 days = weekly). For each blueprint whose cache row is missing /
 /// stale / pointing at a now-changed slug, it downloads the cover, the hero screenshot, and the
 /// description/genres/tags to disk and upserts the row. Registered hosted + singleton in <c>Startup.cs</c>
-/// (like the other pumps) so an admin <c>POST /library/refresh</c> can force an immediate full re-fetch. It
+/// (like the other pumps) so a <c>POST /library/refresh</c> can force an immediate full re-fetch. It
 /// runs off the request path and <b>never blocks startup</b>.
 /// </summary>
 /// <remarks>
@@ -88,7 +88,7 @@ public sealed class LibraryHydrationWorker(
     }
 
     /// <summary>
-    /// Trigger an immediate, <b>forced</b> full re-fetch (the admin <c>POST /library/refresh</c>). Returns
+    /// Trigger an immediate, <b>forced</b> full re-fetch (<c>POST /library/refresh</c>). Returns
     /// <c>false</c> if a sweep is already in flight (the caller returns <c>409</c>); otherwise it kicks the
     /// sweep onto a background task tied to the app lifetime and returns <c>true</c> (the caller returns
     /// <c>202</c> — the sweep runs off the request thread).

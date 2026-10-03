@@ -14,7 +14,7 @@ namespace TheKrystalShip.Api.Data;
 /// account has no rows at all.
 /// </para>
 /// <para>
-/// It never overrides the admin. The host-wide rule on the integration decides what the channel
+/// It never overrides the host. The host-wide rule on the integration decides what the channel
 /// carries; this decides what a person wants out of that. Both must say yes.
 /// </para>
 /// </summary>

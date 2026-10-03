@@ -21,9 +21,9 @@ namespace TheKrystalShip.Api.Contracts;
 /// fallback is a vendor estimate and can overstate what a game really uses, so an operator who knows
 /// better can say so. Absent ⇒ false: the protection is what a caller gets by not asking.
 /// <para>
-/// Operator, not admin. The judgement it takes — "this blueprint's figure is wrong for this server" —
-/// is one anyone who runs these servers day to day is in a position to make, and the tier that may
-/// start a server is the same tier that may decide it fits.
+/// It takes nothing beyond <c>kgsm:server.start</c>. The judgement it takes — "this blueprint's figure
+/// is wrong for this server" — is one anyone who runs these servers day to day is in a position to
+/// make, and whoever may start a server may decide it fits.
 /// </para>
 /// It does not create memory. Forcing a start the node genuinely cannot fit invites the OOM killer,
 /// which picks by its own heuristic and may take down a different server, or the watchdog supervising

@@ -184,5 +184,5 @@ A firing record carries `actions[]` — the operations a surface may draw a butt
 
 ## Auth
 
-`GET /alerts` is `[Authorize(Policy = viewer)]` and the `alerts` topic rides the viewer-gated
-`/stream` connection — a core read surface, consistent with `/audit`.
+`GET /alerts` takes `api:alerts.read`, and the `alerts` topic on `/stream` takes the same action — a
+core read surface, consistent with `/audit`.

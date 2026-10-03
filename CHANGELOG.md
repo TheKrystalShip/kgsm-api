@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the docs describe access as actions (0.214.2)
+
+`PLAN.md`, `PLAN-peers.md`, the subsystem `CLAUDE.md`s, the README and the source comments describe
+every gate as the action it asks and every session as the auth anchor's. The tier-era auth history
+is deleted from `PLAN.md` (the M4·a/M4·b validation entries, the assistant turn relay), and
+`PLAN-peers.md` describes the `/members` routes, anchor-minted sessions and `session.revoke` as they
+run. `Api.Contracts` drops `AssistantTurnRequest`, `AssistantConfirmRequest`, `TurnFeedbackRequest`
+and `MemoryWriteRequest`, which nothing serves (1.0.0-dev.17). Log lines that said "an admin" say
+"somebody", and the auth-disabled warning names the synthetic Owner.
+
 ### Fixed — a refused action gate names the action (0.214.1)
 
 A `403` from an action gate carries `{"error":{"code":"forbidden","message":"This needs <action>."}}`,

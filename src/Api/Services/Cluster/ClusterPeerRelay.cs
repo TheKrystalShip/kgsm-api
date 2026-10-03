@@ -15,7 +15,7 @@ public enum ClusterRelayStatus
     Ok,
     /// <summary>No such peer row on this node (or the cluster is disabled → empty roster).</summary>
     UnknownNode,
-    /// <summary>The peer row exists but is disabled on this node (the admin disable-list).</summary>
+    /// <summary>The peer row exists but is disabled on this node (the member disable-list).</summary>
     Disabled,
     /// <summary>The peer could not be reached, or answered non-2xx — honest "unreachable," never a fabricated body.</summary>
     Unreachable,

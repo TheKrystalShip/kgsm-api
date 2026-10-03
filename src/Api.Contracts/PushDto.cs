@@ -2,14 +2,14 @@ using System.Text.Json.Serialization;
 
 namespace TheKrystalShip.Api.Contracts;
 
-/// <summary>GET/PATCH /integrations/webpush — the admin's view of the push channel. There is no
+/// <summary>GET/PATCH /integrations/webpush — the host-wide view of the push channel. There is no
 /// <c>webhook</c> block because there is no secret to paste: the host signs with a generated VAPID
 /// pair and each browser mints its own credential.</summary>
 /// <param name="Provider">The channel's identifier, <c>webpush</c>.</param>
 /// <param name="Configured">Whether this host holds a VAPID pair to send with.</param>
 /// <param name="PublicKey">The VAPID public key, which a browser needs to subscribe. Public by design
 /// — the private half never leaves the host.</param>
-/// <param name="Enabled">Whether the admin has the channel switched on.</param>
+/// <param name="Enabled">Whether the channel is switched on for this host.</param>
 /// <param name="Events">Which events this channel is configured to deliver.</param>
 public sealed record WebPushIntegrationView(
     string Provider,
@@ -64,7 +64,7 @@ public sealed record PushActionResult(bool Ok, string Message);
 
 /// <summary>GET /push/key — what a browser needs before it can call <c>pushManager.subscribe</c>.</summary>
 /// <param name="PublicKey">base64url VAPID public key, passed as <c>applicationServerKey</c>.</param>
-/// <param name="Enabled">Whether the admin has the push channel switched on. A browser may subscribe
+/// <param name="Enabled">Whether the push channel is switched on for this host. A browser may subscribe
 /// either way — but the panel says so, rather than letting someone opt in to silence.</param>
 public sealed record PushKeyResponse(string PublicKey, bool Enabled);
 
@@ -96,7 +96,7 @@ public sealed record PushDevicesResponse(bool Enabled, IReadOnlyList<PushDeviceV
 /// <summary>
 /// One catalog event as it appears on a person's own notification settings.
 /// <para>
-/// <paramref name="Enabled"/> is THEIR choice; <paramref name="AvailableOnHost"/> is the admin's
+/// <paramref name="Enabled"/> is THEIR choice; <paramref name="AvailableOnHost"/> is the
 /// host-wide rule for the push channel. Both are reported because both gate delivery, and showing
 /// only the personal one would let somebody switch an event on and hear nothing with no explanation.
 /// </para>

@@ -10,8 +10,8 @@ using TheKrystalShip.KGSM.Core.Models;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// The label a server is read by — <c>PUT /servers/{id}/display-name</c> (Operator, rename) and
-/// <c>DELETE</c> (Operator, clear, after which the instance reads as its id again). The current label
+/// The label a server is read by — <c>PUT /servers/{id}/display-name</c> (rename) and <c>DELETE</c>
+/// (clear, after which the instance reads as its id again), both on <c>kgsm:server.config.write</c>. The current label
 /// needs no <c>GET</c> of its own: it is <c>name</c> on the <see cref="Server"/> DTO, on the list, the
 /// detail and the <c>servers</c> stream alike.
 /// </summary>

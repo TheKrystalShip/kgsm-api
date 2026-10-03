@@ -215,7 +215,7 @@ public sealed class DomainPump(
         // released — carried so an open server page shows the name without a reload.
         || a.PublishedHost != b.PublishedHost
         // Moves when a server on another member behind the same address takes or gives up one of this
-        // one's ports — rare, and exactly what an admin looking at the server needs to see arrive.
+        // one's ports — rare, and exactly what somebody looking at the server needs to see arrive.
         || !SameCollisions(a.PortCollisions, b.PortCollisions);
 
     private static bool SameCollisions(IReadOnlyList<PortCollision>? a, IReadOnlyList<PortCollision>? b) =>

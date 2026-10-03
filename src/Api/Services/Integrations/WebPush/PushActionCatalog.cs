@@ -81,7 +81,7 @@ public static class PushActionCatalog
 
         // An account waiting for approval gets no button: approving is a write to the accounts, which
         // are the auth anchor's and are written only there. The notification's own tap opens the page
-        // where an admin makes that decision.
+        // where whoever holds `auth:accounts.approve` makes that decision.
         if (ev.CatalogId == "awaiting_approval") return [];
 
         // A reactor offer deliberately gets no button, and the absence is the design rather than an

@@ -90,7 +90,7 @@ public static class NotificationCatalog
         new("leaf_degraded", "Service degraded", "A KGSM service on this host reported that part of its job stopped working and stayed that way."),
         new("leaf_recovered", "Service recovered", "A KGSM service reported that a part that had stopped working is working again."),
         new("restart_soon", "Scheduled restart due", "A running server is minutes away from its scheduled restart."),
-        new("awaiting_approval", "Account awaiting approval", "Somebody signed in for the first time and cannot do anything until an admin approves them (user.provisioned)."),
+        new("awaiting_approval", "Account awaiting approval", "Somebody signed in for the first time and cannot do anything until somebody approves them (user.provisioned)."),
         new("reactor_offer", "Reactor offer", "A reactor rule staged an action and is waiting for somebody to confirm or dismiss it (reactor.proposed)."),
     ];
 
@@ -101,8 +101,8 @@ public static class NotificationCatalog
     /// <remarks>
     /// Every other event is bounded by what the host does: a server starts, crashes, gets backed up. These
     /// two are bounded by how popular a server is, and a busy evening is hundreds of joins. Defaulting them
-    /// on would mean adding them silently changed what an already-configured host sends — so an admin turns
-    /// them on deliberately, and each person can still switch them off again.
+    /// on would mean adding them silently changed what an already-configured host sends — so they are
+    /// turned on deliberately, and each person can still switch them off again.
     /// </remarks>
     private static readonly HashSet<string> OptIn = new(StringComparer.Ordinal) { "player_join", "server_empty" };
 

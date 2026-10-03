@@ -167,8 +167,8 @@ public static class StreamProtocol
     // --- me (the caller's own standing on this host) ---
     /// <summary>What this host says about the <em>caller's own</em> account: <c>me</c>. The live
     /// companion to <c>GET /api/v1/me</c> — the client hydrates there and applies
-    /// <see cref="MePatch"/> and <see cref="MeAccess"/> frames from here on, so a status or access an
-    /// administrator changes lands on an open panel instead of waiting for a reload.
+    /// <see cref="MePatch"/> and <see cref="MeAccess"/> frames from here on, so a change to the account's
+    /// status or access lands on an open panel instead of waiting for a reload.
     /// <para>The one topic delivered by <em>audience</em> rather than by subscription alone: a frame
     /// reaches only the connections authenticated as the account it is about, never the host at large
     /// (<see cref="StreamHub.PublishToAccount"/>). It is also the one topic <see cref="Gate"/> leaves

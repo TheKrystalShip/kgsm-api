@@ -87,8 +87,8 @@ public sealed record Host(
     // when the firewall can't answer (absent/unreachable/unknown); an empty OpenPorts means the firewall
     // answered and owns no rules.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] HostNetwork? Network = null,
-    // The per-process GPU breakdown — detail-only (like Network above) and OPERATOR-GATED: below operator a
-    // context belonging to no known unit is stripped of its pid and name and folded into one unnamed row per
+    // The per-process GPU breakdown — detail-only (like Network above) and GATED on api:services.read: without
+    // it a context belonging to no known unit is stripped of its pid and name and folded into one unnamed row per
     // device, keeping its memory so the card still totals honestly. Null when the host has no GPU. The device
     // list itself is not gated and rides the metrics tick (HostMetricsDto.Gpus).
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -291,14 +291,14 @@ public sealed record GpuSample(
 
 /// <summary>
 /// One compute context on a GPU (monitor <c>GpuProcess</c>), carried on the <see cref="Host"/> detail only and
-/// <strong>operator-gated</strong>.
+/// <strong>gated on <c>api:services.read</c></strong>.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Why gated:</b> the monitor sees every process using the card, including ones that have nothing to do with
-/// KGSM — somebody's training run, a CUDA experiment. Naming those to every viewer is the same mistake as
-/// putting a player's connection address on an audit row. Below operator, contexts that resolve to no known
-/// unit are collapsed into a single unnamed row by <c>GpuRedaction</c>.
+/// KGSM — somebody's training run, a CUDA experiment. Naming those to everybody who can read the host is the
+/// same mistake as putting a player's connection address on an audit row. Without that action, contexts that
+/// resolve to no known unit are collapsed into a single unnamed row by <c>GpuRedaction</c>.
 /// </para>
 /// <para>
 /// That collapse <b>keeps the memory figure</b>. Dropping the rows would leave the per-process figures
@@ -363,7 +363,7 @@ public sealed record HostIdentity(
     DateTimeOffset StartedAt);
 
 /// <summary>
-/// Sparse update body for <c>PATCH /hosts/{id}</c> (admin) — the editable half of the identity card. Only
+/// Sparse update body for <c>PATCH /hosts/{id}</c> (<c>api:hosts.write</c>) — the editable half of the identity card. Only
 /// the present fields change: a <see langword="null"/> field is left unchanged; an explicit empty string
 /// <strong>clears</strong> the override (the value falls back to its <c>Api__*</c> config default). Both
 /// are free-form strings (length-bounded by the controller); region is NOT a restricted enum.

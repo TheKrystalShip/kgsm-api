@@ -50,7 +50,7 @@ public sealed record Alert(
 /// <para>
 /// <b>The offer is a policy, not a permission.</b> It says this condition is the kind of thing that verb
 /// answers — it does not say the caller may run it, or that the target is in a state that accepts it. The
-/// panel applies its own gates at render (tier, the observed run state, one command in flight) exactly as
+/// panel applies its own gates at render (whether the caller may make the request, the observed run state, one command in flight) exactly as
 /// it does for the same verb pressed anywhere else, and <c>POST /servers/{id}/commands</c> applies them
 /// again at the click. An offer whose target is running is still correct: the button renders disabled and
 /// says why, which is the honest answer to "why can't I update this".

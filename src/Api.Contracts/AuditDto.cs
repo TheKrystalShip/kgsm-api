@@ -203,7 +203,7 @@ public static class AuditTargetKind
 {
     public const string Server = "server";
     public const string Host = "host";
-    // A KGSM leaf service (monitor/watchdog/assistant/firewall) — the target of the service.* admin actions
+    // A KGSM leaf service (monitor/watchdog/assistant/firewall) — the target of the service.* actions
     // (the leaf-runtime-provisioning/config feature). Beyond the doc's server/host set; the frontend accepts
     // unknown target kinds forward-compat.
     public const string Leaf = "leaf";

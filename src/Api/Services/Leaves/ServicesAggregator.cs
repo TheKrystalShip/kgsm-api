@@ -14,8 +14,8 @@ namespace TheKrystalShip.Api.Services.Leaves;
 ///   where the api has no probe (firewall/bot) — never inferred from liveness.</item>
 /// </list>
 /// The two are kept distinct on purpose: a unit can be <c>active</c> yet failing its <c>/health</c> (the
-/// interesting case the at-a-glance Overview dot can't show). Read-only in this slice — start/stop/restart
-/// controls are a later increment (polkit grant + admin gate + audit).
+/// interesting case the at-a-glance Overview dot can't show). This is the read side only; starting,
+/// stopping and restarting a leaf is <c>ServicesController</c>'s, behind <c>api:services.manage</c>.
 /// </summary>
 public sealed class ServicesAggregator(
     SystemdReader systemd,

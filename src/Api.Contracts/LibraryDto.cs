@@ -128,8 +128,9 @@ public sealed record LibrarySpecs(
 /// equal to <paramref name="OverridesSystem"/>, surfaced separately so a client never has to derive the
 /// rule that reverting a blueprint with no original would destroy the only copy. The API refuses that
 /// case independently (<c>409 no_original</c>) whether or not a client checks this.</param>
-/// <param name="ReadOnly">Whether THIS caller may save. Writes are admin-only while reads are operator+,
-/// so an operator gets the file with <c>readOnly: true</c> — the editor opens, the buttons do not.</param>
+/// <param name="ReadOnly">Whether THIS caller may save. Reading takes <c>kgsm:library.read</c> and
+/// saving <c>kgsm:blueprints.write</c>, so a caller holding only the first gets the file with
+/// <c>readOnly: true</c> — the editor opens, the buttons do not.</param>
 /// <param name="Runtime">The blueprint's runtime (<c>native</c>/<c>container</c>) as the engine reports it
 /// in the catalog, or <c>null</c> when this blueprint isn't in the cached catalog (a brand-new one, or a
 /// malformed file the engine won't enumerate — which is precisely a file worth opening to repair). Never

@@ -12,9 +12,9 @@ the `jobs` SSE topic (`job.patch`) → verify (`server.patch` on settle)**. The 
   derives the target from the instance's own `Instance.Ports` (a client list would let the browser open
   anything). It is **always admissible** (no run-state no-op — declarative/idempotent) and shares the
   one-in-flight slot.
-- **`move` has a dedicated route, and it is admin.** `POST /servers/{id}/move { library }` reuses the job
-  machinery (the install/`backup_restore` pattern — the plain verbs are param-less) and takes the
-  library-CRUD authority rather than operator, because placement shapes the host. **The engine starts
+- **`move` has a dedicated route and its own action.** `POST /servers/{id}/move { library }` reuses the
+  job machinery (the install/`backup_restore` pattern — the plain verbs are param-less) and takes
+  `kgsm:server.move` rather than a lifecycle action, because placement shapes the host. **The engine starts
   the instance once on the new path to confirm it runs there**, so a `server.started` and a
   `server.stopped` land partway through with no bracket around them — a surface reading run-state alone
   flickers "running" mid-move, and the job holding the in-flight slot is the span it should trust instead.
@@ -85,8 +85,9 @@ the `jobs` SSE topic (`job.patch`) → verify (`server.patch` on settle)**. The 
 
 ## Auth
 
-The `POST .../commands` action is `[Authorize(Policy = operator)]` — mutations require operator or admin;
-viewers reading `/servers` can't issue one. The gate's state-guards are orthogonal to permissions.
+`POST .../commands` asks the action its verb performs (`ActionIds.ForVerb` — `kgsm:server.start`,
+`.stop`, `.restart`, `.update`) at the instance's scope; reading `/servers` grants none of them. The
+gate's state-guards are orthogonal to permissions.
 
 ## Real-lifecycle caveat
 

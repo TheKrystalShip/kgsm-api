@@ -100,7 +100,7 @@ public sealed class NotificationBus : INotificationBus
     /// the moment it happens and means what it says.
     /// <para>
     /// <b>An episode that ended without recovering is not an all-clear.</b> The monitor closes one as
-    /// <c>unwatched</c> when an admin retunes or disables its rule, and as <c>interrupted</c> when the daemon
+    /// <c>unwatched</c> when somebody retunes or disables its rule, and as <c>interrupted</c> when the daemon
     /// itself restarts. Announcing either would be reporting a measurement nobody took — and neither loses
     /// anything: the person who retuned the rule is the one who did it, and a condition still true after a
     /// restart opens a fresh episode within seconds and announces itself as a breach.
@@ -122,7 +122,7 @@ public sealed class NotificationBus : INotificationBus
     {
         // A provisioning that did not leave somebody waiting is not an approval request. Which one it was
         // is on the row: a host whose policy activates an account on sight writes the same action with a
-        // different status, and announcing that would ask an admin to approve what is already approved.
+        // different status, and announcing that would ask somebody to approve what is already approved.
         //
         // The key is "to" — the state the account landed in. An account-lifecycle row carries the move
         // as a from/to pair (AuditMapping.FromUserAccountEvent), and a provision has no "from" because

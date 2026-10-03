@@ -379,7 +379,7 @@ public class Startup(IConfiguration configuration)
         // The hydration worker: boot sweep + a configurable periodic refresh (weekly by default, at a local
         // hour). Runs if EITHER source is on (Steam is on by default — keyless; RAWG is opt-in via
         // Api__RawgApiKey). Off the request path; never blocks startup. Registered singleton + hosted
-        // (same instance) like the other pumps, so the admin POST /library/refresh can force an immediate sweep.
+        // (same instance) like the other pumps, so POST /library/refresh can force an immediate sweep.
         services.AddSingleton<LibraryHydrationWorker>();
         services.AddHostedService(sp => sp.GetRequiredService<LibraryHydrationWorker>());
 
@@ -979,7 +979,7 @@ public class Startup(IConfiguration configuration)
         ILogger startupLog = loggerFactory.CreateLogger("TheKrystalShip.Api.Startup");
         if (options.AuthDisabled)
             startupLog.LogWarning(
-                "AUTH DISABLED (Api__AuthDisabled) — every request is authenticated as admin and "
+                "AUTH DISABLED (Api__AuthDisabled) — every request is authenticated as the Owner and "
                 + "attributed to {Actor}. Never enable this on an exposed host.",
                 options.DisabledAuthActor);
 

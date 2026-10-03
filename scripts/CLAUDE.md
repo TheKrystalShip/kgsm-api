@@ -3,7 +3,7 @@
 ## `smoke.sh` — the "mock frontend"
 
 It builds Release and asserts the whole HTTP contract surface, plus an **auth-ENABLED** no-token sweep.
-The domain checks run under `Api__AuthDisabled=true` (the escape hatch — synthetic admin) so they
+The domain checks run under `Api__AuthDisabled=true` (the escape hatch — a synthetic Owner) so they
 exercise the contracts unchanged; a dedicated auth-enabled instance then proves the no-token sweep
 (every protected endpoint `401`s with the frozen envelope, `/health`+`/api/v1` stay open, and an
 `/auth` path is a `404` because this node signs nobody in). The command-gate checks prove the

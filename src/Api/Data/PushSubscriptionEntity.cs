@@ -6,7 +6,7 @@ namespace TheKrystalShip.Api.Data;
 /// This is the shape that does <b>not</b> fit <see cref="IntegrationEntity"/>, and the reason push
 /// needed a table of its own: an integration holds ONE secret for the whole host (a Slack webhook),
 /// while push has one credential per <em>user per device</em>, minted by the browser rather than
-/// pasted by an admin.
+/// pasted into the panel.
 /// </para>
 /// <para>
 /// <b>Not a secret we chose.</b> The endpoint is a capability URL issued by the push service, and the

@@ -20,7 +20,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// </para>
 /// <para>
 /// <b>Which is why speech carries no Link on the Services board</b> and is absent from
-/// <see cref="ProvisionableLeaf"/>. That axis is a stored connection an admin can turn off, and there is
+/// <see cref="ProvisionableLeaf"/>. That axis is a stored connection somebody can turn off, and there is
 /// nothing here for one to arm: this client runs on a page view, holds no poll and feeds no data flow, and
 /// the paths that actually use the engine — the assistant service, the bot, a browser recording a voice
 /// note — reach the leaf directly. A toggle would stop none of them while looking like the switch that

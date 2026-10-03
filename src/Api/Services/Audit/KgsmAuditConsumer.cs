@@ -749,7 +749,7 @@ public sealed class KgsmAuditConsumer(
         // blueprint.write / blueprint.revert — a game's blueprint FILE changed (kgsm-lib 1.43.0). These are
         // the first events whose subject is not an instance: they carry BlueprintName, not InstanceName, so
         // the row's target is the blueprint and its serverId is null. The PUT/DELETE /library/{id}/file path
-        // threads actor+origin into the emit, so the echo carries the real admin — engine-owned, no
+        // threads actor+origin into the emit, so the echo carries the person who made the change — engine-owned, no
         // double-write (unlike file.write, which the api direct-writes precisely because kgsm emits nothing
         // for an instance file save).
         //
@@ -779,7 +779,7 @@ public sealed class KgsmAuditConsumer(
         });
 
         // library.add / library.remove — a named placement root was registered or deregistered. The
-        // library CRUD path stamps actor+origin onto the kgsm call, so these echoes carry the real admin;
+        // library CRUD path stamps actor+origin onto the kgsm call, so these echoes carry the person who made the change;
         // engine-owned, no double-write. A RENAME has no handler here because kgsm emits nothing for it —
         // that row is written to this API's own journal and rides the raw hook above with the rest.
         events.RegisterHandler<LibraryAddedData>(d =>

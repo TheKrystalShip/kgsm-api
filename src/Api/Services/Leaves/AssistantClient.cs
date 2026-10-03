@@ -9,11 +9,10 @@ namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>
 /// The kgsm-assistant leaf client: a typed <see cref="HttpClient"/> onto the assistant's HTTP
-/// surface (a co-located leaf reached over plain TCP, unlike the monitor's unix socket). Today
-/// it exposes only a liveness <see cref="ProbeAsync"/> used to report the architecture §4·b
-/// assistant capability, but it is the deliberate home for the assistant's real surface as it
-/// lands — the tool catalog, capability discovery, and the SSE turn relay (M7) — so callers
-/// depend on typed methods here rather than raw HTTP scattered across the aggregator.
+/// surface (a co-located leaf reached over plain TCP, unlike the monitor's unix socket). It
+/// answers the liveness <see cref="CheckHealthAsync"/> that reports the architecture §4·b assistant
+/// capability; anything else this API asks of the assistant belongs here as a typed method rather
+/// than raw HTTP scattered across the aggregator.
 /// </summary>
 /// <remarks>
 /// When the assistant is not provisioned (no base URL configured) the client is constructed in a
@@ -62,7 +61,7 @@ public sealed class AssistantClient : HttpClient
     }
 
     /// <summary>True when the assistant is provisioned (connected) on this host at runtime AND a base URL is
-    /// configured to reach it. The capability/relay calls all gate on this, so disconnecting the assistant
+    /// configured to reach it. The capability probe gates on this, so disconnecting the assistant
     /// disarms them live.</summary>
     public bool IsProvisioned => _hasBaseUrl && _registry.IsProvisioned(ProvisionableLeaf.Assistant);
 

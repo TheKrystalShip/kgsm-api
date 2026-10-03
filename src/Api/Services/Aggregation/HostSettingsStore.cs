@@ -14,7 +14,7 @@ public sealed record HostSettingsRecord(string? Label, string? Region, DateTimeO
 /// The single reader/writer of the <c>host_settings</c> table — this host's operator-editable identity
 /// overrides (region/label, the runtime-mutable half of the identity card). A singleton owning its own DI
 /// scope per operation (the same pattern as <see cref="Audit.AuditService"/>/<c>IntegrationStore</c>), with
-/// the resolved row cached in memory (it changes only on an admin PATCH) so neither <c>GET /hosts</c> nor
+/// the resolved row cached in memory (it changes only on a <c>PATCH /hosts/{id}</c>) so neither <c>GET /hosts</c> nor
 /// the open <c>GET /api/v1</c> handshake touches the DB on the hot path.
 /// </summary>
 /// <remarks>

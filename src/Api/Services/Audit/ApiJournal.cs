@@ -275,7 +275,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
         string type, string actor, string? origin, Action<Utf8JsonWriter> payload, CancellationToken ct)
     {
         // Parsed at this boundary because several of these names are chosen at run time from the
-        // constants above — which of the user.* events an admin action is, which of the command.*
+        // constants above — which of the user.* events an account change is, which of the command.*
         // outcomes a run ended in. A name that is not a name is dropped loudly rather than written:
         // a line no consumer matches fails silently everywhere downstream.
         if (!EventName.TryParse(type, out EventName name))

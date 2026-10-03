@@ -419,7 +419,7 @@ public static class AuditMapping
     /// <see cref="ParseActor"/>/<see cref="NormalizeOrigin"/>) — engine-owned, no double-write. UNLIKE
     /// <see cref="FromConfigChangedEvent"/> (key only), the FULL command text rides in <c>meta.command</c>
     /// and a truncated form in the summary, on purpose: the trail records exactly what an operator ran
-    /// (console commands are admin-level). A blank command degrades to a command-less summary + null meta
+    /// (a console command can do anything the game allows). A blank command degrades to a command-less summary + null meta
     /// (defensive — the event guarantees a non-empty command), never a fabricated placeholder.
     /// </summary>
     public static AuditWrite FromInputSentEvent(InstanceInputSentData d, string hostId)
@@ -461,8 +461,8 @@ public static class AuditMapping
     /// <summary>
     /// Map a kgsm <c>blueprint.created</c> event to a <c>blueprint.write</c> row — a blueprint file that
     /// did not exist in the user directory before. Provenance rides off the envelope (the PUT
-    /// <c>/library/{id}/file</c> path threads actor+origin into the emit, so the echo carries the real
-    /// admin rather than the service account) — engine-owned, no double-write.
+    /// <c>/library/{id}/file</c> path threads actor+origin into the emit, so the echo carries the person
+    /// who made the change rather than the service account) — engine-owned, no double-write.
     /// </summary>
     public static AuditWrite FromBlueprintCreatedEvent(BlueprintCreatedData d, string hostId) =>
         BlueprintWrite(d, hostId, d.Tier, KgsmEventCatalog.NameOf<BlueprintCreatedData>(), AuditSeverity.Success,
@@ -508,8 +508,8 @@ public static class AuditMapping
     /// servers.
     /// </summary>
     /// <remarks>
-    /// Engine-owned echo: the CRUD path stamps actor+origin onto the kgsm call, so this carries the real
-    /// admin rather than the service account, and nothing is direct-written for it.
+    /// Engine-owned echo: the CRUD path stamps actor+origin onto the kgsm call, so this carries the person
+    /// who made the change rather than the service account, and nothing is direct-written for it.
     /// </remarks>
     public static AuditWrite FromLibraryAddedEvent(LibraryAddedData d, string hostId) =>
         LibraryWrite(d, hostId, KgsmEventCatalog.NameOf<LibraryAddedData>(), AuditSeverity.Success,
@@ -1075,10 +1075,8 @@ public static class AuditMapping
         int count = d.Count ?? 1;
         string sessions = count == 1 ? "a session" : $"{count} sessions";
 
-        // An admin revoking somebody else's session is the substantial-power case and reads louder than
-        // a person managing their own, which is routine.
-        // An admin revoking somebody else's session is the substantial-power case and reads louder than
-        // a person managing their own, which is routine.
+        // Revoking somebody else's session is the substantial-power case and reads louder than a person
+        // managing their own, which is routine.
         (string severity, string summary) = d.Scope switch
         {
             SessionRevokeScopes.All => (AuditSeverity.Info, $"{who} logged out everywhere ({count} session(s))"),

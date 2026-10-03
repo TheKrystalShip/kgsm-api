@@ -49,14 +49,14 @@ public sealed class ApiOptions
     /// </summary>
     public required string HostId { get; init; }
 
-    /// <summary>Human-friendly host label (default: the host id). The deploy-time default; an admin
+    /// <summary>Human-friendly host label (default: the host id). The deploy-time default; a
     /// <c>PATCH /hosts/{id}</c> override (stored in <c>host_settings</c>) wins at runtime.</summary>
     public required string HostLabel { get; init; }
 
     /// <summary>
     /// Deployment region (<c>Api__Region</c>) — an <strong>arbitrary free string</strong> (e.g.
     /// <c>eu-west</c>, <c>us-east</c>, <c>homelab</c>), NOT a restricted enum. The deploy-time default for the
-    /// host identity card; an admin <c>PATCH /hosts/{id}</c> override (stored in <c>host_settings</c>) wins at
+    /// host identity card; a <c>PATCH /hosts/{id}</c> override (stored in <c>host_settings</c>) wins at
     /// runtime. <see langword="null"/> when unset — surfaced as honest unknown, never a fabricated region.
     /// </summary>
     public string? Region { get; init; }
@@ -244,7 +244,7 @@ public sealed class ApiOptions
     /// How stale (in days) a cached library row may get before the periodic worker re-fetches it from
     /// Steam/RAWG (<c>Api__LibraryRefreshIntervalDays</c>, default 7 = weekly). Cover/metadata for a
     /// fixed game catalog is near-static, so this is the per-game refresh cadence; <c>0</c> (or negative)
-    /// disables the periodic wake entirely (boot sweep + the admin <c>POST /library/refresh</c> only). The
+    /// disables the periodic wake entirely (boot sweep + <c>POST /library/refresh</c> only). The
     /// boot sweep also honours it (a frequent restart doesn't re-hammer fresh rows).
     /// </summary>
     public required int LibraryRefreshIntervalDays { get; init; }

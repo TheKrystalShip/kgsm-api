@@ -16,7 +16,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// (<c>alert.raise</c>/<c>resolve</c>/<c>retract</c>); this endpoint is the hydrate/backfill source (§3·j).
 /// The durable, growing record of <em>what fired</em> lives in <c>/audit</c>, not here.
 /// <para>
-/// Gated at <b>viewer</b> (a core read surface, consistent with <c>/audit</c>). Served entirely from the
+/// Gated on <c>api:alerts.read</c>, a core read surface beside <c>/audit</c>. Served entirely from the
 /// in-memory <see cref="AlertEngine"/> — alerts are never persisted (the rear-view ages off at 24h).
 /// </para>
 /// </summary>

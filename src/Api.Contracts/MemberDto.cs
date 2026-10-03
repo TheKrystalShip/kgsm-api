@@ -30,17 +30,17 @@ public sealed record MemberView(
 public sealed record MemberListResponse(IReadOnlyList<MemberView> Members);
 
 /// <summary>
-/// One enabled member as a viewer sees it. Deliberately leaner than <see cref="MemberView"/>: no local
-/// handle, no enabled flag — a management state only an admin toggles — and no route version. Just enough
-/// to know a member exists, what it is, how to reach it, and whether it is alive.
+/// One enabled member as <c>api:members.read</c> sees it. Deliberately leaner than <see cref="MemberView"/>:
+/// no local handle, no enabled flag — a management state toggled under <c>api:members.manage</c> — and no
+/// route version. Just enough to know a member exists, what it is, how to reach it, and whether it is alive.
 /// </summary>
 public sealed record ClusterMemberView(
     string MemberId, string Label, string Kind, string ClientUrl, string Membership, string Status, int? LatencyMs);
 
-/// <summary>The viewer-tier roster envelope.</summary>
+/// <summary>The roster envelope <c>GET /members/roster</c> answers.</summary>
 public sealed record ClusterMembersResponse(IReadOnlyList<ClusterMemberView> Members);
 
-/// <summary>The admin "paste a URL" action. The nickname is optional.</summary>
+/// <summary>The "paste a URL" request that adds a member. The nickname is optional.</summary>
 public sealed record MemberAddRequest(string Url, string? Nickname);
 
 /// <summary>The newly-added row, answered on a successful join.</summary>
@@ -79,7 +79,7 @@ public sealed record ClusterCapabilityView(
 public sealed record ClusterCapabilitiesResponse(IReadOnlyList<ClusterCapabilityView> Capabilities);
 
 /// <summary>
-/// The admin's reassignment. An empty member id records <em>deliberately nobody</em>, which converges
+/// A capability's reassignment. An empty member id records <em>deliberately nobody</em>, which converges
 /// as a decision rather than reading as an assignment nobody has heard yet.
 /// </summary>
 public sealed record ClusterCapabilityAssignRequest(string MemberId);

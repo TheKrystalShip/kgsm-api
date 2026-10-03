@@ -29,8 +29,8 @@ namespace TheKrystalShip.Api.Realtime;
 /// REQUEST, and this stream is one request that lasts hours — so the connect-time
 /// <c>[Authorize]</c> is the only gate the framework applies, and a session revoked afterwards would
 /// keep receiving the host's roster, metrics, console lines and audit rows until the tab closed.
-/// <c>sessionAlive</c> closes that: the write loop asks the session registry every
-/// <see cref="SessionRecheckInterval"/> whether this connection's <c>sid</c> is still live, and ends
+/// <c>sessionAlive</c> closes that: the write loop asks the ended-session list every
+/// <see cref="RecheckInterval"/> whether this connection's <c>sid</c> is still live, and ends
 /// the connection when it isn't. Revoking a session therefore cuts its live channel within 20s, the
 /// same order as the ≤5s bound REST already has. The check is <b>on the session, not on the access
 /// token's expiry</b>: an access token lapses every ~15 minutes by design and the client rotates it
@@ -75,7 +75,7 @@ public sealed class StreamConnection
     /// <param name="sessionAlive">
     /// Asks whether the session behind this connection is still live. <see langword="null"/> when there
     /// is no session to check — an auth-disabled host's synthetic principal carries no <c>sid</c> — in
-    /// which case the stream runs exactly as it did before, unchecked.
+    /// which case the stream runs unchecked.
     /// </param>
     /// <param name="access">
     /// What the reader behind this connection may see. <b>Defaults to <see cref="StreamAccess.Nobody"/></b>:

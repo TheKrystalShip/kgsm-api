@@ -108,7 +108,7 @@ public static class PushActionKind
     public const string ServerStop = "server.stop";
 
     /// <summary>Stop pushing <c>Target</c> — one watched condition — to this person for a few hours.
-    /// Their own phone, so it needs nothing above viewer.</summary>
+    /// Their own phone, so it needs nothing beyond the account existing.</summary>
     public const string ConditionSnooze = "condition.snooze";
 
     /// <summary>
@@ -121,8 +121,8 @@ public static class PushActionKind
     public const string PlayerBan = "player.ban";
 
     /// <summary>
-    /// Restart the leaf named by <c>Target</c>. Admin, like every other way of restarting a service from
-    /// the panel — it interrupts something every other surface on this host depends on.
+    /// Restart the leaf named by <c>Target</c>. Needs <c>api:services.manage</c>, like every other way of
+    /// restarting a service from the panel — it interrupts something every other surface on this host depends on.
     /// </summary>
     public const string LeafRestart = "leaf.restart";
 

@@ -81,7 +81,7 @@ public sealed class SlackNotificationProvider(HttpClient http, ILogger<SlackNoti
         Ping(FormatMessage(ev), rule, record);
 
     // Optionally mention the configured ops user-group when the rule asks AND a subteam id is set; the
-    // subteam id is admin-supplied config (a structural mention), so it is not escaped — the message text
+    // subteam id is the integration's own config (a structural mention), so it is not escaped — the message text
     // already is, by whichever caller built it.
     private static object Ping(string message, NotificationRule rule, IntegrationRecord record)
     {

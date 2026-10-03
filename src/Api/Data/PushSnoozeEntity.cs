@@ -11,8 +11,8 @@ namespace TheKrystalShip.Api.Data;
 /// <para>
 /// <b>Personal, and only on this channel.</b> It gates the push provider's per-device fan-out and
 /// nothing else: the condition still fires, still writes its audit rows, still shows in the alert feed,
-/// and still reaches Slack and everybody else's phone. Silencing a host for everyone is the admin's
-/// host-wide rule, which is a different control in a different place.
+/// and still reaches Slack and everybody else's phone. Silencing a host for everyone is the
+/// host-wide rule on the integration, which is a different control in a different place.
 /// </para>
 /// </summary>
 public sealed class PushSnoozeEntity

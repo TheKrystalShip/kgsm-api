@@ -183,7 +183,7 @@ public sealed class StreamHub
     /// told on <c>me</c>.
     /// </summary>
     /// <remarks>
-    /// Called once the replica has applied the change, so an administrator's change lands on the
+    /// Called once the replica has applied the change, so a change made at the anchor lands on the
     /// affected person's open panel at once. The connection's own re-check is the backstop, and answers
     /// within its own interval.
     /// </remarks>
