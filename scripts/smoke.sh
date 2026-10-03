@@ -56,6 +56,10 @@ DB="${SMOKE_DB:-/tmp/kgsm-api-smoke.db}"; rm -f "$DB"
 HOST_ID="${SMOKE_HOST_ID:-smoke-host}"
 MON_SOCK="${SMOKE_MONITOR_SOCKET:-/tmp/kgsm-api-smoke-nomonitor.sock}"  # absent by default
 WD_SOCK="${SMOKE_WATCHDOG_SOCKET:-}"                                    # empty -> watchdog absent
+# Empty -> firewall absent. Stated outright rather than left unset: an unset socket resolves to the
+# well-known one wherever the firewall's descriptor is installed, which would hand this run the host's
+# live firewall.
+FW_SOCK="${SMOKE_FIREWALL_SOCKET:-}"
 
 # M1·b engine wiring. kgsm-lib is base, not a leaf: point it at the canonical dev checkout so
 # GET /servers reads a real roster. Override with SMOKE_KGSM_PATH on another host.
@@ -128,6 +132,7 @@ HEALTH_WAIT_TICKS=300
 start_api() {
   Api__Urls="$BASE" Api__DbPath="$DB" \
   Api__HostId="$HOST_ID" Api__MonitorSocketPath="$1" Api__WatchdogSocketPath="$WD_SOCK" \
+  Api__FirewallSocketPath="$FW_SOCK" \
   Api__KgsmPath="$KGSM_PATH" KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
   Api__UpdateCheckDisabled=true \
     dotnet "$DLL" >/tmp/kgsm-api-smoke.log 2>&1 &
@@ -143,7 +148,8 @@ start_api_auth() {
   env -u Api__AuthDisabled \
     Api__Urls="$BASE" Api__DbPath="$DB" \
     Api__HostId="$HOST_ID" \
-    Api__MonitorSocketPath="$MON_SOCK" Api__WatchdogSocketPath="$WD_SOCK" Api__KgsmPath="$KGSM_PATH" \
+    Api__MonitorSocketPath="$MON_SOCK" Api__WatchdogSocketPath="$WD_SOCK" Api__FirewallSocketPath="$FW_SOCK" \
+    Api__KgsmPath="$KGSM_PATH" \
     KGSM_API_KGSM_SOCKET="$KGSM_SOCK" \
     dotnet "$DLL" >/tmp/kgsm-api-smoke-auth.log 2>&1 &
   SRV=$!; PIDS+=("$SRV")
@@ -356,7 +362,7 @@ if [[ "$CODE" == 200 ]] && EXP="$HOST_ID" python3 -c "
 import json,os,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 if not (isinstance(d,list) and len(d)>=1): sys.exit(2)   # empty roster -> can't prove a real read
-keys={'activeJob','backupCount','blueprint','clientSteamAppId','connectPort','diskBytes','hostId','id','isSteamAccountRequired','lastBackup','latestVersion','library','libraryPath','libraryState','metrics','name','note','onlinePlayers','runtime','startMemoryMb','startMemorySource','startedAt','status','steamAppId','stoppedAt','updateAvailable','updateAvailableSince','updateCheckedAt','version'}
+keys={'activeJob','backupCount','blueprint','clientSteamAppId','connectPort','diskBytes','hostId','id','installNonce','isSteamAccountRequired','lastBackup','latestVersion','library','libraryPath','libraryState','metrics','name','note','onlinePlayers','ports','runtime','startMemoryMb','startMemorySource','startedAt','status','steamAppId','stoppedAt','updateAvailable','updateAvailableSince','updateCheckedAt','version'}
 for s in d:
     if set(s)!=keys: sys.exit(3)
     if s['status'] not in ('running','stopped','unknown'): sys.exit(4)
@@ -403,7 +409,7 @@ import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 if not (isinstance(d,list) and len(d)>=1): sys.exit(2)   # empty catalog -> can't prove a real read
 keys={'id','name','type','steamAppId','clientSteamAppId','isSteamAccountRequired','ports','specs',
-      'cover','hero','description','genres','tags','rawgSlug'}
+      'cover','hero','description','genres','tags','rawgSlug','moderation'}
 speckeys={'maxPlayers','minRamMb','recommendedRamMb','baseDiskMb'}
 saw_range=saw_steam=saw_null_steam=saw_slug=False
 for e in d:
@@ -477,20 +483,22 @@ sys.exit(0 if ok else 1)
   ok "/services carries provisioned for the 4 leaves; omitted for api/bot (honest, not-applicable)"
 else bad "/services provisioned flag (code=$CODE body=$BODY)"; fi
 
-# LP2. Connect the assistant at runtime → 200 + provisioned:true; the §4·b capability set lights up live
-#      (assistant provisioned:true on GET /hosts/{id}); disconnect reverses it. No restart, no reconnect.
-req POST "/api/v1/hosts/${HOST_ID}/services/assistant/connect"
+# LP2. Connect the watchdog at runtime → 200 + provisioned:true; the §4·b capability set lights up live
+#      (watchdog provisioned:true on GET /hosts/{id}); disconnect reverses it. No restart, no reconnect.
+#      The watchdog because this run starts it unconfigured and the board always carries its row; a leaf
+#      installed on this host as an anchor (the assistant can be one) is not on the board to flip.
+req POST "/api/v1/hosts/${HOST_ID}/services/watchdog/connect"
 conn_ok=false
 if [[ "$CODE" == 200 ]] && python3 -c "import json,sys;sys.exit(0 if json.load(open('/tmp/kgsm-api-smoke.body'))['provisioned'] is True else 1)" 2>/dev/null; then
   req GET "/api/v1/hosts/${HOST_ID}"
-  if python3 -c "import json,sys;sys.exit(0 if json.load(open('/tmp/kgsm-api-smoke.body'))['capabilities']['assistant']['provisioned'] is True else 1)" 2>/dev/null; then
-    req POST "/api/v1/hosts/${HOST_ID}/services/assistant/disconnect"
+  if python3 -c "import json,sys;sys.exit(0 if json.load(open('/tmp/kgsm-api-smoke.body'))['capabilities']['watchdog']['provisioned'] is True else 1)" 2>/dev/null; then
+    req POST "/api/v1/hosts/${HOST_ID}/services/watchdog/disconnect"
     [[ "$CODE" == 200 ]] && req GET "/api/v1/hosts/${HOST_ID}" \
-      && python3 -c "import json,sys;sys.exit(0 if json.load(open('/tmp/kgsm-api-smoke.body'))['capabilities']['assistant']['provisioned'] is False else 1)" 2>/dev/null \
+      && python3 -c "import json,sys;sys.exit(0 if json.load(open('/tmp/kgsm-api-smoke.body'))['capabilities']['watchdog']['provisioned'] is False else 1)" 2>/dev/null \
       && conn_ok=true
   fi
 fi
-$conn_ok && ok "connect/disconnect assistant flips the live capability set (provisioned true→false), no restart" \
+$conn_ok && ok "connect/disconnect watchdog flips the live capability set (provisioned true→false), no restart" \
   || bad "connect/disconnect round-trip (code=$CODE body=$BODY)"
 
 # LP3. A non-provisionable leaf (bot) and an unknown leaf both 404 on connect (only the 4 leaves flip).
@@ -508,7 +516,7 @@ import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 keys={f['key'] for f in d['fields']}
 envs={f['envName'] for f in d['fields']}
-ok=(d['leaf']=='monitor' and 'logLevel' in keys and 'intervalMs' in keys
+ok=(d['id']=='monitor' and 'logLevel' in keys and 'intervalMs' in keys
     and 'Logging__LogLevel__Default' in envs and 'Monitor__IntervalMs' in envs)
 sys.exit(0 if ok else 1)
 " 2>/dev/null; then
@@ -520,13 +528,15 @@ sys.exit(0 if ok else 1)
 else bad "/services/monitor/config manifest (code=$CODE body=$BODY)"; fi
 
 # LP5. PUT config VALIDATION (no mutation, no restart): an unknown key and a bad enum value each 400 with the
-#      frozen envelope — rejected BEFORE any render/restart, so the smoke never shells systemctl.
+#      frozen envelope — rejected BEFORE any render/restart, so the smoke never shells systemctl. The
+#      monitor answers for its own configuration and the API relays its answer, so the code is the
+#      component's (invalid_value) and only the envelope is the API's.
 req PUT "/api/v1/hosts/${HOST_ID}/services/monitor/config" -H 'Content-Type: application/json' -d '{"values":{"nope":"x"}}'
 c1="$CODE"; b1="$BODY"
 req PUT "/api/v1/hosts/${HOST_ID}/services/monitor/config" -H 'Content-Type: application/json' -d '{"values":{"logLevel":"Loud"}}'
-if [[ "$c1" == 400 ]] && grep -q '"code":"bad_request"' <<<"$b1" && [[ "$CODE" == 400 ]]; then
-  ok "PUT config rejects unknown key + bad enum → 400 {error:bad_request} (no mutation)"
-else bad "PUT config validation (unknownKey=$c1 badEnum=$CODE)"; fi
+if [[ "$c1" == 400 ]] && grep -q '"error":{"code":"' <<<"$b1" && [[ "$CODE" == 400 ]] && grep -q '"error":{"code":"' <<<"$BODY"; then
+  ok "PUT config rejects unknown key + bad enum → 400 {error:{code}} (no mutation)"
+else bad "PUT config validation (unknownKey=$c1 badEnum=$CODE body=$b1)"; fi
 
 stop_api
 
@@ -633,7 +643,8 @@ ok = (d['capabilities']['metrics']['status']=='operational'
       and d.get('cpu')=={'model':'AMD Ryzen 7 3800X 8-Core Processor','cores':8,'threads':16,'maxFreqGhz':3.9}
       and d['interfaces'][0].get('mac')=='aa:bb:cc:dd:ee:ff' and d['interfaces'][0].get('errors')==0
       and d['disks'][0].get('device')=='Samsung SSD 990 EVO Plus 1TB'
-      and d.get('sensors')==[{'chip':'k10temp','label':'Tctl','valueC':42.5}])
+      and [{k:s.get(k) for k in ('chip','label','valueC')} for s in d.get('sensors') or []]
+          ==[{'chip':'k10temp','label':'Tctl','valueC':42.5}])
 sys.exit(0 if ok else 1)
 " 2>/dev/null; then
     ok "host metrics operational + capacity + M-diag telemetry + 1.1.0 depth (cpu-info/sensors/mem-cached/mac/device) present (stub snapshot)"
@@ -1027,16 +1038,19 @@ sys.exit(0 if has_data else 1)
   # --- M6·a alerts: the condition-mirror read surface (watchdog ABSENT here → empty feed) ------
   echo "==> M6·a alerts checks — GET /alerts (the condition-mirror read; empty here — no watchdog in smoke)"
 
-  # 35. GET /alerts (default firing) -> 200 + { data:[] }. No watchdog is provisioned in smoke, so the
-  #     engine serves an EMPTY feed (degrade gracefully — never a 500). Proves the endpoint + the envelope.
+  # 35. GET /alerts (default firing) -> 200 + { data:[...] }. No watchdog is provisioned in smoke, so no
+  #     row comes from a crash source; what the feed does carry is the engine's own conditions about the
+  #     host's instances (an update available), which are this host's data (degrade gracefully — never a
+  #     500). Proves the endpoint + the envelope.
   req GET /api/v1/alerts
   if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
-sys.exit(0 if (isinstance(d.get('data'),list) and len(d['data'])==0) else 1)
+rows=d.get('data')
+sys.exit(0 if (isinstance(rows,list) and all(r.get('source')!='watchdog' for r in rows)) else 1)
 " 2>/dev/null; then
-    ok "/alerts 200 + { data:[] } (empty feed — no crash source provisioned; never a 500)"
-  else bad "M6·a /alerts empty feed (code=$CODE body=$BODY)"; fi
+    ok "/alerts 200 + { data:[...] } (no crash-sourced row — no watchdog provisioned; never a 500)"
+  else bad "M6·a /alerts feed (code=$CODE body=$BODY)"; fi
 
   # 36. The resolved rear-view + the since window bind (still empty here) — proves status=resolved & since
   #     parse and the page shape holds (the firing/resolved split + the 24h rear-view).
@@ -1143,18 +1157,18 @@ sys.exit(0 if str(d.get('etag','')).startswith('sha256:') else 1)
   req PUT "/api/v1/servers/${FIRST_ID}/files/content?path=temp/does-not-exist-smoke.txt" -H 'Content-Type: application/json' -d '{"content":"x"}'
   [[ "$CODE" == 404 ]] && ok "file save non-existent → 404 (save-existing only, no create)" || bad "file save 404 (code=$CODE body=$BODY)"
 
-  # 7. The file.write audit row landed with path/size/sha256 — and NEVER the content (secret hygiene).
+  # 7. The file.written audit row landed with path/size/sha256 — and NEVER the content (secret hygiene).
   req GET "/api/v1/audit?serverId=${FIRST_ID}"
   if python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
-rows=[r for r in d.get('data',[]) if r.get('action')=='file.write']
+rows=[r for r in d.get('data',[]) if r.get('action')=='file.written']
 assert rows, 'no file.write row'
 m=rows[0].get('meta') or {}
 sys.exit(0 if ('path' in m and 'sizeBytes' in m and str(m.get('sha256','')).startswith('sha256:') and 'content' not in m) else 1)
 " 2>/dev/null; then
-    ok "audit: file.write row carries path/size/sha256 — NEVER the content (secret hygiene)"
-  else bad "file.write audit row (code=$CODE body=$BODY)"; fi
+    ok "audit: file.written row carries path/size/sha256 — NEVER the content (secret hygiene)"
+  else bad "file.written audit row (code=$CODE body=$BODY)"; fi
 
   # --- M8·b install / uninstall: the create/delete write path (gate only — NO mutation) ------
   echo "==> M8·b install/uninstall checks — POST /servers + DELETE /servers/{id} (gate/rejection, no mutation)"

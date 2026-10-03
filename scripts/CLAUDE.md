@@ -20,7 +20,9 @@ degrade→recover capability lifecycle (down flip + tick silence, then operation
 `provisioned:true` throughout).
 
 Knobs: `SMOKE_PORT`, `SMOKE_SKIP_BUILD=1`, `SMOKE_DB`, `SMOKE_KGSM_PATH` (the engine on another host),
-`SMOKE_MONITOR_SOCKET` (a live monitor in Phase A). It `rm -f`s its own `SMOKE_DB`, because
+`SMOKE_MONITOR_SOCKET` (a live monitor in Phase A), `SMOKE_WATCHDOG_SOCKET` and `SMOKE_FIREWALL_SOCKET`
+(both empty, and so absent, unless given: an unset leaf socket resolves to the well-known one wherever
+that leaf is installed, which would hand the run the host's live leaf). It `rm -f`s its own `SMOKE_DB`, because
 `EnsureCreated` no-ops on an existing database.
 
 The diagnostics endpoints it probes (`/api/v1/_throw`, `/api/v1/_dbcheck`) exist for it alone — restrict
