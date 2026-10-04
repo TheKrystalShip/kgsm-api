@@ -22,8 +22,11 @@ degrade→recover capability lifecycle (down flip + tick silence, then operation
 Knobs: `SMOKE_PORT`, `SMOKE_SKIP_BUILD=1`, `SMOKE_DB`, `SMOKE_KGSM_PATH` (the engine on another host),
 `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A), `SMOKE_WATCHDOG_SOCKET` and `SMOKE_FIREWALL_SOCKET`
 (both empty, and so absent, unless given: an unset leaf socket resolves to the well-known one wherever
-that leaf is installed, which would hand the run the host's live leaf). It `rm -f`s its own `SMOKE_DB`, because
-`EnsureCreated` no-ops on an existing database.
+that leaf is installed, which would hand the run the host's live leaf), `SMOKE_SERVER` (the server every
+per-server check runs against; the roster's first when unset). The file checks save that server's config
+back byte for byte, which changes nothing on disk but is recorded in the host's audit trail, so on a host
+whose servers are in use name a disposable one. It `rm -f`s its own `SMOKE_DB`, because `EnsureCreated`
+no-ops on an existing database.
 
 The diagnostics endpoints it probes (`/api/v1/_throw`, `/api/v1/_dbcheck`) exist for it alone — restrict
 them before any public exposure. `_dbcheck` is a **read** round-trip: the append-only audit table must

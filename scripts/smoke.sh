@@ -44,6 +44,7 @@
 #         SMOKE_SKIP_BUILD=1 scripts/smoke.sh   # reuse the existing Release build
 #         SMOKE_KGSM_PATH=/path/to/kgsm.sh scripts/smoke.sh   # engine on another host
 #         SMOKE_MONITOR_SOCKET=/run/kgsm-monitor/metrics.sock scripts/smoke.sh   # live monitor in Phase A
+#         SMOKE_SERVER=terraria-test scripts/smoke.sh   # the server the per-server checks run against
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -374,8 +375,11 @@ sys.exit(0)
   ok "/servers 200 + honest DTO shape (n=${N})"
 else bad "/servers shape (code=$CODE body=$BODY) [empty roster? set SMOKE_KGSM_PATH]"; fi
 
-# The join in Phase B keys on a real instance id; capture the first one from the roster.
-FIRST_ID="$(python3 -c "import json;d=json.load(open('/tmp/kgsm-api-smoke.body'));print(d[0]['id'] if d else '')" 2>/dev/null)"
+# The server every per-server check runs against: SMOKE_SERVER, else the roster's first. The join in
+# Phase B keys on it, and the file checks save its config back byte for byte — the content is unchanged
+# but the write is recorded in the host's audit trail, so on a host whose servers are in use name a
+# disposable one.
+FIRST_ID="${SMOKE_SERVER:-$(python3 -c "import json;d=json.load(open('/tmp/kgsm-api-smoke.body'));print(d[0]['id'] if d else '')" 2>/dev/null)}"
 
 # 14. Degrade honesty: with no monitor, EVERY server's metrics is null (not a fabricated zero).
 req GET /api/v1/servers
