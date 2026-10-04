@@ -314,7 +314,7 @@ migrated WebSocket→SSE 2026-07-02, protocol in `src/Api/Realtime/CLAUDE.md`; f
   minted, and every request is evaluated per action against this node's replica of the cluster's
   authority.
 - **This node signs nobody in.** No login, registration, identity linking, session registry, signing
-  key or Owner bootstrap lives here; they are `kgsm-auth-anchor`'s, which every install runs (a
+  key or Owner bootstrap lives here; they are `tks-auth`'s, which every install runs (a
   machine on its own is a cluster of one). Authority for the model: `../kgsm-docs/systems/authorization/`
   and `../hosted-sign-in-plan.md`; the local rules: `src/Api/Services/Auth/CLAUDE.md`.
 - **Built:** the JwtBearer pipeline accepts ES256 sessions only, verified through

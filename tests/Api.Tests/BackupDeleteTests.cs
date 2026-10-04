@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Text.Json;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Commands;
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;

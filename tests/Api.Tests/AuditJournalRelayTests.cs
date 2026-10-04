@@ -10,7 +10,7 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Auth;
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 using TheKrystalShip.KGSM.Core.Models;
 
 namespace TheKrystalShip.Api.Tests;

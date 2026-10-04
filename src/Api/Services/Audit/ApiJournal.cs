@@ -1,5 +1,5 @@
 using System.Text.Json;
-using TheKrystalShip.KGSM.Auth.Journal;
+using TheKrystalShip.Auth.Journal;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Services;
 

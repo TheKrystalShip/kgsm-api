@@ -3,7 +3,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

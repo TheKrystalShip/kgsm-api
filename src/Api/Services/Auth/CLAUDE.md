@@ -1,7 +1,7 @@
 # CLAUDE.md — Services/Auth/
 
 Auth on a node that **signs nobody in**. Every session this API accepts was minted by the cluster's
-auth anchor (`kgsm-auth-anchor`) — which on a machine that founded its own cluster runs beside it — and
+auth anchor (`tks-auth`) — which on a machine that founded its own cluster runs beside it — and
 is verified here against the key that member publishes. **What a caller may do** is evaluated per
 action, from this node's replica of the cluster's authority (accounts, roles, permissions, scoped
 assignments, the catalog), on every request. The authority for the model is

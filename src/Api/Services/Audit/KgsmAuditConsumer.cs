@@ -6,7 +6,7 @@ using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Players;
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth.Cluster;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Events;

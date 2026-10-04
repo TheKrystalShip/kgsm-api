@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth.Cluster;
 using TheKrystalShip.KGSM.Cluster.Membership;
 
 namespace TheKrystalShip.Api.Tests;

@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
 using TheKrystalShip.Api.Services.Auth;
-using TheKrystalShip.KGSM.Auth.Access;
+using TheKrystalShip.Auth.Access;
 
 using ActionIds = TheKrystalShip.Api.Services.Auth.ActionIds;
 

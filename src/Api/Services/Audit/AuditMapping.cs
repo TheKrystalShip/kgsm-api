@@ -1,7 +1,7 @@
 using System.Globalization;
 using TheKrystalShip.Api.Services.Alerts;
 using System.Text.Json;
-using TheKrystalShip.KGSM.Auth.Journal;
+using TheKrystalShip.Auth.Journal;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.KGSM.Core.Models;

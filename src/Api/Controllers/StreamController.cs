@@ -5,9 +5,9 @@ using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Auth;
 
-using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Access;
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth;
+using TheKrystalShip.Auth.Access;
+using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Controllers;
 

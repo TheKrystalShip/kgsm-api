@@ -8,7 +8,7 @@ using Microsoft.Extensions.Configuration;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Auth;
 
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 using TheKrystalShip.Api.Services.Aggregation;
 
 namespace TheKrystalShip.Api.Tests;

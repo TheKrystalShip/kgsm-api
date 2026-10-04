@@ -15,7 +15,7 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Integrations;
 
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Tests;

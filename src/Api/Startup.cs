@@ -36,9 +36,9 @@ using TheKrystalShip.KGSM.Services;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Extensions;
 
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth.Cluster;
 using TheKrystalShip.KGSM.Lifecycle;
 
 namespace TheKrystalShip.Api;

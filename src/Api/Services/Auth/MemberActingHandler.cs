@@ -4,9 +4,9 @@ using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 
-using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Access;
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth;
+using TheKrystalShip.Auth.Access;
+using TheKrystalShip.Auth.Cluster;
 using TheKrystalShip.KGSM.Cluster;
 
 namespace TheKrystalShip.Api.Services.Auth;

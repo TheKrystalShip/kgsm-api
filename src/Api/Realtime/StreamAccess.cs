@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 
 using TheKrystalShip.Api.Services.Auth;
-using TheKrystalShip.KGSM.Auth.Access;
-using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.Auth.Access;
+using TheKrystalShip.Auth.Users;
 
 namespace TheKrystalShip.Api.Realtime;
 

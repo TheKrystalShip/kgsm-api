@@ -4,9 +4,9 @@ using System.Text;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 
-using TheKrystalShip.KGSM.Auth.Minting;
+using TheKrystalShip.Auth.Minting;
 
 namespace TheKrystalShip.Api.Tests;
 

@@ -1,6 +1,6 @@
 using System.Security.Claims;
 
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Services.Auth;
 

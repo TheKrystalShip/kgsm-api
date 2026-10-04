@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Routing.Patterns;
 
-using TheKrystalShip.KGSM.Auth.Access;
+using TheKrystalShip.Auth.Access;
 
 namespace TheKrystalShip.Api.Services.Auth;
 

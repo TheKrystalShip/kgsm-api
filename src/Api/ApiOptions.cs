@@ -1,8 +1,8 @@
 using TheKrystalShip.KGSM.Events;
 using TheKrystalShip.Api.Services.Alerts;
-using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Cluster;
-using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.Auth;
+using TheKrystalShip.Auth.Cluster;
+using TheKrystalShip.Auth.Users;
 
 namespace TheKrystalShip.Api;
 

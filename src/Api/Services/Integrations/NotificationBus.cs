@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 using TheKrystalShip.Api.Contracts;
-using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.Auth.Users;
 using TheKrystalShip.KGSM.Events;
 using TheKrystalShip.Api.Services.Audit;
 

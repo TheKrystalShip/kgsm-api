@@ -4,9 +4,9 @@ using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 
 using TheKrystalShip.Api.Services.Auth;
-using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Access;
-using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.Auth;
+using TheKrystalShip.Auth.Access;
+using TheKrystalShip.Auth.Users;
 
 using ActionIds = TheKrystalShip.Api.Services.Auth.ActionIds;
 

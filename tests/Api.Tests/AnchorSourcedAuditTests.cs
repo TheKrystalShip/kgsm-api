@@ -3,7 +3,7 @@ using System.Text.Json;
 
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Audit;
-using TheKrystalShip.KGSM.Auth.Journal;
+using TheKrystalShip.Auth.Journal;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Events;
 
@@ -242,7 +242,7 @@ public sealed class AnchorSourcedAuditTests
             new EventHistoryEntry(
                 Id: "evt_1", Ts: When, Type: type, Instance: null, Blueprint: null,
                 Actor: "discord:haru", Origin: AuditOrigin.Ui, Hostname: "hotrod",
-                Data: PayloadFor(type), Producer: "kgsm-auth-anchor"),
+                Data: PayloadFor(type), Producer: "tks-auth"),
             HostId);
 
         Assert.NotNull(row);

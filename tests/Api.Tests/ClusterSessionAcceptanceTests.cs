@@ -10,10 +10,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.IdentityModel.Tokens;
 
 using TheKrystalShip.Api.Services.Auth;
-using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Cluster;
-using TheKrystalShip.KGSM.Auth.Minting;
-using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.Auth;
+using TheKrystalShip.Auth.Cluster;
+using TheKrystalShip.Auth.Minting;
+using TheKrystalShip.Auth.Users;
 
 namespace TheKrystalShip.Api.Tests;
 

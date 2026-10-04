@@ -13,7 +13,7 @@ engine. The live project is `src/Api/`; `legacy/` is a scrapped .NET 9 attempt t
 metrics, kept for *harvest only* — **never treat it as authoritative or a design reference.**
 
 **This API signs nobody in.** Every session it accepts is minted by the cluster's auth anchor
-(`kgsm-auth-anchor`), which every install runs — a machine on its own is a cluster of one — and is
+(`tks-auth`), which every install runs — a machine on its own is a cluster of one — and is
 verified here against the key that anchor publishes; what a caller may do is evaluated per action from
 its replica of the cluster's authority on every request. **Auth is ON by default** —
 `Api__AuthDisabled=true` is the explicit, loudly-logged dev escape hatch (a synthetic Owner). Detail:

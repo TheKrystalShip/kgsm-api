@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

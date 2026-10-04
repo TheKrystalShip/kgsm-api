@@ -1,4 +1,4 @@
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth.Cluster;
 using TheKrystalShip.KGSM.Cluster;
 
 namespace TheKrystalShip.Api.Services.Auth;
@@ -32,7 +32,7 @@ public sealed class AuthAnchorReport(
                 "This node has no cluster secret, so it has no auth anchor and nobody can sign in to it. "
                 + "Every install is a cluster: set Cluster__Secret in /etc/kgsm/kgsm-cluster.env — "
                 + "kgsm-base generates one on a machine that founds its own cluster — and run the auth "
-                + "anchor, kgsm-auth-anchor, on the machine that holds the accounts.");
+                + "anchor, tks-auth, on the machine that holds the accounts.");
             return;
         }
 

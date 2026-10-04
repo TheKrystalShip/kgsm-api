@@ -16,7 +16,7 @@ post_install() {
   On a machine that founded its own cluster the anchor runs here, and its first start leaves the
   administrator's one-time password, readable by nobody else, in:
 
-    /var/lib/kgsm-auth-anchor/initial-admin-password
+    /var/lib/tks-auth/initial-admin-password
 
   A machine joining an existing cluster is signed into through that cluster's anchor instead.
 

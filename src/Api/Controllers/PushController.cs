@@ -7,7 +7,7 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Integrations;
 using TheKrystalShip.Api.Services.Integrations.WebPush;
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Controllers;
 

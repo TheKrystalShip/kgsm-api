@@ -4,7 +4,7 @@ using System.Threading.Channels;
 
 using TheKrystalShip.Api.Contracts;
 
-using TheKrystalShip.KGSM.Auth.Access;
+using TheKrystalShip.Auth.Access;
 
 namespace TheKrystalShip.Api.Realtime;
 

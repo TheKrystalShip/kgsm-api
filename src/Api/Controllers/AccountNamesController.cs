@@ -2,8 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 using TheKrystalShip.Api.Contracts;
-using TheKrystalShip.KGSM.Auth.Access;
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth.Access;
+using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Controllers;
 

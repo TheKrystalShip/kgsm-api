@@ -8,9 +8,9 @@ using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Tests;
 

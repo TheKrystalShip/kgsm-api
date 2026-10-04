@@ -7,7 +7,7 @@ using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Integrations;
 using TheKrystalShip.Api.Services.Integrations.WebPush;
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Tests;
@@ -126,7 +126,7 @@ public class NotificationActionTests(AuthTestFactory factory) : IClassFixture<Au
     {
         KgsmIdentity who = Account("act-disabled", Persona.Owner);
         string handle = await StageUpdateAsync(who);
-        factory.SetAccount(who, Persona.Owner, TheKrystalShip.KGSM.Auth.Users.UserStatus.Disabled);
+        factory.SetAccount(who, Persona.Owner, TheKrystalShip.Auth.Users.UserStatus.Disabled);
 
         HttpResponseMessage res = await factory.CreateClient()
             .PostAsync($"/api/v1/notifications/actions/{handle}", From(Endpoint));

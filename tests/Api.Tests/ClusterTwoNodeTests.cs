@@ -18,8 +18,8 @@ using TheKrystalShip.KGSM.Cluster.Identity;
 using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Messaging;
 
-using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth;
+using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Tests;
 

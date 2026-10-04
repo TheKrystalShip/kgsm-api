@@ -6,8 +6,8 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Integrations.WebPush;
-using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth;
+using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Tests;
 

@@ -4,9 +4,9 @@ using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Integrations.WebPush;
-using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Access;
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth;
+using TheKrystalShip.Auth.Access;
+using TheKrystalShip.Auth.Cluster;
 using TheKrystalShip.KGSM.Events;
 
 using ActionIds = TheKrystalShip.Api.Services.Auth.ActionIds;

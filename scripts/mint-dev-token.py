@@ -5,7 +5,7 @@ mint-dev-token.py — mint a session bearer for a KGSM account, signed as the cl
 Why this exists
 ---------------
 kgsm-api signs nobody in. Every session it accepts was minted by the cluster's auth anchor
-(kgsm-auth-anchor): an ES256 JWT, audienced to the cluster, stamped with the anchor's issuer, and
+(tks-auth): an ES256 JWT, audienced to the cluster, stamped with the anchor's issuer, and
 verified against the key the anchor publishes. Access is not in the token — every request evaluates
 the caller's account from the node's authority replica — so a token only means anything if it names an
 account.
@@ -74,7 +74,7 @@ def read_private_key(path: str):
         with open(path, "rb") as fh:
             return serialization.load_pem_private_key(fh.read(), password=None)
     except FileNotFoundError:
-        sys.exit(f"error: no anchor signing key at {path} — does this machine run kgsm-auth-anchor?")
+        sys.exit(f"error: no anchor signing key at {path} — does this machine run tks-auth?")
     except PermissionError:
         sys.exit(f"error: {path} is not readable (0600, owned by the service user) — run as that user")
 
@@ -130,7 +130,7 @@ def main() -> None:
     ap.add_argument("--users-db", default="/var/lib/kgsm/auth/users.db",
                     help="the account store --account is read from")
     ap.add_argument("--ttl", default="12h", help="lifetime: 30m / 12h / 7d (default 12h)")
-    ap.add_argument("--key", default="/var/lib/kgsm-auth-anchor/session-signing.pem",
+    ap.add_argument("--key", default="/var/lib/tks-auth/session-signing.pem",
                     help="the anchor's private signing key")
     ap.add_argument("--anchor-env", action="append",
                     help="an EnvironmentFile the anchor loads, for a configured cluster id or issuer. "
@@ -143,8 +143,8 @@ def main() -> None:
     args = ap.parse_args()
 
     env_files = args.anchor_env or [
-        "/etc/kgsm-auth-anchor/kgsm-auth-anchor.env",
-        "/var/lib/kgsm-auth-anchor/config-override.env",
+        "/etc/tks-auth/tks-auth.env",
+        "/var/lib/tks-auth/config-override.env",
     ]
 
     def anchor_setting(name: str) -> str | None:

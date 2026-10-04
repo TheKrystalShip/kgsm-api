@@ -1,6 +1,6 @@
 using TheKrystalShip.Api.Realtime;
 
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

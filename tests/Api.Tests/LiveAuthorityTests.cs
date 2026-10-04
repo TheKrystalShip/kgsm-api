@@ -9,7 +9,7 @@ using Microsoft.Extensions.Configuration;
 
 using TheKrystalShip.Api.Contracts;
 
-using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.Auth.Users;
 
 namespace TheKrystalShip.Api.Tests;
 

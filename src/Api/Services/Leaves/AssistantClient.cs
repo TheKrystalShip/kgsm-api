@@ -2,7 +2,7 @@ using System.Net.Http.Json;
 using System.Net.Sockets;
 
 using TheKrystalShip.Api.Contracts;
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 using TheKrystalShip.Kgsm.Assistant.Relay;
 
 namespace TheKrystalShip.Api.Services.Leaves;

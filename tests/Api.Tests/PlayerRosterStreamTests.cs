@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Players;
 
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

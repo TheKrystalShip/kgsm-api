@@ -112,8 +112,8 @@ if wait_health; then
     # secret, or with no anchor running where one should be, serves a panel nobody can sign in to.
     if ! host_is_clustered; then
         warn "no cluster secret in ${SHARED_CLUSTER_FILE}: nobody can sign in to this node. Run deploy/setup.sh, which founds a cluster of one."
-    elif [[ -r "$CLUSTER_FOUNDED_FILE" ]] && ! systemctl is-active --quiet kgsm-auth-anchor.service; then
-        warn "this machine founded its cluster but kgsm-auth-anchor is not running, so nobody can sign in. Deploy kgsm-auth (its deploy/setup.sh, then deploy/deploy.sh); its first start leaves the administrator's one-time password in /var/lib/kgsm-auth-anchor/initial-admin-password."
+    elif [[ -r "$CLUSTER_FOUNDED_FILE" ]] && ! systemctl is-active --quiet tks-auth.service; then
+        warn "this machine founded its cluster but tks-auth is not running, so nobody can sign in. Deploy tks-auth (its deploy/setup.sh, then deploy/deploy.sh); its first start leaves the administrator's one-time password in /var/lib/tks-auth/initial-admin-password."
     else
         log "sign-in: the cluster's auth anchor (see this unit's log for which member holds the accounts)."
     fi

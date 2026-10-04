@@ -2,8 +2,8 @@ using System.Security.Claims;
 
 using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
-using TheKrystalShip.KGSM.Auth.Access;
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth.Access;
+using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Services.Auth;
 

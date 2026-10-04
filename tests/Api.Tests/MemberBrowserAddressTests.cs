@@ -4,7 +4,7 @@ using System.Text.Json;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 using TheKrystalShip.KGSM.Cluster.Membership;
 
 namespace TheKrystalShip.Api.Tests;

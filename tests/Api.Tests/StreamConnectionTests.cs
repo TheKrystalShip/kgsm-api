@@ -3,9 +3,9 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
 using TheKrystalShip.Api.Realtime;
 
-using TheKrystalShip.KGSM.Auth;
-using TheKrystalShip.KGSM.Auth.Access;
-using TheKrystalShip.KGSM.Auth.Users;
+using TheKrystalShip.Auth;
+using TheKrystalShip.Auth.Access;
+using TheKrystalShip.Auth.Users;
 
 namespace TheKrystalShip.Api.Tests;
 

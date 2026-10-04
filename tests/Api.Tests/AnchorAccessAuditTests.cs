@@ -3,7 +3,7 @@ using System.Text.Json;
 
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Audit;
-using TheKrystalShip.KGSM.Auth.Journal;
+using TheKrystalShip.Auth.Journal;
 using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Tests;

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the auth anchor is tks-auth (0.215.2)
+
+- Built on `TheKrystalShip.Auth*`: `Auth` 5.0.0, `Access` 2.0.0, `Users` 3.0.0, `Journal` 3.0.0,
+  `Cluster` 2.0.0, and `Testing` 2.0.0 for the tests. The namespaces follow. No behaviour changes.
+- The package depends on `tks-auth`; the deploy, the first-start message and `mint-dev-token.py` name
+  its unit and its paths under `/var/lib/tks-auth/` and `/etc/tks-auth/`.
+
 ### Changed — built on released packages (0.215.1, Api.Contracts 1.0.0)
 
 - `TheKrystalShip.KGSM.Api.Contracts` is released as 1.0.0, the DTO graph as it stands.

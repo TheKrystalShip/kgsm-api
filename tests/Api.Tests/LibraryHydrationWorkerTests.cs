@@ -1,4 +1,4 @@
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;

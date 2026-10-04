@@ -8,7 +8,7 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Backups;
 using TheKrystalShip.Api.Services.Commands;
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 

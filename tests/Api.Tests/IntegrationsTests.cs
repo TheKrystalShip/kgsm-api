@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Integrations;
 
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

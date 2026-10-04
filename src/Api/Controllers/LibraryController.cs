@@ -10,9 +10,9 @@ using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
-using TheKrystalShip.KGSM.Auth;
+using TheKrystalShip.Auth;
 
-using TheKrystalShip.KGSM.Auth.Cluster;
+using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Controllers;
 
