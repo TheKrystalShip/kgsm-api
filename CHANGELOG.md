@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the audit reads tks-auth's journal (0.215.3)
+
+- Built on `TheKrystalShip.KGSM.Lib` 9.1.0, whose journal scan finds the organization's `tks-`
+  services beside the ecosystem's. The audit carries every sign-in and access change again.
+
 ### Changed — the auth anchor is tks-auth (0.215.2)
 
 - Built on `TheKrystalShip.Auth*`: `Auth` 5.0.0, `Access` 2.0.0, `Users` 3.0.0, `Journal` 3.0.0,
