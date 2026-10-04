@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.215.0</Version>
+    <Version>0.215.1</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -64,13 +64,13 @@
   <ItemGroup>
     <!-- Build-only: the attributes arrive as source and the generator as a tool, and the package
          declares no dependencies of its own. -->
-    <PackageReference Include="TheKrystalShip.KGSM.ComponentConfig" Version="3.2.0-dev.2" PrivateAssets="all" />
+    <PackageReference Include="TheKrystalShip.KGSM.ComponentConfig" Version="3.2.0" PrivateAssets="all" />
 
     <!-- The descriptor's reader, shared with every component that serves its own surface. This API
          reads a leaf's descriptor for the one case the leaf cannot cover — a leaf that is DOWN, which
          is exactly when its configuration is wanted — and reads it through the same library the leaf
          serves it with, so the two answers about one file cannot come from two sets of rules. -->
-    <PackageReference Include="TheKrystalShip.KGSM.ComponentSurface" Version="1.0.0-dev.8" />
+    <PackageReference Include="TheKrystalShip.KGSM.ComponentSurface" Version="1.0.0" />
   </ItemGroup>
 
   <!-- The wire contract, built here because this API is what produces it, and packed so a caller on
@@ -157,34 +157,34 @@
          ip:port / opaque session correlation token / disconnect reason). Consumed here by the new
          roster projection (Services/Players/PlayerRosterService.cs) + the audit meta extension
          (AuditMapping.PlayerMeta). -->
-    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="9.0.0-dev.1" />
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="9.0.0" />
     <!-- The assistant's own liveness probe, built by kgsm-llm, so this API and kgsm-bot ask whether
          the assistant is up the way the assistant defines being up. -->
     <PackageReference Include="TheKrystalShip.Kgsm.Assistant.Relay" Version="1.1.0" />
-    <PackageReference Include="TheKrystalShip.KGSM.Auth" Version="4.0.0-dev.4" />
+    <PackageReference Include="TheKrystalShip.KGSM.Auth" Version="4.0.0" />
 
     <!-- The shape of an account event. The cluster's auth anchor writes them and this API reads them
          into audit rows; a reader deserializes into a fixed shape, so the names are taken from the
          writer's own package rather than spelled a second time. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Auth.Journal" Version="2.0.0-dev.1" />
+    <PackageReference Include="TheKrystalShip.KGSM.Auth.Journal" Version="2.0.0" />
     <!-- This node's replica of the cluster's accounts. Deliberately NOT on this API's EF context: the
          replica is a shared machine file other services read too, and this API's own database is
          wiped whenever its schema changes. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Auth.Users" Version="2.0.0-dev.8" />
+    <PackageReference Include="TheKrystalShip.KGSM.Auth.Users" Version="2.0.0" />
     <!-- Everything this node does about a session as a resource server of the auth anchor: verifying
          one it cannot mint, reading who holds it, and honouring one somebody ended. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Auth.Cluster" Version="1.0.0-dev.21" />
+    <PackageReference Include="TheKrystalShip.KGSM.Auth.Cluster" Version="1.0.0" />
     <!-- Pinned beside Auth.Cluster for the operations document's shape, which this node publishes. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Auth.Access" Version="1.0.0-dev.6" />
+    <PackageReference Include="TheKrystalShip.KGSM.Auth.Access" Version="1.0.0" />
 
     <!-- Cluster membership and durable member-to-member messaging. The outbox, the inbox, the member
          service token and the member-to-member wire all live there, so this API takes part in a cluster
          as one member among several rather than being the thing a cluster is made of. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Cluster" Version="1.0.0-dev.24" />
+    <PackageReference Include="TheKrystalShip.KGSM.Cluster" Version="1.0.0" />
 
     <!-- This node's half of being named by the cluster's DNS anchor: telling it where the node is
          reached, and keeping what it answers. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Dns" Version="0.2.0-dev.14" />
+    <PackageReference Include="TheKrystalShip.KGSM.Dns" Version="0.2.0" />
 
     <!-- The shared GET /metrics wire contract (Snapshot graph + source-gen camelCase
          JSON), built in kgsm-monitor. We deserialize the monitor scrape into these exact

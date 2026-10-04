@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — built on released packages (0.215.1, Api.Contracts 1.0.0)
+
+- `TheKrystalShip.KGSM.Api.Contracts` is released as 1.0.0, the DTO graph as it stands.
+- Pinned to the release of every package it takes: `Lib` 9.0.0, `Auth` 4.0.0, `Auth.Access` 1.0.0,
+  `Auth.Users` 2.0.0, `Auth.Journal` 2.0.0, `Auth.Cluster` 1.0.0, `Cluster` 1.0.0, `Dns` 0.2.0,
+  `ComponentConfig` 3.2.0 and `ComponentSurface` 1.0.0; the tests take `Auth.Testing` 1.0.0. No
+  behaviour changes.
+
 ### Removed — what served the tier model (0.215.0)
 
 - The audit trail maps no `auth.cluster.vouched` or `user.tier_changed` row and records no `tier`,
