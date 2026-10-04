@@ -122,7 +122,7 @@ public sealed class NodeAccess(
 
     /// <summary>
     /// The servers among <paramref name="serverIds"/> the caller may perform <paramref name="action"/> on
-    /// — how a collection is cut to what its reader can see (permissions plan §4·c).
+    /// — how a collection is cut to what its reader can see.
     /// </summary>
     public async Task<HashSet<string>> AllowedServersAsync(
         ClaimsPrincipal user, string action, IEnumerable<string> serverIds, CancellationToken ct = default)

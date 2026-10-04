@@ -5,7 +5,7 @@ auth anchor (`kgsm-auth-anchor`) — which on a machine that founded its own clu
 is verified here against the key that member publishes. **What a caller may do** is evaluated per
 action, from this node's replica of the cluster's authority (accounts, roles, permissions, scoped
 assignments, the catalog), on every request. The authority for the model is
-`../../../../kgsm-docs/plans/permissions.md`, `../../../../cluster-auth-plan.md` and
+`../../../../kgsm-docs/systems/authorization/`, `../../../../cluster-auth-plan.md` and
 `../../../../hosted-sign-in-plan.md`; this file is the local "what you must not break."
 
 ## Locked decisions (do not relitigate)
