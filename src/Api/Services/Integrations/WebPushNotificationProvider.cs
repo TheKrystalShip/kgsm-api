@@ -1,4 +1,4 @@
-using TheKrystalShip.KGSM.WebPush;
+using TheKrystalShip.WebPush;
 using System.Text.Json;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;

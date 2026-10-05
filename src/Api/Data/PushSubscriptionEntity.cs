@@ -71,6 +71,6 @@ public sealed class PushSubscriptionEntity
 /// </remarks>
 public static class PushSubscriptionCredential
 {
-    public static TheKrystalShip.KGSM.WebPush.PushSubscription Credential(this PushSubscriptionEntity row) =>
+    public static TheKrystalShip.WebPush.PushSubscription Credential(this PushSubscriptionEntity row) =>
         new(row.Endpoint, row.P256dh, row.Auth);
 }

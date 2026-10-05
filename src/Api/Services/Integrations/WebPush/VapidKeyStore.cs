@@ -1,4 +1,4 @@
-using TheKrystalShip.KGSM.WebPush;
+using TheKrystalShip.WebPush;
 
 namespace TheKrystalShip.Api.Services.Integrations.WebPush;
 

@@ -1,4 +1,4 @@
-using TheKrystalShip.KGSM.WebPush;
+using TheKrystalShip.WebPush;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

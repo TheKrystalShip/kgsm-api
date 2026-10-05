@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — Web Push from `TheKrystalShip.WebPush` (0.216.1)
+
+- Built on `TheKrystalShip.WebPush` 2.0.0, the Web Push library under the organization's name; the
+  protocol and the push routes are unchanged.
+
 ### Added — audit rows for applications and token exchanges (0.216.0)
 
 - The audit words tks-auth's `auth.application.*` events (an application or its client registered,

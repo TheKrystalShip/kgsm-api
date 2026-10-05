@@ -1,4 +1,4 @@
-using TheKrystalShip.KGSM.WebPush;
+using TheKrystalShip.WebPush;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
