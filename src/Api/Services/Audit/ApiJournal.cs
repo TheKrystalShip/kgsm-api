@@ -70,6 +70,13 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     public const string ServiceRequirementApprovedEvent = AuthEvents.ServiceRequirementApproved;
     public const string ServiceRequirementRevokedEvent = AuthEvents.ServiceRequirementRevoked;
 
+    public const string ApplicationChangedEvent = AuthEvents.ApplicationChanged;
+    public const string ApplicationRemovedEvent = AuthEvents.ApplicationRemoved;
+    public const string ApplicationClientRemovedEvent = AuthEvents.ApplicationClientRemoved;
+    public const string ClientSecretRotatedEvent = AuthEvents.ClientSecretRotated;
+    public const string TokenExchangedEvent = AuthEvents.TokenExchanged;
+    public const string TokenExchangeRefusedEvent = AuthEvents.TokenExchangeRefused;
+
     public const string ServiceConnectedEvent = "service.connected";
     public const string ServiceDisconnectedEvent = "service.disconnected";
     public const string ServiceConfigChangedEvent = "service.config_changed";

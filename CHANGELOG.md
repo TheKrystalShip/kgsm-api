@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — audit rows for applications and token exchanges (0.216.0)
+
+- The audit words tks-auth's `auth.application.*` events (an application or its client registered,
+  changed or removed, a secret rotated) and `auth.token.exchanged` / `auth.token.exchange_refused`; a
+  refusal reads as a warning with its reason, and the Discord identity stays in the row's detail.
+- Built on `TheKrystalShip.KGSM.Lib` 9.2.0 and `TheKrystalShip.Auth.Journal` 3.2.0.
+
 ### Fixed — the audit reads tks-auth's journal (0.215.3)
 
 - Built on `TheKrystalShip.KGSM.Lib` 9.1.0, whose journal scan finds the organization's `tks-`

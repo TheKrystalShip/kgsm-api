@@ -106,6 +106,56 @@ public sealed class AnchorAccessAuditTests
         Assert.Equal("true", row.Meta!["automatic"]);
     }
 
+    [Theory]
+    [InlineData(AuthEvents.ApplicationChanged, null, "owner changed the application 'Krystal Cinema'")]
+    [InlineData(AuthEvents.ApplicationChanged, "cinema-web", "owner registered the client 'cinema-web' with 'Krystal Cinema'")]
+    [InlineData(AuthEvents.ApplicationRemoved, null, "owner removed the application 'Krystal Cinema' and its clients")]
+    [InlineData(AuthEvents.ApplicationClientRemoved, "cinema-web", "owner removed the client 'cinema-web' from 'Krystal Cinema'")]
+    [InlineData(AuthEvents.ClientSecretRotated, "cinema-bot", "owner gave the client 'cinema-bot' of 'Krystal Cinema' a new secret")]
+    public void An_application_change_names_the_application_and_its_client(string type, string? client, string summary)
+    {
+        ApplicationEventData d = Roundtrip<ApplicationEventData>(
+            AuthEventPayloads.Application("cinema", "Krystal Cinema", client), "local:owner");
+
+        AuditWrite row = AuditMapping.FromApplicationEvent(d, type, HostId);
+
+        Assert.Equal(summary, row.Summary);
+        Assert.Equal(AuditSeverity.Warn, row.Severity);
+        Assert.Equal("application", row.Target!.Kind);
+        Assert.Equal("cinema", row.Target.Id);
+    }
+
+    [Fact]
+    public void An_exchange_for_a_bot_names_who_acts_for_whom()
+    {
+        TokenExchangeEventData d = Roundtrip<TokenExchangeEventData>(
+            AuthEventPayloads.TokenExchange("cinema-bot", "cinema", "discord:1234", "usr_alice", "alice",
+                actedBy: "cinema-bot", reason: null), "discord:alice");
+
+        AuditWrite row = AuditMapping.FromTokenExchangeEvent(d, AuthEvents.TokenExchanged, HostId);
+
+        Assert.Equal("cinema-bot was given a token to act for 'alice' in 'cinema'", row.Summary);
+        Assert.Equal(AuditSeverity.Info, row.Severity);
+        Assert.Equal("usr_alice", row.Target!.Id);
+    }
+
+    [Fact]
+    public void A_refused_exchange_says_why_and_keeps_the_identity_out_of_the_sentence()
+    {
+        TokenExchangeEventData d = Roundtrip<TokenExchangeEventData>(
+            AuthEventPayloads.TokenExchange("cinema-web", "cinema", "discord:1234", null, null, null,
+                TokenExchangeRefusals.AccountUnknown), "discord:1234");
+
+        AuditWrite row = AuditMapping.FromTokenExchangeEvent(d, AuthEvents.TokenExchangeRefused, HostId);
+
+        Assert.Equal("cinema-web was refused a token for a Discord user in 'cinema': no account holds that Discord identity",
+            row.Summary);
+        Assert.Equal(AuditSeverity.Warn, row.Severity);
+        Assert.Null(row.Target);
+        Assert.Equal("discord:1234", row.Meta!["identity"]);
+        Assert.Equal(TokenExchangeRefusals.AccountUnknown, row.Meta["reason"]);
+    }
+
     [Fact]
     public void Every_access_event_is_shaped_rather_than_dropped()
     {
@@ -114,7 +164,9 @@ public sealed class AnchorAccessAuditTests
                      AuthEvents.AssignmentGranted, AuthEvents.AssignmentRevoked, AuthEvents.RoleChanged,
                      AuthEvents.RoleRemoved, AuthEvents.PermissionChanged, AuthEvents.PermissionRemoved,
                      AuthEvents.CatalogChanged, AuthEvents.ServiceRequirementApproved,
-                     AuthEvents.ServiceRequirementRevoked,
+                     AuthEvents.ServiceRequirementRevoked, AuthEvents.ApplicationChanged,
+                     AuthEvents.ApplicationRemoved, AuthEvents.ApplicationClientRemoved,
+                     AuthEvents.ClientSecretRotated, AuthEvents.TokenExchanged, AuthEvents.TokenExchangeRefused,
                  })
         {
             Assert.True(KgsmEventCatalog.Describe(type).Known, $"{type} is not in the engine's catalog");

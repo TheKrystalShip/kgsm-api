@@ -1328,6 +1328,96 @@ public static class AuditMapping
         return ApiWrite(d, type, AuditSeverity.Warn, new AuditTarget("user", d.AccountId, d.Service ?? d.AccountId), hostId, summary, meta);
     }
 
+    /// <summary>Map an application, or one of its clients, being registered, changed or removed.</summary>
+    /// <remarks>
+    /// Warn throughout: an application's clients are who can be handed a token at all, so each of
+    /// these changes access for every account at once. A change that names a client is that client
+    /// being registered; one that names none is to the application's own fields.
+    /// </remarks>
+    public static AuditWrite FromApplicationEvent(ApplicationEventData d, string type, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string who = ActorName(d.Actor);
+        string application = $"'{(d.Name is { Length: > 0 } name ? name : d.Id)}'";
+        string client = $"'{d.Client}'";
+        string summary = type switch
+        {
+            ApiJournal.ApplicationRemovedEvent => $"{who} removed the application {application} and its clients",
+            ApiJournal.ApplicationClientRemovedEvent => $"{who} removed the client {client} from {application}",
+            ApiJournal.ClientSecretRotatedEvent => $"{who} gave the client {client} of {application} a new secret",
+            _ when !string.IsNullOrEmpty(d.Client) => $"{who} registered the client {client} with {application}",
+            _ => $"{who} changed the application {application}",
+        };
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal) { ["applicationId"] = d.Id };
+        if (!string.IsNullOrEmpty(d.Name)) meta["name"] = d.Name!;
+        if (!string.IsNullOrEmpty(d.Client)) meta["client"] = d.Client!;
+
+        return ApiWrite(d, type, AuditSeverity.Warn, new AuditTarget("application", d.Id, d.Name ?? d.Id),
+            hostId, summary, meta);
+    }
+
+    /// <summary>Map a client exchanging a Discord credential for a token, or being refused one.</summary>
+    /// <remarks>
+    /// <para>
+    /// An exchange is Info: it is somebody reaching an application they may use. A refusal is Warn — the
+    /// client authenticated, so it is a real caller turned away, and the reason says whether that was a
+    /// person not yet approved or a client asking for something it may not.
+    /// </para>
+    /// <para>
+    /// The Discord identity rides in the meta and never in the sentence: it links the account to a
+    /// person elsewhere, and a refusal for an unknown account has nothing else to name them by.
+    /// </para>
+    /// </remarks>
+    public static AuditWrite FromTokenExchangeEvent(TokenExchangeEventData d, string type, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string person = !string.IsNullOrEmpty(d.Username) ? $"'{d.Username}'"
+            : !string.IsNullOrEmpty(d.UserId) ? d.UserId!
+            : "a Discord user";
+        string application = $"'{d.Application}'";
+
+        bool refused = string.Equals(type, ApiJournal.TokenExchangeRefusedEvent, StringComparison.Ordinal);
+        (string severity, string summary) = (refused, d.ActedBy) switch
+        {
+            (true, _) => (AuditSeverity.Warn,
+                $"{d.Client} was refused a token for {person} in {application}: {RefusalPhrase(d.Reason)}"),
+            (false, { Length: > 0 } actedBy) =>
+                (AuditSeverity.Info, $"{actedBy} was given a token to act for {person} in {application}"),
+            _ => (AuditSeverity.Info, $"{person} was given a token for {application} through {d.Client}"),
+        };
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["client"] = d.Client,
+            ["application"] = d.Application,
+        };
+        if (!string.IsNullOrEmpty(d.UserId)) meta["userId"] = d.UserId!;
+        if (!string.IsNullOrEmpty(d.Identity)) meta["identity"] = d.Identity!;
+        if (!string.IsNullOrEmpty(d.ActedBy)) meta["actedBy"] = d.ActedBy!;
+        if (!string.IsNullOrEmpty(d.Reason)) meta["reason"] = d.Reason!;
+
+        AuditTarget? target = string.IsNullOrEmpty(d.UserId)
+            ? null
+            : new AuditTarget("user", d.UserId!, string.IsNullOrEmpty(d.Username) ? d.UserId! : d.Username);
+
+        return ApiWrite(d, type, severity, target, hostId, summary, meta);
+
+        static string RefusalPhrase(string? reason) => reason switch
+        {
+            null or "" => "no reason was recorded",
+            TokenExchangeRefusals.SubjectInvalid => "Discord did not recognise the credential",
+            TokenExchangeRefusals.DiscordApplication => "the credential is from a Discord application it may not present",
+            TokenExchangeRefusals.ClientNotAllowed => "the client is not registered for this exchange",
+            TokenExchangeRefusals.AccountUnknown => "no account holds that Discord identity",
+            TokenExchangeRefusals.AccountPending => "the account is awaiting approval",
+            TokenExchangeRefusals.AccountDisabled => "the account is disabled",
+            _ => reason,
+        };
+    }
+
     /// <summary>A scope as a sentence reads it: cluster-wide, on a node, on one server.</summary>
     private static string ScopePhrase(string? scope)
     {

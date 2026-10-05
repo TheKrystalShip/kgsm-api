@@ -228,6 +228,11 @@ public static class EngineEventShaping
                 Map<CatalogEventData>(item, d => AuditMapping.FromCatalogEvent(d, hostId)),
             ApiJournal.ServiceRequirementApprovedEvent or ApiJournal.ServiceRequirementRevokedEvent =>
                 Map<ServiceRequirementEventData>(item, d => AuditMapping.FromServiceRequirementEvent(d, item.Type, hostId)),
+            ApiJournal.ApplicationChangedEvent or ApiJournal.ApplicationRemovedEvent
+                or ApiJournal.ApplicationClientRemovedEvent or ApiJournal.ClientSecretRotatedEvent =>
+                Map<ApplicationEventData>(item, d => AuditMapping.FromApplicationEvent(d, item.Type, hostId)),
+            ApiJournal.TokenExchangedEvent or ApiJournal.TokenExchangeRefusedEvent =>
+                Map<TokenExchangeEventData>(item, d => AuditMapping.FromTokenExchangeEvent(d, item.Type, hostId)),
 
             ApiJournal.ServiceConnectedEvent or ApiJournal.ServiceDisconnectedEvent =>
                 Map<ServiceProvisioningEventData>(item,
