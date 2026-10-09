@@ -693,7 +693,7 @@ public sealed class ApiOptions
             // host can already answer: a leaf's package installs its config descriptor, so the
             // descriptor directory is the list of what is installed here. LeafEndpoint reads it, and an
             // installed leaf is wired with nothing asked of an operator. See the method for the rest.
-            AssistantBaseUrl = LeafEndpoint(s.AssistantBaseUrl, "http://127.0.0.1:8083", "assistant-plugin", leafDescriptorDir),
+            AssistantBaseUrl = LeafEndpoint(s.AssistantBaseUrl, "http://127.0.0.1:5180", "assistant", leafDescriptorDir),
             // The browser route is opt-in and has no sensible default — a loopback URL is not one.
             AssistantPublicUrl = Clean(s.AssistantPublicUrl),
             FirewallSocketPath = LeafEndpoint(s.FirewallSocketPath, "/run/kgsm-firewall/firewall.sock", "firewall", leafDescriptorDir),

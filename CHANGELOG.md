@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed — the assistant leaf is the assistant's KGSM plugin (0.218.0)
 
-- The assistant is found at `http://127.0.0.1:8083` when a descriptor named `assistant-plugin` is
+- The assistant is found at `http://127.0.0.1:5180` when a descriptor named `assistant` is
   installed, its unit is `kgsm-assistant.service`, and the Services board, the host logs, the restart
   grant, the packaged unit map and the dev script say so.
 - The capability's liveness probe is this client's own `GET /health` within two seconds, so the API no
