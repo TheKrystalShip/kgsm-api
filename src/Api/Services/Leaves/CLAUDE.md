@@ -56,21 +56,6 @@ consumer needs no provisioning check of its own to stay off a daemon this host h
   warning on every call it serves so that dormancy is measured rather than assumed.
   `Api:AssistantBaseUrl` is this API's own loopback route and is never a browser address; the two are
   separate settings because conflating them hands a browser an address it cannot reach.
-- **Speech** → the leaf's own published client (`TheKrystalShip.Speech`) wrapped in
-  `SpeechLeafClient`, serving `GET /hosts/{id}/services/speech/status`. `Api__SpeechSocketPath`
-  defaults to the standard path rather than being opt-in: systemd binds the socket whether or not the
-  daemon runs, so the file's presence *is* the provisioning check.
-  **Read on a page view, never polled, and never on a resting unit.** The daemon idle-exits to give back
-  the ~1.6GB its models cost and **connecting to its socket is what starts it** — so there is no
-  `LeafHealthMonitor` entry for speech, and the controller reads systemd first and answers
-  `resting:true` without connecting when the unit is not active. What a resting host still reports is
-  read here rather than asked for: the model files measured on disk and the configured voice, both
-  resolved through `LeafConfigService` so no path or default is written down twice.
-  **It also carries no Link on the Services board** (it is absent from `ProvisionableLeaf`). That axis
-  is a stored connection somebody can turn off, and speech has none to arm: this client runs on a page
-  view, feeds no data flow, and the assistant service, the bot and a browser recording a voice note all
-  reach the leaf directly. Socket activation is not the reason — the firewall is socket-activated too
-  and does carry a Link, because disconnecting it degrades the ports surface.
 
 ## What is configurable comes from the leaves (`LeafDescriptorStore`, `LeafConfigService`)
 

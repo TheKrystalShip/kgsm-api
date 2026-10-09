@@ -71,7 +71,6 @@ public static class ActionIds
     public const string MonitorThresholdsRead = "monitor:thresholds.read";
     public const string MonitorThresholdsWrite = "monitor:thresholds.write";
     public const string FirewallRulesRead = "firewall:rules.read";
-    public const string SpeechStatusRead = "speech:status.read";
     public const string BotStatusRead = "bot:status.read";
     public const string ReactorRulesRead = "reactor:rules.read";
     public const string ReactorRulesWrite = "reactor:rules.write";

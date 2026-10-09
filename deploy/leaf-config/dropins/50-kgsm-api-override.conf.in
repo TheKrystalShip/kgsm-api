@@ -1,5 +1,5 @@
 # The runtime leaf-config feature's plumbing. @LEAF@ is the leaf id — monitor, watchdog, assistant,
-# firewall, speech, scheduler, reactor or bot — and this template is rendered once per leaf, into
+# firewall, scheduler, reactor or bot — and this template is rendered once per leaf, into
 # /etc/systemd/system/<unit>.d/50-kgsm-api-override.conf by deploy/setup-leaf-config.sh and into
 # /usr/lib/systemd/system/<unit>.d/50-kgsm-api-override.conf by packaging/PKGBUILD. Both render the
 # same file; keep the leaf→unit map in step across the two.

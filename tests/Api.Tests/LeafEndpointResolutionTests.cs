@@ -135,7 +135,6 @@ public class LeafEndpointResolutionTests : IDisposable
 
         Assert.Equal("/run/kgsm-monitor/metrics.sock", o.MonitorSocketPath);
         Assert.Equal("/run/kgsm-watchdog/control.sock", o.WatchdogSocketPath);
-        Assert.Equal("/run/kgsm-speech/speech.sock", o.SpeechSocketPath);
         Assert.Equal("/usr/bin/kgsm", o.KgsmPath);
     }
 }

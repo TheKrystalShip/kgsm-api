@@ -94,7 +94,7 @@ long-term maintainability wins here.
   one-time log), not a capability. The process-based `IInstanceService` is transient → resolved
   per-request. The engine's event journal is tailed live for SSE and notifications
   (`src/Api/Services/Audit/CLAUDE.md`).
-- **Leaves** (monitor, assistant, speech, watchdog, scheduler, reactor, firewall, bot) →
+- **Leaves** (monitor, assistant, watchdog, scheduler, reactor, firewall, bot) →
   `src/Api/Services/Leaves/CLAUDE.md`. A missing/down leaf removes only its capability, never a 500.
 
 ## Invariants — non-negotiable

@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — the speech leaf (0.217.0, Api.Contracts 2.0.0)
+
+- The Services board carries no speech row, `GET /hosts/{id}/services/speech/status` and the
+  `speech:status.read` action are gone, and so are the speech socket setting, the polkit restart grant
+  and the override drop-in for the speech unit. The organization's speech service, `tks-speech`, is
+  reached by the assistant harness directly and is not a leaf of this panel.
+- `Api.Contracts` 2.0.0 drops `SpeechEngine`, `SpeechVoice`, `SpeechLaneReport` and `SpeechModelFile`;
+  no consumer referenced them.
+- No longer built on `TheKrystalShip.Speech`.
+
 ### Changed — Web Push from `TheKrystalShip.WebPush` (0.216.1)
 
 - Built on `TheKrystalShip.WebPush` 2.0.0, the Web Push library under the organization's name; the

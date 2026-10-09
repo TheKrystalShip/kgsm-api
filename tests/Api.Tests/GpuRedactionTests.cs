@@ -54,7 +54,7 @@ public sealed class GpuRedactionTests
         var kept = GpuRedaction.Redacted([
             Proc(1, null, 1.0, 10),
             Proc(2, null, 2.0, 20),
-            Proc(3, "kgsm-speech.service", 1.5, 5),
+            Proc(3, "tks-speech.service", 1.5, 5),
         ]);
 
         Assert.Equal(2, kept!.Count);
@@ -94,7 +94,7 @@ public sealed class GpuRedactionTests
     {
         // The one property worth stating outright: gating changes who is named, never how full the card is.
         IReadOnlyList<GpuProcessSample> full = [
-            Proc(1, "kgsm-speech.service", 1.15, 4),
+            Proc(1, "tks-speech.service", 1.15, 4),
             Proc(2, null, 3.5, 11),
             Proc(3, null, 0.35),
         ];

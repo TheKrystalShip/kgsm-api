@@ -34,7 +34,6 @@ polkit.addRule(function(action, subject) {
         "kgsm-watchdog.service": true,
         "kgsm-assistant-service.service": true,
         "kgsm-firewall.service": true,
-        "kgsm-speech.service": true,
         "kgsm-scheduler.service": true,
         "kgsm-reactor.service": true,
         "kgsm-bot.service": true

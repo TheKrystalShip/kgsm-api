@@ -91,7 +91,7 @@ internal sealed class TestAuthority
         ActionIds.BatchesCancel, ActionIds.AuditPersonalFields, ActionIds.ServicesRead, ActionIds.LogsRead,
         ActionIds.EngineConfigRead, ActionIds.FirewallRulesRead, ActionIds.MonitorThresholdsRead,
         ActionIds.SchedulerWindowsRead, ActionIds.SchedulerWindowsWrite, ActionIds.WatchdogSupervisionRead,
-        ActionIds.SpeechStatusRead, ActionIds.BotStatusRead, ActionIds.ReactorRulesRead,
+        ActionIds.BotStatusRead, ActionIds.ReactorRulesRead,
     };
 
     /// <summary>

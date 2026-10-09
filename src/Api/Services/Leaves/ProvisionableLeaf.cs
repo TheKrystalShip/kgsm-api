@@ -11,20 +11,15 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// control over something real rather than a preference.
 /// </para>
 /// <para>
-/// Three leaves are deliberately out, for two different reasons. <c>api</c> and <c>bot</c> because this
+/// Two leaves are deliberately out: <c>api</c> and <c>bot</c>, because this
 /// API holds no client to them at all — it is itself, and the bot is a parallel Discord surface onto
-/// kgsm-lib. <c>speech</c> because its presence is <b>measured, not stored</b>: the socket file answers
-/// whether the leaf is installed here (<see cref="SpeechLeafClient"/>), the API reads it on a page view
-/// and nothing else, and every path that actually uses the engine — the assistant service, the bot, a
-/// browser recording a voice note — reaches it directly, not through here. A toggle would arm nothing,
-/// while appearing to be the switch that turns voice off. All three report a <c>null</c> link, which the
-/// board renders as "not applicable" rather than as "disconnected".
+/// kgsm-lib. Both report a <c>null</c> link, which the board renders as "not applicable" rather than as
+/// "disconnected".
 /// </para>
 /// <para>
 /// Socket activation is <b>not</b> the criterion, and reading it as one gets the firewall wrong: the
-/// firewall and the speech engine are both socket-activated and idle-exiting, and both are unpolled for
-/// exactly that reason (<see cref="LeafHealthSource.None"/> — a 2s probe would defeat idle-exit, and
-/// probing speech would load a gigabyte of models to ask whether it is alive). That is the health axis.
+/// firewall is socket-activated and idle-exiting, and unpolled for exactly that reason
+/// (<see cref="LeafHealthSource.None"/> — a 2s probe would defeat idle-exit). That is the health axis.
 /// The firewall is still provisionable because the API holds a stored link that gates the ports surface.
 /// </para>
 /// <para>
@@ -46,7 +41,7 @@ public static class ProvisionableLeaf
     public static readonly IReadOnlyList<string> All = [Monitor, Watchdog, Assistant, Firewall, Scheduler, Reactor];
 
     /// <summary>True when <paramref name="leafId"/> is one of the runtime-provisionable leaves
-    /// (everything else — <c>api</c>/<c>bot</c>/<c>speech</c>/unknown — is not).</summary>
+    /// (everything else — <c>api</c>/<c>bot</c>/unknown — is not).</summary>
     public static bool IsProvisionable(string? leafId) =>
         leafId is Monitor or Watchdog or Assistant or Firewall or Scheduler or Reactor;
 }
