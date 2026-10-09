@@ -19,7 +19,20 @@ public sealed class LeafConfigTests
 {
     private const string Host = AuthTestFactory.HostId;
     private const string MonitorUnit = "kgsm-monitor.service";
-    private const string AssistantUnit = "kgsm-assistant.service";
+
+    // A monitor descriptor whose one field is a write-only secret: the shape the secret-hygiene tests need.
+    private const string SecretDescriptor = """
+        {
+          "schemaVersion": 1, "id": "monitor", "displayName": "Monitor",
+          "unit": "kgsm-monitor.service", "role": "Host and per-server resource metrics.",
+          "onDemand": false, "applyMode": "restart",
+          "floorSources": [],
+          "fields": [
+            { "key": "apiKey", "env": "KGSM_MONITOR_API_KEY", "label": "Upstream key",
+              "description": "Write-only.", "type": "secret" }
+          ]
+        }
+        """;
 
     // ---- GET: the manifest shape ------------------------------------------------------------------
     [Fact]
@@ -103,15 +116,16 @@ public sealed class LeafConfigTests
         using var f = new LeafConfigTestFactory();
         HttpClient owner = Owner(f);
         const string secret = "tvly-SUPER-SECRET-KEY-1234";
+        f.InstallDescriptor("monitor", SecretDescriptor);
 
-        await Put(owner, "assistant", "{\"values\":{\"webSearchApiKey\":\"" + secret + "\"}}");
+        await Put(owner, "monitor", "{\"values\":{\"apiKey\":\"" + secret + "\"}}");
 
         // GET masks the secret: value null, set true, never the value itself.
-        HttpResponseMessage getResp = await owner.GetAsync($"/api/v1/hosts/{Host}/services/assistant/config");
+        HttpResponseMessage getResp = await owner.GetAsync($"/api/v1/hosts/{Host}/services/monitor/config");
         string getBody = await getResp.Content.ReadAsStringAsync();
         Assert.DoesNotContain(secret, getBody); // the secret never crosses back to the client
         JsonElement key = JsonDocument.Parse(getBody).RootElement.GetProperty("fields").EnumerateArray()
-            .First(x => x.GetProperty("key").GetString() == "webSearchApiKey");
+            .First(x => x.GetProperty("key").GetString() == "apiKey");
         Assert.True(key.GetProperty("isSecret").GetBoolean());
         Assert.Equal(JsonValueKind.Null, key.GetProperty("value").ValueKind); // ALWAYS null for a secret
         Assert.True(key.GetProperty("set").GetBoolean());
@@ -119,7 +133,7 @@ public sealed class LeafConfigTests
         // The audit trail records the KEY but never the secret value.
         string auditBody = await (await owner.GetAsync("/api/v1/audit")).Content.ReadAsStringAsync();
         Assert.DoesNotContain(secret, auditBody);
-        Assert.Contains("webSearchApiKey", auditBody);
+        Assert.Contains("apiKey", auditBody);
     }
 
     // ---- PUT: a bad value fails the canary → auto-rollback (restart twice, override restored) ------
@@ -128,19 +142,20 @@ public sealed class LeafConfigTests
     {
         using var f = new LeafConfigTestFactory();
         HttpClient owner = Owner(f);
+        f.InstallDescriptor("monitor", SecretDescriptor);
 
         // The sentinel value the fake probe treats as unhealthy → the apply must roll back.
-        JsonElement result = await Json(Put(owner, "assistant",
-            "{\"values\":{\"webSearchApiKey\":\"" + FakeLeafProbe.UnhealthyValue + "\"}}"));
+        JsonElement result = await Json(Put(owner, "monitor",
+            "{\"values\":{\"apiKey\":\"" + FakeLeafProbe.UnhealthyValue + "\"}}"));
 
         Assert.Equal("rolled_back", result.GetProperty("outcome").GetString());
         // Restarted twice: the (bad) apply, then the rollback restore.
-        Assert.Equal(2, f.Units().RestartCount(AssistantUnit));
+        Assert.Equal(2, f.Units().RestartCount(MonitorUnit));
 
         // Snapshot restored: the override is gone (it had no prior value).
-        JsonElement cfg = await Json(owner.GetAsync($"/api/v1/hosts/{Host}/services/assistant/config"));
+        JsonElement cfg = await Json(owner.GetAsync($"/api/v1/hosts/{Host}/services/monitor/config"));
         JsonElement key = cfg.GetProperty("fields").EnumerateArray()
-            .First(x => x.GetProperty("key").GetString() == "webSearchApiKey");
+            .First(x => x.GetProperty("key").GetString() == "apiKey");
         Assert.False(key.GetProperty("overridden").GetBoolean());
         Assert.False(key.GetProperty("set").GetBoolean());
 

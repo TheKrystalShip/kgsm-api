@@ -150,7 +150,6 @@ public sealed class LeafHealthWatcher : BackgroundService
     private static Capability? CapabilityFor(LeafDescriptor leaf, HostCapabilities caps) => leaf.Health switch
     {
         LeafHealthSource.Metrics => caps.Metrics,
-        LeafHealthSource.Assistant => caps.Assistant,
         LeafHealthSource.Watchdog => caps.Watchdog,
         LeafHealthSource.Scheduler => caps.Scheduler,
         LeafHealthSource.Reactor => caps.Reactor,

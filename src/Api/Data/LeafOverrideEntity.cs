@@ -8,8 +8,7 @@ namespace TheKrystalShip.Api.Data;
 /// <c>&lt;LeafOverridesDir&gt;/&lt;leaf&gt;.env</c> file that a systemd drop-in feeds the leaf at start, so
 /// the DB is the source of truth and the file is a pure render (reset = delete the row + re-render).
 /// <para>
-/// <b>Secret handling.</b> <see cref="IsSecret"/> rows hold a write-only secret (e.g. the assistant's web
-/// search key): stored plaintext in the host-local SQLite (consistent with the env-stored bot token on this
+/// <b>Secret handling.</b> <see cref="IsSecret"/> rows hold a write-only secret (e.g. an API key): stored plaintext in the host-local SQLite (consistent with the env-stored bot token on this
 /// single trusted host), <strong>never echoed on read</strong> (the API returns <c>set:true</c> + an optional
 /// last-4 fingerprint), and never logged.
 /// </para>
@@ -20,7 +19,7 @@ namespace TheKrystalShip.Api.Data;
 /// </summary>
 public sealed class LeafOverrideEntity
 {
-    /// <summary>The leaf id this override targets (<c>monitor</c>/<c>watchdog</c>/<c>assistant</c>/<c>firewall</c>).</summary>
+    /// <summary>The leaf id this override targets (<c>monitor</c>/<c>watchdog</c>/<c>firewall</c>).</summary>
     public string LeafId { get; set; } = "";
 
     /// <summary>The manifest field key (the stable id, e.g. <c>logLevel</c>) — NOT the env name.</summary>

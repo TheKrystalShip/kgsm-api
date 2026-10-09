@@ -20,7 +20,7 @@ namespace TheKrystalShip.Api.Contracts;
 /// <param name="OnDemand">Socket-activated / idle-exiting (the firewall): <c>inactive</c> is its normal
 /// resting state, so the UI renders it neutrally rather than as a fault.</param>
 /// <param name="Provisioned">Runtime provisioning (connected-on-this-host) — <c>true</c>/<c>false</c> for the
-/// four runtime-provisionable leaves (monitor/watchdog/assistant/firewall), <strong>null</strong> (omitted)
+/// runtime-provisionable leaves (monitor/watchdog/firewall/scheduler/reactor), <strong>null</strong> (omitted)
 /// for <c>api</c>/<c>bot</c> where provisioning is not applicable. The UI shows a connect/disconnect toggle
 /// only when this is present. Distinct from systemd <see cref="State"/> (a leaf can be connected yet its
 /// unit inactive, or disconnected yet its unit running — provisioning is the SPA-facing capability flag).</param>

@@ -6,7 +6,7 @@ only its capability, never a 500, and the API runs with any subset of leaves pre
 ## Leaf health & the capability model (`LeafHealthMonitor`, `LeafRegistry`)
 
 Capability **availability** is owned by the always-on `LeafHealthMonitor`, which polls each
-*provisioned* leaf's health every ~2s (monitor + assistant `GET /health`; watchdog `IsReadyAsync` via
+*provisioned* leaf's health every ~2s (monitor `GET /health`; watchdog `IsReadyAsync` via
 kgsm-lib — never a direct socket). It is the **single source** feeding both the REST `GET /hosts`
 capability block (`HostAggregator` reads its cached `Current`) and the `hosts/{id}/capabilities` stream
 (it publishes flips). Two axes, never conflated:
@@ -25,7 +25,7 @@ capability; else ⇒ unavailable); the watchdog's is a readiness probe, reached 
 `IsReadyAsync`.
 
 **An optional leaf's endpoint is resolved, not configured.** The firewall authority, the scheduler, the
-reactor, the bot and the assistant each bind a fixed endpoint their own configuration names, so this
+reactor and the bot each bind a fixed endpoint their own configuration names, so this
 API reads `Api__LeafDescriptorDir` — where a leaf's package installs its descriptor — and wires what is
 installed. A leaf with no descriptor there reports its capability `absent`, which is a different claim
 from a row that is perpetually down. A pinned path wins, for a leaf that does not sit where its package
@@ -46,16 +46,9 @@ consumer needs no provisioning check of its own to stay off a daemon this host h
   producer and consumer share ONE build-time contract. **Never re-declare a local copy of the monitor
   DTOs.** Any contract change bumps the package `Version` AND this project's `<PackageReference>` — a
   same-version repack is served stale from the NuGet cache (`id+version` keyed).
-- **Assistant** → the typed `AssistantClient` (a dedicated `HttpClient` subclass, not raw HTTP in the
-  aggregator). It exposes a liveness `CheckHealthAsync` for the capability and the HTTP/SSE relay
-  behind `/api/v1/assistant/*`. The probe self-bounds via a linked token — leave the client's `Timeout`
-  at default so slower calls aren't capped by the probe budget.
-  **The relay is peer transport and is expected to be idle.** A browser talking to *this* host's
-  assistant addresses the leaf directly, on the public origin reported as the capability's `info.url`
-  (`Api:AssistantPublicUrl`) — this API relays nothing for its own node, and the controller logs a
-  warning on every call it serves so that dormancy is measured rather than assumed.
-  `Api:AssistantBaseUrl` is this API's own loopback route and is never a browser address; the two are
-  separate settings because conflating them hands a browser an address it cannot reach.
+- **The assistant is not a leaf.** It is the cluster's anchor and holds no capability here; a browser
+  finds it through the cluster's capability assignments and the address its member states, and this
+  API relays nothing for it.
 
 ## What is configurable comes from the leaves (`LeafDescriptorStore`, `LeafConfigService`)
 
@@ -86,8 +79,7 @@ the built-in fallback for a leaf that has not shipped a descriptor, not the auth
   would keep the previous setter's name on a value they never chose.
 
 **An anchor sharing this machine is not one of this node's services.** Leaf-or-anchor is a deployment
-choice, so the same component is a leaf on one host and an anchor on another, and only the descriptor
-it installed here says which. `AnchorDescriptorStore` scans `/var/lib/kgsm/anchors/`
+choice, and only the descriptor a component installed here says which it is on this host. `AnchorDescriptorStore` scans `/var/lib/kgsm/anchors/`
 (`Api__AnchorDescriptorDir`) for **ids alone** — the one fact this API needs — and subtracts them: an
 anchored component is absent from the Services board and its stream, is not addressable as a leaf, and
 has no configuration surface here, not even the keys `LeafConfigManifest` knows by name. It owns its

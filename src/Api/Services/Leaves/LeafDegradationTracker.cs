@@ -12,8 +12,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// <para>
 /// <b>The half a probe cannot see.</b> <see cref="LeafHealthMonitor"/> asks each leaf's
 /// <c>/health</c> and gets a yes or a no, so a leaf that is answering perfectly while unable to do
-/// part of its job reads as operational — an assistant with a dead backend, a monitor serving a frozen
-/// frame, a scheduler that cannot reach the watchdog. And the two socket-activated leaves cannot be
+/// part of its job reads as operational — a monitor serving a frozen frame, a scheduler that cannot reach the watchdog. And the two socket-activated leaves cannot be
 /// probed at all, because connecting to the socket is what starts them.
 /// </para>
 /// <para>

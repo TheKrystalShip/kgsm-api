@@ -2,7 +2,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 
 /// <summary>
 /// The leaves whose provisioning is runtime-flippable and whose config the API can target (the
-/// leaf-runtime-provisioning/config feature) — <c>monitor</c>, <c>watchdog</c>, <c>assistant</c>,
+/// leaf-runtime-provisioning/config feature) — <c>monitor</c>, <c>watchdog</c>,
 /// <c>firewall</c>, <c>scheduler</c>, <c>reactor</c>.
 /// <para>
 /// <b>The membership test is "does this API hold a link there is something to arm".</b> Each of these
@@ -32,16 +32,15 @@ public static class ProvisionableLeaf
 {
     public const string Monitor = "monitor";
     public const string Watchdog = "watchdog";
-    public const string Assistant = "assistant";
     public const string Firewall = "firewall";
     public const string Scheduler = "scheduler";
     public const string Reactor = "reactor";
 
     /// <summary>The provisionable + config-target leaf ids, in Services-board order.</summary>
-    public static readonly IReadOnlyList<string> All = [Monitor, Watchdog, Assistant, Firewall, Scheduler, Reactor];
+    public static readonly IReadOnlyList<string> All = [Monitor, Watchdog, Firewall, Scheduler, Reactor];
 
     /// <summary>True when <paramref name="leafId"/> is one of the runtime-provisionable leaves
     /// (everything else — <c>api</c>/<c>bot</c>/unknown — is not).</summary>
     public static bool IsProvisionable(string? leafId) =>
-        leafId is Monitor or Watchdog or Assistant or Firewall or Scheduler or Reactor;
+        leafId is Monitor or Watchdog or Firewall or Scheduler or Reactor;
 }

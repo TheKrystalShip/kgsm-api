@@ -2,7 +2,7 @@
 
 The per-host **Control Panel aggregator API** for the KGSM ecosystem. One deployable unit =
 **one host** = `kgsm` + its leaves + this API. It aggregates **only its own host's** leaves
-(metrics, assistant, watchdog, firewall) and serves the React SPA (`kgsm-web`) and other surfaces
+(metrics, watchdog, firewall, scheduler, reactor) and serves the React SPA (`kgsm-web`) and other surfaces
 over a path-versioned REST + WebSocket surface at `/api/v1`. Cross-host "fleet" rollup is done
 client-side by the SPA — there is no `/fleet` endpoint.
 
@@ -101,10 +101,10 @@ no-op), which is why it lives in the script that already holds sudo rather than 
 
 What that wiring is:
 
-- A **systemd drop-in** per config-target leaf (`monitor`, `watchdog`, `assistant`, `firewall`) that
+- A **systemd drop-in** per config-target leaf (`monitor`, `watchdog`, `firewall`, `scheduler`, `reactor`, `bot`) that
   layers an API-owned override env file (`/var/lib/kgsm-api/leaf-overrides/<leaf>.env`) on **last**, so
   the API's overrides win — the leaf never references the API.
-- A **scoped polkit rule** letting the service user `systemctl restart` **only** those four units
+- A **scoped polkit rule** letting the service user `systemctl restart` **only** those units
   (restart-family verbs only). This is the **only** ongoing privileged operation; the API renders the
   override files **unprivileged** in its own state dir. `NoNewPrivileges=true` on the API unit does not
   block it — `systemctl restart` is a polkit-authorized D-Bus call to PID 1, not an in-process escalation.

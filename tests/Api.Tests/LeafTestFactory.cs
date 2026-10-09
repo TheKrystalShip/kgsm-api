@@ -108,7 +108,6 @@ public class LeafTestFactory : AuthTestFactory
                 // All four leaves start NOT provisioned (blank) → connect flips absent→provisioned.
                 ["Api:MonitorSocketPath"] = _monitorSocket,
                 ["Api:WatchdogSocketPath"] = "",
-                ["Api:AssistantBaseUrl"] = "",
                 ["Api:FirewallSocketPath"] = "",
                 ["Api:LeafOverridesDir"] = OverridesDir,
                 ["Api:LeafDescriptorDir"] = DescriptorDir,

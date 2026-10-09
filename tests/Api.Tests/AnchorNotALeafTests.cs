@@ -28,12 +28,12 @@ public sealed class AnchorNotALeafTests
     public async Task AnchoredComponent_IsAbsentFromTheServicesBoard()
     {
         using var factory = new LeafTestFactory();
-        factory.InstallAnchorDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant.service"));
+        factory.InstallAnchorDescriptor("scheduler", AnchorDescriptor("scheduler", "kgsm-scheduler.service"));
         HttpClient owner = Client(factory, Persona.Owner);
 
         IReadOnlyList<string> ids = await ServiceIds(owner);
 
-        Assert.DoesNotContain("assistant", ids);
+        Assert.DoesNotContain("scheduler", ids);
         // Every other leaf is untouched — this subtracts one component, it does not narrow the board.
         Assert.Contains("monitor", ids);
         Assert.Contains("watchdog", ids);
@@ -43,10 +43,10 @@ public sealed class AnchorNotALeafTests
     public async Task AnchoredComponent_IsNotAddressableAsALeaf()
     {
         using var factory = new LeafTestFactory();
-        factory.InstallAnchorDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant.service"));
+        factory.InstallAnchorDescriptor("scheduler", AnchorDescriptor("scheduler", "kgsm-scheduler.service"));
         HttpClient owner = Client(factory, Persona.Owner);
 
-        HttpResponseMessage resp = await owner.GetAsync($"/api/v1/hosts/{Host}/services/assistant/config");
+        HttpResponseMessage resp = await owner.GetAsync($"/api/v1/hosts/{Host}/services/scheduler/config");
 
         Assert.Equal(HttpStatusCode.NotFound, resp.StatusCode);
     }
@@ -59,7 +59,7 @@ public sealed class AnchorNotALeafTests
 
         IReadOnlyList<string> ids = await ServiceIds(owner);
 
-        Assert.Contains("assistant", ids);
+        Assert.Contains("scheduler", ids);
         Assert.Contains("bot", ids);
     }
 
@@ -70,11 +70,11 @@ public sealed class AnchorNotALeafTests
     public async Task AnchorDescriptor_WinsOverALeafDescriptorForTheSameComponent()
     {
         using var factory = new LeafTestFactory();
-        factory.InstallDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant.service"));
-        factory.InstallAnchorDescriptor("assistant", AnchorDescriptor("assistant", "kgsm-assistant.service"));
+        factory.InstallDescriptor("scheduler", AnchorDescriptor("scheduler", "kgsm-scheduler.service"));
+        factory.InstallAnchorDescriptor("scheduler", AnchorDescriptor("scheduler", "kgsm-scheduler.service"));
         HttpClient owner = Client(factory, Persona.Owner);
 
-        Assert.DoesNotContain("assistant", await ServiceIds(owner));
+        Assert.DoesNotContain("scheduler", await ServiceIds(owner));
     }
 
     private static async Task<IReadOnlyList<string>> ServiceIds(HttpClient c)

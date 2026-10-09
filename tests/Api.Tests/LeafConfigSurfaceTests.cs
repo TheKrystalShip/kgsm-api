@@ -139,23 +139,23 @@ public sealed class LeafConfigSurfaceTests
     public async Task A_secret_never_echoes_its_value_from_any_tier()
     {
         using var f = new LeafConfigTestFactory();
-        string floor = FloorFile(f, "WebSearch__ApiKey=tvly-THE-REAL-SECRET-VALUE\n");
-        f.InstallDescriptor("assistant", $$"""
+        string floor = FloorFile(f, "KGSM_MONITOR_API_KEY=tvly-THE-REAL-SECRET-VALUE\n");
+        f.InstallDescriptor("monitor", $$"""
         {
-          "schemaVersion": 1, "id": "assistant", "displayName": "Assistant",
-          "unit": "kgsm-assistant.service", "role": "LLM assistant.",
+          "schemaVersion": 1, "id": "monitor", "displayName": "Monitor",
+          "unit": "kgsm-monitor.service", "role": "Host and per-server resource metrics.",
           "onDemand": false, "applyMode": "restart",
           "floorSources": [{ "kind": "env-file", "path": "{{floor}}" }],
           "fields": [
-            { "key": "webSearchApiKey", "env": "WebSearch__ApiKey", "label": "Web search key",
+            { "key": "apiKey", "env": "KGSM_MONITOR_API_KEY", "label": "Upstream key",
               "description": "Write-only.", "type": "secret" }
           ]
         }
         """);
 
-        HttpResponseMessage resp = await Owner(f).GetAsync(ConfigUrl("assistant"));
+        HttpResponseMessage resp = await Owner(f).GetAsync(ConfigUrl("monitor"));
         string body = await resp.Content.ReadAsStringAsync();
-        JsonElement key = Field(JsonDocument.Parse(body).RootElement, "webSearchApiKey");
+        JsonElement key = Field(JsonDocument.Parse(body).RootElement, "apiKey");
 
         // The floor is where a real secret actually lives, so this is the tier that must never leak.
         Assert.DoesNotContain("THE-REAL-SECRET-VALUE", body);

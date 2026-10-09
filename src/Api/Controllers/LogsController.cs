@@ -9,7 +9,7 @@ namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
 /// The aggregated host-log read surface — <c>GET /hosts/{id}/logs</c> (architecture.html §3, "Hosts &amp;
-/// diagnostics"). Funnels the host's leaf-service logs (assistant, monitor, watchdog, kgsm-firewall, +the
+/// diagnostics"). Funnels the host's leaf-service logs (monitor, watchdog, kgsm-firewall, +the
 /// api &amp; bot) out of the <b>systemd journal</b> into one source-tagged, cursor-paginated stream. This is
 /// host-OS introspection (journald is the system's own merged log bus), sourced by the api directly via
 /// <see cref="JournalReader"/> — NOT through kgsm-lib (that chokepoint is for engine domain data; the host

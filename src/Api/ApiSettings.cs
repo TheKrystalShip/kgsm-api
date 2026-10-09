@@ -95,20 +95,6 @@ public sealed class ApiSettings
         Risk = ConfigRisk.Wiring)]
     public string? WatchdogSocketPath { get; set; }
 
-    /// <summary>Assistant base URL. Blank reports the assistant absent.</summary>
-    /// <panel>Where the assistant serves. Empty means this host has no assistant and the chat surface
-    /// reports it absent.</panel>
-    [ConfigField("assistantUrl", "Assistant URL", Group = "leaves", Risk = ConfigRisk.Wiring, NoDefault = true)]
-    public string? AssistantBaseUrl { get; set; }
-
-    /// <summary>Public origin browsers reach the assistant on. Blank reports no browser route.</summary>
-    /// <panel>The assistant's own public address, e.g. <c>https://assistant.example.com</c>. The Control
-    /// Panel's chat talks to the assistant directly on it. Empty means the chat reports the assistant
-    /// unreachable from the browser rather than routing through this API.</panel>
-    [ConfigField("assistantPublicUrl", "Assistant public URL", Group = "leaves", Risk = ConfigRisk.Wiring,
-        NoDefault = true)]
-    public string? AssistantPublicUrl { get; set; }
-
     /// <summary>kgsm-firewall control socket. Blank reports the ports surface absent.</summary>
     /// <panel>The firewall authority's socket. Empty means port state is reported as unknown rather than
     /// assumed closed.</panel>

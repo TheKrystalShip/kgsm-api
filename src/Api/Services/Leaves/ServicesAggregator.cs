@@ -10,7 +10,7 @@ namespace TheKrystalShip.Api.Services.Leaves;
 ///   <item><b>Liveness</b> — systemd's own view via <see cref="SystemdReader"/> (universal: every leaf has a
 ///   unit). This is the spine.</item>
 ///   <item><b>Deep health</b> — the api's existing capability probes via <see cref="LeafHealthMonitor"/>
-///   (monitor/assistant/watchdog) plus the api itself. Layered ON TOP where it exists; honest <c>null</c>
+///   (monitor/watchdog) plus the api itself. Layered ON TOP where it exists; honest <c>null</c>
 ///   where the api has no probe (firewall/bot) — never inferred from liveness.</item>
 /// </list>
 /// The two are kept distinct on purpose: a unit can be <c>active</c> yet failing its <c>/health</c> (the
@@ -137,7 +137,6 @@ public sealed class ServicesAggregator(
         // We are answering this request, so the api is reachable by definition.
         LeafHealthSource.SelfApi => new ComponentServiceHealth(CapabilityStatus.Operational, null),
         LeafHealthSource.Metrics => FromCapability(caps.Metrics),
-        LeafHealthSource.Assistant => FromCapability(caps.Assistant),
         LeafHealthSource.Watchdog => FromCapability(caps.Watchdog),
         LeafHealthSource.Scheduler => FromCapability(caps.Scheduler),
         LeafHealthSource.Reactor => FromCapability(caps.Reactor),

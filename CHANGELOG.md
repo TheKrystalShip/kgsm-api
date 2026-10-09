@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — the assistant is not a leaf (0.219.0, Api.Contracts 3.0.0)
+
+The assistant is the cluster's anchor and serves a chat; a node runs no assistant of its own, so the
+panel holds nothing for one.
+
+- The Services board, the host logs, the runtime connect/disconnect and the config targets no longer
+  list an `assistant` leaf, and the restart grant, the per-leaf drop-in and the packaged unit map no
+  longer cover `kgsm-assistant.service`. The capability probe, its client, `Api:AssistantBaseUrl` and
+  `Api:AssistantPublicUrl` are gone, and so is the assistant's entry in the built-in config manifest.
+- `GET /hosts` carries no `assistant` capability. `Api.Contracts` 3.0.0 drops
+  `HostCapabilities.Assistant` and `AssistantCapabilityInfo`; a consumer on an older pin ignores the
+  missing field.
+
 ### Changed — the package names no assistant package (0.218.1)
 
 The assistant is the cluster's anchor, deployed on its own, and no package provides it on a node, so

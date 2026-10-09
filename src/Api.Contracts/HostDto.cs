@@ -382,7 +382,6 @@ public sealed record OsInfo(string? Name, string? Kernel, string Arch);
 /// </summary>
 public sealed record HostCapabilities(
     Capability Metrics,
-    Capability Assistant,
     Capability Watchdog,
     Capability Scheduler,
     Capability Reactor);
@@ -430,12 +429,3 @@ public static class CapabilityStatus
 /// <summary>Honestly-sourced <c>info</c> for the metrics capability — the monitor's nominal
 /// sampling interval, straight from the snapshot.</summary>
 public sealed record MetricsCapabilityInfo(int IntervalMs);
-
-/// <summary>
-/// <c>info</c> for the assistant capability — the public origin a browser reaches the assistant leaf
-/// on, straight from <c>Api:AssistantPublicUrl</c>. The Control Panel's chat addresses the leaf
-/// directly on it; this API relays nothing for its own host. Emitted only when the origin is
-/// configured, so a host without one reports the capability with no <c>info</c> and the chat says the
-/// assistant has no browser route rather than guessing at an address.
-/// </summary>
-public sealed record AssistantCapabilityInfo(string Url);

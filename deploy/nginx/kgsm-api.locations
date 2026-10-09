@@ -22,7 +22,7 @@ location / {
     proxy_set_header   X-Forwarded-Proto $scheme;
     proxy_set_header   Connection        '';
 
-    # SSE (/api/v1/stream, the assistant turn relay): stream frames through as they arrive. The app
+    # SSE (/api/v1/stream): stream frames through as they arrive. The app
     # already sends X-Accel-Buffering: no, which nginx honours; this makes it explicit rather than
     # dependent on a header staying in place upstream.
     proxy_buffering    off;

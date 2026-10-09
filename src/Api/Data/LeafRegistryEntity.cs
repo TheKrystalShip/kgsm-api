@@ -3,7 +3,7 @@ namespace TheKrystalShip.Api.Data;
 /// <summary>
 /// One provisionable leaf's <strong>runtime provisioning</strong> row — the persisted, runtime-mutable
 /// half of "is this leaf connected on this host" (the leaf-runtime-provisioning feature, Phase 1). One row
-/// per provisionable leaf id (<c>monitor</c>/<c>watchdog</c>/<c>assistant</c>/<c>firewall</c>), keyed by
+/// per provisionable leaf id (<c>monitor</c>/<c>watchdog</c>/<c>firewall</c>), keyed by
 /// <see cref="LeafId"/>. The row's <see cref="Provisioned"/> flag is what somebody holding <c>api:services.manage</c> flips at runtime via the
 /// Services panel (connect/disconnect), so it moves the capability set off the immutable startup
 /// <see cref="ApiOptions"/> into a DB-backed registry the <see cref="Services.Leaves.LeafHealthMonitor"/>
@@ -18,7 +18,7 @@ namespace TheKrystalShip.Api.Data;
 /// </summary>
 public sealed class LeafRegistryEntity
 {
-    /// <summary>The provisionable leaf id (<c>monitor</c>/<c>watchdog</c>/<c>assistant</c>/<c>firewall</c>) —
+    /// <summary>The provisionable leaf id (<c>monitor</c>/<c>watchdog</c>/<c>firewall</c>) —
     /// the primary key. One row per provisionable leaf.</summary>
     public string LeafId { get; set; } = "";
 

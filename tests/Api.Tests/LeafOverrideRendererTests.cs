@@ -56,8 +56,8 @@ public sealed class LeafOverrideRendererTests : IDisposable
     [Fact]
     public void Render_FileIs0600()
     {
-        _renderer.Render(ProvisionableLeaf.Assistant, [new LeafOverrideRow("webSearchApiKey", "tvly-secret", true)]);
-        string path = _renderer.PathFor(ProvisionableLeaf.Assistant);
+        _renderer.Render(ProvisionableLeaf.Monitor, [new LeafOverrideRow("logLevel", "Debug", false)]);
+        string path = _renderer.PathFor(ProvisionableLeaf.Monitor);
 
         if (OperatingSystem.IsLinux())
         {
@@ -94,13 +94,13 @@ public sealed class LeafOverrideRendererTests : IDisposable
     public void Render_StripsNewlinesFromValue_NoInjection()
     {
         // A value can never span lines (it would inject a second KEY=VALUE).
-        _renderer.Render(ProvisionableLeaf.Assistant,
-            [new LeafOverrideRow("webSearchApiKey", "abc\nLogging__LogLevel__Default=Trace", true)]);
-        string text = File.ReadAllText(_renderer.PathFor(ProvisionableLeaf.Assistant));
+        _renderer.Render(ProvisionableLeaf.Monitor,
+            [new LeafOverrideRow("intervalMs", "abc\nLogging__LogLevel__Default=Trace", false)]);
+        string text = File.ReadAllText(_renderer.PathFor(ProvisionableLeaf.Monitor));
         string[] kvLines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries)
             .Where(l => !l.StartsWith('#')).ToArray();
         Assert.Single(kvLines); // exactly one override line, not two
-        Assert.StartsWith("WebSearch__ApiKey=", kvLines[0]);
+        Assert.StartsWith("KGSM_MONITOR_INTERVAL_MS=", kvLines[0]);
     }
 
     public void Dispose()

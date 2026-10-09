@@ -17,7 +17,6 @@ public sealed class LeafRestartabilityTests
     [Theory]
     [InlineData("watchdog")]
     [InlineData("monitor")]
-    [InlineData("assistant")]
     [InlineData("firewall")]
     [InlineData("scheduler")]
     [InlineData("bot")]
@@ -57,11 +56,9 @@ public sealed class LeafRestartabilityTests
     [Fact]
     public void A_leaf_can_be_found_by_id_with_its_unit()
     {
-        LeafDescriptor? leaf = LeafCatalog.Find("assistant");
+        LeafDescriptor? leaf = LeafCatalog.Find("watchdog");
         Assert.NotNull(leaf);
-        // The assistant's unit carries the '-service' segment, which is the one place in this map a
-        // reader would guess wrong.
-        Assert.Equal("kgsm-assistant.service", leaf.Unit);
+        Assert.Equal("kgsm-watchdog.service", leaf.Unit);
         Assert.Null(LeafCatalog.Find("nothing-here"));
     }
 }
@@ -78,9 +75,9 @@ public sealed class LeafHealthWatcherTests
     private static Capability Absent() => new(Provisioned: false, Status: CapabilityStatus.Unknown);
 
     private static HostCapabilities Caps(
-        Capability? metrics = null, Capability? assistant = null,
+        Capability? metrics = null,
         Capability? watchdog = null, Capability? scheduler = null, Capability? reactor = null) =>
-        new(Metrics: metrics ?? Up(), Assistant: assistant ?? Up(),
+        new(Metrics: metrics ?? Up(),
             Watchdog: watchdog ?? Up(), Scheduler: scheduler ?? Up(), Reactor: reactor ?? Up());
 
     private static readonly DateTimeOffset T0 = new(2026, 8, 12, 20, 0, 0, TimeSpan.Zero);
@@ -175,7 +172,7 @@ public sealed class LeafHealthWatcherTests
         // an outage on every one of its own redeploys.
         (LeafHealthWatcher w, Recorder bus, Action<HostCapabilities> set) = New();
 
-        set(Caps(assistant: NotYetProbed()));
+        set(Caps(metrics: NotYetProbed()));
         w.Tick(T0);
         w.Tick(T0.AddMinutes(10));
 
@@ -233,7 +230,7 @@ public sealed class LeafHealthWatcherTests
         // direction it was set.
         (LeafHealthWatcher w, Recorder bus, Action<HostCapabilities> set) = New();
 
-        set(Caps(metrics: Down(), assistant: Down(), watchdog: Down(), scheduler: Down()));
+        set(Caps(metrics: Down(), watchdog: Down(), scheduler: Down()));
         w.Tick(T0);
         w.Tick(T0.AddMinutes(2));
 
@@ -241,6 +238,6 @@ public sealed class LeafHealthWatcherTests
         Assert.DoesNotContain("firewall", reported);
         Assert.DoesNotContain("bot", reported);
         Assert.DoesNotContain("api", reported);
-        Assert.Equal(4, reported.Length);
+        Assert.Equal(3, reported.Length);
     }
 }

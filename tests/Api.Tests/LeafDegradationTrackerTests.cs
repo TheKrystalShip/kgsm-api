@@ -86,12 +86,12 @@ public sealed class LeafDegradationTrackerTests : IDisposable
     {
         // Two vocabularies: a producer is kgsm-monitor and the capability model calls the same leaf
         // monitor. One place owns the mapping.
-        Journal("kgsm-assistant", Degraded("llm-backend"));
+        Journal("kgsm-monitor", Degraded("sampler"));
 
         LeafDegradationTracker tracker = RunOnce();
 
-        Assert.Equal(["llm-backend"], tracker.For("assistant"));
-        Assert.Contains("kgsm-assistant", tracker.Current.Keys);
+        Assert.Equal(["sampler"], tracker.For("monitor"));
+        Assert.Contains("kgsm-monitor", tracker.Current.Keys);
     }
 
     [Fact]

@@ -33,7 +33,6 @@ public sealed class LeafReachability(LeafHealthMonitor health) : ILeafReachabili
         Capability? capability = leafId switch
         {
             ProvisionableLeaf.Monitor => caps.Metrics,
-            ProvisionableLeaf.Assistant => caps.Assistant,
             ProvisionableLeaf.Watchdog => caps.Watchdog,
             ProvisionableLeaf.Scheduler => caps.Scheduler,
             ProvisionableLeaf.Reactor => caps.Reactor,

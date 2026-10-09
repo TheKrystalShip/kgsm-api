@@ -24,7 +24,6 @@ public static class NodeCapabilities
         var ids = new List<string>(6);
         if (capabilities.Metrics.Provisioned) ids.Add(ProvisionableLeaf.Monitor);
         if (capabilities.Watchdog.Provisioned) ids.Add(ProvisionableLeaf.Watchdog);
-        if (capabilities.Assistant.Provisioned) ids.Add(ProvisionableLeaf.Assistant);
         if (capabilities.Scheduler.Provisioned) ids.Add(ProvisionableLeaf.Scheduler);
         if (capabilities.Reactor.Provisioned) ids.Add(ProvisionableLeaf.Reactor);
         if (clusterEnabled) ids.Add("cluster");

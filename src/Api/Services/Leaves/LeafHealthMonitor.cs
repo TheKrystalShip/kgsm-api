@@ -35,7 +35,6 @@ public sealed class LeafHealthMonitor : BackgroundService
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(2);
 
     private readonly MonitorClient _monitor;
-    private readonly AssistantClient _assistant;
     private readonly ReactorClient _reactor;
     private readonly LeafRegistry _registry;
     private readonly IServiceProvider _services;
@@ -48,9 +47,6 @@ public sealed class LeafHealthMonitor : BackgroundService
     // NOT the runtime DB registry (the four provisionable leaves): the scheduler is an opt-in leaf resolved
     // optionally from DI. Captured once at construction, same source as the conditional registration.
     private readonly bool _schedulerProvisioned;
-    // The assistant's PUBLIC origin (config, fixed for the process) — reported as the capability's info so
-    // the Control Panel's chat can address the leaf itself. Null when unconfigured: no info, no browser route.
-    private readonly string? _assistantPublicUrl;
     // Serializes the poll body so the always-on 2s loop and an out-of-band PollNowAsync (a connect/disconnect
     // forcing an immediate publish) never race two writers onto _current.
     private readonly SemaphoreSlim _pollGate = new(1, 1);
@@ -69,7 +65,6 @@ public sealed class LeafHealthMonitor : BackgroundService
     public LeafHealthMonitor(
         ApiOptions options,
         MonitorClient monitor,
-        AssistantClient assistant,
         ReactorClient reactor,
         LeafRegistry registry,
         IServiceProvider services,
@@ -79,7 +74,6 @@ public sealed class LeafHealthMonitor : BackgroundService
     {
         _degradation = degradation;
         _monitor = monitor;
-        _assistant = assistant;
         _reactor = reactor;
         _registry = registry;
         _services = services;
@@ -87,7 +81,6 @@ public sealed class LeafHealthMonitor : BackgroundService
         _logger = logger;
         _topic = StreamProtocol.HostCapabilitiesTopic(options.HostId);
         _schedulerProvisioned = options.SchedulerProvisioned;
-        _assistantPublicUrl = options.AssistantPublicUrl;
         _current = ColdBlock(); // provisioned -> unknown (declared, not yet probed); unprovisioned -> absent
     }
 
@@ -129,7 +122,6 @@ public sealed class LeafHealthMonitor : BackgroundService
             // Provisioning comes from the runtime registry (NOT the immutable ApiOptions), so a connect/
             // disconnect flips the capability set live. A non-provisioned leaf is never probed (Absent).
             bool metricsProvisioned = _registry.IsProvisioned(ProvisionableLeaf.Monitor);
-            bool assistantProvisioned = _registry.IsProvisioned(ProvisionableLeaf.Assistant);
             bool watchdogProvisioned = _registry.IsProvisioned(ProvisionableLeaf.Watchdog);
             bool reactorProvisioned = _registry.IsProvisioned(ProvisionableLeaf.Reactor);
 
@@ -144,11 +136,10 @@ public sealed class LeafHealthMonitor : BackgroundService
                 : null;
 
             Task<bool> metricsTask = metricsProvisioned ? _monitor.CheckHealthAsync(ct) : Task.FromResult(false);
-            Task<bool> assistantTask = assistantProvisioned ? _assistant.CheckHealthAsync(ct) : Task.FromResult(false);
             Task<bool> watchdogTask = watchdogProvisioned ? ProbeWatchdogAsync(ct) : Task.FromResult(false);
             Task<bool> schedulerTask = scheduler is not null ? scheduler.CheckHealthAsync(ct) : Task.FromResult(false);
             Task<bool> reactorTask = reactorProvisioned ? _reactor.CheckHealthAsync(ct) : Task.FromResult(false);
-            await Task.WhenAll(metricsTask, assistantTask, watchdogTask, schedulerTask, reactorTask)
+            await Task.WhenAll(metricsTask, watchdogTask, schedulerTask, reactorTask)
                 .ConfigureAwait(false);
 
             // info.intervalMs stays honestly sourced from the metrics snapshot (cached), only when up.
@@ -160,9 +151,6 @@ public sealed class LeafHealthMonitor : BackgroundService
                 Metrics: BuildMetrics(
                     prev.Metrics, metricsProvisioned, metricsTask.Result, snap, now,
                     Degraded(ProvisionableLeaf.Monitor)),
-                Assistant: BuildAssistant(
-                    prev.Assistant, assistantProvisioned, assistantTask.Result, _assistantPublicUrl, now,
-                    Degraded(ProvisionableLeaf.Assistant)),
                 Watchdog: BuildLeaf(
                     prev.Watchdog, watchdogProvisioned, watchdogTask.Result, now, "Watchdog is not ready.",
                     Degraded(ProvisionableLeaf.Watchdog)),
@@ -214,8 +202,8 @@ public sealed class LeafHealthMonitor : BackgroundService
     /// </summary>
     /// <remarks>
     /// <b>A probe answers yes or no, and a leaf can be answering perfectly while unable to do part of
-    /// its job.</b> An assistant with a dead backend, a monitor serving a frozen frame and a scheduler
-    /// that cannot reach the watchdog all pass their health check. <c>Degraded</c> is the state the
+    /// its job.</b> A monitor serving a frozen frame and a scheduler that cannot reach the watchdog both
+    /// pass their health check. <c>Degraded</c> is the state the
     /// contract has always had and nothing produced.
     /// </remarks>
     /// <param name="healthy">Whether the leaf answered its probe.</param>
@@ -233,8 +221,8 @@ public sealed class LeafHealthMonitor : BackgroundService
     /// What to say about a leaf that is up and impaired, naming the components rather than summarising.
     /// </summary>
     /// <remarks>
-    /// The component is the actionable part: "the assistant is degraded" sends somebody reading logs
-    /// where "the assistant's llm-backend is unreachable" does not.
+    /// The component is the actionable part: "the scheduler is degraded" sends somebody reading logs
+    /// where "the scheduler's watchdog link is unreachable" does not.
     /// </remarks>
     private static string? MessageFor(bool healthy, IReadOnlyCollection<string> degraded, string downMessage)
     {
@@ -259,25 +247,6 @@ public sealed class LeafHealthMonitor : BackgroundService
             Since: SinceFor(prev, status, now),
             Message: MessageFor(healthy, degraded, "Monitor health check failed."),
             Info: info);
-    }
-
-    // The assistant carries its public origin in `info` so the chat surface can reach the leaf directly.
-    // The origin is config, not health, so it rides along on every status — a leaf that is momentarily down
-    // still has the same address, and withholding it would make a transient outage look like a missing route.
-    private static Capability BuildAssistant(
-        Capability prev, bool provisioned, bool healthy, string? publicUrl, DateTimeOffset now,
-        IReadOnlyCollection<string> degraded)
-    {
-        if (!provisioned)
-            return Capability.Absent;
-
-        string status = StatusFor(healthy, degraded);
-        return new Capability(
-            Provisioned: true,
-            Status: status,
-            Since: SinceFor(prev, status, now),
-            Message: MessageFor(healthy, degraded, "Assistant health check failed."),
-            Info: publicUrl is null ? null : new AssistantCapabilityInfo(publicUrl));
     }
 
     private static Capability BuildLeaf(
@@ -307,10 +276,6 @@ public sealed class LeafHealthMonitor : BackgroundService
             : Capability.Absent;
         return new HostCapabilities(
             Metrics: Cold(_registry.IsProvisioned(ProvisionableLeaf.Monitor)),
-            Assistant: _registry.IsProvisioned(ProvisionableLeaf.Assistant)
-                ? new Capability(Provisioned: true, Status: CapabilityStatus.Unknown,
-                    Info: _assistantPublicUrl is null ? null : new AssistantCapabilityInfo(_assistantPublicUrl))
-                : Capability.Absent,
             Watchdog: Cold(_registry.IsProvisioned(ProvisionableLeaf.Watchdog)),
             Scheduler: Cold(_schedulerProvisioned),
             Reactor: Cold(_registry.IsProvisioned(ProvisionableLeaf.Reactor)));

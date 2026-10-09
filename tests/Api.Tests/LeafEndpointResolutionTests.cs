@@ -39,7 +39,7 @@ public class LeafEndpointResolutionTests : IDisposable
     [Fact]
     public void AnInstalledLeafIsWiredWithNothingConfigured()
     {
-        Install("scheduler", "reactor", "bot", "firewall", "assistant");
+        Install("scheduler", "reactor", "bot", "firewall");
 
         ApiOptions o = Resolve();
 
@@ -47,13 +47,11 @@ public class LeafEndpointResolutionTests : IDisposable
         Assert.Equal("/run/kgsm-reactor/status.sock", o.ReactorSocketPath);
         Assert.Equal("/run/kgsm-bot/status.sock", o.BotSocketPath);
         Assert.Equal("/run/kgsm-firewall/firewall.sock", o.FirewallSocketPath);
-        Assert.Equal("http://127.0.0.1:5180", o.AssistantBaseUrl);
 
         Assert.True(o.SchedulerProvisioned);
         Assert.True(o.ReactorProvisioned);
         Assert.True(o.BotStatusProvisioned);
         Assert.True(o.FirewallProvisioned);
-        Assert.True(o.AssistantProvisioned);
     }
 
     [Fact]
@@ -67,13 +65,11 @@ public class LeafEndpointResolutionTests : IDisposable
         Assert.Equal("", o.ReactorSocketPath);
         Assert.Equal("", o.BotSocketPath);
         Assert.Equal("", o.FirewallSocketPath);
-        Assert.Equal("", o.AssistantBaseUrl);
 
         Assert.False(o.SchedulerProvisioned);
         Assert.False(o.ReactorProvisioned);
         Assert.False(o.BotStatusProvisioned);
         Assert.False(o.FirewallProvisioned);
-        Assert.False(o.AssistantProvisioned);
     }
 
     [Fact]

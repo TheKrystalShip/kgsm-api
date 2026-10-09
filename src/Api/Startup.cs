@@ -151,7 +151,6 @@ public class Startup(IConfiguration configuration)
         // The metrics-history read seam: the same MonitorClient singleton, exposed for the history
         // proxy controller (the monitor owns history now; the API relays GET /metrics/history verbatim).
         services.AddSingleton<IMonitorHistoryClient>(sp => sp.GetRequiredService<MonitorClient>());
-        services.AddSingleton<AssistantClient>();
         // Host identity: the static, runtime-derived card (OS/runtime/build/start-time), read once + cached;
         // and the editable overrides store (region/label) — its own EnsureCreated + CREATE TABLE IF NOT EXISTS
         // so the host_settings table appears on an existing DB without wiping the shared audit log.
@@ -269,7 +268,7 @@ public class Startup(IConfiguration configuration)
             // it elsewhere would have this API writing a record it could not then read back.
             namedJournals: [new JournalSource(ApiOptions.ApiJournalProducer, apiOptions.EventJournalDir)]);
 
-        // M6·b — ports. The firewall authority (kgsm-firewall) is OPT-IN like the assistant: its kgsm-lib
+        // M6·b — ports. The firewall authority (kgsm-firewall) is OPT-IN: its kgsm-lib
         // client is registered ONLY when its socket is configured (blank => firewall "absent"). It is
         // deliberately NOT added to the LeafHealthMonitor 2s poll — the daemon is socket-activated and
         // idle-exits, so a periodic probe would defeat that; NetworkAggregator probes it ON-DEMAND on a

@@ -24,7 +24,7 @@ its replica of the cluster's authority on every request. **Auth is ON by default
 - **`PLAN.md`** — the milestone roadmap, principles, the cross-team contract registry, project layout,
   and the validation log. The authority for *this backend*.
 - **`../architecture.html`** — the **frontend team's** external-surface spec: REST `/api/v1`, the
-  per-host realtime stream, assistant SSE, the §6 conventions. The authority for *the wire contracts*.
+  per-host realtime stream, the §6 conventions. The authority for *the wire contracts*.
   Freeze contracts **from this doc**, never invent them.
 - **`../system-architecture.md`** — the ecosystem keystone. The API is its `web-API aggregator`.
 - **`docs/m0-aot-spike-findings.md`** — why the runtime/stack is what it is (below).
@@ -94,7 +94,7 @@ long-term maintainability wins here.
   one-time log), not a capability. The process-based `IInstanceService` is transient → resolved
   per-request. The engine's event journal is tailed live for SSE and notifications
   (`src/Api/Services/Audit/CLAUDE.md`).
-- **Leaves** (monitor, assistant, watchdog, scheduler, reactor, firewall, bot) →
+- **Leaves** (monitor, watchdog, scheduler, reactor, firewall, bot) →
   `src/Api/Services/Leaves/CLAUDE.md`. A missing/down leaf removes only its capability, never a 500.
 
 ## Invariants — non-negotiable

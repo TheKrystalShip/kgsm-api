@@ -18,7 +18,7 @@ namespace TheKrystalShip.Api;
 /// a non-empty path/URL means the capability is declared on this host, an empty one means
 /// it is absent (the §4·b capability renders <c>absent</c>, not a broken <c>down</c>). The
 /// defaults provision the engine-side pieces (the kgsm engine, monitor, watchdog) at their
-/// standard install paths; the assistant is opt-in. (True host-registration provisioning
+/// standard install paths; the other leaves are opt-in. (True host-registration provisioning
 /// arrives with the host registry later; config is the honest stand-in.)
 /// <para>
 /// The kgsm engine is <strong>base, not a leaf</strong> — the api is meaningless without
@@ -67,22 +67,6 @@ public sealed class ApiOptions
     /// <summary>kgsm-watchdog control socket. Empty ⇒ watchdog capability not provisioned (absent).</summary>
     public required string WatchdogSocketPath { get; init; }
 
-    /// <summary>
-    /// Assistant base URL (the SSE relay lands at M7). Empty ⇒ assistant capability not
-    /// provisioned (absent). In M1 it is only probed for liveness to report the capability.
-    /// </summary>
-    public required string AssistantBaseUrl { get; init; }
-
-    /// <summary>
-    /// The public origin a browser reaches the assistant on (<c>Api__AssistantPublicUrl</c>), e.g.
-    /// <c>https://assistant.example.com</c>. Reported in the assistant capability's <c>info.url</c>
-    /// so the Control Panel's chat can address the leaf directly; <see cref="AssistantBaseUrl"/> is
-    /// this API's own loopback route and is never a browser address. <see langword="null"/> when
-    /// unset — the capability then carries no <c>info</c> and the chat says the assistant has no
-    /// browser route, rather than inventing one from the loopback URL.
-    /// </summary>
-    public string? AssistantPublicUrl { get; init; }
-
 
 
     /// <summary>
@@ -105,7 +89,7 @@ public sealed class ApiOptions
     /// carries both the reading and the telling.
     /// Empty ⇒ the scheduler leaf is not provisioned (absent): <c>GET /servers/{id}/settings</c> still
     /// returns 200 with <c>nextFireUtc:null</c>, and the scheduler capability renders absent — never a
-    /// perpetually-<c>down</c> row. <strong>Opt-in like the assistant/firewall</strong>: the scheduler is a
+    /// perpetually-<c>down</c> row. <strong>Opt-in like the firewall</strong>: the scheduler is a
     /// separate optional leaf (built in parallel, not yet deployed), so a host without it reports absent.
     /// </summary>
     public required string SchedulerSocketPath { get; init; }
@@ -266,7 +250,6 @@ public sealed class ApiOptions
 
     public bool MetricsProvisioned => !string.IsNullOrWhiteSpace(MonitorSocketPath);
     public bool WatchdogProvisioned => !string.IsNullOrWhiteSpace(WatchdogSocketPath);
-    public bool AssistantProvisioned => !string.IsNullOrWhiteSpace(AssistantBaseUrl);
 
     /// <summary>Whether the kgsm-firewall authority is configured (a non-empty
     /// <see cref="FirewallSocketPath"/>). When false the ports surface degrades to
@@ -372,7 +355,7 @@ public sealed class ApiOptions
     /// <summary>
     /// The ordered source-id → systemd-unit map the host-log aggregator reads
     /// (<c>Api__LogSources</c>, e.g. <c>watchdog:kgsm-watchdog.service,monitor:kgsm-monitor.service</c>).
-    /// Blank/unset ⇒ the default leaf set (assistant, monitor, watchdog, firewall, api, bot). Order is the
+    /// Blank/unset ⇒ the default leaf set (monitor, watchdog, firewall, api, bot). Order is the
     /// order the frontend presents the sources. Reading the journal needs the api's user to have journal read
     /// access (the <c>systemd-journal</c>/<c>wheel</c> ACL); a host whose units are named differently overrides
     /// this map. NOT a §4·b capability — journald is always present locally; a read failure degrades to empty.
@@ -471,8 +454,6 @@ public sealed class ApiOptions
         $"{ApiSettings.Section}__{nameof(ApiSettings.SchedulerSocketPath)}" => SchedulerSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.BotSocketPath)}" => BotSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.ReactorSocketPath)}" => ReactorSocketPath,
-        $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantBaseUrl)}" => AssistantBaseUrl,
-        $"{ApiSettings.Section}__{nameof(ApiSettings.AssistantPublicUrl)}" => AssistantPublicUrl,
         $"{ApiSettings.Section}__{nameof(ApiSettings.FirewallSocketPath)}" => FirewallSocketPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.KgsmPath)}" => KgsmPath,
         $"{ApiSettings.Section}__{nameof(ApiSettings.KgsmJournalDir)}" => KgsmJournalDir,
@@ -693,9 +674,6 @@ public sealed class ApiOptions
             // host can already answer: a leaf's package installs its config descriptor, so the
             // descriptor directory is the list of what is installed here. LeafEndpoint reads it, and an
             // installed leaf is wired with nothing asked of an operator. See the method for the rest.
-            AssistantBaseUrl = LeafEndpoint(s.AssistantBaseUrl, "http://127.0.0.1:5180", "assistant", leafDescriptorDir),
-            // The browser route is opt-in and has no sensible default — a loopback URL is not one.
-            AssistantPublicUrl = Clean(s.AssistantPublicUrl),
             FirewallSocketPath = LeafEndpoint(s.FirewallSocketPath, "/run/kgsm-firewall/firewall.sock", "firewall", leafDescriptorDir),
             SchedulerSocketPath = LeafEndpoint(s.SchedulerSocketPath, "/run/kgsm-scheduler/scheduler.sock", "scheduler", leafDescriptorDir),
             BotSocketPath = LeafEndpoint(s.BotSocketPath, "/run/kgsm-bot/status.sock", "bot", leafDescriptorDir),

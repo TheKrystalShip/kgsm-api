@@ -53,7 +53,7 @@ BASE="http://127.0.0.1:${PORT}"
 DLL="${REPO_ROOT}/src/Api/bin/Release/net10.0/kgsm-api.dll"
 DB="${SMOKE_DB:-/tmp/kgsm-api-smoke.db}"; rm -f "$DB"
 
-# M1·a leaf wiring (deterministic defaults: no monitor, no watchdog, no assistant).
+# M1·a leaf wiring (deterministic defaults: no monitor, no watchdog).
 HOST_ID="${SMOKE_HOST_ID:-smoke-host}"
 MON_SOCK="${SMOKE_MONITOR_SOCKET:-/tmp/kgsm-api-smoke-nomonitor.sock}"  # absent by default
 WD_SOCK="${SMOKE_WATCHDOG_SOCKET:-}"                                    # empty -> watchdog absent
@@ -264,13 +264,13 @@ if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
 d=json.load(open('/tmp/kgsm-api-smoke.body'))
 c=d.get('capabilities',{})
-ok=(all(k in c for k in ('metrics','assistant','watchdog'))
-    and all('provisioned' in c[k] and 'status' in c[k] for k in ('metrics','assistant','watchdog'))
+ok=(all(k in c for k in ('metrics','watchdog'))
+    and all('provisioned' in c[k] and 'status' in c[k] for k in ('metrics','watchdog'))
     and c['metrics']['provisioned'] is True       # monitor socket configured
-    and c['assistant']['provisioned'] is False)    # assistant unset -> absent
+    and 'assistant' not in c)
 sys.exit(0 if ok else 1)
 " 2>/dev/null; then
-  ok "/hosts/{id} 200 + capabilities {metrics,assistant,watchdog}"
+  ok "/hosts/{id} 200 + capabilities {metrics,watchdog}"
 else bad "/hosts/{id} capability block (code=$CODE body=$BODY)"; fi
 
 # 11. GET /hosts/{unknown} — 404 returns OUR error envelope, not framework ProblemDetails
@@ -473,7 +473,7 @@ req POST /api/v1/library/refresh
 echo "==> Leaf runtime provisioning + config checks"
 
 # LP1. GET /hosts/{id}/services carries the runtime `provisioned` flag for the four provisionable leaves
-#      (monitor true here — its socket is set; watchdog/assistant/firewall false) and OMITS it for api/bot.
+#      (monitor true here — its socket is set; watchdog/firewall false) and OMITS it for api/bot.
 req GET "/api/v1/hosts/${HOST_ID}/services"
 if [[ "$CODE" == 200 ]] && python3 -c "
 import json,sys
@@ -489,8 +489,8 @@ else bad "/services provisioned flag (code=$CODE body=$BODY)"; fi
 
 # LP2. Connect the watchdog at runtime → 200 + provisioned:true; the §4·b capability set lights up live
 #      (watchdog provisioned:true on GET /hosts/{id}); disconnect reverses it. No restart, no reconnect.
-#      The watchdog because this run starts it unconfigured and the board always carries its row; a leaf
-#      installed on this host as an anchor (the assistant can be one) is not on the board to flip.
+#      The watchdog because this run starts it unconfigured and the board always carries its row; a
+#      component installed on this host as an anchor is not on the board to flip.
 req POST "/api/v1/hosts/${HOST_ID}/services/watchdog/connect"
 conn_ok=false
 if [[ "$CODE" == 200 ]] && python3 -c "import json,sys;sys.exit(0 if json.load(open('/tmp/kgsm-api-smoke.body'))['provisioned'] is True else 1)" 2>/dev/null; then
@@ -510,7 +510,7 @@ req POST "/api/v1/hosts/${HOST_ID}/services/bot/connect"
 c1="$CODE"
 req POST "/api/v1/hosts/${HOST_ID}/services/nope/connect"
 [[ "$c1" == 404 && "$CODE" == 404 ]] \
-  && ok "connect bot/nope → 404 (only monitor/watchdog/assistant/firewall are provisionable)" \
+  && ok "connect bot/nope → 404 (only monitor/watchdog/firewall/scheduler/reactor are provisionable)" \
   || bad "connect non-provisionable 404 (bot=$c1 nope=$CODE)"
 
 # LP4. GET /services/{leaf}/config returns the manifest (real env names); a non-config-target leaf 404s.

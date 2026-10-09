@@ -18,9 +18,6 @@ public enum LeafHealthSource
     /// <summary>The monitor's metrics capability (<see cref="LeafHealthMonitor"/> → monitor <c>/health</c>).</summary>
     Metrics,
 
-    /// <summary>The assistant's capability (<see cref="LeafHealthMonitor"/> → assistant <c>/health</c>).</summary>
-    Assistant,
-
     /// <summary>The watchdog's readiness (<see cref="LeafHealthMonitor"/> → kgsm-lib <c>IWatchdogClient.IsReadyAsync</c>).</summary>
     Watchdog,
 
@@ -66,8 +63,6 @@ public static class LeafCatalog
             "Resident supervisor — owns kgsm.slice, native lifecycle & crash-restart", false, LeafHealthSource.Watchdog),
         new("monitor", "kgsm-monitor.service", "Monitor",
             "Host & per-server resource metrics", false, LeafHealthSource.Metrics),
-        new("assistant", "kgsm-assistant.service", "Assistant",
-            "The assistant's KGSM plugin — chat & tool-calling turns", false, LeafHealthSource.Assistant),
         new("firewall", "kgsm-firewall.service", "Firewall",
             "Host firewall authority — opens & closes server ports", true, LeafHealthSource.None),
         new("scheduler", "kgsm-scheduler.service", "Scheduler",

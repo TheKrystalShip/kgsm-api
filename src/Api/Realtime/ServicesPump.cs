@@ -160,7 +160,6 @@ public sealed class ServicesPump(
     {
         LeafHealthSource.SelfApi => CapabilityStatus.Operational,
         LeafHealthSource.Metrics => caps.Metrics.Status,
-        LeafHealthSource.Assistant => caps.Assistant.Status,
         LeafHealthSource.Watchdog => caps.Watchdog.Status,
         LeafHealthSource.Scheduler => caps.Scheduler.Status,
         LeafHealthSource.Reactor => caps.Reactor.Status,
@@ -171,7 +170,6 @@ public sealed class ServicesPump(
     {
         LeafHealthSource.SelfApi => new ComponentServiceHealth(CapabilityStatus.Operational, null),
         LeafHealthSource.Metrics => FromCapability(caps.Metrics),
-        LeafHealthSource.Assistant => FromCapability(caps.Assistant),
         LeafHealthSource.Watchdog => FromCapability(caps.Watchdog),
         LeafHealthSource.Scheduler => FromCapability(caps.Scheduler),
         LeafHealthSource.Reactor => FromCapability(caps.Reactor),

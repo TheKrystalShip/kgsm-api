@@ -39,16 +39,12 @@
       "MonitorSocketPath": "/run/kgsm-monitor/metrics.sock",
       // kgsm-watchdog control socket. Blank reports the watchdog capability absent.
       "WatchdogSocketPath": "/run/kgsm-watchdog/control.sock",
-      // The optional leaves, all six declared null: not "no endpoint" but "nothing pinned here". Each
+      // The optional leaves, all declared null: not "no endpoint" but "nothing pinned here". Each
       // of these leaves binds a fixed endpoint its own configuration already names, so the API resolves
       // one from the leaf's package rather than from a path a host would have to copy — a leaf whose
       // descriptor is in LeafDescriptorDir is installed, and an installed leaf is wired. Setting one to
       // an empty string is how a host keeps a leaf it installed off the panel anyway; setting a path is
       // how it names one that does not sit where its package puts it.
-      "AssistantBaseUrl": null,
-      // Public origin browsers reach the assistant on. There is no resolving this one — a loopback
-      // address is not a browser route — so blank reports no browser route and means it.
-      "AssistantPublicUrl": "",
       "FirewallSocketPath": null,
       "SchedulerSocketPath": null,
       "ReactorSocketPath": null,

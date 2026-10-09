@@ -102,7 +102,7 @@ package() {
     # package — and EnvironmentFile=- makes it inert until the API first writes an override, so a
     # leaf that is not installed and a leaf that has never been configured both cost nothing.
     local leaf unit
-    for leaf in monitor watchdog assistant firewall scheduler reactor bot; do
+    for leaf in monitor watchdog firewall scheduler reactor bot; do
         case "$leaf" in
             *) unit="kgsm-${leaf}.service" ;;
         esac

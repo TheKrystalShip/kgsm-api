@@ -66,8 +66,7 @@ public sealed record LeafConfigFieldDef(
 /// <strong>Every key here is a confirmed-real env var</strong> the leaf actually reads (never a fabricated
 /// one): <c>logLevel</c> rides the ecosystem-standard <c>Logging__LogLevel__Default</c> on every .NET leaf;
 /// the rest were verified against each leaf's own config (kgsm-monitor <c>KGSM_MONITOR_INTERVAL_MS</c>,
-/// kgsm-watchdog <c>KGSM_WATCHDOG_POLL_INTERVAL_MS</c>, the assistant's <c>Rag__Enabled</c> +
-/// <c>WebSearch__ApiKey</c>). The display name + unit come from <see cref="LeafCatalog"/>. These entries
+/// kgsm-watchdog <c>KGSM_WATCHDOG_POLL_INTERVAL_MS</c>). The display name + unit come from <see cref="LeafCatalog"/>. These entries
 /// carry no default, bounds or risk — a leaf's own descriptor is where that detail comes from.
 /// </remarks>
 public static class LeafConfigManifest
@@ -101,16 +100,6 @@ public static class LeafConfigManifest
                 new("pollIntervalMs", "KGSM_WATCHDOG_POLL_INTERVAL_MS", "Supervision poll interval (ms)",
                     "How often the watchdog reconciles its supervised instances, in milliseconds.",
                     ComponentConfigFieldType.Int),
-            ],
-            [ProvisionableLeaf.Assistant] =
-            [
-                LogLevelField(),
-                new("ragEnabled", "Rag__Enabled", "Knowledge base (RAG)",
-                    "Enable retrieval-augmented context so the assistant can search its knowledge base.",
-                    ComponentConfigFieldType.Bool),
-                new("webSearchApiKey", "WebSearch__ApiKey", "Web search API key",
-                    "Tavily API key enabling the assistant's web-search tool. Write-only — never shown again.",
-                    ComponentConfigFieldType.Secret),
             ],
             // Firewall: log level only — no other env key on kgsm-firewall is confirmed safe to expose yet.
             [ProvisionableLeaf.Firewall] =

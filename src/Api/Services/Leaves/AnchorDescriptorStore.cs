@@ -17,9 +17,9 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// </para>
 /// <para>
 /// <b>Leaf-or-anchor is a deployment choice</b>, which is why this is measured per host rather than
-/// compiled in. The same assistant is a node's leaf on one machine and the cluster's anchor on another, and
-/// the descriptor it installed is the only thing that says which. A deploy clears the file it left in the
-/// other directory, so the two directories cannot both claim it.
+/// compiled in. The descriptor a component installed is the only thing that says which it is on this
+/// machine. A deploy clears the file it left in the other directory, so the two directories cannot both
+/// claim it.
 /// </para>
 /// <para>
 /// Re-read on the same TTL as <see cref="LeafDescriptorStore"/> and for the same reason: descriptors change

@@ -13,7 +13,7 @@
 #   1. ensure /var/lib/kgsm-api/leaf-overrides/ exists (0700, owned by the service user) — the API
 #      writes each leaf's override env file here UNPRIVILEGED (it's inside the API's own state dir).
 #   2. install a systemd drop-in per configurable leaf
-#      (monitor/watchdog/assistant/firewall/scheduler/reactor/bot) that layers that leaf's
+#      (monitor/watchdog/firewall/scheduler/reactor/bot) that layers that leaf's
 #      override env file on LAST, the leaf staying unaware of the API.
 #   3. install a scoped polkit rule letting the service user `systemctl restart` ONLY those units.
 #
@@ -48,7 +48,6 @@ POLKIT_DST="/etc/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules"
 declare -A LEAF_UNITS=(
     [monitor]="kgsm-monitor.service"
     [watchdog]="kgsm-watchdog.service"
-    [assistant]="kgsm-assistant.service"
     [firewall]="kgsm-firewall.service"
     [scheduler]="kgsm-scheduler.service"
     [reactor]="kgsm-reactor.service"
