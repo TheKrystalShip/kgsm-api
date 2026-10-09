@@ -143,7 +143,7 @@ public sealed class LeafConfigSurfaceTests
         f.InstallDescriptor("assistant", $$"""
         {
           "schemaVersion": 1, "id": "assistant", "displayName": "Assistant",
-          "unit": "kgsm-assistant-service.service", "role": "LLM assistant.",
+          "unit": "kgsm-assistant.service", "role": "LLM assistant.",
           "onDemand": false, "applyMode": "restart",
           "floorSources": [{ "kind": "env-file", "path": "{{floor}}" }],
           "fields": [

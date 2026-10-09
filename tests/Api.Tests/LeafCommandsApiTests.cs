@@ -53,7 +53,7 @@ public sealed class LeafCommandsApiTests
         return JsonDocument.Parse(await resp.Content.ReadAsStringAsync()).RootElement;
     }
 
-    // The shape kgsm-llm's build emits: every command, each naming the action that admits it.
+    // The shape the assistant's build emits: every command, each naming the action that admits it.
     private const string AssistantManifest = """
         {
           "schemaVersion": 3,

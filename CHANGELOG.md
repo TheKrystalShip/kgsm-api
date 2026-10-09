@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the package recommends kgsm-assistant (0.218.1)
+
+The package's optional dependency for the chat surface is `kgsm-assistant`. The tests' assistant
+fixtures name its unit.
+
 ### Changed — the assistant leaf is the assistant's KGSM plugin (0.218.0)
 
 - The assistant is found at `http://127.0.0.1:5180` when a descriptor named `assistant` is

@@ -63,7 +63,7 @@ per-host capabilities (§4·b), client-side aggregation (§4·a).
 (lib/monitor/watchdog). The one historically-rocky AOT area is **OAuth/auth
 middleware**; we spike that *before* the auth milestone, never assume it (M4).
 
-**Namespace:** `TheKrystalShip.Kgsm.Api` (parallels `TheKrystalShip.Kgsm.Assistant`).
+**Namespace:** `TheKrystalShip.Kgsm.Api`.
 **Repo:** rewrite in-place here — fresh `src/`, keep repo + remote.
 
 ### Non-goals / explicitly deferred
@@ -712,7 +712,7 @@ v1.0 or as a fast-follow v1.1, depending on how the integration is holding toget
   → read endpoint → hot ring → frontend gate); see that doc's §0 progress ledger. Build not
   started.
 - ~~**Proxy-verbatim vs re-wrap** for the assistant SSE (O1)~~ — **RESOLVED at M7 (2026-06-19):
-  near-verbatim relay; §5·a shaping pushed UPSTREAM into the assistant** (`kgsm-llm/docs/wire-contract.md`),
+  near-verbatim relay; §5·a shaping pushed UPSTREAM into the assistant,
   and the **confirmed-command fork LOCKED (a)** (execute via the API's M3 path; `command.verified`
   stays off the turn stream). See M7.
 
