@@ -39,7 +39,6 @@ depends=('kgsm-base' 'kgsm' 'tks-auth' 'systemd' 'glibc' 'aspnet-runtime' 'polki
 optdepends=(
     'kgsm-web: the Control Panel SPA this serves at / (without it the API runs headless)'
     'kgsm-monitor: host and per-server metrics'
-    'kgsm-assistant: the assistant the chat surface relays to'
     'kgsm-scheduler: scheduled restarts and backups on the settings page'
     'kgsm-firewall: port exposure reporting'
     'nginx: public TLS ingress in front of the API'

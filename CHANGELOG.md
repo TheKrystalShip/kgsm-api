@@ -8,10 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed — the package recommends kgsm-assistant (0.218.1)
+### Changed — the package names no assistant package (0.218.1)
 
-The package's optional dependency for the chat surface is `kgsm-assistant`. The tests' assistant
-fixtures name its unit.
+The assistant is the cluster's anchor, deployed on its own, and no package provides it on a node, so
+the package lists no optional dependency for the chat surface. The tests' assistant fixtures name its
+unit.
 
 ### Changed — the assistant leaf is the assistant's KGSM plugin (0.218.0)
 
