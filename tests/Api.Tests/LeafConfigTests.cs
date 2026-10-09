@@ -19,7 +19,7 @@ public sealed class LeafConfigTests
 {
     private const string Host = AuthTestFactory.HostId;
     private const string MonitorUnit = "kgsm-monitor.service";
-    private const string AssistantUnit = "kgsm-assistant-service.service";
+    private const string AssistantUnit = "kgsm-assistant.service";
 
     // ---- GET: the manifest shape ------------------------------------------------------------------
     [Fact]

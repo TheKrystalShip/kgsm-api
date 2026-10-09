@@ -16,7 +16,7 @@ public class LogSourceOfferingTests
     private static readonly IReadOnlyList<LogSourceMap> Configured =
     [
         new("watchdog", "kgsm-watchdog.service"),
-        new("assistant", "kgsm-assistant-service.service"),
+        new("assistant", "kgsm-assistant.service"),
         new("bot", "kgsm-bot.service"),
         new("api", "kgsm-api.service"),
     ];
@@ -32,7 +32,7 @@ public class LogSourceOfferingTests
         IReadOnlyList<string> ids = Ids(new Dictionary<string, UnitState>
         {
             ["kgsm-watchdog.service"] = In("active"),
-            ["kgsm-assistant-service.service"] = In("not-installed"),
+            ["kgsm-assistant.service"] = In("not-installed"),
             ["kgsm-bot.service"] = In("not-installed"),
             ["kgsm-api.service"] = In("active"),
         });
@@ -50,7 +50,7 @@ public class LogSourceOfferingTests
         IReadOnlyList<string> ids = Ids(new Dictionary<string, UnitState>
         {
             ["kgsm-watchdog.service"] = In(state),
-            ["kgsm-assistant-service.service"] = In("not-installed"),
+            ["kgsm-assistant.service"] = In("not-installed"),
             ["kgsm-bot.service"] = In("not-installed"),
             ["kgsm-api.service"] = In("active"),
         });
@@ -66,7 +66,7 @@ public class LogSourceOfferingTests
         IReadOnlyList<string> ids = Ids(new Dictionary<string, UnitState>
         {
             ["kgsm-watchdog.service"] = UnitState.Unknown,
-            ["kgsm-assistant-service.service"] = In("not-installed"),
+            ["kgsm-assistant.service"] = In("not-installed"),
             ["kgsm-bot.service"] = UnitState.Unknown,
             ["kgsm-api.service"] = In("active"),
         });
@@ -86,7 +86,7 @@ public class LogSourceOfferingTests
     {
         IReadOnlyList<LogSourceInfo> offered = LogsController.SelectSources(
             Configured,
-            new Dictionary<string, UnitState> { ["kgsm-assistant-service.service"] = In("not-installed") });
+            new Dictionary<string, UnitState> { ["kgsm-assistant.service"] = In("not-installed") });
 
         Assert.Equal(["watchdog", "bot", "api"], offered.Select(s => s.Id));
         Assert.Equal("kgsm-watchdog.service", offered[0].Unit);

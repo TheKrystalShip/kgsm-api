@@ -61,7 +61,7 @@ public sealed class LeafRestartabilityTests
         Assert.NotNull(leaf);
         // The assistant's unit carries the '-service' segment, which is the one place in this map a
         // reader would guess wrong.
-        Assert.Equal("kgsm-assistant-service.service", leaf.Unit);
+        Assert.Equal("kgsm-assistant.service", leaf.Unit);
         Assert.Null(LeafCatalog.Find("nothing-here"));
     }
 }

@@ -26,7 +26,7 @@ it is served read-only with the reason, rather than having an override file writ
 |---|---|
 | `monitor` | `kgsm-monitor.service` |
 | `watchdog` | `kgsm-watchdog.service` |
-| `assistant` | `kgsm-assistant-service.service` &nbsp;← note the `-service` segment |
+| `assistant` | `kgsm-assistant.service` |
 | `firewall` | `kgsm-firewall.service` |
 | `scheduler` | `kgsm-scheduler.service` |
 | `bot` | `kgsm-bot.service` |
@@ -80,7 +80,7 @@ systemctl cat kgsm-firewall.service | grep -A2 'drop-in\|leaf-overrides' # the o
 ```bash
 sudo rm -f /etc/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules         # revoke the restart grant
 sudo rm -f /etc/systemd/system/kgsm-{monitor,watchdog,firewall}.service.d/50-kgsm-api-override.conf
-sudo rm -f /etc/systemd/system/kgsm-assistant-service.service.d/50-kgsm-api-override.conf
+sudo rm -f /etc/systemd/system/kgsm-assistant.service.d/50-kgsm-api-override.conf
 sudo systemctl daemon-reload
 # optional: drop the rendered overrides (resets every leaf to its deploy floor on next restart)
 rm -f /var/lib/kgsm-api/leaf-overrides/*.env

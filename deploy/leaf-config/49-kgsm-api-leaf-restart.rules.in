@@ -32,7 +32,7 @@ polkit.addRule(function(action, subject) {
     var units = {
         "kgsm-monitor.service": true,
         "kgsm-watchdog.service": true,
-        "kgsm-assistant-service.service": true,
+        "kgsm-assistant.service": true,
         "kgsm-firewall.service": true,
         "kgsm-scheduler.service": true,
         "kgsm-reactor.service": true,

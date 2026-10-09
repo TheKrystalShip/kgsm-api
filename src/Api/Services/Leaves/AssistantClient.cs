@@ -3,7 +3,6 @@ using System.Net.Sockets;
 
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Auth;
-using TheKrystalShip.Kgsm.Assistant.Relay;
 
 namespace TheKrystalShip.Api.Services.Leaves;
 
@@ -66,15 +65,29 @@ public sealed class AssistantClient : HttpClient
     public bool IsProvisioned => _hasBaseUrl && _registry.IsProvisioned(ProvisionableLeaf.Assistant);
 
     /// <summary>
-    /// Liveness probe for the §4·b assistant capability, run through the assistant's own shared probe
-    /// so every leaf that consumes it agrees on what "up" means: <c>GET /health</c>, a 2xx, within
-    /// <see cref="ProbeTimeout"/>. Never throws. An unprovisioned assistant is short-circuited here
-    /// rather than probed, so the capability renders <c>absent</c> instead of a broken <c>down</c>.
+    /// Liveness probe for the §4·b assistant capability: <c>GET /health</c> on the assistant's plugin, a
+    /// 2xx, within <see cref="ProbeTimeout"/>. Never throws. An unprovisioned assistant is
+    /// short-circuited here rather than probed, so the capability renders <c>absent</c> instead of a
+    /// broken <c>down</c>.
     /// </summary>
-    public Task<bool> CheckHealthAsync(CancellationToken ct) =>
-        IsProvisioned
-            ? AssistantHealthProbe.CheckAsync(this, ct, _logger, ProbeTimeout)
-            : Task.FromResult(false);
+    public async Task<bool> CheckHealthAsync(CancellationToken ct)
+    {
+        if (!IsProvisioned)
+            return false;
+
+        using CancellationTokenSource budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        budget.CancelAfter(ProbeTimeout);
+        try
+        {
+            using HttpResponseMessage response = await GetAsync("/health", budget.Token).ConfigureAwait(false);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "The assistant's health probe did not answer");
+            return false;
+        }
+    }
 
     // Recycle pooled connections so a process-lifetime singleton never pins a stale one (the
     // documented long-lived-HttpClient alternative to IHttpClientFactory). Largely moot for a

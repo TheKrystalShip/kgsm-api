@@ -105,8 +105,7 @@ package() {
     local leaf unit
     for leaf in monitor watchdog assistant firewall scheduler reactor bot; do
         case "$leaf" in
-            assistant) unit="kgsm-assistant-service.service" ;;
-            *)         unit="kgsm-${leaf}.service" ;;
+            *) unit="kgsm-${leaf}.service" ;;
         esac
         sed "s|@LEAF@|${leaf}|g" \
             "${repo}/deploy/leaf-config/dropins/50-kgsm-api-override.conf.in" \

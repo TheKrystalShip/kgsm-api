@@ -14,7 +14,7 @@
   ],
   "services": [
     { "name": "kgsm-monitor.service",            "required": false, "why": "host and per-server metrics", "without": "metrics panels report unavailable; every other page works" },
-    { "name": "kgsm-assistant-service.service",  "required": false, "why": "the services board reports its health", "without": "the assistant reads unavailable on the services board" },
+    { "name": "kgsm-assistant.service",          "required": false, "why": "the services board reports its health", "without": "the assistant reads unavailable on the services board" },
     { "name": "kgsm-scheduler.service",          "required": false, "why": "scheduled restarts and backups on the settings page", "without": "those fields read unavailable" },
     { "name": "kgsm-firewall.service",           "required": false, "why": "port exposure reporting", "without": "firewall state reads unavailable" },
     { "name": "nginx",                           "required": false, "why": "public TLS ingress in front of the API", "without": "the API serves directly on its own port" }

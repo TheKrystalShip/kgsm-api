@@ -45,11 +45,10 @@ POLKIT_DST="/etc/polkit-1/rules.d/49-kgsm-api-leaf-restart.rules"
 # talks to, and a leaf missing from here is served read-only with the reason rather than silently failing
 # at the restart. Wiring a newly-arrived leaf means re-running this script, not rebuilding the API.
 #
-# NB: assistant carries the '-service' segment — kgsm-assistant-service.service, not kgsm-assistant.service.
 declare -A LEAF_UNITS=(
     [monitor]="kgsm-monitor.service"
     [watchdog]="kgsm-watchdog.service"
-    [assistant]="kgsm-assistant-service.service"
+    [assistant]="kgsm-assistant.service"
     [firewall]="kgsm-firewall.service"
     [scheduler]="kgsm-scheduler.service"
     [reactor]="kgsm-reactor.service"
