@@ -1,21 +1,20 @@
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// The per-server firewall/ports view (reference/node-api.md network, M6·b) — the cross-reference of what a
-/// server <em>requires</em> against what the host firewall actually has open. A field on the
+/// The per-server firewall/ports view (reference/node-api.md, "A server's network") — the cross-reference of
+/// what a server <em>requires</em> against what the host firewall actually has open. A field on the
 /// <see cref="Server"/> <strong>detail</strong> response only (<c>GET /servers/{id}</c>); omitted on the
-/// list and on the <c>servers</c> stream (which stay the frozen M1·b shape).
+/// list and on the <c>servers</c> stream, whose shape is frozen.
 /// <para>
-/// <strong>Honesty (the central M6·b call):</strong> <see cref="Required"/> is always knowable — it is the
+/// <strong>Honesty:</strong> <see cref="Required"/> is always knowable — it is the
 /// server's own domain truth (kgsm <c>Instance.Ports</c>), independent of the firewall. Per-row
 /// <see cref="RequiredPort.Open"/> is the host-firewall verdict (a rule is present), which goes
 /// <see langword="null"/> — never a fabricated <c>false</c> — when the firewall can't answer
 /// (<see cref="Firewall"/> ≠ <c>operational</c>). <see cref="Reachable"/> is <strong>reserved</strong>
-/// (always <see langword="null"/>): §3·g asks for end-to-end reachability ("a rule can be applied while the
-/// port stays blocked upstream — router NAT/ISP"), but the api has no upstream prober, so the strong name is
-/// reserved for a real probe (e.g. a future UPnP/watchdog one) rather than overclaimed by the
+/// (always <see langword="null"/>): end-to-end reachability is a different fact from a rule being present
+/// (a rule can be applied while the port stays blocked upstream, at a router or an ISP), and the api has
+/// no upstream prober, so the strong name is held for a real probe rather than overclaimed by the
 /// rules-present aggregate. The frontend derives "all required rules open" from <see cref="Required"/> itself.
-/// (The rename-not-redefine call, like M1·b's <c>cpuPctCore</c>-not-<c>cpu</c>.)
 /// </para>
 /// </summary>
 /// <param name="Firewall">The block-level firewall availability for this probe
@@ -34,7 +33,7 @@ public sealed record ServerNetwork(
     IReadOnlyList<RequiredPort> Required,
     bool? Reachable);
 
-/// <summary>One required port and its host-firewall verdict (M6·b).</summary>
+/// <summary>One required port and its host-firewall verdict.</summary>
 /// <param name="Port">The single port number (ranges are expanded one row per port).</param>
 /// <param name="Proto">Transport protocol — <c>"tcp"</c> or <c>"udp"</c> (lower-cased).</param>
 /// <param name="Open"><see langword="true"/> when the port is reachable at the host firewall — either a
@@ -46,7 +45,7 @@ public sealed record ServerNetwork(
 public sealed record RequiredPort(int Port, string Proto, bool? Open);
 
 /// <summary>
-/// The host-wide open-ports grid (reference/node-api.md network, M6·b) — the raw firewall listing for the
+/// The host-wide open-ports grid (reference/node-api.md, "A server's network") — the raw firewall listing for the
 /// Diagnostics panel, a field on the <see cref="Host"/> <strong>detail</strong> response
 /// (<c>GET /hosts/{id}</c>). The whole block is <see langword="null"/> when the firewall can't answer
 /// (absent/unreachable/unknown — honest "not measurable now").
@@ -61,7 +60,7 @@ public sealed record RequiredPort(int Port, string Proto, bool? Open);
 /// </summary>
 public sealed record HostNetwork(string Firewall, IReadOnlyList<OpenPort> OpenPorts);
 
-/// <summary>One host-firewall rule, expanded one row per port (M6·b).</summary>
+/// <summary>One host-firewall rule, expanded one row per port.</summary>
 /// <param name="Port">The single port number.</param>
 /// <param name="Proto">Transport protocol — <c>"tcp"</c> or <c>"udp"</c>.</param>
 /// <param name="App">The game/blueprint id this instance was installed from, joined from the kgsm roster,
@@ -70,7 +69,7 @@ public sealed record HostNetwork(string Firewall, IReadOnlyList<OpenPort> OpenPo
 public sealed record OpenPort(int Port, string Proto, string? App, string Server);
 
 /// <summary>
-/// The block-level firewall availability (M6·b) — the single honest liveness signal for the ports
+/// The block-level firewall availability — the single honest liveness signal for the ports
 /// surface, reported per-probe (the firewall is not a polled leaf). Maps from the kgsm-lib
 /// <c>IFirewallService</c> outcome: <see cref="Operational"/> = a successful <c>ListOwnedAsync</c>;
 /// <see cref="Down"/> = unreachable (<c>FirewallException</c>/timeout); <c>Unknown</c> = the backend

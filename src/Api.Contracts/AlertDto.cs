@@ -5,17 +5,19 @@ namespace TheKrystalShip.Api.Contracts;
 /// NOT a task. The server raises it while the condition is true and resolves it when the condition
 /// clears (self-heal or operator); the client never writes one (no complete/dismiss/PATCH). Emitted as
 /// a page element by <c>GET /alerts</c> and pushed on the <c>alerts</c> WS topic as <c>alert.raise</c>
-/// (full record, upserted by <see cref="Id"/>). The crash source (M6·a) is the only producer wired
-/// today — every field below is honestly sourced from the watchdog's supervision state, never invented.
+/// (full record, upserted by <see cref="Id"/>). Its producers are the watchdog's supervision state, the
+/// monitor's threshold episodes and the engine's recorded update availability; every field is sourced from
+/// one of them, never invented.
 /// </summary>
-/// <param name="Id">Stable, condition-derived id (<c>crash:&lt;serverId&gt;</c>) — a re-fire upserts the
-/// SAME record (escalation re-pushes it), never a fresh per-raise id.</param>
+/// <param name="Id">Stable, condition-derived id (<c>crash:&lt;serverId&gt;</c>, <c>metric:&lt;rule&gt;</c>,
+/// <c>update:&lt;serverId&gt;</c>) — a re-fire upserts the SAME record (escalation re-pushes it), never a
+/// fresh per-raise id.</param>
 /// <param name="Severity">Display weight — <see cref="AlertSeverity"/> (<c>danger|warn|info</c>).</param>
-/// <param name="Source">Who raised it — <see cref="AlertSource"/>. Only <c>watchdog</c> is sourced at M6·a.</param>
+/// <param name="Source">Who raised it — <see cref="AlertSource"/>.</param>
 /// <param name="Title">Human one-line headline.</param>
 /// <param name="Detail">Human detail (the watchdog's transition reason / give-up summary).</param>
 /// <param name="ServerId">The affected server, or <see langword="null"/> for a panel-wide condition.</param>
-/// <param name="HostId">This host (every alert carries a hostId so the SPA filters, never joins — §4·d).</param>
+/// <param name="HostId">This host (every alert carries a hostId so the SPA filters, never joins).</param>
 /// <param name="Anchor">A best-effort deep-link hint to where the operator would act, or null.</param>
 /// <param name="Status">Lifecycle — <see cref="AlertStatus"/> (<c>firing|resolved</c>).</param>
 /// <param name="RaisedAt">When the condition started firing (ISO-8601 UTC <c>Z</c>).</param>
@@ -78,8 +80,9 @@ public sealed record AlertAnchor(string Surface, string? HostId, string? Tab = n
 /// and the <c>alert.resolve</c> WS message. <see cref="By"/> is <em>always</em> <c>system</c> (the server
 /// observed the clear; the client never resolves). <see cref="ActionId"/> is the one-way bridge to the
 /// audit action that fixed it (<see cref="AuditRecord.Id"/>) — the alert↔audit link — or null when no
-/// single action cleared it (never fabricated). At M6·a it is set only for an OPERATOR/api start|restart
-/// recovery; an autonomous watchdog auto-restart emits no audited action, so an auto-heal links to null.
+/// single action cleared it (never fabricated). Only a crash resolution carries one: the start or restart
+/// that brought the server back inside that crash's episode, whether a person's or the watchdog's own
+/// recovery. A metric or update resolution, or a crash cleared by a stop, links to null.
 /// </summary>
 public sealed record AlertResolution(string By, string Source, string Reason, string? ActionId);
 
@@ -116,9 +119,10 @@ public static class AlertSeverity
     public const string Danger = "danger";
 }
 
-/// <summary>Who raised an alert (reference/node-api.md alerts <c>source</c>). Only <see cref="Watchdog"/> is
-/// sourced at M6·a (the crash condition); the others are reserved for later increments (host-monitor /
-/// metrics thresholds, the assistant) and are NOT emitted until their producer lands — never fabricated.</summary>
+/// <summary>Who raised an alert (reference/node-api.md alerts <c>source</c>). <see cref="Watchdog"/> raises
+/// crash conditions, <see cref="HostMonitor"/> and <see cref="Metrics"/> threshold conditions at host and
+/// server scope, and <see cref="Engine"/> update availability. <see cref="Assistant"/> has no producer and is
+/// never emitted.</summary>
 public static class AlertSource
 {
     public const string Watchdog = "watchdog";

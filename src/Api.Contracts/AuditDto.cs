@@ -57,16 +57,16 @@ public sealed record AuditRecord(
 /// <summary>
 /// A keyset page of audit records (reference/node-api.md cursor pagination): <c>{ data, nextCursor }</c>,
 /// newest first. <see cref="NextCursor"/> is an opaque cursor string — pass it back as <c>?cursor=</c>
-/// for the next page — or <see langword="null"/> when there are no older rows. As of
-/// The page is a ts-DESC merge of the API's own local rows (auth/session/
-/// leaf/files/console-audit — never engine-sourced) and kgsm-monitor's engine event history (shaped at
-/// read time); <see cref="NextCursor"/>'s internal encoding changed accordingly (a composite
-/// <c>(ts, id)</c> keyset spanning both sources, was a bare local <c>rowid</c>) but stays opaque to the
-/// client — kgsm-web only ever stores and echoes it back, never parses it.
+/// for the next page — or <see langword="null"/> when there are no older rows.
+/// The page is a ts-DESC merge of every producer's event journal on this host (shaped at read time) and
+/// the API's frozen older local rows. <see cref="NextCursor"/> encodes a composite <c>(ts, id)</c> keyset
+/// spanning both sources and stays opaque to the client — kgsm-web only ever stores and echoes it back,
+/// never parses it.
 /// </summary>
 /// <param name="EngineHistoryDegraded">
-/// <see langword="true"/> when kgsm-monitor was unreachable for this page, so it contains ONLY the
-/// API's own local rows — an honest partial, never a silent drop of the engine history. Additive field
+/// <see langword="true"/> when no journal could be read for this page (an unreadable journal, or a host
+/// with no engine), so it contains ONLY the API's own local rows — an honest partial, never a silent drop
+/// of the history. Additive field
 /// (the additive-only rule in reference/node-api.md); absent/false on a healthy read, so an unmodified older client
 /// simply never notices it.
 /// </param>

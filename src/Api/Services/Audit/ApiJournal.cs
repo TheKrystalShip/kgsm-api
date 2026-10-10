@@ -12,10 +12,11 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>A producer records what that producer did.</b> Signing somebody in, changing an account's
-/// authority, applying a leaf's configuration, releasing a backup archive — the engine runs nothing
-/// for any of them, so nothing else on this host can honestly say they happened. They are written
-/// here, beside the engine's journal and each leaf's, and the audit page is the merge.
+/// <b>A producer records what that producer did.</b> Applying a leaf's configuration, writing a file,
+/// releasing a backup archive, a command that failed or was refused before reaching the engine — the
+/// engine runs nothing for any of them, so nothing else on this host can honestly say they happened. They
+/// are written here, beside the engine's journal and each leaf's, and the audit page is the merge.
+/// Sign-ins and account changes are the auth anchor's to record, and this API reads them from its journal.
 /// </para>
 /// <para>
 /// <b>Nothing publishes from here.</b> This API already tails every journal it can discover, its own
@@ -32,9 +33,9 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// </para>
 /// <para>
 /// <b>Best-effort, always.</b> Every method swallows its failure after logging it. These are written
-/// alongside actions that have already happened — a session already exists, a service has already
-/// restarted — and turning a successful sign-in into an error because recording it did not work trades
-/// a missing line for a broken door.
+/// alongside actions that have already happened — a file is already written, a service has already
+/// restarted — and turning a successful action into an error because recording it did not work trades
+/// a missing line for a broken operation.
 /// </para>
 /// </remarks>
 public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> logger)
