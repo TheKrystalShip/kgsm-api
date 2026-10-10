@@ -1,7 +1,7 @@
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// The identity an action ran as (architecture.html §3·d <c>actor</c>). <see cref="Kind"/> is
+/// The identity an action ran as (reference/node-api.md audit <c>actor</c>). <see cref="Kind"/> is
 /// <c>user|system|token</c>; <see cref="Provider"/> the identity source (<c>discord|system|api</c>,
 /// nullable). The pair with <see cref="AuditRecord.Origin"/> answers both <em>whose authority</em>
 /// (this) and <em>through which surface</em> (origin) — never collapsed (the user's actor-vs-origin
@@ -9,12 +9,12 @@ namespace TheKrystalShip.Api.Contracts;
 /// </summary>
 public sealed record AuditActor(string Kind, string Name, string? Provider);
 
-/// <summary>What an action acted on (architecture.html §3·d <c>target</c>). Null when the action is
+/// <summary>What an action acted on (reference/node-api.md audit <c>target</c>). Null when the action is
 /// panel-wide (no target).</summary>
 public sealed record AuditTarget(string Kind, string Id, string? Name);
 
 /// <summary>
-/// One audit record — the wire shape of an append-only action fact (architecture.html §3·d). Emitted
+/// One audit record — the wire shape of an append-only action fact (reference/node-api.md audit). Emitted
 /// by <c>GET /audit</c> (a page element) and pushed on the <c>audit</c> WS topic as <c>audit.append</c>.
 /// </summary>
 /// <param name="Id">Opaque, stable, public event id (<c>evt_…</c>).</param>
@@ -55,7 +55,7 @@ public sealed record AuditRecord(
     string? Outcome = null);
 
 /// <summary>
-/// A keyset page of audit records (architecture.html §6 cursor pagination): <c>{ data, nextCursor }</c>,
+/// A keyset page of audit records (reference/node-api.md cursor pagination): <c>{ data, nextCursor }</c>,
 /// newest first. <see cref="NextCursor"/> is an opaque cursor string — pass it back as <c>?cursor=</c>
 /// for the next page — or <see langword="null"/> when there are no older rows. As of
 /// The page is a ts-DESC merge of the API's own local rows (auth/session/
@@ -67,12 +67,12 @@ public sealed record AuditRecord(
 /// <param name="EngineHistoryDegraded">
 /// <see langword="true"/> when kgsm-monitor was unreachable for this page, so it contains ONLY the
 /// API's own local rows — an honest partial, never a silent drop of the engine history. Additive field
-/// (architecture.html invariant #4); absent/false on a healthy read, so an unmodified older client
+/// (the additive-only rule in reference/node-api.md); absent/false on a healthy read, so an unmodified older client
 /// simply never notices it.
 /// </param>
 /// <param name="Journals">
 /// What each producer's event journal contributed, or <see langword="null"/> when the engine is
-/// unprovisioned and none was read. Additive (architecture.html invariant #4), so an unmodified client
+/// unprovisioned and none was read. Additive (the additive-only rule in reference/node-api.md), so an unmodified client
 /// simply never notices it.
 /// <para>
 /// The ecosystem records events per producer — the engine writes what the engine did, each leaf writes
@@ -105,7 +105,7 @@ public sealed record AuditJournalCoverage(
     DateTimeOffset? CoverageFrom,
     bool Truncated);
 
-/// <summary>Display weight for an audit record (architecture.html §3·d <c>severity</c>).</summary>
+/// <summary>Display weight for an audit record (reference/node-api.md audit <c>severity</c>).</summary>
 public static class AuditSeverity
 {
     public const string Info = "info";
@@ -156,7 +156,7 @@ public static class AuditOutcomes
 }
 
 
-/// <summary>Actor kinds (architecture.html §3·d <c>actor.kind</c>).</summary>
+/// <summary>Actor kinds (reference/node-api.md audit <c>actor.kind</c>).</summary>
 public static class ActorKind
 {
     public const string User = "user";
@@ -175,7 +175,7 @@ public static class ActorKind
     public const string Rule = "rule";
 }
 
-/// <summary>Identity providers (architecture.html §3·d <c>actor.provider</c>).</summary>
+/// <summary>Identity providers (reference/node-api.md audit <c>actor.provider</c>).</summary>
 public static class ActorProvider
 {
     public const string Discord = "discord";
@@ -198,7 +198,7 @@ public static class ActorProvider
     public const string Rule = "rule";
 }
 
-/// <summary>Target kinds (architecture.html §3·d <c>target.kind</c>).</summary>
+/// <summary>Target kinds (reference/node-api.md audit <c>target.kind</c>).</summary>
 public static class AuditTargetKind
 {
     public const string Server = "server";
@@ -218,7 +218,7 @@ public static class AuditTargetKind
 }
 
 /// <summary>
-/// The closed origin set (architecture.html §3·d). Two values are <b>reserved</b> and no request may
+/// The closed origin set (reference/node-api.md audit). Two values are <b>reserved</b> and no request may
 /// declare either: <see cref="System"/> for the engine/watchdog path (stamped at the kgsm level via
 /// <c>KGSM_EVENT_ORIGIN</c>; the API never emits it), and <see cref="Notification"/>, which this API
 /// stamps itself when it redeems a notification button. <see cref="IsCallerDeclarable"/> is the subset a

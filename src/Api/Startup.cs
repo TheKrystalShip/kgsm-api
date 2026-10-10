@@ -49,7 +49,7 @@ namespace TheKrystalShip.Api;
 /// middleware pipeline. The API is a per-host KGSM Control Panel aggregator on standard
 /// JIT (controllers + EF Core — see PLAN.md §8 for the runtime/stack decision). It holds
 /// NO domain DTOs yet; hosts/servers/metrics arrive in M1 behind the leaf wiring. M0's
-/// job is the cross-team contract surface, frozen from architecture.html §6: the
+/// job is the cross-team contract surface, frozen from reference/node-api.md: the
 /// <c>/api/v1</c> base path, the <c>{ "error": { code, message, details? } }</c> envelope,
 /// camelCase + ISO-8601 UTC 'Z' JSON, a configurable CORS allowlist, and the auth
 /// pipeline placeholder (filled at M4).

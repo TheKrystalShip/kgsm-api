@@ -20,7 +20,7 @@ namespace TheKrystalShip.Api.Controllers;
 /// frozen shape and its deliberate divergences. <b>Write</b> (M3): <c>POST /servers/{id}/commands</c>
 /// is the first mutation path — gate → 202 + job → track on the <c>jobs</c> WS topic → verify.
 /// <b>Create/delete</b> (M8·b): <c>POST /servers</c> installs a new server from a blueprint and
-/// <c>DELETE /servers/{id}</c> uninstalls one — both async, returning a job (architecture.html §3·h).
+/// <c>DELETE /servers/{id}</c> uninstalls one — both async, returning a job (reference/node-api.md servers).
 /// Per-host: every server carries this host's <c>hostId</c>; the SPA fans out across hosts client-side.
 /// </summary>
 [ApiController]
@@ -120,7 +120,7 @@ public sealed class ServersController(
     }
 
     /// <summary>
-    /// Issue a command (architecture.html §5·d). The body is intent only —
+    /// Issue a command (reference/node-api.md commands). The body is intent only —
     /// <c>{ "verb": "start"|"stop"|"restart"|"update" }</c>, a closed set. The verb is admitted (state
     /// guards, permissions), a <see cref="Job"/> is created, and the work runs off-request; the
     /// <c>202</c> returns the job and progress arrives on the <c>jobs</c> WS topic.
@@ -347,7 +347,7 @@ public sealed class ServersController(
     }
 
     /// <summary>
-    /// Install a new server from a blueprint (M8·b, architecture.html §3·h) — the panel's one
+    /// Install a new server from a blueprint (M8·b, reference/node-api.md servers) — the panel's one
     /// <em>create</em> operation. The client may send the whole install form, but only <c>blueprint</c>
     /// (required), <c>name</c>, and <c>origin</c> are honored today; the rest is accepted-but-inert
     /// (§3·h additive-only). The backend assigns the instance id (kgsm <c>generate-id</c>), creates a job,
@@ -493,7 +493,7 @@ public sealed class ServersController(
     }
 
     /// <summary>
-    /// Uninstall a server (M8·b, architecture.html §3·h — <c>DELETE /servers/{id}</c>). Async like install:
+    /// Uninstall a server (M8·b, reference/node-api.md servers — <c>DELETE /servers/{id}</c>). Async like install:
     /// returns <c>202</c> + a job; the instance is removed off-request, a <c>server.removed</c> tombstone is
     /// pushed on the <c>servers</c> topic when it leaves the roster, and a <c>server.uninstall</c> audit
     /// entry lands (from the kgsm event echo). <c>origin</c> rides the <c>?origin=</c> query (a DELETE has no body).
@@ -643,7 +643,7 @@ public sealed class ServersController(
         return AuditOrigin.IsCallerDeclarable(origin);
     }
 
-    // The frozen { error: { code, message } } envelope (architecture.html §6), rendered via the MVC
+    // The frozen { error: { code, message } } envelope (reference/node-api.md), rendered via the MVC
     // formatters (camelCase) — same shape UseStatusCodePages emits for the message-less 404 above.
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));

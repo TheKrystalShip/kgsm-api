@@ -1,7 +1,7 @@
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// The request body for <c>POST /servers/{id}/commands</c> (architecture.html §5·d, M3). The client
+/// The request body for <c>POST /servers/{id}/commands</c> (reference/node-api.md commands, M3). The client
 /// expresses <em>intent only</em> — a closed, server-defined verb set
 /// (<c>start</c>/<c>stop</c>/<c>restart</c>/<c>update</c>); an unknown/empty verb is
 /// rejected at write time (<c>400</c>). <c>update</c> (long-running, version-changing) joined the set in
@@ -32,7 +32,7 @@ namespace TheKrystalShip.Api.Contracts;
 public sealed record CommandRequest(string? Verb, string? Origin = null, bool Force = false);
 
 /// <summary>
-/// The request body for <c>POST /servers</c> (architecture.html §3·h, M8·b) — the panel's one
+/// The request body for <c>POST /servers</c> (reference/node-api.md library, M8·b) — the panel's one
 /// <em>create</em> operation. The contract is deliberately lopsided: the client may send the whole
 /// install form, but the installer (kgsm) needs exactly one thing — which <strong>blueprint</strong>.
 /// <list type="bullet">
@@ -180,7 +180,7 @@ public static class CommandVerb
 }
 
 /// <summary>
-/// A command job (architecture.html §3/§5·d, M3) — returned inline by the <c>202</c> and streamed on
+/// A command job (reference/node-api.md commands, M3) — returned inline by the <c>202</c> and streamed on
 /// the <c>jobs</c> WS topic as <c>job.patch</c>. <see cref="State"/> is the <b>job's own execution
 /// lifecycle</b>, NOT the server's display state (which rides the <c>servers</c> topic via
 /// <c>server.patch</c> on settle) — a deliberate divergence from the §5·d example's server-shaped
@@ -207,7 +207,7 @@ public sealed record Job(
     string? BatchId = null,
     int? QueuedPosition = null);
 
-/// <summary>The <c>202 Accepted</c> body: <c>{ "job": { ... } }</c> (architecture.html §3).</summary>
+/// <summary>The <c>202 Accepted</c> body: <c>{ "job": { ... } }</c> (reference/node-api.md commands).</summary>
 public sealed record CommandAccepted(Job Job);
 
 /// <summary>

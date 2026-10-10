@@ -4,7 +4,7 @@ namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
 /// A host (a machine running KGSM) with its capacity summary and capability block —
-/// the honest realization of <c>architecture.html §4·a / §4·b</c>, frozen at M1·a.
+/// the honest realization of <c>reference/node-api.md hosts</c>, frozen at M1·a.
 /// <para>
 /// This api is per-host: <c>GET /hosts</c> returns exactly this one host, and the SPA
 /// fans out across hosts and rolls up client-side (there is no <c>/fleet</c>). The

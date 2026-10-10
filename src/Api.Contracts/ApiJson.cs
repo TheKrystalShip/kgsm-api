@@ -9,7 +9,7 @@ namespace TheKrystalShip.Api.Contracts;
 /// otherwise separate options objects. Keeps the wire shape consistent whether a
 /// response comes from a controller or the error writer.
 ///
-/// Conventions frozen from architecture.html §6: camelCase property names and
+/// Conventions frozen from reference/node-api.md: camelCase property names and
 /// ISO-8601 UTC <c>Z</c> timestamps. Note we deliberately do NOT set a global
 /// "ignore nulls" — domain DTOs (M1) use explicit <c>null</c> to mean "unknown /
 /// source absent", which must survive to the wire; per-field omission is opt-in via

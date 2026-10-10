@@ -1,7 +1,7 @@
 namespace TheKrystalShip.Api.Data;
 
 /// <summary>
-/// One outbound-notification integration's stored config (M8·c, architecture.html §3·e), keyed by
+/// One outbound-notification integration's stored config (M8·c, systems/control-panel/notifications.md), keyed by
 /// <see cref="Provider"/> (one row per provider — <c>discord</c> first, <c>slack</c>/<c>telegram</c>
 /// later). This is the API's first non-audit persisted entity; it lives in the same
 /// <see cref="AppDbContext"/>, so the existing <c>EnsureCreated</c> at startup creates it too.

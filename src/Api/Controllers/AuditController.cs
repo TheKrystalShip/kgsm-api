@@ -11,7 +11,7 @@ using TheKrystalShip.KGSM.Core.Models;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// The <c>/audit</c> read surface (architecture.html §3·d) — the immutable, append-only action record:
+/// The <c>/audit</c> read surface (reference/node-api.md audit) — the immutable, append-only action record:
 /// "what happened, who did it, through which surface, when." It is a MERGE of two sources: the local
 /// table, holding only the API's own rows (auth/session/leaf/files/console-audit — written by
 /// <see cref="AuditService.AppendAsync"/>), and kgsm engine history, read from the engine's own event

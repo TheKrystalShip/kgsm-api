@@ -16,7 +16,7 @@ using TheKrystalShip.Auth.Users;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// <c>GET /me</c> — the caller's own identity on this host (architecture.html §3·f surface, the "Profile"
+/// <c>GET /me</c> — the caller's own identity on this host (reference/node-api.md me surface, the "Profile"
 /// resource). It projects the session bearer's claims: the identity snapshot captured at sign-in, the
 /// granted <c>scopes</c>, and the <c>status</c> of the account behind them. What the caller may do is
 /// <see cref="MeAccessController"/>.

@@ -7,19 +7,16 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The cont
 ## Locked decisions (do not relitigate)
 
 - **Hand-rolled SSE, NOT SignalR.** The `{ topic, type, data }` envelope **is** the contract —
-  SignalR's framing would break it. Don't introduce SignalR. **Fetch-based SSE, not native
-  `EventSource`** — `EventSource` can't set an `Authorization` header (see Auth below). Topics are
-  chosen at connect via `?topics=a,b,c` (comma-separated); subscriptions are **immutable per
-  connection** (fixed from the query at connect, no client→server channel) — changing topics means
-  opening another stream. Wire frame: `data: <json>\n\n` (no `event:`/`id:`/`Last-Event-ID`); a
-  `: connected\n\n` comment on connect and a `: keepalive\n\n` comment every 20s (also the dead-client
-  detector, alongside `RequestAborted`).
+  SignalR's framing would break it. **Fetch-based SSE, not native `EventSource`**, which can't set an
+  `Authorization` header (see Auth below). Subscriptions are **immutable per connection**: changing
+  topics means opening another stream. Framing, topics and cadence:
+  `../../../../kgsm-docs/reference/realtime-stream.md`.
 - **All topic/type strings live in `StreamProtocol.cs` — never inline** (a standing user requirement).
   Add a new topic or message type there; a literal `"servers"` or `"metrics.tick"` anywhere else is a bug.
-- **Patch-only, no snapshot-on-subscribe.** The client hydrates via REST and applies patches (§3·j);
-  on (re)connect it re-hydrates via REST. Don't send a full snapshot when a client subscribes.
+- **Patch-only, no snapshot-on-subscribe.** The client hydrates via REST and re-hydrates on
+  (re)connect. Don't send a full snapshot when a client subscribes.
 - **Coalesce-to-latest per key** is the backpressure rule: a slow client gets the *newest* frame, never
-  an unbounded backlog; a stalled send is torn down → the client reconnects (§3·j). Don't buffer history.
+  an unbounded backlog; a stalled send is torn down and the client reconnects. Don't buffer history.
   **Exception — the `audit` topic:** audit appends are distinct immutable facts, not supersede-by-latest
   patches, so each carries a **unique** coalesce key (the event id, `StreamProtocol.AuditEntityKey`) — never
   the static topic name, which would silently drop all but the latest append. The client prepends; on
@@ -61,15 +58,14 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The cont
 ## Auth
 
 `/stream` is `[Authorize]` — any authenticated caller connects, and **the gate is per topic and per
-frame** (`StreamProtocol.Gate`, `StreamAccess`): a host topic takes the action its REST companion does
-(`api:logs.read`, `api:services.read`, `api:audit.read`, `api:alerts.read`, `api:batches.read`,
-`api:hosts.read`, `monitor:metrics.read`); one server's metrics or console takes `kgsm:server.read` /
-`kgsm:server.console.read` at that server; the server collections (`servers`, `servers/metrics`,
-`jobs`, `players`) are open to subscribe and each frame reaches only the readers of the server it is
-about (`Publish(..., serverId)`, `PublishRows`); `me` needs nothing; a topic this build does not know is
-an Owner's alone. A topic the reader may not see **delivers nothing** — never a 403 on the whole stream.
-What the open `me` buys is the one caller nothing else has anything to say to: somebody awaiting
-approval, who connects to hear about their own account and hears nothing else.
+frame** (`StreamProtocol.Gate`, `StreamAccess`): a host topic takes the action its REST companion does;
+one server's metrics or console takes `kgsm:server.read` / `kgsm:server.console.read` at that server; the
+server collections (`servers`, `servers/metrics`, `jobs`, `players`) are open to subscribe and each frame
+reaches only the readers of the server it is about (`Publish(..., serverId)`, `PublishRows`); `me` needs
+nothing, so somebody awaiting approval hears about their own account and nothing else; a topic this
+build does not know is an Owner's alone. A topic the reader may not see **delivers nothing** — never a
+403 on the whole stream. The per-topic actions are `StreamProtocol.Gate`; the model is
+`../../../../kgsm-docs/systems/control-panel/realtime.md`.
 
 The audit feed says the same things to every reader of it; only the values inside a row differ. A row
 the engine classifies as carrying personal or privileged values is published with a redacted variant

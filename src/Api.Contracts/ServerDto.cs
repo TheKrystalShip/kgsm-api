@@ -4,7 +4,7 @@ namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
 /// A game server (a kgsm instance on this host) — the <strong>honest realization</strong> of the
-/// <c>architecture.html §3</c> <c>Server</c> example, frozen at M1·b. It is the join of the kgsm
+/// <c>reference/node-api.md</c> <c>Server</c> example, frozen at M1·b. It is the join of the kgsm
 /// engine's domain + run-state (via kgsm-lib) with the per-instance metrics (via kgsm-monitor),
 /// keyed on the instance id.
 /// <para>

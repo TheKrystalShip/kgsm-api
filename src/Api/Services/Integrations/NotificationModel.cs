@@ -24,11 +24,11 @@ public sealed record IntegrationRecord(
             new Dictionary<string, string>(), [], null);
 }
 
-/// <summary>One per-event routing rule (architecture.html §3·e <c>events[]</c>): for a catalog event id,
+/// <summary>One per-event routing rule (systems/control-panel/notifications.md <c>events[]</c>): for a catalog event id,
 /// whether to post it, how loudly (<see cref="Cadence"/>), and whether to @-mention the ops role.</summary>
 public sealed record NotificationRule(string Id, bool Enabled, string Cadence, bool Ping);
 
-/// <summary>How loudly a provider carries one catalog event (architecture.html §3·e).</summary>
+/// <summary>How loudly a provider carries one catalog event (systems/control-panel/notifications.md).</summary>
 public static class NotificationCadence
 {
     /// <summary>Every occurrence, subject only to the delivery worker's anti-spam window.</summary>
@@ -54,12 +54,12 @@ public static class NotificationCadence
     public static bool IsKnown(string? cadence) => cadence is Every or Once or Digest;
 }
 
-/// <summary>A server-defined catalog event (architecture.html §3·e): the events a notification provider
+/// <summary>A server-defined catalog event (systems/control-panel/notifications.md): the events a notification provider
 /// can announce. The user only configures <see cref="NotificationRule"/> over this fixed catalog.</summary>
 public sealed record CatalogEvent(string Id, string Title, string Description);
 
 /// <summary>
-/// The server-defined notification catalog (architecture.html §3·e). <b>Honest:</b> only events the API
+/// The server-defined notification catalog (systems/control-panel/notifications.md). <b>Honest:</b> only events the API
 /// can actually source/deliver are listed — <c>join</c> (no player tracking) is deliberately omitted,
 /// never faked. It joins the catalog when an honest source lands.
 /// <para>
@@ -257,7 +257,7 @@ public interface INotificationProvider
     string ProviderId { get; }
 
     /// <summary>Render the provider-shaped GET view from the stored config — secret masked to a hint,
-    /// never echoed (architecture.html §3·e). Returns a wire DTO the controller serializes.</summary>
+    /// never echoed (systems/control-panel/notifications.md). Returns a wire DTO the controller serializes.</summary>
     object Describe(IntegrationRecord record);
 
     /// <summary>Validate/normalize a candidate secret (a webhook URL) on PATCH. False + <paramref name="error"/>

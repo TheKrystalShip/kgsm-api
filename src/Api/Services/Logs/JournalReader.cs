@@ -8,11 +8,11 @@ namespace TheKrystalShip.Api.Services.Logs;
 
 /// <summary>
 /// Reads the host's <b>systemd journal</b> and projects it into the aggregated, source-tagged
-/// <see cref="LogPage"/> the <c>GET /hosts/{id}/logs</c> surface returns (architecture.html §3).
+/// <see cref="LogPage"/> the <c>GET /hosts/{id}/logs</c> surface returns (reference/node-api.md logs).
 /// <para>
 /// The aggregation is intrinsic to journald: a single <c>journalctl -u A -u B … --output=json</c> already
 /// merges every configured leaf unit in chronological order, each entry tagged with its <c>_SYSTEMD_UNIT</c>
-/// and carrying an opaque <c>__CURSOR</c> — which is exactly the keyset cursor architecture.html §6 asks for.
+/// and carrying an opaque <c>__CURSOR</c> — which is exactly the keyset cursor reference/node-api.md asks for.
 /// So this reader just shells journalctl (host-OS introspection, like the planned process table — NOT engine
 /// data, so deliberately NOT routed through kgsm-lib), parses the NDJSON, and maps each entry to a
 /// <see cref="LogLine"/>. Honesty: a journalctl failure (missing binary, no read access) degrades to an

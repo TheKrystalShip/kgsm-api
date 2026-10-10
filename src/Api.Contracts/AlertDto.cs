@@ -1,7 +1,7 @@
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// One alert — the live wire representation of a problem <em>condition</em> (architecture.html §3·c),
+/// One alert — the live wire representation of a problem <em>condition</em> (reference/node-api.md alerts),
 /// NOT a task. The server raises it while the condition is true and resolves it when the condition
 /// clears (self-heal or operator); the client never writes one (no complete/dismiss/PATCH). Emitted as
 /// a page element by <c>GET /alerts</c> and pushed on the <c>alerts</c> WS topic as <c>alert.raise</c>
@@ -68,13 +68,13 @@ public sealed record Alert(
 /// <param name="Target">What it acts on — the server id for every lifecycle kind.</param>
 public sealed record AlertAction(string Kind, string Target);
 
-/// <summary>A deep-link hint to where the operator would act on a condition (architecture.html §3·c
+/// <summary>A deep-link hint to where the operator would act on a condition (reference/node-api.md alerts
 /// <c>anchor</c>). Advisory — the client routes from <see cref="AlertResolution"/>/<c>serverId</c> when
 /// it doesn't recognize a surface. For a crash this points at the server.</summary>
 public sealed record AlertAnchor(string Surface, string? HostId, string? Tab = null, string? Ref = null);
 
 /// <summary>
-/// Provenance of a resolution (architecture.html §3·c <c>resolution</c>) — carried by a resolved record
+/// Provenance of a resolution (reference/node-api.md alerts <c>resolution</c>) — carried by a resolved record
 /// and the <c>alert.resolve</c> WS message. <see cref="By"/> is <em>always</em> <c>system</c> (the server
 /// observed the clear; the client never resolves). <see cref="ActionId"/> is the one-way bridge to the
 /// audit action that fixed it (<see cref="AuditRecord.Id"/>) — the alert↔audit link — or null when no
@@ -83,14 +83,14 @@ public sealed record AlertAnchor(string Surface, string? HostId, string? Tab = n
 /// </summary>
 public sealed record AlertResolution(string By, string Source, string Reason, string? ActionId);
 
-/// <summary>The <c>alert.resolve</c> WS payload (architecture.html §3·c): <c>{ id, resolution }</c>. The
+/// <summary>The <c>alert.resolve</c> WS payload (reference/node-api.md alerts): <c>{ id, resolution }</c>. The
 /// client stamps <c>resolvedAt</c> and moves the record it already holds to the rear-view; the
 /// authoritative <c>resolvedAt</c> is on the REST resolved record. Shares the <see cref="Alert.Id"/>
 /// coalesce key with <c>alert.raise</c>, so a resolve supersedes a still-queued raise (the
 /// ServerPatch/ServerRemoved precedent).</summary>
 public sealed record AlertResolved(string Id, AlertResolution Resolution);
 
-/// <summary>The <c>alert.retract</c> WS payload (architecture.html §3·c): <c>{ id }</c> — the thing was
+/// <summary>The <c>alert.retract</c> WS payload (reference/node-api.md alerts): <c>{ id }</c> — the thing was
 /// never an actionable condition (or its subject is simply gone, e.g. the instance was uninstalled). No
 /// rear-view, no resolution. The client drops it by id.</summary>
 public sealed record AlertRetracted(string Id);
@@ -100,14 +100,14 @@ public sealed record AlertRetracted(string Id);
 /// cursor); the durable, growing record lives in <c>/audit</c>.</summary>
 public sealed record AlertPage(IReadOnlyList<Alert> Data);
 
-/// <summary>Alert lifecycle status (architecture.html §3·c <c>status</c>).</summary>
+/// <summary>Alert lifecycle status (reference/node-api.md alerts <c>status</c>).</summary>
 public static class AlertStatus
 {
     public const string Firing = "firing";
     public const string Resolved = "resolved";
 }
 
-/// <summary>Display weight for an alert (architecture.html §3·c <c>severity</c>) — a strict subset of
+/// <summary>Display weight for an alert (reference/node-api.md alerts <c>severity</c>) — a strict subset of
 /// <see cref="AuditSeverity"/> (no <c>success</c>: a firing condition is never a success).</summary>
 public static class AlertSeverity
 {
@@ -116,7 +116,7 @@ public static class AlertSeverity
     public const string Danger = "danger";
 }
 
-/// <summary>Who raised an alert (architecture.html §3·c <c>source</c>). Only <see cref="Watchdog"/> is
+/// <summary>Who raised an alert (reference/node-api.md alerts <c>source</c>). Only <see cref="Watchdog"/> is
 /// sourced at M6·a (the crash condition); the others are reserved for later increments (host-monitor /
 /// metrics thresholds, the assistant) and are NOT emitted until their producer lands — never fabricated.</summary>
 public static class AlertSource
@@ -133,7 +133,7 @@ public static class AlertSource
 }
 
 /// <summary><see cref="AlertResolution.By"/> is always this — the server observed the clear, never the
-/// client (architecture.html §3·c: "always system").</summary>
+/// client (reference/node-api.md alerts: "always system").</summary>
 public static class AlertResolvedBy
 {
     public const string System = "system";

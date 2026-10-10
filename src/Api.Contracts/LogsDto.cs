@@ -1,7 +1,7 @@
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// One aggregated host-log line (architecture.html §3, <c>GET /hosts/{id}/logs</c>) — a single entry
+/// One aggregated host-log line (reference/node-api.md logs, <c>GET /hosts/{id}/logs</c>) — a single entry
 /// read from the host's <b>systemd journal</b> and tagged with the leaf it came from. The whole feature
 /// is host-OS introspection (journald is the system's own merged log bus), NOT engine domain data, so it
 /// is sourced by the api directly — never through kgsm-lib (the C#↔engine chokepoint is for kgsm/watchdog
@@ -24,7 +24,7 @@ public sealed record LogLine(
     string Text);
 
 /// <summary>
-/// A keyset page of host-log lines (architecture.html §6 cursor pagination): <c>{ data, nextCursor }</c>,
+/// A keyset page of host-log lines (reference/node-api.md cursor pagination): <c>{ data, nextCursor }</c>,
 /// newest first. <see cref="NextCursor"/> is the journald cursor of the last (oldest) line returned — pass
 /// it back as <c>?cursor=</c> for the next (older) page — or <see langword="null"/> when no older lines
 /// remain (the page came back short).
@@ -32,7 +32,7 @@ public sealed record LogLine(
 public sealed record LogPage(IReadOnlyList<LogLine> Data, string? NextCursor);
 
 /// <summary>
-/// One configured host-log source (architecture.html §3) — the identity the frontend's source dropdown
+/// One configured host-log source (reference/node-api.md logs) — the identity the frontend's source dropdown
 /// renders. Derived from the canonical <c>LeafCatalog</c> via
 /// <c>LogSources</c>, so the set is stable and matches the Services board. The frontend
 /// uses this to populate the dropdown regardless of whether a source has recent journal entries (quiet

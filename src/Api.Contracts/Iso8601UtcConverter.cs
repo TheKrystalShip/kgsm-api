@@ -6,7 +6,7 @@ namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
 /// Serializes a <see cref="DateTimeOffset"/> as ISO-8601 in UTC with a <c>Z</c>
-/// suffix — the timestamp convention frozen in architecture.html §6 ("All timestamps
+/// suffix — the timestamp convention frozen in reference/node-api.md ("All timestamps
 /// ISO-8601 UTC (Z)"). System.Text.Json's default emits the local offset form
 /// (<c>+00:00</c>), which is valid ISO-8601 but not the contracted shape; this
 /// normalizes it.

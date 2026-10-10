@@ -13,7 +13,7 @@ namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
 /// The per-host realtime endpoint — <c>GET /api/v1/stream</c> as a fetch-based SSE stream.
-/// One stream per host multiplexes that host's topics (<c>architecture.html §3·b</c>); the
+/// One stream per host multiplexes that host's topics (<c>reference/realtime-stream.md</c>); the
 /// client chooses topics at connect via <c>?topics=a,b,c</c> and the pumps push
 /// <c>{ topic, type, data }</c> envelopes. The action holds the request for the stream's
 /// lifetime, registering the connection with the <see cref="StreamHub"/> for the pumps to

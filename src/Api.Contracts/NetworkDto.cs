@@ -1,7 +1,7 @@
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// The per-server firewall/ports view (architecture.html §3·g, M6·b) — the cross-reference of what a
+/// The per-server firewall/ports view (reference/node-api.md network, M6·b) — the cross-reference of what a
 /// server <em>requires</em> against what the host firewall actually has open. A field on the
 /// <see cref="Server"/> <strong>detail</strong> response only (<c>GET /servers/{id}</c>); omitted on the
 /// list and on the <c>servers</c> stream (which stay the frozen M1·b shape).
@@ -46,7 +46,7 @@ public sealed record ServerNetwork(
 public sealed record RequiredPort(int Port, string Proto, bool? Open);
 
 /// <summary>
-/// The host-wide open-ports grid (architecture.html §3·g, M6·b) — the raw firewall listing for the
+/// The host-wide open-ports grid (reference/node-api.md network, M6·b) — the raw firewall listing for the
 /// Diagnostics panel, a field on the <see cref="Host"/> <strong>detail</strong> response
 /// (<c>GET /hosts/{id}</c>). The whole block is <see langword="null"/> when the firewall can't answer
 /// (absent/unreachable/unknown — honest "not measurable now").

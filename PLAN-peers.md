@@ -395,7 +395,7 @@ pre-told its own address (§2 #13a-c).
 Two distinct reads, kept separate (they must not collapse into one node-proxy):
 - **The SPA reads peer resources DIRECTLY** (browser → the peer's advertised client
   URL, over its own native session) — per-node resources stay on the per-node pages
-  (§8), matching the keystone's client-side rollup (no `/fleet`, no node aggregating
+  (§8), matching the client-side rollup (`../kgsm-docs/systems/control-panel/node-api.md`) (no `/fleet`, no node aggregating
   peers for the browser).
 - **Server-side capacity fan-out** is the only node-proxied path: `GET
   /members/{id}/resources | /capabilities | /library` (service-token relay, reuse

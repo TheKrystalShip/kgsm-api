@@ -10,7 +10,7 @@ using Snap = TheKrystalShip.KGSM.Monitor.Contracts;
 namespace TheKrystalShip.Api.Services.Alerts;
 
 /// <summary>
-/// The condition-mirror alert engine (M6·a, architecture.html §3·c). It maintains the live "needs
+/// The condition-mirror alert engine (M6·a, reference/node-api.md alerts). It maintains the live "needs
 /// attention" set as a mirror of <em>conditions</em> the host can honestly measure, raises while a
 /// condition is true and resolves it (after a probation dwell) when it clears — never a task, never
 /// client-writable. It is the single source for both the REST <c>GET /alerts</c> read and the live

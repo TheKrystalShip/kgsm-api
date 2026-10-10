@@ -3,7 +3,7 @@
 # Smoke test — the reproducible "mock frontend" stand-in until the real SPA can reach a
 # host. Builds the API (JIT) and runs it, then asserts the cross-team contracts over HTTP.
 #
-#   M0 (architecture.html §6): /api/v1 base path, the error envelope on a real 500 and a
+#   M0 (reference/node-api.md): /api/v1 base path, the error envelope on a real 500 and a
 #   404, ISO-8601-UTC-'Z' timestamps, the EF Core + SQLite round-trip, CORS headers.
 #   M1·a (§4·a/§4·b): GET /hosts + /hosts/{id} (this host's capacity + capability block),
 #   the 404 envelope on an unknown host, and the honesty coupling — metrics 'operational'

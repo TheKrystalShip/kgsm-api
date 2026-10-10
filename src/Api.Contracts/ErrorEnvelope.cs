@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// The frontend-facing error contract, frozen verbatim from architecture.html §6
+/// The frontend-facing error contract, frozen verbatim from reference/node-api.md
 /// (Conventions → Errors): <c>{ "error": { "code", "message", "details?" } }</c>,
 /// alongside a standard HTTP status. The SPA's API client normalizes this into a
 /// thrown <c>ApiError</c>, so the shape is load-bearing — additive changes only.

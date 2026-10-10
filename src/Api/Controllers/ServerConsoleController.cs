@@ -228,7 +228,7 @@ public sealed class ServerConsoleController(ILogger<ServerConsoleController> log
         return AuditOrigin.IsCallerDeclarable(origin);
     }
 
-    // The frozen { error: { code, message } } envelope (architecture.html §6), via the MVC formatters.
+    // The frozen { error: { code, message } } envelope (reference/node-api.md), via the MVC formatters.
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));
 

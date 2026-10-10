@@ -27,7 +27,7 @@ the `jobs` SSE topic (`job.patch`) → verify (`server.patch` on settle)**. The 
   `unknown` status never blocks. **Never fabricate admissibility kgsm doesn't enforce.**
 - **`job.state` is the JOB's own lifecycle** (`queued→running→succeeded|failed`), NOT the server's
   status. The affected server's status rides the `servers` topic via `server.patch`; the client derives
-  the optimistic display from the verb. (Frozen §6 divergence from the §5·d server-shaped example.)
+  the optimistic display from the verb. (A frozen divergence from the frontend spec's server-shaped example; `PLAN.md §6`.)
 - **Jobs are in-memory.** `JobRegistry` holds state; jobs themselves are **not** persisted (no jobs table).
   Don't add one.
 - **Provenance stamping, NOT an audit write.** The command path stamps `actor`(bearer identity)+

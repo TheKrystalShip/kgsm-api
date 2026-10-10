@@ -6,7 +6,7 @@ namespace TheKrystalShip.Api.Data;
 /// <summary>
 /// EF Core context for the API's own operational metadata — the small set of tables the
 /// aggregator persists (the domain itself is live-scraped from the leaves, never stored).
-/// As of M5 it holds the single append-only <see cref="AuditEntry"/> table (architecture.html
+/// As of M5 it holds the single append-only <see cref="AuditEntry"/> table (reference/node-api.md
 /// §3·d). M4 auth is stateless JWT — no session/user rows.
 /// <para>
 /// <b>Schema is created via <c>EnsureCreated</c>, not EF migrations.</b> The project has

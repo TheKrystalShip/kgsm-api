@@ -1,6 +1,6 @@
 # CLAUDE.md — Services/Alerts/
 
-The **condition-mirror** alert engine (architecture.html §3·c) — the live "needs attention"
+The **condition-mirror** alert engine — the live "needs attention"
 surface. `GET /api/v1/alerts?status=firing|resolved&since=24h` + the `alerts` SSE topic
 (`alert.raise`/`resolve`/`retract`). The contract is frozen in `PLAN.md §6` (alert row).
 This file is the local "what you must not break."
@@ -21,7 +21,7 @@ An alert mirrors a **condition**, not a task. The server raises it while the con
 resolves it when the condition clears (self-heal or operator) — **the client never writes one**: no
 complete, no dismiss, no PATCH. The feed trends toward empty ("all clear"); the durable, growing record
 of *what fired* lives in **`/audit`**, never here. Alerts are **present-tense + mutable**; audit is
-**past-tense + immutable** — they never overlap (§3·c). `resolution.actionId` is the one-way link from a
+**past-tense + immutable** — they never overlap. `resolution.actionId` is the one-way link from a
 resolved condition to the audit action that fixed it.
 
 ## Locked decisions (do not relitigate)
@@ -32,11 +32,11 @@ resolved condition to the audit action that fixed it.
   is measured from the kernel (`cgroup.events`) — **never fabricated**. **Honest boundary:** the watchdog
   supervises **native** instances only, so container crashes are out of scope until a Docker event source
   exists. Still deferred for want of an honest source: leaf-down (already on the `capabilities.patch` axis —
-  a leaf is infrastructure, not a §3·c game-server condition) and port-unreachable (no upstream prober).
+  a leaf is infrastructure, not a game-server condition) and port-unreachable (no upstream prober).
   Don't add a source whose signal you can't honestly measure.
 - **The poll IS the authority, and the poll interval IS the raise debounce.** We do **not** event-fast-path
   a raise — a crash that recovers faster than one poll tick is never seen down, so it never fires (exactly
-  §3·c's "don't fire on a blip"). Firing on every transient crash would be the noise the dwell exists to
+  the contract's "don't fire on a blip"). Firing on every transient crash would be the noise the dwell exists to
   prevent. The **only** event integration is the actionId bridge below.
 - **Resolve is probation-gated (api-owned); escalate is mirrored (watchdog-owned).** A cleared condition is
   resolved only after it stays clear for `ResolveProbation` (30s) — measured from the **first clear
@@ -156,7 +156,7 @@ A firing record carries `actions[]` — the operations a surface may draw a butt
   no cause, so every verb available would be a guess at which; and a cleared condition has nothing left to
   do about it. `Actions` is `null` on every resolved record.
 
-## Stream message contract (architecture.html §3·c)
+## Stream message contract
 
 - `alert.raise` → the **full `Alert`** record (status `firing`). Re-pushed to flip `escalated`/`attempts`.
 - `alert.resolve` → **`{ id, resolution }`** (`AlertResolved`). Client stamps `resolvedAt`, moves to the
@@ -165,7 +165,7 @@ A firing record carries `actions[]` — the operations a surface may draw a butt
 - **Coalesce key = the alert id** (`StreamProtocol.AlertEntityKey`), so all three kinds for one condition
   share a slot — a `resolve`/`retract` correctly supersedes a queued `raise` (the `ServerPatch`/
   `ServerRemoved` precedent, **not** the audit per-append unique key). A torn-down slow client re-hydrates
-  via `GET /alerts` (§3·j), so coalescing never loses durable truth.
+  via `GET /alerts`, so coalescing never loses durable truth.
 
 ## Invariants when you touch this
 
@@ -176,7 +176,7 @@ A firing record carries `actions[]` — the operations a surface may draw a butt
 - **Always-on, not subscriber-gated** (like `LeafHealthMonitor`, unlike the metric pumps): `GET /alerts`
   must serve fresh truth regardless of stream subscribers. With no watchdog provisioned the loop logs once and
   serves an **empty** feed (degrade gracefully — never a 500).
-- **Severity is the §3·c subset** (`danger|warn|info`) — no `success` (a firing condition is never a
+- **Severity is the alert subset** (`danger|warn|info`) — no `success` (a firing condition is never a
   success). `resolution.by` is **always `system`** (the server observed the clear, never the client).
 - **`anchor.surface`** is a best-effort deep-link hint (`server` for a crash); the frontend always has
   `serverId`/`hostId` to route from if it doesn't recognize the surface. Confirm the surface vocabulary at

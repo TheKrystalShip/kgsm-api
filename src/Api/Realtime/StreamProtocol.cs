@@ -27,7 +27,7 @@ public readonly record struct TopicGate(TopicGateKind Kind, string? Action = nul
 /// <summary>
 /// The single source of truth for the realtime wire vocabulary (M2) — every topic name and
 /// message <c>type</c> string lives here, never inlined as a magic string at a call site.
-/// The contract is frozen in <c>PLAN.md §6</c> and reconciled against <c>architecture.html §3·b</c>.
+/// The contract is frozen in <c>PLAN.md §6</c> and reconciled against <c>reference/realtime-stream.md</c>.
 /// <para>
 /// Adding a topic/type is a one-line, additive change here (M3 brings <c>jobs</c>, M5 <c>audit</c>,
 /// etc.); subscribers to a not-yet-implemented topic are accepted and simply receive nothing until
@@ -252,7 +252,7 @@ public static class StreamProtocol
     public static string HostLogEntityKey(string cursor) => $"logs:{cursor}";
 
     // --- jobs (M3 — the command write path) ---
-    /// <summary>Command/job progress + completion (host-wide): <c>jobs</c> (architecture.html §5·d).</summary>
+    /// <summary>Command/job progress + completion (host-wide): <c>jobs</c> (reference/node-api.md commands).</summary>
     public const string JobsTopic = "jobs";
     /// <summary>
     /// A full <see cref="Contracts.Job"/> on every state transition, merged by id (patch-only, exactly like
@@ -286,7 +286,7 @@ public static class StreamProtocol
     public static string BatchEntityKey(string id) => $"batches:{id}";
 
     // --- audit (M5 — the append-only action log) ---
-    /// <summary>Newly-appended audit records (host-wide): <c>audit</c> (architecture.html §3·d).</summary>
+    /// <summary>Newly-appended audit records (host-wide): <c>audit</c> (reference/node-api.md audit).</summary>
     public const string AuditTopic = "audit";
     /// <summary>
     /// A single appended <see cref="Contracts.AuditRecord"/> (the client prepends it — events are
@@ -341,7 +341,7 @@ public static class StreamProtocol
     public static string PlayerResetEntityKey(string serverId) => $"players-reset:{serverId}";
 
     // --- alerts (M6·a — the condition-mirror feed) ---
-    /// <summary>Live problem conditions, host-wide: <c>alerts</c> (architecture.html §3·c).</summary>
+    /// <summary>Live problem conditions, host-wide: <c>alerts</c> (reference/node-api.md alerts).</summary>
     public const string AlertsTopic = "alerts";
     /// <summary>A new condition starts firing, OR a re-push of the full <see cref="Contracts.Alert"/>
     /// record (e.g. to flip <c>escalated</c>). The client upserts by id.</summary>

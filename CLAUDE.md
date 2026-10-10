@@ -16,7 +16,7 @@ default; `Api__AuthDisabled=true` is the loudly-logged dev escape hatch (a synth
 - `PLAN.md`: the staged roadmap, the §6 registry of every frozen wire shape, and what is built versus
   planned. `PLAN-peers.md`: gossip and the roster.
 - `../kgsm-docs/reference/node-api.md` and `reference/realtime-stream.md`: the conventions and the
-  stream. `../kgsm-docs/plans/architecture.html` is the frontend spec the contracts were frozen from.
+  stream.
 - `../kgsm-docs/systems/control-panel/node-api.md`: how the node produces them.
 - `../kgsm-docs/systems/authorization/` before touching access; `../kgsm-docs/architecture/README.md`
   for the ecosystem.

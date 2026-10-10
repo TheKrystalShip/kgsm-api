@@ -17,7 +17,7 @@ using TheKrystalShip.Auth.Cluster;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// The installable-game catalog read surface (<c>architecture.html §3·h/§3·i</c>, M8·a). A scrape of this
+/// The installable-game catalog read surface (<c>reference/node-api.md library</c>, M8·a). A scrape of this
 /// host's kgsm blueprints (via kgsm-lib) joined with this host's cached RAWG.io cover/metadata, mapped to the
 /// honest <see cref="LibraryEntry"/> shape — no mutation (that is <c>POST /servers</c>, M8·b). The
 /// <c>GET /library</c> listing and the blueprint file reads take <c>kgsm:library.read</c>, every write

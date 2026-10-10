@@ -2,7 +2,7 @@ namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
 /// Liveness payload for <c>GET /health</c>. This endpoint is <b>ours</b> (ops /
-/// load-balancer / smoke probe), not a frontend contract — architecture.html
+/// load-balancer / smoke probe), not a frontend contract — reference/node-api.md
 /// specifies no health endpoint; the SPA derives liveness from its data stores'
 /// <c>connecting → live → down</c> state (§3·j), not from here. Returned as JSON
 /// (not bare text) to stay consistent with the API's JSON-everywhere convention.

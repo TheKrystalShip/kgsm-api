@@ -2,7 +2,7 @@ namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
 /// One installable game in the catalog — the <strong>honest realization</strong> of the
-/// <c>GET /library</c> entry (<c>architecture.html §3·h/§3·i</c>), frozen at M8·a. Sourced purely
+/// <c>GET /library</c> entry (<c>reference/node-api.md library</c>), frozen at M8·a. Sourced purely
 /// from the kgsm engine's blueprints (via kgsm-lib <c>IBlueprintService.ListDetailed</c>); a pure
 /// read, the catalog analog of the M1·a host scrape (no mutation, no leaf join).
 /// <para>
@@ -88,7 +88,7 @@ public sealed record LibraryEntry(
 public sealed record LibraryPort(int Start, int End, string Proto);
 
 /// <summary>
-/// Advisory, vendor-declared game specs (<c>architecture.html §3·h "specs"</c>) — mapped 1:1 from
+/// Advisory, vendor-declared game specs (<c>reference/node-api.md library "specs"</c>) — mapped 1:1 from
 /// kgsm-lib's <c>BlueprintMetadata</c>. Every field is nullable: <c>null</c> means
 /// <em>unknown/unbounded</em>, never a substitute for a real <c>0</c> (the never-fabricate-a-metric
 /// invariant). Coverage is per-blueprint — RAM (<c>MinRamMb</c>/<c>RecommendedRamMb</c>) is widely curated,

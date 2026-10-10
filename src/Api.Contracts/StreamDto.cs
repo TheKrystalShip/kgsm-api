@@ -2,7 +2,7 @@ namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
 /// The host capacity sample pushed on the <c>hosts/{id}/metrics</c> topic (M2). It is exactly the
-/// mutable, measured portion of the <see cref="Host"/> view (<c>architecture.html §4·a</c>) — the
+/// mutable, measured portion of the <see cref="Host"/> view (<c>reference/node-api.md hosts</c>) — the
 /// same <see cref="MemCapacity"/>/<see cref="DiskCapacity"/> shapes and units (GiB) the REST
 /// <c>GET /hosts</c> emits — minus the stable identity/label and the capability block (capability
 /// flips ride their own <c>hosts/{id}/capabilities</c> topic). Built from one monitor snapshot via

@@ -5,7 +5,7 @@
 # same file; keep the leaf→unit map in step across the two.
 #
 # The API fans configuration OUT to this leaf via an override env file in the API's OWN state dir;
-# the leaf never references the API (keystone §4: "no leaf depends on the API"). This drop-in is pure
+# the leaf never references the API (kgsm-docs decisions/0016-leaves-stand-alone.md: no leaf depends on the API). This drop-in is pure
 # plumbing — static, installed once + daemon-reload; the override file's CONTENTS change at runtime
 # (the API rewrites them unprivileged), which needs no reload, only a restart to apply.
 #

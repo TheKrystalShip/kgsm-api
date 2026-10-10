@@ -9,7 +9,7 @@ using TheKrystalShip.Api.Services.Auth;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// The <c>/alerts</c> read surface (M6·a, architecture.html §3·c) — the condition-mirror: live problem
+/// The <c>/alerts</c> read surface (M6·a, reference/node-api.md alerts) — the condition-mirror: live problem
 /// conditions now (<c>?status=firing</c>) and a short resolved rear-view (<c>?status=resolved&amp;since=24h</c>).
 /// <b>Read-only by design</b>: there is no complete/dismiss/PATCH — the server raises and resolves; the
 /// client never writes an alert. New conditions also arrive live on the <c>alerts</c> WS topic

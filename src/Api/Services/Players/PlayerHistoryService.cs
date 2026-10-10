@@ -93,7 +93,7 @@ public sealed class PlayerHistoryService(
         // A server the engine reports as stopped contributes nothing, whatever its entry says: a
         // process that is not running has no connections, so a session it still names describes
         // something that cannot exist. This is the same status-from-the-authority join every other
-        // surface makes (keystone §4) rather than a second opinion about presence — and it matters
+        // surface makes (kgsm-docs decisions/0020-measured-or-unknown.md) rather than a second opinion about presence — and it matters
         // most here, because this method writes to the PERMANENT roster: an unjoined snapshot is how
         // a stale session became a durable "online" that outlived several restarts.
         var onlineByInstance = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);

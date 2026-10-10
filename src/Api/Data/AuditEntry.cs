@@ -1,7 +1,7 @@
 namespace TheKrystalShip.Api.Data;
 
 /// <summary>
-/// One immutable row of the append-only audit log (M5, architecture.html §3·d) — a past-tense
+/// One immutable row of the append-only audit log (M5, reference/node-api.md audit) — a past-tense
 /// fact: a thing a human or the system <em>did</em>. The table is the durable archive the alerts
 /// feed ages into; rows are never updated or deleted (a correction is a new row).
 /// <para>

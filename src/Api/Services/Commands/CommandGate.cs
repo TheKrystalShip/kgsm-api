@@ -3,7 +3,7 @@ using TheKrystalShip.Api.Contracts;
 namespace TheKrystalShip.Api.Services.Commands;
 
 /// <summary>
-/// The M3 admissibility gate (architecture.html §5·d "state guards"). Deliberately <b>minimal</b>:
+/// The M3 admissibility gate (reference/node-api.md commands "state guards"). Deliberately <b>minimal</b>:
 /// it rejects only the obvious no-ops against the <em>real observed</em> status — start-when-running,
 /// start-when-starting, stop-when-stopped — and lets everything else through, so the engine (kgsm →
 /// watchdog/Docker) stays the single authority on what a verb does. The API never fabricates an

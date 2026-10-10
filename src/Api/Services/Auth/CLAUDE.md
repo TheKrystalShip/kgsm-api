@@ -54,11 +54,10 @@ assignments, the catalog), on every request. The authority for the model is
   the attribute itself), and the controller asks `NodeAccess` in the body. A batch's members are each
   refused on their own. `ActionIds` names every id this API gates on; `api:*` are declared in
   `ApiActionDeclarations.cs`, every other one in its own component's manifest.
-- **What is enforced is published.** `GET /api/v1/operations` (`ApiOperations`) is built from those
-  attributes on the endpoints as mapped — method, route under `/api/v1`, action, and scope by
-  `NodeAccess.IsServerRoute`, the same test `TargetOf` evaluates with — so a client gates a control on
-  the request it will make and holds no action ids. Every entry a request matches must be held. A gate
-  decided in a handler from anything other than those attributes is a gate no client can see, and
+- **What is enforced is published.** `GET /api/v1/operations` (`ApiOperations`,
+  `../../../../../kgsm-docs/reference/operation-manifest.md`) is built from those attributes on the
+  endpoints as mapped, with scope by `NodeAccess.IsServerRoute`, the same test `TargetOf` evaluates with.
+  A gate decided in a handler from anything other than those attributes is a gate no client can see, and
   `OperationsTests` fails on any `[RequiresAction]` route the document leaves out.
 - **A collection is cut to its reader.** `GET /servers`, availability, and every server frame on the
   stream carry only the servers the caller may read (`NodeAccess.AllowedServersAsync`), so somebody
@@ -127,12 +126,5 @@ assignments, the catalog), on every request. The authority for the model is
 - **Honest failure modes:** the replica unreadable → `502 authority_unavailable`. **Never a default
   grant, and never a denial either** — "we could not ask" is a third answer and must stay one. A
   disabled account → terminal refusal.
-- **`/stream` gates per topic and per frame, not per endpoint.** Any authenticated caller connects; each
-  topic delivers only what the reader's access reaches (`StreamProtocol.Gate`) — silently, never a 403
-  on the whole stream. Access is evaluated on every frame from the replica as it stands
-  (`Realtime/StreamAccess.cs`), so access granted or taken away while a stream is open applies to the
-  next frame, both ways. `me` needs nothing, so somebody awaiting approval holds a connection that
-  carries news about their own account and nothing else.
-- **The SSE bearer is a normal `Authorization` header**, so `/stream` authenticates through the standard
-  JwtBearer pipeline like every other request — a query-string token authenticates nothing
-  (`Stream_Sse_QueryTokenIgnored`).
+- **`/stream` gates per topic and per frame, not per endpoint**, and its bearer is a normal
+  `Authorization` header: `Realtime/CLAUDE.md` (Auth).
