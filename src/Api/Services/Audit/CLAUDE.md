@@ -7,9 +7,9 @@ side is `../../../../../kgsm-docs/systems/events/`. This file is the local "what
 ## Locked decisions (do not relitigate)
 
 - **Event-sourced, and every producer records its own actions.** kgsm **owns** `server.*`/`backup.*`;
-  the watchdog owns what it supervises; the monitor owns what it measured; and this API owns `auth.*`,
-  `user.*`, `identity.*`, `service.*`, `file.write` and `backup.download`, which it writes to **its own
-  journal** (`ApiJournal` → `Api__EventJournalDir`). `GET /audit` is the merge of every journal plus the
+  the watchdog owns what it supervises; the monitor owns what it measured; the auth anchor owns sign-ins
+  and account changes; and this API owns `service.*`, `file.written`, `backup.downloaded`, `command.*`
+  and `library.*`, which it writes to **its own journal** (`ApiJournal` → `Api__EventJournalDir`). `GET /audit` is the merge of every journal plus the
   local table's historical rows. **Nothing writes an audit row directly** — there is no append
   path on `AuditService`.
   The API **never** records a row when it *issues* a command to another component: the command path only
@@ -156,7 +156,7 @@ side is `../../../../../kgsm-docs/systems/events/`. This file is the local "what
 visible), then wires events **only if** the engine is provisioned and `IEventService` resolves; an unreadable or
 absent journal is logged and skipped (the read loop is kgsm-lib's own fire-and-forget task, and it
 tolerates a directory that does not exist yet, so it never throws here). Recording is best-effort throughout —
-`ApiJournal` logs a failure and swallows it, because a sign-in that already happened must not turn into an
+`ApiJournal` logs a failure and swallows it, because an action that already happened must not turn into an
 error because writing it down did not work. **Honest boundary:** events emitted while the
 API isn't listening are **not** audited (stateless engine, no backfill) — state it, don't try to backfill.
 
