@@ -18,7 +18,7 @@ public sealed record LeafConfigGroup(string Id, string Label, int Order);
 /// <summary>
 /// A leaf's own declaration of its full configurable surface, shipped as
 /// <c>/var/lib/kgsm/leaves/&lt;id&gt;.json</c> by that leaf's <c>deploy.sh</c> and read (never written) here.
-/// The format is owned by <c>tks/leaf-config-descriptor.md</c>.
+/// The format is owned by <c>kgsm-docs/reference/leaf-config-descriptor.md</c>.
 /// </summary>
 /// <remarks>
 /// Distinct from <see cref="LeafDescriptor"/>, which is <em>this API's</em> static catalog of what services a

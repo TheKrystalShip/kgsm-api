@@ -5,8 +5,7 @@ auth anchor (`tks-auth`) — which on a machine that founded its own cluster run
 is verified here against the key that member publishes. **What a caller may do** is evaluated per
 action, from this node's replica of the cluster's authority (accounts, roles, permissions, scoped
 assignments, the catalog), on every request. The authority for the model is
-`../../../../kgsm-docs/systems/authorization/`, `../../../../cluster-auth-plan.md` and
-`../../../../hosted-sign-in-plan.md`; this file is the local "what you must not break."
+`../../../../../kgsm-docs/systems/authorization/` and `../../../../../kgsm-docs/systems/identity/`; this file is the local "what you must not break."
 
 ## Locked decisions (do not relitigate)
 

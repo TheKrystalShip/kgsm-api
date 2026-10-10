@@ -4,10 +4,9 @@
 > all belonging to **one cluster**, discover each other's resources,
 > recommend placement, share a single sign-on, and federate the assistant.
 >
-> Extends the O7 stub in `system-architecture.md §5`; companion to
-> `kgsm-api/PLAN.md` (the per-host milestone plan). The node-to-node transport it
-> rides on has its own authority: **the cluster package's `docs/cluster-message-bus.md`** (built
-> first — it is the foundation every peer feature depends on).
+> Companion to `kgsm-api/PLAN.md` (the per-host milestone plan). The cluster as built is
+> `../kgsm-docs/systems/cluster/`. The node-to-node transport it rides on has its own authority:
+> **the cluster package's `docs/cluster-message-bus.md`** (the foundation every peer feature depends on).
 
 ---
 
@@ -40,7 +39,7 @@ every member evaluates a caller against its own read-only replica of them
   per-node asymmetric identity (see §3, mTLS upgrade path).
 
 This does **not** break the "leaves independently deployable" doctrine
-(`system-architecture.md §4`): a node still runs fully standalone; `cluster` is an
+(`../kgsm-docs/decisions/0016-leaves-stand-alone.md`): a node still runs fully standalone; `cluster` is an
 additive capability. Membership requires config homogeneity; operation does not.
 
 ---
@@ -76,7 +75,7 @@ per-leaf status, not from a status line on the capability itself.
 | 5 | No per-node keypairs | Symmetric shared secret only — no Ed25519, no per-request asymmetric signing |
 | 6 | Handshake | Somebody holding `api:members.manage` pastes a URL → the two nodes exchange **node cards** in one symmetric `POST /members/introduce` over TLS (§7), each validating the other with the same predicate and each recording the mirror of what the other records. No key exchange, no fingerprint confirmation |
 | 7 | Trust direction | **Symmetric by construction** — the shared secret *is* the trust boundary. A node trusts any caller bearing a valid cluster-secret service token whose `iss` is **not an explicitly-disabled peer** (a **disable-list** gate, not an allow-list): an unknown-but-validly-tokened node is trusted, because holding the secret already proves cluster membership. This is what makes trust transitive without pairwise handshakes and lets the mesh work under a partial topology view |
-| 8 | Node disable | A row flag in the `Peers` table — disabled ⇒ its service tokens rejected (`403 peer_disabled`); stays in DB for re-enable. Disable is the **only** local override to the shared-secret trust; absence from the table is *not* rejection |
+| 8 | Node disable | A row flag in the `Peers` table — disabled ⇒ its service tokens rejected (`403 member_disabled`); stays in DB for re-enable. Disable is the **only** local override to the shared-secret trust; absence from the table is *not* rejection |
 | 9 | Secret rotation | Dual-secret overlap window: nodes accept `{current, previous}`, roll one at a time, drop `previous` |
 | 10 | Version policy | **Match on `apiVersion` (`v1`)**, not build version — allows rolling upgrades across a heterogeneous-build mesh |
 | 11 | Discovery | **Join-via-one-seed + gossip convergence.** The only membership action, ever, is "join the cluster": paste **one** existing member's URL. From that seed the roster converges automatically (§2·b) — add one, join all. No per-peer approvals, no master node |
@@ -105,7 +104,7 @@ two controller endpoints), **no new service, broker, or dependency**.
 
 | # | Decision | Choice |
 |---|---|---|
-| 13 | One sign-in, whole cluster | A person signs in **once**, at the auth anchor; the session it mints is accepted by every member, and what it may do is evaluated per action on each (`hosted-sign-in-plan.md`) |
+| 13 | One sign-in, whole cluster | A person signs in **once**, at the auth anchor; the session it mints is accepted by every member, and what it may do is evaluated per action on each (`../kgsm-docs/systems/identity/sign-in.md`) |
 | 14 | No session lives on a node | A member verifies a session against the key the anchor publishes and keeps no row for it — only the list of sessions that have ended |
 | 17 | SPA connection model | A **direct multi-host client** — one session, per-node SSE, browser fans out |
 | 19 | Logout everywhere | An ended session is announced over the message bus (`session.revoke`) — durable, so a node that is down when it ends refuses it when it returns |
@@ -224,7 +223,7 @@ The SPA calls any member with that bearer:
 | A5 | Auth for peer queries | Relay: the local API proxies with a **service token**; no user token leaves the origin |
 | A6 | Wire path | Assistant → local API → service-token call to peer → result back |
 | A7 | Freshness | Real-time query, always live |
-| A8 | Peer query failure | Single retry, then honest failure (`peer_unreachable`); a dead peer yields a **partial** cluster answer, never a whole-cluster failure |
+| A8 | Peer query failure | Single retry, then honest failure (`member_unreachable`); a dead peer yields a **partial** cluster answer, never a whole-cluster failure |
 
 Tools gaining an optional `nodeId`: `get_servers`, `get_library`,
 `get_host_status`; plus a new `get_cluster_overview` (fan-out aggregate). Routing
@@ -256,7 +255,7 @@ mesh that works fully before gossip lands:
   `apiVersion` match → confirm it advertises `cluster` → store); reachability
   validated at add time.
 - The **disable-list gate**: replace `AllowAllClusterPeerGate` with a `Peers`-table
-  gate that rejects only explicitly-disabled peers (`403 peer_disabled`); an
+  gate that rejects only explicitly-disabled peers (`403 member_disabled`); an
   unknown validly-tokened node is accepted (§2 #7).
 - Real outbox fan-out: a `ClusterTarget` provider reading enabled roster members
   (the **durable** send set narrows to first-hand-`alive` peers once gossip can inject
@@ -342,7 +341,7 @@ pre-told its own address (§2 #13a-c).
   `PeerLatencyPoller` walks them in order and pins the first that answers `/identity` with
   the expected `nodeId`. Every candidate failing is an honest `unreachable`.
 - **Where a member says it answers.** A configured public address leads, then the name the
-  cluster assigned it and serves (`cluster-dns-plan.md`), then the member-only gossip
+  cluster assigned it and serves (`../kgsm-docs/systems/cluster/dns.md`), then the member-only gossip
   address, then what reflection learned (`SelfIdentityStore`). Learned candidates persist,
   so a restart keeps them.
 - **Panel origins come from the sign-in provider.** CORS admits the origins the cluster's
@@ -467,11 +466,11 @@ a panel reads to auto-populate its node registry.
 → 201 { id, url, nickname, nodeId, apiVersion, status:"reachable", enabled:true }
 → 400 { error: { code: "invalid_url" } }
 → 409 { error: { code: "version_mismatch", details: { remote:"v2", local:"v1" } } }
-→ 422 { error: { code: "peer_not_cluster",
+→ 422 { error: { code: "member_not_cluster",
         message: "Remote node does not advertise the cluster capability" } }
 → 422 { error: { code: "insecure_transport" } }
-→ 409 { error: { code: "peer_is_self" } }
-→ 502 { error: { code: "peer_unreachable" } }
+→ 409 { error: { code: "member_is_self" } }
+→ 502 { error: { code: "member_unreachable" } }
 ```
 
 ### `POST /api/v1/members/introduce` (cluster-token authed)
@@ -481,15 +480,15 @@ record, and the same validation predicate runs on both sides.
 { "self": { "nodeId": "node-a", "apiVersion": "v1", "build": "0.1.0+abc123",
             "capabilities": ["monitor","watchdog","cluster"],
             "candidates": [{ "url": "https://node-a.example", "client": true }],
-            "incarnation": 3, "protocol": 1 },
+            "incarnation": 3, "protocol": 3 },
   "youAre": { "url": "https://node-b.example", "provenance": "operator" } }
 → 200  the same record from the other side; its `youAre` carries
        `"provenance": "observed"`, or is null when the receiver saw no usable address
 → 401 { error: { code: "invalid_cluster_token" } }
-→ 409 { error: { code: "peer_is_self" } }
+→ 409 { error: { code: "member_is_self" } }
 → 409 { error: { code: "version_mismatch", details: { remote:"v2", local:"v1" } } }
 → 409 { error: { code: "protocol_mismatch" } }
-→ 422 { error: { code: "peer_not_cluster" } }
+→ 422 { error: { code: "member_not_cluster" } }
 → 422 { error: { code: "insecure_transport" } }
 ```
 
@@ -497,14 +496,14 @@ record, and the same validation predicate runs on both sides.
 ```json
 { "nodeId": "node-b", "apiVersion": "v1", "build": "0.1.0+abc123",
   "capabilities": ["monitor","watchdog","cluster"],
-  "candidates": [{ "url": "https://node-b.example", "client": true }], "protocol": 1 }
+  "candidates": [{ "url": "https://node-b.example", "client": true }], "protocol": 3 }
 ```
 
 ### `GET /api/v1/members/self/resources` (cluster-token authed + disable-gated)
 What this node exposes to a cluster peer's server-side fan-out. Cluster-token authed with the same
 fail-closed preamble as `/members/inbox`, and — unlike `/members/identity` (token-only, so a not-yet-joined
 node can still identify itself) — a resource read IS disable-gated: an explicitly-disabled peer gets
-`403 peer_disabled`. A lean projection of the §4·a host capacity strip; `cpuPct`/`mem`/`disks` are honest
+`403 member_disabled`. A lean projection of the §4·a host capacity strip; `cpuPct`/`mem`/`disks` are honest
 `null` when no metrics snapshot exists (never fabricated — the "metric-presence ≠ status" invariant).
 ```json
 { "id": "node-b", "label": "Gaming Box", "status": "online",
@@ -518,8 +517,9 @@ capability and `LibraryEntry` shapes verbatim, same auth + gate.)
 ### `GET /api/v1/members/{id}/{resources|capabilities|library}` (`api:members.manage` — the relay)
 The **server-side node-proxy** (the one node-proxied path): mints a cluster service token and GETs peer
 `{id}`'s `self/*` surface, returning the peer's body **verbatim**. Consumed by the
-capacity fan-out / the assistant, **never the SPA** (§8). `{id}` is the roster-row id (as `/{id}/latency`).
-Honest degradation, never a 500: `404` unknown id, `403 peer_disabled`, `502 peer_unreachable` (down peer
+capacity fan-out / the assistant, **never the SPA** (§8). The routes are built; their consumers (the capacity fan-out, the assistant) are
+planned. `{id}` is the roster-row id (as `/{id}/latency`).
+Honest degradation, never a 500: `404` unknown id, `403 member_disabled`, `502 member_unreachable` (down peer
 or non-2xx).
 
 ### `POST /api/v1/members/inbox` (cluster-token authed)
@@ -557,7 +557,7 @@ the cluster package's `docs/cluster-message-bus.md`.
   to that peer with the same session; the source node drops out of the loop.
 - **CORS follows the sign-in provider's clients:** a peer admits the SPA's origin
   because the SPA is a registered client of the cluster's provider, whose origins
-  every member reads through the holder (`hosted-sign-in-plan.md` decision 18). The
+  every member reads through the holder (`../kgsm-docs/systems/identity/sign-in.md`). The
   Cluster page runs a browser-side preflight probe per peer and **warns** on a
   CORS/reachability mismatch rather than failing opaquely mid-install.
 
@@ -638,7 +638,7 @@ Still open — to resolve before or during the relevant phase:
    double-booking bites in practice (a short-lived reservation on the target).
 5. **Nickname divergence.** Nicknames are node-local; the SPA aggregates — decide
    which label wins when two nodes name the same peer differently (cosmetic).
-6. **`peer_disabled` after cluster opt-out.** A node that drops the `cluster`
+6. **`member_disabled` after cluster opt-out.** A node that drops the `cluster`
    capability while peers still list it: its `/members/self/*` and `/inbox` must
    `404`/`403` cleanly, and peers must reflect it as unavailable, not fabricate a
    status.

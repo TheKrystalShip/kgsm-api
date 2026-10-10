@@ -118,8 +118,10 @@ This README is an overview; the authorities are:
 
 - **`PLAN.md`** — the milestone roadmap, principles, and the **§6 cross-team contract registry** (every
   frozen wire shape). The authority for this backend.
-- **`../architecture.html`** — the frontend team's external-surface spec (REST/WS/SSE, auth Model A,
-  the §6 conventions). The authority for the wire contracts.
-- **`../system-architecture.md`** — the ecosystem keystone (topology, invariants, open decisions).
+- **`../kgsm-docs/reference/node-api.md`** and **`../kgsm-docs/reference/realtime-stream.md`** — the
+  conventions, route families and push stream. `../kgsm-docs/plans/architecture.html` is the frontend
+  team's external-surface spec the contracts were frozen from.
+- **`../kgsm-docs/architecture/README.md`** — the ecosystem: topology, invariants, which document owns
+  which contract.
 - **`CLAUDE.md`** — working guidance, the locked stack decision, and the invariants ("never fabricate",
   "metric-presence ≠ status", additive-only, single-writer audit).

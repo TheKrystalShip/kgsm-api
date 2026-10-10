@@ -402,7 +402,7 @@ public sealed class ApiOptions
     /// <c>/var/lib/kgsm/leaves</c>). Each leaf's own <c>deploy.sh</c> installs <c>&lt;leaf&gt;.json</c> here
     /// declaring its full configurable surface; this API only ever <strong>scans and reads</strong> it, so a
     /// leaf that joins the ecosystem later becomes configurable with no rebuild here. Format:
-    /// <c>tks/leaf-config-descriptor.md</c>.
+    /// <c>kgsm-docs/reference/leaf-config-descriptor.md</c>.
     /// </summary>
     public required string LeafDescriptorDir { get; init; }
 
@@ -411,7 +411,7 @@ public sealed class ApiOptions
     /// <c>/var/lib/kgsm/anchors</c>). A component declaring <c>[Anchor]</c> installs <c>&lt;name&gt;.json</c>
     /// here. This API reads it for one fact — which components on this host are anchors — and subtracts
     /// them from the node's services: an anchor owns its own configuration and journal and is reached as
-    /// the cluster member it is. Format: <c>tks/leaf-config-descriptor.md</c>.
+    /// the cluster member it is. Format: <c>kgsm-docs/reference/leaf-config-descriptor.md</c>.
     /// </summary>
     public required string AnchorDescriptorDir { get; init; }
 

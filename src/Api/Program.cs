@@ -53,7 +53,7 @@ public class Program
                 if (string.IsNullOrWhiteSpace(urls)) urls = DefaultUrls;
                 config.AddInMemoryCollection(new Dictionary<string, string?> { [ServerUrlsKey] = urls });
             })
-            // Ecosystem-standard logging (see ../tks/logging-convention.md): one journald-native
+            // Ecosystem-standard logging (see kgsm-docs/reference/logging-convention.md): one journald-native
             // SystemdConsole sink (the <N> syslog priority prefix lets `journalctl -p` filter by level).
             // CreateDefaultBuilder already binds the "Logging" appsettings section + env overrides; this
             // only swaps the default Simple/Debug/EventSource providers for the single Systemd sink.

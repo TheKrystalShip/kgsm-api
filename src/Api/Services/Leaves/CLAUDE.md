@@ -1,6 +1,6 @@
 # Leaves: what this API connects, configures and relays
 
-The API **aggregates leaves; no leaf depends on the API** (keystone §4). A missing/down leaf removes
+The API **aggregates leaves; no leaf depends on the API** (`../../../../../kgsm-docs/decisions/0016-leaves-stand-alone.md`). A missing/down leaf removes
 only its capability, never a 500, and the API runs with any subset of leaves present.
 
 ## Leaf health & the capability model (`LeafHealthMonitor`, `LeafRegistry`)
@@ -57,7 +57,7 @@ Each leaf ships a config descriptor its own `deploy.sh` installs into `/var/lib/
 and `risk`. `LeafDescriptorStore` **scans that directory**, so a leaf that joins the ecosystem later
 becomes configurable, and appears on the Services board, with no rebuild here. `LeafConfigManifest` is
 the built-in fallback for a leaf that has not shipped a descriptor, not the authority. Format:
-`../leaf-config-descriptor.md` at the workspace root.
+`../../../../../kgsm-docs/reference/leaf-config-descriptor.md`.
 
 - **Readable and editable are separate.** A descriptor makes a leaf's config visible with full
   provenance; editing also needs the leaf's override drop-in to apply on this host, because without it
@@ -97,4 +97,4 @@ the panel prints it; a command naming none is a file this API skips. A leaf that
 **404**, not an empty list — most take no commands, and that is a different statement. Read-only
 reference material, so it takes `api:services.read` with the rest of `ServicesController`. **The
 understood version is `LeafCommandManifest.SupportedSchemaVersion`**; anything else is skipped whole
-and logged once, never half-read. Format: `../leaf-command-manifest.md` at the workspace root.
+and logged once, never half-read. Format: `../../../../../kgsm-docs/reference/leaf-command-manifest.md`.

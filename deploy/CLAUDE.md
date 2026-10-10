@@ -6,15 +6,15 @@
 ```
 
 **To (re)deploy the API, run `./deploy/deploy.sh` — do NOT run the individual publish/`systemctl`
-steps by hand.** It publishes as the invoking (service-owning) user, bundles the SPA, refreshes the
+steps by hand.** It publishes as the invoking (service-owning) user, refreshes the
 unit only if it changed, stops the unit, `rsync`s the binary tree into `/opt/kgsm-api`, starts it, and
 verifies with a real `HTTP 200` from `/health` (it does not claim success on the launch exit code
 alone). The health URL is **resolved from the configured `Api__Urls`**, not hardcoded — on this host
-that is loopback `:8097`, while the unit's built-in default is `:8080`. Idempotent; the env file
+that is loopback `:8097`, while the unit's built-in default is `:8080`. `wwwroot/` is excluded from the sync: the Control Panel is `kgsm-web`'s to install, and an API deploy neither fills nor empties it. Idempotent; the env file
 (`/etc/kgsm-api/kgsm-api.env`) and DB (`/var/lib/kgsm-api`) live outside `/opt` and are never touched.
-It opens with a `require_setup` assertion that fails **before building** — with *"run
-`deploy/setup.sh`"* — when the host is not provisioned. `deploy-common.sh` holds the paths, unit names
-and helpers both scripts share, so the two can never disagree.
+The shared mechanism (`require_setup`, `deploy-common.sh`, the polkit grant) is
+`../../kgsm-docs/systems/distribution/checkout-deploy.md`; `deploy-common.sh` holds the paths, unit names
+and helpers both scripts share.
 
 `setup.sh` owns everything privileged: it chowns `/opt/kgsm-api` to you, seeds the env file, puts the
 real unit in `/etc/kgsm-api/systemd/` with `/etc/systemd/system/kgsm-api.service` symlinked to it,

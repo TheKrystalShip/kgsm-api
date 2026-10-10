@@ -21,7 +21,7 @@ public readonly record struct RunTimes(DateTimeOffset? SpawnedAt, DateTimeOffset
 /// <para><b>Why the watchdog and not the engine.</b> kgsm dates a run from a local pid file, and a native
 /// instance the watchdog spawned has none — the process lives in a cgroup the daemon owns, so the engine's
 /// <c>start_time</c> is null for exactly the instances this host runs. The watchdog is already the run-state
-/// authority for a native instance (<c>system-architecture.md §4</c>), and it holds both timestamps durably:
+/// authority for a native instance (<c>kgsm-docs/systems/engine/watchdog.md</c>), and it holds both timestamps durably:
 /// the spawn time beside the persisted phase, and the last exit in its run ledger. Asking the authority for
 /// the clock keeps run-state and run-duration answered by one source that cannot disagree with itself.</para>
 /// <para><b>Containers are not covered here</b> and do not need to be: Docker reports a start time that

@@ -1,8 +1,8 @@
 # CLAUDE.md — Services/Audit/
 
-The append-only **audit log** (architecture.html §3·d) — persistence *downstream* of the stateless
-engine (keystone O3). `GET /api/v1/audit` (keyset) + the `audit` SSE topic (`audit.append`). The
-contract is frozen in `PLAN.md §6` (audit row). This file is the local "what you must not break."
+The append-only **audit log** — persistence *downstream* of the stateless engine. `GET /api/v1/audit`
+(keyset) + the `audit` SSE topic (`audit.append`). The audit row is frozen in `PLAN.md §6`; the event
+side is `../../../../../kgsm-docs/systems/events/`. This file is the local "what you must not break."
 
 ## Locked decisions (do not relitigate)
 
@@ -141,12 +141,13 @@ contract is frozen in `PLAN.md §6` (audit row). This file is the local "what yo
   **Resolve the reader from the request scope, not the constructor** — kgsm-lib registers only when the
   engine is provisioned, so a constructor parameter turns an engine-less host into a 500 on the one
   endpoint that explains what happened.
-- **An event's id is its journal position** (`AuditId.ForPosition`, `evt_<producer>_<segment>_<offset>`), not
-  a hash of its contents. A position-derived id keeps two identical events inside one second distinct —
-  the engine's timestamps have one-second granularity, so a content hash cannot, and the merge's dedup
-  would collapse them. The id also sorts like the journal, which is why one `(ts, id)` cursor still spans both merge sources.
-  `EngineEventIdTracker` must keep deriving the live-push id from the same position, or a client
-  reconciling an SSE row against `GET /audit` sees one fact under two ids.
+- **An event's id is the id its producer minted onto the line** (`AuditId.ForLine`); a line with no `Id`
+  falls back to its journal position (`evt_<producer>_<segment>_<offset>`). Neither is a hash of the
+  event's contents, so two identical events inside one second stay distinct and the merge's dedup keeps
+  both. The positional form sorts like the journal, which is why one `(ts, id)` cursor still spans both
+  merge sources. `EngineEnvelopeTracker` derives the live-push id through the same `AuditId.ForLine`
+  call as the history read, or a client reconciling an SSE row against `GET /audit` sees one fact under
+  two ids (`../../../../../kgsm-docs/decisions/0015-journal-lines-are-minted-an-id.md`).
 
 ## Degrade gracefully (don't crash startup)
 

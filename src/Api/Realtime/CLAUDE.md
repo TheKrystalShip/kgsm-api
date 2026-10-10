@@ -1,7 +1,8 @@
 # CLAUDE.md — Realtime/
 
-The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The contract is frozen in
-`PLAN.md §6` (stream row). This file is the local "what you must not break."
+The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The contract is
+`../../../../kgsm-docs/reference/realtime-stream.md`; the system is
+`../../../../kgsm-docs/systems/control-panel/realtime.md`. This file is the local "what you must not break."
 
 ## Locked decisions (do not relitigate)
 
@@ -37,11 +38,6 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The cont
   REST hydrate: `{ id, metrics, diskBytes }`, the same two parts `Server` carries, so a merge is
   field-for-field. **A row may be half-null** — a stopped instance has no sample and a real footprint,
   which is the whole reason disk sits outside the metrics block. Never fill either half in.
-- **`network.patch` rides its OWN topic `servers/{id}/network` — never `server.patch`.** The same
-  topic-separation discipline as metrics: keeping the firewall block off the `servers` topic is what lets
-  `server.patch` stay the frozen `Server`. **No pump publishes it** — it is pushed ONLY by the
-  `open_ports` verify (the firewall is socket-activated + idle-exits; a periodic probe would defeat that).
-  Don't add a network pump; don't fold `network` into `server.patch`.
 - **`me` is delivered by AUDIENCE, not by subscription alone.** Every other topic is host-wide: anyone
   subscribed gets the frame. This one carries the *reader's own* standing (`me.patch` with the account's
   `status`, `me.access` with the whole `GET /me/access` answer), so it goes only to the connections

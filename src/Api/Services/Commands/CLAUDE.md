@@ -6,12 +6,9 @@ the `jobs` SSE topic (`job.patch`) → verify (`server.patch` on settle)**. The 
 
 ## Locked decisions (do not relitigate)
 
-- **Closed verb set: `start`·`stop`·`restart`·`open_ports`** (`update` deferred — long-running +
-  version-changing). Verbs are server-defined in `CommandVerb`; a client/model can't invent one. Add new
-  verbs there. **`open_ports`** is intent-only — it carries **NO client port list**; the runner
-  derives the target from the instance's own `Instance.Ports` (a client list would let the browser open
-  anything). It is **always admissible** (no run-state no-op — declarative/idempotent) and shares the
-  one-in-flight slot.
+- **Closed verb set: `start`·`stop`·`restart`·`update`** (`CommandVerb.IsKnown`). Verbs are
+  server-defined in `CommandVerb`; a client/model can't invent one. Add new verbs there. The other
+  `CommandVerb` constants name jobs started from dedicated routes (install, uninstall, move, backups).
 - **`move` has a dedicated route and its own action.** `POST /servers/{id}/move { library }` reuses the
   job machinery (the install/`backup_restore` pattern — the plain verbs are param-less) and takes
   `kgsm:server.move` rather than a lifecycle action, because placement shapes the host. **The engine starts
@@ -52,17 +49,6 @@ the `jobs` SSE topic (`job.patch`) → verify (`server.patch` on settle)**. The 
   refused `move` carries `fromLibrary`/`toLibrary` on that row: the successful move is the engine's own
   `server.moved`, which names the same pair, and the disk somebody could not empty is exactly what they
   come back to.
-- **`open_ports` is the audit EXCEPTION — a DIRECT write.** It goes through `IFirewallService`
-  (`EnsureOpenAsync`), which runs no kgsm command and emits **no event**, so there is no echo to read — the
-  `auth.*` case. The runner therefore writes the `network.ports.open` row **directly** via `AuditService`
-  (`AuditMapping.FromPortsOpenedCommand`), but **only on a real change (`Applied` or `AppliedInactive`)** — a
-  `NoOp` succeeds with no row (recording "opened" when nothing changed would fabricate a change; symmetric
-  with the CLI echo, which only fires on a confirmed open). `AppliedInactive` (the rule was staged but ufw is
-  inactive) is a real config change, so it IS audited — with `enforced:false`, and
-  the summary says "staged" not "opened". This is **not** a double-write: kgsm never echoes an api firewall
-  call, and the CLI echo path (`network.ports.opened`) is disjoint. The `meta` carries `{jobId, ports}` —
-  `jobId` is the job↔audit correlation, populatable because the api owns both the job and the append
-  (an echo-sourced row cannot name one). Don't extend this direct-write to the lifecycle verbs.
 
 ## Invariants when you touch this
 
@@ -73,15 +59,10 @@ the `jobs` SSE topic (`job.patch`) → verify (`server.patch` on settle)**. The 
   `ILifecycleService` THERE**. The request scope is gone by the `202`, so capturing a request-scoped
   service is use-after-dispose. **Only the `Job` (value data) crosses the boundary** — never a scoped service.
 - **Always settle in `finally`** — a started job must release its slot and emit a terminal `job.patch`
-  even on a throw. On settle, **verify** — lifecycle verbs re-read run-state → `server.patch` (the §5·d
-  `command.verified`); `open_ports` re-probes the firewall → `network.patch` on the dedicated
-  `servers/{id}/network` topic (so `server.patch` stays the frozen `Server`). Both reuse the shared
-  aggregator build path, so the patch is byte-identical to the matching REST detail field.
-- **kgsm-lib only.** Lifecycle goes through `ILifecycleService` (native→watchdog, container→Docker); the
-  `open_ports` firewall call goes through `IFirewallService`. **Never** shell `kgsm.sh` or open the
-  watchdog/firewall socket directly (the ecosystem chokepoint invariant). `IFirewallService` is a
-  conditionally-registered singleton (firewall opt-in) — resolve it from the job's scope and degrade
-  honestly (`"firewall authority not provisioned"`) when absent, never throw a missing-dependency.
+  even on a throw. On settle, **verify** — lifecycle verbs re-read run-state → `server.patch`, built by the shared
+  aggregator path, so the patch is byte-identical to the matching REST element.
+- **kgsm-lib only.** Lifecycle goes through `ILifecycleService` (native→watchdog, container→Docker).
+  **Never** shell `kgsm.sh` or open the watchdog socket directly (ADR 0017).
 
 ## Auth
 

@@ -164,8 +164,8 @@ public sealed record Server(
     // never fabricated.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Cover = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Hero = null,
-    // The firewall/ports cross-reference (M6·b) — populated ONLY on the GET /servers/{id} detail view
-    // (and the servers/{id}/network WS patch); omitted entirely on the list + the `servers` stream, so
+    // The firewall/ports cross-reference (M6·b) — populated ONLY on the GET /servers/{id} detail view;
+    // omitted entirely on the list + the `servers` stream, so
     // those stay byte-identical to the frozen M1·b shape (detail ≠ list, the first such split). See
     // ServerNetwork for the honest-unknown + reserved-`reachable` semantics.
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ServerNetwork? Network = null,
