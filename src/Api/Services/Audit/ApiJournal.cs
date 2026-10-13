@@ -51,6 +51,7 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     public const string LogoutEvent = AuthEvents.SignedOut;
     public const string SessionRevokedEvent = AuthEvents.SessionRevoked;
     public const string LockedOutEvent = AuthEvents.LockedOut;
+    public const string AdminRefusedEvent = AuthEvents.AdminRefused;
 
     public const string UserProvisionedEvent = AuthEvents.UserProvisioned;
     public const string UserApprovedEvent = AuthEvents.UserApproved;

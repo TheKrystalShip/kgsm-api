@@ -125,7 +125,7 @@ public sealed class KgsmAuditConsumer(
     private static readonly HashSet<string> OwnEventTypes = new(StringComparer.Ordinal)
     {
         ApiJournal.LoginEvent, ApiJournal.LogoutEvent,
-        ApiJournal.SessionRevokedEvent, ApiJournal.LockedOutEvent,
+        ApiJournal.SessionRevokedEvent, ApiJournal.LockedOutEvent, ApiJournal.AdminRefusedEvent,
         ApiJournal.UserProvisionedEvent, ApiJournal.UserApprovedEvent, ApiJournal.UserDisabledEvent,
         ApiJournal.UserDeletedEvent, ApiJournal.UserPasswordChangedEvent,
         ApiJournal.IdentityLinkedEvent, ApiJournal.IdentityUnlinkedEvent,

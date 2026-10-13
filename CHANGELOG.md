@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — refused admin attempts reach the audit trail (`Auth.Journal` 3.3.0, `Lib` 9.3.0)
+
+- The auth anchor's `auth.admin.refused` is read from its journal into an audit row (Warn): who was
+  refused, which surface (document, token or route) and how many times in the coalesced minute. The
+  address is a meta value behind `api:audit.personal-fields`, and `Account` is absent when nobody was
+  identified.
+
 ### Removed — the assistant is not a leaf (0.219.0, Api.Contracts 3.0.0)
 
 The assistant is the cluster's anchor and serves a chat; a node runs no assistant of its own, so the

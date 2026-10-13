@@ -157,13 +157,13 @@
          ip:port / opaque session correlation token / disconnect reason). Consumed here by the new
          roster projection (Services/Players/PlayerRosterService.cs) + the audit meta extension
          (AuditMapping.PlayerMeta). -->
-    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="9.2.0" />
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="9.3.0" />
     <PackageReference Include="TheKrystalShip.Auth" Version="5.0.0" />
 
     <!-- The shape of an account event. The cluster's auth anchor writes them and this API reads them
          into audit rows; a reader deserializes into a fixed shape, so the names are taken from the
          writer's own package rather than spelled a second time. -->
-    <PackageReference Include="TheKrystalShip.Auth.Journal" Version="3.2.0" />
+    <PackageReference Include="TheKrystalShip.Auth.Journal" Version="3.3.0" />
     <!-- This node's replica of the cluster's accounts. Deliberately NOT on this API's EF context: the
          replica is a shared machine file other services read too, and this API's own database is
          wiped whenever its schema changes. -->

@@ -1132,6 +1132,42 @@ public static class AuditMapping
             summary, meta);
     }
 
+    /// <summary>
+    /// Map an <c>auth.admin.refused</c> event — the auth anchor turned somebody away from an
+    /// administrator-only surface.
+    /// </summary>
+    /// <remarks>
+    /// Warn: a refusal is the control working, but somebody asked for what they may not have. The
+    /// address stays out of the summary and rides in meta, where the personal-fields gate can hold it
+    /// back from a reader who may not see it.
+    /// </remarks>
+    public static AuditWrite FromAdminRefusedEvent(AuthAdminRefusedData d, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string where = d.Surface switch
+        {
+            AdminRefusalSurfaces.Document => "the admin console",
+            AdminRefusalSurfaces.Token => "an admin token",
+            _ => $"the admin route {d.Route}",
+        };
+        string who = string.IsNullOrEmpty(d.Account) ? "an unidentified caller" : $"'{d.Account}'";
+        string times = d.Count > 1 ? $" ({d.Count} times)" : string.Empty;
+        string summary = $"{who} was refused {where}{times}";
+
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["surface"] = d.Surface,
+            ["route"] = d.Route,
+            ["count"] = d.Count.ToString(CultureInfo.InvariantCulture),
+        };
+        if (!string.IsNullOrEmpty(d.Account)) meta["account"] = d.Account!;
+        if (!string.IsNullOrEmpty(d.Address)) meta["address"] = d.Address!;
+
+        return ApiWrite(d, ApiJournal.AdminRefusedEvent, AuditSeverity.Warn, target: null, hostId,
+            summary, meta);
+    }
+
     /// <summary>Map one of the <c>user.*</c> events to its account action.</summary>
     /// <remarks>
     /// These are the trail's most sensitive rows: each records an account changing at the auth anchor.

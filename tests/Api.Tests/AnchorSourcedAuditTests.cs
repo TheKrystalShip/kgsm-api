@@ -185,6 +185,26 @@ public sealed class AnchorSourcedAuditTests
         Assert.DoesNotContain("password", rendered, StringComparison.OrdinalIgnoreCase);
     }
 
+    // ---- a refused attempt at an administrator-only surface ------------------------------------
+
+    [Fact]
+    public void A_refused_admin_attempt_keeps_the_address_out_of_the_summary()
+    {
+        AuthAdminRefusedData data = Stamped(
+            Roundtrip<AuthAdminRefusedData>(AuthEventPayloads.AdminRefused(
+                AdminRefusalSurfaces.Document, "/admin/", account: null, address: "203.0.113.9", count: 4)),
+            "system:auth-anchor");
+
+        AuditWrite row = AuditMapping.FromAdminRefusedEvent(data, HostId);
+
+        Assert.Equal(AuditSeverity.Warn, row.Severity);
+        Assert.Equal("an unidentified caller was refused the admin console (4 times)", row.Summary);
+        Assert.DoesNotContain("203.0.113.9", row.Summary);
+        Assert.Equal("203.0.113.9", row.Meta!["address"]);
+        Assert.False(row.Meta.ContainsKey("account"));
+        Assert.True(AuditRedaction.IsRestricted("address"));
+    }
+
     // ---- a session withdrawn rather than ended -------------------------------------------------
 
     [Fact]
@@ -226,6 +246,7 @@ public sealed class AnchorSourcedAuditTests
     [InlineData(AuthEvents.SignedOut)]
     [InlineData(AuthEvents.SessionRevoked)]
     [InlineData(AuthEvents.LockedOut)]
+    [InlineData(AuthEvents.AdminRefused)]
     [InlineData(AuthEvents.UserProvisioned)]
     [InlineData(AuthEvents.UserApproved)]
     [InlineData(AuthEvents.UserDisabled)]
@@ -267,6 +288,9 @@ public sealed class AnchorSourcedAuditTests
 
             AuthEvents.LockedOut => AuthEventPayloads.LockedOut(
                 "usr_abc", "haru", "local:usr_abc", 6, When.AddMinutes(5)),
+
+            AuthEvents.AdminRefused => AuthEventPayloads.AdminRefused(
+                AdminRefusalSurfaces.Route, "/auth/admin/accounts", "haru", "203.0.113.9", 3),
 
             AuthEvents.IdentityLinked or AuthEvents.IdentityUnlinked =>
                 AuthEventPayloads.Identity("usr_abc", "haru", "discord", "discord:haru"),

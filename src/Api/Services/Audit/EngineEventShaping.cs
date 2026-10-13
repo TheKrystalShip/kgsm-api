@@ -209,6 +209,8 @@ public static class EngineEventShaping
                 Map<AuthSessionRevokedData>(item, d => AuditMapping.FromSessionRevokedEvent(d, hostId)),
             ApiJournal.LockedOutEvent =>
                 Map<AuthLockedOutData>(item, d => AuditMapping.FromLockedOutEvent(d, hostId)),
+            ApiJournal.AdminRefusedEvent =>
+                Map<AuthAdminRefusedData>(item, d => AuditMapping.FromAdminRefusedEvent(d, hostId)),
 
             ApiJournal.UserProvisionedEvent or ApiJournal.UserApprovedEvent
                 or ApiJournal.UserDisabledEvent
