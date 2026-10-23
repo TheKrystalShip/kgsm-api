@@ -56,6 +56,10 @@ public sealed class ApiOptions
     /// <see cref="PushSubject"/>.</summary>
     public string NotificationsPushSubject { get; init; } = "";
 
+    /// <summary>What <c>Api__NotificationsVapidKeysPath</c> says. Empty keeps the pair in
+    /// <see cref="NotificationsDir"/>.</summary>
+    public string NotificationsVapidKeysPath { get; init; } = "";
+
     /// <summary>
     /// The address a button posts to: the configured one, else the public origin and the actions path, else
     /// empty — and a push then carries no buttons.
@@ -718,6 +722,7 @@ public sealed class ApiOptions
             NotificationsDir = BlankFallback(s.NotificationsDir, DefaultNotificationsDir(s.DbPath)),
             NotificationsActionBaseUrl = Defaulted(s.NotificationsActionBaseUrl, ""),
             NotificationsPushSubject = Defaulted(s.NotificationsPushSubject, ""),
+            NotificationsVapidKeysPath = Defaulted(s.NotificationsVapidKeysPath, ""),
 
             // Realtime pump cadences. The domain (instance) poll is relaxed by default (5s) — it
             // spawns kgsm.sh and the roster changes rarely (the SPA also has a manual refresh); floored at

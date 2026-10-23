@@ -449,6 +449,14 @@ public sealed class ApiSettings
     [ConfigField("notificationsPushSubject", "Push contact", Group = "identity", NoDefault = true)]
     public string? NotificationsPushSubject { get; set; }
 
+    /// <summary>The file holding the VAPID key pair. Blank keeps <c>vapid.json</c> in the notifications directory.</summary>
+    /// <panel>The push key pair's file. Empty keeps it in the notifications directory. A server of the same
+    /// site on this machine that names the same file shares the pair, which lets a browser's one
+    /// subscription serve both.</panel>
+    [ConfigField("notificationsVapidKeysPath", "Push keys file", Group = "storage", Type = ConfigType.Path,
+        Risk = ConfigRisk.Destructive, NoDefault = true)]
+    public string? NotificationsVapidKeysPath { get; set; }
+
 
     // ── General ──────────────────────────────────────────────────────
     /// <summary>HTTP bind address(es), semicolon-separated. Read before the host exists, so it is bound separately in Program.</summary>

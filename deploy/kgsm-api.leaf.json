@@ -724,6 +724,15 @@
       "risk": "destructive"
     },
     {
+      "key": "notificationsVapidKeysPath",
+      "env": "Api__NotificationsVapidKeysPath",
+      "label": "Push keys file",
+      "description": "The push key pair's file. Empty keeps it in the notifications directory. A server of the same site on this machine that names the same file shares the pair, which lets a browser's one subscription serve both.",
+      "group": "storage",
+      "type": "path",
+      "risk": "destructive"
+    },
+    {
       "key": "logLevel",
       "env": "Logging__LogLevel__Default",
       "label": "Log level",

@@ -39,6 +39,9 @@
       // How a push service reaches whoever runs this node: a URL or a mailto: address. Blank uses the
       // public origin.
       "NotificationsPushSubject": "",
+      // The file holding the VAPID key pair. Blank keeps vapid.json in the notifications directory. A
+      // server of the same site on this machine that names the same file shares the pair.
+      "NotificationsVapidKeysPath": "",
 
       // ── Leaf connections ──
       // kgsm-monitor metrics socket. Blank reports the metrics capability absent.

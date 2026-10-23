@@ -23,7 +23,9 @@ site's API uses, and the Control Panel shows them in one tray.
   `POST`/`DELETE /push/subscribe` and `GET /push/devices`. A button posts to the anonymous
   `POST /api/v1/notifications/actions/{handle}`, which always answers `200 { ok, message }`.
 - Settings `NotificationsDir` (default `notifications/` beside the database), `NotificationsActionBaseUrl`
-  and `NotificationsPushSubject` (both derived from the public base URL when blank).
+  and `NotificationsPushSubject` (both derived from the public base URL when blank), and
+  `NotificationsVapidKeysPath` (the push key pair's file; blank keeps `vapid.json` in the notifications
+  directory, and a server of the same site naming the same file shares the pair).
 - Removed: the Web Push provider and its integration row, `/api/v1/push/*`, per-event cadence and digests
   for push, snooze, quiet hours and the administrator's per-event rules for push, and the update-all
   button. Slack and webhook integrations are unchanged. `Api.Contracts` 4.0.0 drops the push DTOs.

@@ -190,7 +190,7 @@
     <PackageReference Include="TheKrystalShip.KGSM.Monitor.Contracts" Version="1.11.0" />
     <!-- The shared notification system's server half: each person's history, push subscriptions, per-kind
          switches and button handles, behind one route shape. -->
-    <PackageReference Include="TheKrystalShip.Notifications" Version="1.0.0-dev.1" />
+    <PackageReference Include="TheKrystalShip.Notifications" Version="1.1.0" />
   </ItemGroup>
 
   <!-- Stamp the short git SHA onto the build so the assembly InformationalVersion becomes "<Version>+<sha>"

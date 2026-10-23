@@ -406,6 +406,7 @@ public class Startup(IConfiguration configuration)
         services.AddNotifications(o =>
         {
             o.StateDirectory = apiOptions.NotificationsDir;
+            o.VapidKeysPath = apiOptions.NotificationsVapidKeysPath;
             o.PushSubject = apiOptions.PushSubject;
             o.PushTitle = FleetNotifications.PushTitle;
             o.ActionBaseUrl = apiOptions.NotificationActionsUrl;
