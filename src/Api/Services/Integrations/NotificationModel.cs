@@ -24,11 +24,11 @@ public sealed record IntegrationRecord(
             new Dictionary<string, string>(), [], null);
 }
 
-/// <summary>One per-event routing rule (systems/control-panel/notifications.md <c>events[]</c>): for a catalog event id,
+/// <summary>One per-event routing rule (systems/notifications/README.md <c>events[]</c>): for a catalog event id,
 /// whether to post it, how loudly (<see cref="Cadence"/>), and whether to @-mention the ops role.</summary>
 public sealed record NotificationRule(string Id, bool Enabled, string Cadence, bool Ping);
 
-/// <summary>How loudly a provider carries one catalog event (systems/control-panel/notifications.md).</summary>
+/// <summary>How loudly a provider carries one catalog event (systems/notifications/README.md).</summary>
 public static class NotificationCadence
 {
     /// <summary>Every occurrence, subject only to the delivery worker's anti-spam window.</summary>
@@ -54,12 +54,12 @@ public static class NotificationCadence
     public static bool IsKnown(string? cadence) => cadence is Every or Once or Digest;
 }
 
-/// <summary>A server-defined catalog event (systems/control-panel/notifications.md): the events a notification provider
+/// <summary>A server-defined catalog event (systems/notifications/README.md): the events a notification provider
 /// can announce. The user only configures <see cref="NotificationRule"/> over this fixed catalog.</summary>
 public sealed record CatalogEvent(string Id, string Title, string Description);
 
 /// <summary>
-/// The server-defined notification catalog (systems/control-panel/notifications.md). <b>Honest:</b> only events the API
+/// The server-defined notification catalog (systems/notifications/README.md). <b>Honest:</b> only events the API
 /// can actually source/deliver are listed — <c>join</c> (no player tracking) is deliberately omitted,
 /// never faked. It joins the catalog when an honest source lands.
 /// <para>
@@ -172,7 +172,7 @@ public static class NotificationCatalog
 public sealed record NotificationTestResult(bool Ok, string? Posted, string? ChannelLabel, string? Error);
 
 /// <summary>
-/// One notifiable fact, derived from an audit row, en route to the providers (M8·c Increment B). Lean and
+/// One notifiable fact, derived from an audit row, en route to the providers Lean and
 /// provider-agnostic: it carries what a provider needs to <em>route</em> (the <see cref="CatalogId"/> →
 /// the user's rule) and to <em>render</em> a message — never the audit row itself (the bus is decoupled
 /// from the audit contract). <see cref="Action"/> is the event's own name so a provider can phrase a
@@ -242,7 +242,7 @@ public static class DerivedNotificationAction
     public const string RestartSoon = "restart.soon";
 }
 
-/// <summary>The outcome of one provider <c>SendAsync</c> (M8·c Increment B). Honest like
+/// <summary>The outcome of one provider <c>SendAsync</c> Honest like
 /// <see cref="NotificationTestResult"/> — a real failure reports <see cref="Error"/>, never a faked ok.</summary>
 public sealed record NotificationDeliveryResult(bool Ok, string? Error);
 
@@ -257,7 +257,7 @@ public interface INotificationProvider
     string ProviderId { get; }
 
     /// <summary>Render the provider-shaped GET view from the stored config — secret masked to a hint,
-    /// never echoed (systems/control-panel/notifications.md). Returns a wire DTO the controller serializes.</summary>
+    /// never echoed (systems/notifications/README.md). Returns a wire DTO the controller serializes.</summary>
     object Describe(IntegrationRecord record);
 
     /// <summary>Validate/normalize a candidate secret (a webhook URL) on PATCH. False + <paramref name="error"/>
@@ -270,7 +270,7 @@ public interface INotificationProvider
 
     /// <summary>Deliver a real notification for <paramref name="ev"/> through the configured secret,
     /// honoring the per-event <paramref name="rule"/> (e.g. an ops-role ping). Called by the
-    /// <c>NotificationDeliveryWorker</c> (Increment B). Honest: a real failure returns
+    /// <c>NotificationDeliveryWorker</c>  Honest: a real failure returns
     /// <see cref="NotificationDeliveryResult.Ok"/> false + an error, never a faked ok.</summary>
     Task<NotificationDeliveryResult> SendAsync(
         NotificationEvent ev, NotificationRule rule, IntegrationRecord record, CancellationToken ct);

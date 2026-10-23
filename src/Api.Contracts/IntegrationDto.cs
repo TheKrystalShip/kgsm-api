@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace TheKrystalShip.Api.Contracts;
 
 /// <summary>
-/// The wire contracts for outbound-notification integrations (systems/control-panel/notifications.md, M8·c). camelCase
+/// The wire contracts for outbound-notification integrations (systems/notifications/README.md). camelCase
 /// like the rest of the surface. The webhook secret is never on the wire — read returns a masked
 /// <see cref="WebhookView.Hint"/>; PATCH accepts a full URL (write-only).
 /// </summary>
@@ -14,7 +14,7 @@ public sealed record IntegrationSummary(string Provider, bool Configured, bool E
 public sealed record WebhookView(bool Configured,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Hint);
 
-/// <summary>One catalog event ⋈ the user's rule (systems/control-panel/notifications.md <c>events[]</c> + the
+/// <summary>One catalog event ⋈ the user's rule (systems/notifications/README.md <c>events[]</c> + the
 /// server-defined catalog title/description).</summary>
 public sealed record IntegrationEventView(
     string Id, string Title, string Description, bool Enabled, string Cadence, bool Ping);
@@ -29,7 +29,7 @@ public sealed record SlackIntegrationView(
     bool Enabled,
     IReadOnlyList<IntegrationEventView> Events);
 
-/// <summary>POST /integrations/{provider}/test — 202 on a real send (systems/control-panel/notifications.md).</summary>
+/// <summary>POST /integrations/{provider}/test — 202 on a real send (systems/notifications/README.md).</summary>
 public sealed record IntegrationTestResponse(bool Ok, string Posted,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ChannelLabel);
 

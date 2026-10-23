@@ -88,7 +88,7 @@ public sealed class AuditService(
                 : new StreamRedaction(ActionIds.AuditPersonalFields,
                     new StreamMessage(StreamProtocol.AuditTopic, StreamProtocol.AuditAppend, redacted)));
 
-        // Increment B (M8·c): tap the ALWAYS-ON audit path so notifications fire on every kgsm lifecycle
+        // Tap the ALWAYS-ON audit path so notifications fire on every kgsm lifecycle
         // event regardless of WS subscribers (the StreamHub pumps are subscriber-gated; this publish is
         // not). The bus keeps only catalog-mapped actions and the delivery worker routes them; a
         // non-notifiable action (auth.*, network.*, …) is dropped there. Never throws / never blocks.

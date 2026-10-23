@@ -5,7 +5,7 @@ using TheKrystalShip.Api.Data;
 namespace TheKrystalShip.Api.Services.Integrations;
 
 /// <summary>
-/// The single reader/writer of the integration-config table (M8·c). A singleton that owns its own DI
+/// The single reader/writer of the integration-config table A singleton that owns its own DI
 /// scope per operation (the same pattern as <see cref="Audit.AuditService"/> — reads/writes can arrive
 /// off any request path) and serializes writes behind a gate (SQLite is single-writer). The provider-
 /// specific JSON columns (<c>Settings</c>, <c>Events</c>) are (de)serialized here so the rest of the

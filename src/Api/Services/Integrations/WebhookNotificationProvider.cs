@@ -3,7 +3,7 @@ using TheKrystalShip.Api.Contracts;
 namespace TheKrystalShip.Api.Services.Integrations;
 
 /// <summary>
-/// Shared base for the <b>webhook-secret-URL</b> family of notification providers (M8·c) — providers whose
+/// Shared base for the <b>webhook-secret-URL</b> family of notification providers — providers whose
 /// stored secret <em>is</em> the POST endpoint. It captures the genuinely-common logic so a
 /// new webhook provider is reduced to its specifics: the honest webhook POST, the <c>/test</c>+send
 /// orchestration, the catalog⋈rules event overlay, and the secret-masking hint. A concrete provider supplies

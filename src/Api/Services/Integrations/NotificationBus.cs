@@ -7,7 +7,7 @@ using TheKrystalShip.Api.Services.Audit;
 namespace TheKrystalShip.Api.Services.Integrations;
 
 /// <summary>
-/// The in-process tap that turns the always-on audit flow into notifications (M8·c Increment B). Every
+/// The in-process tap that turns the always-on audit flow into notifications Every
 /// audit row — whatever its source (a kgsm event echo, a watchdog <c>system</c> crash, an API-internal
 /// write) — is offered here by <see cref="Audit.AuditService.AppendAsync"/>; the bus keeps only the
 /// notifiable ones (a catalog event) and hands them to <see cref="NotificationDeliveryWorker"/>.

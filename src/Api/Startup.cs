@@ -416,9 +416,9 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<FleetNotifications>();
         services.AddScoped<INotificationActionHandler, FleetNotificationActions>();
 
-        // M8·c Increment B — the delivery worker. The bus is the ALWAYS-ON tap: AuditService.AppendAsync
-        // publishes every audit row to it (the bus keeps only catalog-mapped actions; the worker routes to
-        // enabled providers at `every` cadence with a per-(provider,server,event) anti-spam window). NO new
+        // The delivery worker. The bus is the ALWAYS-ON tap: AuditService.AppendAsync
+        // publishes every audit row to it (the bus keeps only catalog-mapped actions; the worker tells the
+        // people who may read each one, then routes it to the enabled channel providers). NO new
         // event-socket consumer — it rides the existing audit flow. Singleton bus (a bounded channel) + a
         // hosted drain loop, the always-on-hosted-service shape of the audit consumer / alert engine.
         services.AddSingleton<INotificationBus, NotificationBus>();

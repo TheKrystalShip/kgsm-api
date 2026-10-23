@@ -1,16 +1,18 @@
 namespace TheKrystalShip.Api.Services.Integrations;
 
 /// <summary>
-/// Drains the <see cref="INotificationBus"/> and delivers each notifiable event to every enabled provider
-/// at <c>every</c> cadence (M8·c Increment B). The bus is fed by the always-on audit append, so this fires
-/// on real kgsm lifecycle events with <b>no new event-socket consumer</b> — it rides the existing audit
-/// flow. Single drain loop; mirrors the always-on-hosted-service shape of the audit consumer / alert engine.
+/// Drains the <see cref="INotificationBus"/> and delivers each notifiable event twice over: first to the
+/// people who may read it (through <see cref="Notifications.FleetNotifications"/>, whatever the channel
+/// integrations are set to), then to every enabled channel provider under the administrator's per-event
+/// rule. The bus is fed by the always-on audit append, so this fires on real kgsm lifecycle events with
+/// <b>no new event-socket consumer</b>. Single drain loop; the always-on-hosted-service shape of the audit
+/// consumer / alert engine.
 /// </summary>
 /// <remarks>
-/// <para><b>Routing gates (all must pass):</b> the provider is <c>Enabled</c> and has a secret (somewhere
-/// to send), the per-event rule is <c>Enabled</c>, and its cadence is <c>every</c>. <c>once</c>/<c>digest</c>
-/// are accepted in the A contract but their delivery is deferred to Increment C — they deliver <b>zero</b>
-/// here (not fewer); the skip is logged at Information so a mis-set cadence is never a silent black hole.</para>
+/// <para><b>Channel routing gates (all must pass):</b> the provider is <c>Enabled</c> and has a secret
+/// (somewhere to send), and the per-event rule is <c>Enabled</c>. The rule's cadence then decides the
+/// path: <c>every</c> sends under the short suppression window, <c>once</c> under a day-long one, and
+/// <c>digest</c> holds the event for <see cref="NotificationDigestStore"/> to flush as one summary.</para>
 /// <para><b>Anti-spam suppression.</b> A crash-looping server re-emits <c>server.crash</c> every watchdog
 /// backoff cycle; without a guard, the worker would fire a post each cycle and self-DoS the webhook
 /// (an incoming webhook is rate-limited in the tens per minute) exactly when a server is dying. So a per-<c>(provider,subject,catalog)</c>
@@ -18,7 +20,7 @@ namespace TheKrystalShip.Api.Services.Integrations;
 /// window are skipped (logged). The window counts the <b>attempt</b>, not just a success, so a failing
 /// webhook is not hammered either. <b>Honest boundary:</b> a mass reboot autostarts N servers → N
 /// <em>distinct</em> keys → N posts (not suppressed) — bounded by the host's server count, accepted; only
-/// the unbounded single-server loop is coalesced. Heavier shaping (digest/global rate-limit) is Increment C.
+/// the unbounded single-server loop is coalesced.
 /// The subject is <see cref="NotificationEvent.SubjectKey"/> where the event names one — a threshold event
 /// is about a watched condition rather than a server, and several of those share one host.</para>
 /// <para><b>Threading.</b> <see cref="_lastSent"/> is touched ONLY by the single drain loop (the channel

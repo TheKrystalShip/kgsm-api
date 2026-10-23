@@ -19,9 +19,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 {
     public DbSet<AuditEntry> Audit => Set<AuditEntry>();
 
-    /// <summary>M8·c — outbound-notification integration config, one row per provider (§3·e). The
-    /// first non-audit table; created by the same <c>EnsureCreated</c> (delete the dev DB once when it
-    /// lands — EnsureCreated no-ops on an existing DB).</summary>
+    /// <summary>Outbound-notification integration config, one row per provider.
+    /// Created by the same <c>EnsureCreated</c> as the audit table.</summary>
     public DbSet<IntegrationEntity> Integrations => Set<IntegrationEntity>();
 
     /// <summary>The library RAWG.io metadata cache, one row per blueprint (cover/hero/description/genres/

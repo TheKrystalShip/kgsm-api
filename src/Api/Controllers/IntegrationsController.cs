@@ -7,7 +7,7 @@ using TheKrystalShip.Api.Services.Integrations;
 namespace TheKrystalShip.Api.Controllers;
 
 /// <summary>
-/// <c>/integrations/{provider}</c> — outbound notification routing (systems/control-panel/notifications.md).
+/// <c>/integrations/{provider}</c> — outbound notification routing (systems/notifications/README.md).
 /// Provider-agnostic: a provider is resolved by id out of the registered
 /// <see cref="INotificationProvider"/> set, and one that is not registered is a 404. Gated on
 /// <c>api:integrations.manage</c>, a cluster-wide action. The webhook secret is never echoed (masked hint on read, write-only
@@ -113,7 +113,7 @@ public sealed class IntegrationsController(
         return Ok(p.Describe(updated));
     }
 
-    /// <summary>Send a real test message through the configured webhook (systems/control-panel/notifications.md).
+    /// <summary>Send a real test message through the configured webhook (systems/notifications/README.md).
     /// 202 on success; honest failure otherwise — 409 if nothing is configured, 502 if the provider
     /// rejected the send (never a faked ok).</summary>
     [HttpPost("{provider}/test")]

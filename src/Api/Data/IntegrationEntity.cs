@@ -1,10 +1,10 @@
 namespace TheKrystalShip.Api.Data;
 
 /// <summary>
-/// One outbound-notification integration's stored config (M8·c, systems/control-panel/notifications.md), keyed by
-/// <see cref="Provider"/> (one row per provider — <c>discord</c> first, <c>slack</c>/<c>telegram</c>
-/// later). This is the API's first non-audit persisted entity; it lives in the same
-/// <see cref="AppDbContext"/>, so the existing <c>EnsureCreated</c> at startup creates it too.
+/// One outbound-notification integration's stored config (systems/notifications/README.md), keyed by
+/// <see cref="Provider"/> (one row per provider, <c>slack</c> among them).
+/// It lives in the same <see cref="AppDbContext"/> as the audit table, so the existing
+/// <c>EnsureCreated</c> at startup creates it too.
 /// <para>
 /// <b>EnsureCreated, NOT a migration</b> (the project's dev authority — see <see cref="AppDbContext"/>):
 /// because <c>EnsureCreated</c> no-ops on an existing DB, adding this table means the dev DB file must be
@@ -18,10 +18,10 @@ namespace TheKrystalShip.Api.Data;
 /// </summary>
 public sealed class IntegrationEntity
 {
-    /// <summary>The provider id (<c>discord</c>/…) — the primary key. One config row per provider.</summary>
+    /// <summary>The provider id (<c>slack</c>/…) — the primary key. One config row per provider.</summary>
     public string Provider { get; set; } = "";
 
-    /// <summary>Whether the integration is on (the delivery worker, M8·c Increment B, honors this).</summary>
+    /// <summary>Whether the integration is on (the delivery worker honors this).</summary>
     public bool Enabled { get; set; }
 
     /// <summary>The one secret — the provider's webhook URL. Null = not configured. Never echoed on read.</summary>
@@ -30,7 +30,7 @@ public sealed class IntegrationEntity
     /// <summary>A cosmetic channel label (e.g. <c>#krystal-ops</c>) — the provider owns the real channel.</summary>
     public string? ChannelLabel { get; set; }
 
-    /// <summary>Provider-specific settings as a JSON object string (e.g. a discord ops-role), or null.
+    /// <summary>Provider-specific settings as a JSON object string (e.g. a Slack ops subteam), or null.
     /// Generic so the column doesn't grow a provider-specific shape; the provider interprets its keys.</summary>
     public string? Settings { get; set; }
 
