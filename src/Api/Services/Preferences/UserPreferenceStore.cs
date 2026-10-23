@@ -22,8 +22,7 @@ public sealed record SyncState(bool Enabled, string? SourceDevice, DateTimeOffse
 /// work here. The moment this store learns what a widget is, every new one becomes a backend change.
 /// </para>
 /// <para>
-/// Same posture as <see cref="Integrations.WebPush.PushPreferenceStore"/>: a singleton owning a scope
-/// per operation, writes behind a gate, and an idempotent <c>CREATE TABLE IF NOT EXISTS</c> beside
+/// A singleton owning a scope per operation, writes behind a gate, and an idempotent <c>CREATE TABLE IF NOT EXISTS</c> beside
 /// <c>EnsureCreated</c> so the tables also appear on an already-deployed database.
 /// </para>
 /// </summary>

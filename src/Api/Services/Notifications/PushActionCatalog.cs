@@ -1,18 +1,21 @@
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Actions;
+using TheKrystalShip.Api.Services.Integrations;
 
-namespace TheKrystalShip.Api.Services.Integrations.WebPush;
+namespace TheKrystalShip.Api.Services.Notifications;
 
 /// <summary>What a notification for one event offers to do, and what it says on the button.</summary>
 /// <param name="Kind">A <see cref="PushActionKind"/> value — the operation staged behind it.</param>
-/// <param name="Target">What it acts on: the server, or the watched condition.</param>
+/// <param name="Target">What it acts on: the server, or the leaf.</param>
 /// <param name="Label">The button text. Short — a lock screen truncates.</param>
-/// <param name="Subject">Who inside <paramref name="Target"/> it acts on, for the moderation kinds.</param>
+/// <param name="Subject">Who or what inside <paramref name="Target"/> it acts on: the player for a
+/// moderation kind, the maintenance window for a postponement.</param>
 public sealed record PushActionOffer(string Kind, string Target, string Label, string? Subject = null);
 
 /// <summary>
-/// The closed map from a notifiable event to the buttons its notification carries.
+/// The closed map from a notifiable event to the buttons its notification carries. A breach has none: it
+/// cannot be fixed from a lock screen, and silencing it is not one of the verbs.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,9 +31,9 @@ public sealed record PushActionOffer(string Kind, string Target, string Label, s
 /// </remarks>
 public static class PushActionCatalog
 {
-    /// <summary>How long a snooze lasts. Long enough to get through whatever is causing it, short
-    /// enough that forgetting to lift it is not the same as switching the event off.</summary>
-    public static readonly TimeSpan SnoozeFor = TimeSpan.FromHours(4);
+    /// <summary>How long a button stays redeemable. A button is answered in the minutes after it arrives,
+    /// and a capability nobody used should not keep standing.</summary>
+    public static readonly TimeSpan ButtonLifetime = TimeSpan.FromHours(2);
 
     /// <summary>How far one tap defers a scheduled restart. An hour is what the button says, and it is
     /// enough to finish what you are in the middle of without turning "not now" into a reschedule.</summary>
@@ -56,12 +59,6 @@ public static class PushActionCatalog
             if (moderation.Ban) offers.Add(new PushActionOffer(PushActionKind.PlayerBan, server, "Ban", who));
             return offers;
         }
-
-        // A breach cannot be fixed from a lock screen, but it can be acknowledged. The target is the
-        // condition rather than the host: silencing "this NVMe is hot" is not asking to stop hearing
-        // about temperature.
-        if (ev.CatalogId == "threshold_breach" && ev.SubjectKey is { Length: > 0 } condition)
-            return [new PushActionOffer(PushActionKind.ConditionSnooze, condition, "Snooze 4h")];
 
         // The two events that name something other than a server. Both act on the id the event carries,
         // and both are refused at the tap if the account has since lost the action for them.
@@ -115,5 +112,27 @@ public static class PushActionCatalog
 
             _ => [],
         };
+    }
+}
+
+/// <summary>What a button carries to its redemption: the target and, for the kinds that need one, who or
+/// what inside it.</summary>
+public sealed record ButtonArgument(string Target, string? Subject)
+{
+    /// <summary>JSON, because a subject can be a character name the game chose and any separator could
+    /// appear in it.</summary>
+    public static string Pack(string target, string? subject) =>
+        System.Text.Json.JsonSerializer.Serialize(new ButtonArgument(target, subject));
+
+    public static ButtonArgument? Unpack(string argument)
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<ButtonArgument>(argument);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 }

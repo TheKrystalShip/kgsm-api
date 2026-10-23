@@ -57,33 +57,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<EndedSessionEntity> EndedSessions => Set<EndedSessionEntity>();
 
 
-    /// <summary>Web Push subscriptions — one row per (user × device), keyed by the push service's
-    /// endpoint URL. The shape that does not fit <see cref="Integrations"/>: an integration holds one
-    /// host-wide secret, push holds a per-device credential the browser mints. Created by
-    /// <c>EnsureCreated</c> on a fresh DB and by <see cref="Services.Integrations.WebPush.PushSubscriptionStore"/>'s
-    /// idempotent <c>CREATE TABLE IF NOT EXISTS</c> on the already-deployed one — never a wipe of the
-    /// shared audit log.</summary>
-    public DbSet<PushSubscriptionEntity> PushSubscriptions => Set<PushSubscriptionEntity>();
-
-    /// <summary>Per-account push preferences — which catalog events a person wants on their devices,
-    /// keyed by (account, event). Holds only explicit choices: no row means the default, which is ON.
-    /// Created by <c>EnsureCreated</c> on a fresh DB and by
-    /// <see cref="Services.Integrations.WebPush.PushPreferenceStore"/>'s idempotent
-    /// <c>CREATE TABLE IF NOT EXISTS</c> on an existing one.</summary>
-    public DbSet<PushPreferenceEntity> PushPreferences => Set<PushPreferenceEntity>();
-
-    /// <summary>Actions staged for a notification's buttons — the operation a tap redeems, held here so
-    /// the device only ever carries an opaque handle to it. Same creation posture as the two above.</summary>
-    public DbSet<PushActionEntity> PushActions => Set<PushActionEntity>();
-
-    /// <summary>Per-account, per-condition push snoozes, keyed by (account, condition). Expiring rows
-    /// only. Same creation posture as the two above.</summary>
-    public DbSet<PushSnoozeEntity> PushSnoozes => Set<PushSnoozeEntity>();
-
-    /// <summary>Per-account quiet windows — when somebody does not want waking, and what still wakes them.
-    /// Same creation posture as the rest of the push tables.</summary>
-    public DbSet<PushQuietHoursEntity> PushQuietHours => Set<PushQuietHoursEntity>();
-
     /// <summary>Facts held back for a provider whose rule for them says <c>digest</c>. Durable because a
     /// summary lost to a restart was never delivered and never reported undelivered.</summary>
     public DbSet<NotificationDigestEntity> NotificationDigests => Set<NotificationDigestEntity>();
@@ -165,18 +138,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 v => new DateTimeOffset(v, TimeSpan.Zero));
         });
 
-        modelBuilder.Entity<PushActionEntity>(e =>
-        {
-            e.ToTable("push_actions");
-            e.HasKey(p => p.Id);
-            e.Property(p => p.CreatedAt).HasConversion(
-                v => v.UtcTicks,
-                v => new DateTimeOffset(v, TimeSpan.Zero));
-            e.Property(p => p.ExpiresAt).HasConversion(
-                v => v.UtcTicks,
-                v => new DateTimeOffset(v, TimeSpan.Zero));
-        });
-
         modelBuilder.Entity<NotificationDigestEntity>(e =>
         {
             e.ToTable("notification_digest");
@@ -184,47 +145,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.Property(d => d.Ts).HasConversion(
                 v => v.UtcTicks,
                 v => new DateTimeOffset(v, TimeSpan.Zero));
-        });
-
-        modelBuilder.Entity<PushQuietHoursEntity>(e =>
-        {
-            e.ToTable("push_quiet_hours");
-            e.HasKey(q => q.UserSubject);
-            e.Property(q => q.UpdatedAt).HasConversion(
-                v => v.UtcTicks,
-                v => new DateTimeOffset(v, TimeSpan.Zero));
-        });
-
-        modelBuilder.Entity<PushSnoozeEntity>(e =>
-        {
-            e.ToTable("push_snoozes");
-            e.HasKey(p => new { p.UserSubject, p.SubjectKey });
-            e.Property(p => p.ExpiresAt).HasConversion(
-                v => v.UtcTicks,
-                v => new DateTimeOffset(v, TimeSpan.Zero));
-        });
-
-        modelBuilder.Entity<PushPreferenceEntity>(e =>
-        {
-            e.ToTable("push_preferences");
-            e.HasKey(p => new { p.UserSubject, p.CatalogId });
-            e.Property(p => p.UpdatedAt).HasConversion(
-                v => v.UtcTicks,
-                v => new DateTimeOffset(v, TimeSpan.Zero));
-        });
-
-        modelBuilder.Entity<PushSubscriptionEntity>(e =>
-        {
-            e.ToTable("push_subscriptions");
-            e.HasKey(p => p.Endpoint);
-            // Timestamps as UTC ticks — the host_settings/audit posture (SQLite has no date type).
-            e.Property(p => p.CreatedAt).HasConversion(
-                v => v.UtcTicks,
-                v => new DateTimeOffset(v, TimeSpan.Zero));
-            e.Property(p => p.LastSeenAt).HasConversion(
-                new ValueConverter<DateTimeOffset, long>(
-                    v => v.UtcTicks,
-                    v => new DateTimeOffset(v, TimeSpan.Zero)));
         });
 
         modelBuilder.Entity<IntegrationEntity>(e =>

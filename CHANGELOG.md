@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — notifications are the shared system's (1.0.0, Api.Contracts 4.0.0)
+
+Every person's notifications are kept and pushed by `TheKrystalShip.Notifications`, the library every
+site's API uses, and the Control Panel shows them in one tray.
+
+- A person is told about each notification catalog event they may read: the accounts holding
+  `kgsm:server.read` at the server for a server event, `api:audit.read` on the node for any other. Each
+  event is a kind, switchable per person; a player joining and a server sitting empty start off. A kind a
+  person switched off is neither kept nor pushed. Repeats of one event about one subject inside a minute
+  are told once.
+- Routes under `/api/v1/me` on `api:push.devices`: `GET /notifications`, `POST /notifications/read`,
+  `GET /notifications/kinds`, `GET`/`PUT /notifications/preferences`, `GET /push/key`,
+  `POST`/`DELETE /push/subscribe` and `GET /push/devices`. A button posts to the anonymous
+  `POST /api/v1/notifications/actions/{handle}`, which always answers `200 { ok, message }`.
+- Settings `NotificationsDir` (default `notifications/` beside the database), `NotificationsActionBaseUrl`
+  and `NotificationsPushSubject` (both derived from the public base URL when blank).
+- Removed: the Web Push provider and its integration row, `/api/v1/push/*`, per-event cadence and digests
+  for push, snooze, quiet hours and the administrator's per-event rules for push, and the update-all
+  button. Slack and webhook integrations are unchanged. `Api.Contracts` 4.0.0 drops the push DTOs.
+  Existing push subscriptions are not carried over: a browser subscribes again from its settings. The old
+  push tables in the database are no longer read.
+
 ### Added — refused admin attempts reach the audit trail (`Auth.Journal` 3.3.0, `Lib` 9.3.0)
 
 - The auth anchor's `auth.admin.refused` is read from its journal into an audit row (Warn): who was

@@ -70,9 +70,8 @@ assignments, the catalog), on every request. The authority for the model is
   gate. The build fails on a call that is neither.
 - **Credentials handed out ahead of use are bound and re-evaluated.** A backup download ticket carries
   the account, the action (`kgsm:server.files.read`) and the server, and `RedeemAsync` asks the replica
-  again before anything is spent. A push button's staged row names the person, the operation and its
-  target, and `NotificationActionsController` evaluates that person for that operation's action at the
-  tap.
+  again before anything is spent. A notification button's handle names the person, the operation and its
+  target, and `FleetNotificationActions` evaluates that person for that operation's action at the tap.
 - **An identity names its provider.** `KgsmIdentity.Handle` (`provider:subject`) is the token subject
   and the `userId` on the wire, built by the identity, never interpolated at a call site.
 - **Another member acting for a person is a separate scheme.** A request carrying the acting header is
@@ -111,13 +110,15 @@ assignments, the catalog), on every request. The authority for the model is
   gated unless it opts out**, and a new endpoint names its action with `[RequiresAction]`. Adding an
   open endpoint is a deliberate, reviewed act — not an omission. `/health`, `/api/v1` and the
   protected-resource document carry `[AllowAnonymous]`, and **one anonymous write** needs its own
-  paragraph: **`POST /notifications/actions/{handle}`**. A service worker holds no session, so a
-  notification button has no bearer to present and the handle stands in for one. What keeps that sound
-  is that the handle names an operation **staged server-side**, is **bound to the push endpoint** it was
-  staged for, is **single-use with a short life**, and — the load-bearing one — **evaluates the person's
-  access to the operation at redemption from the replica**, never from anything carried since staging.
-  Every refusal about the handle is one `404` with one message, because separate answers let somebody
-  probe which handles exist.
+  paragraph: **`POST /api/v1/notifications/actions/{handle}`**, mapped by the notification library. A
+  service worker holds no session, so a notification button has no bearer to present and the handle
+  stands in for one. What keeps that sound is that the handle names an operation **held server-side**,
+  is **minted per device**, is **single-use with a short life**, and — the load-bearing one —
+  **`FleetNotificationActions` evaluates the person's access to the operation at redemption from the
+  replica**, never from anything carried since the notification was written. Every refusal answers
+  `200 { ok: false, message }`, and a handle that is unknown, spent or expired says one thing, so
+  separate answers cannot be used to probe which handles exist. A person's own notification routes sit
+  under `/api/v1/me` on `api:push.devices`, the self action every active person holds.
 - **`401` vs `403` is the load-bearing split.** `401` = no/invalid bearer (challenge); `403` =
   authenticated, action not held (forbid), whose envelope says `This needs <action>.`
   (`ActionRefusalResultHandler`), as every member's refusal does. Self-service surfaces — `/me`, `/me/access`,

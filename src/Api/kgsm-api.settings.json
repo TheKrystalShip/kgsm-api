@@ -33,6 +33,12 @@
       // Where this node is reached from the internet — normally its network's dynamic-DNS name. The
       // cluster's DNS anchor publishes this node's name as an alias of it. Blank states no host.
       "PublicHost": "",
+      // The absolute address a notification button posts to, without its handle. Blank derives it from
+      // the public base URL.
+      "NotificationsActionBaseUrl": "",
+      // How a push service reaches whoever runs this node: a URL or a mailto: address. Blank uses the
+      // public origin.
+      "NotificationsPushSubject": "",
 
       // ── Leaf connections ──
       // kgsm-monitor metrics socket. Blank reports the metrics capability absent.
@@ -164,6 +170,9 @@
       // ── Storage ──
       // SQLite file for the API's own operational metadata.
       "DbPath": "kgsm-api.db",
+      // Directory the shared notification library keeps its history, subscriptions and push keys in.
+      // Blank uses notifications/ beside the DB.
+      "NotificationsDir": "",
 
       // ── General ──
       // HTTP bind address(es), semicolon-separated. Read before the host exists, so it is bound separately in Program.

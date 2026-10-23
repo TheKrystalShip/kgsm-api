@@ -9,7 +9,7 @@ namespace TheKrystalShip.Api.Services.Actions;
 /// <remarks>
 /// <para>
 /// Two surfaces describe the same three conditions and must not answer differently: a push notification
-/// (<see cref="Integrations.WebPush.PushActionCatalog"/>) and the alert feed
+/// (<see cref="Notifications.PushActionCatalog"/>) and the alert feed
 /// (<see cref="Alerts.AlertActionCatalog"/>). What each surface still owns is the <em>wording</em> — a
 /// lock screen reads "Update now" because one line of text is all the context it has, and a card sitting
 /// beside a server name reads "Update" because the rest is already on screen. Only the choice of verb is

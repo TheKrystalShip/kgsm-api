@@ -1,7 +1,7 @@
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Integrations;
-using TheKrystalShip.Api.Services.Integrations.WebPush;
+using TheKrystalShip.Api.Services.Notifications;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Scheduling;
 

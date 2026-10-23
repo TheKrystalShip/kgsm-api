@@ -47,7 +47,7 @@ side is `../../../../../kgsm-docs/systems/events/`. This file is the local "what
   no summary — lives in the **pure** `AuditMapping.From*Event` mappers, unit-tested without a socket.
   Two vocabularies nearby are **closed on purpose and are not this one**: `NotificationCatalog`
   (somebody's stored consent points into it — see `Integrations/NotificationModel.cs`) and
-  `PushActionKind` (the operation a button performs, persisted behind a staged handle).
+  `PushActionKind` (the operation a notification button performs, minted behind a handle by the notification library).
   **The whole `network.*` set is engine-echo-only** — an instance's ports and router forwards are
   opened by the supervisor when it starts and released when it stops, so the api issues no network
   command and has nothing to direct-write.

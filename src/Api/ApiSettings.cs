@@ -430,6 +430,25 @@ public sealed class ApiSettings
     [ConfigField("dbPath", "Database file", Group = "storage", Type = ConfigType.Path, Risk = ConfigRisk.Destructive)]
     public string? DbPath { get; set; }
 
+    /// <summary>Directory the shared notification library keeps its history, subscriptions and push keys in. Blank uses notifications/ beside the DB.</summary>
+    /// <panel>Where every person's notifications and push subscriptions are kept. Pointing it elsewhere
+    /// starts every history empty and unsubscribes every browser.</panel>
+    [ConfigField("notificationsDir", "Notifications directory", Group = "storage", Type = ConfigType.Path,
+        Risk = ConfigRisk.Destructive, NoDefault = true)]
+    public string? NotificationsDir { get; set; }
+
+    /// <summary>The absolute address a notification button posts to, without its handle. Blank derives it from the public base URL.</summary>
+    /// <panel>Where a button on a push notification sends its tap. Empty derives it from the public base
+    /// URL; with neither set, pushes carry no buttons.</panel>
+    [ConfigField("notificationsActionBaseUrl", "Notification button address", Group = "identity", NoDefault = true)]
+    public string? NotificationsActionBaseUrl { get; set; }
+
+    /// <summary>How a push service reaches whoever runs this node: a URL or a mailto: address. Blank uses the public origin.</summary>
+    /// <panel>The contact a push service is given for this node. Empty uses the public base URL's address,
+    /// then the public host.</panel>
+    [ConfigField("notificationsPushSubject", "Push contact", Group = "identity", NoDefault = true)]
+    public string? NotificationsPushSubject { get; set; }
+
 
     // ── General ──────────────────────────────────────────────────────
     /// <summary>HTTP bind address(es), semicolon-separated. Read before the host exists, so it is bound separately in Program.</summary>

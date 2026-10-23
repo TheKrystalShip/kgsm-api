@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>0.220.0</Version>
+    <Version>1.0.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -188,10 +188,9 @@
          types with the same JSON context, so the contract is solid at build time and
          cannot drift between the monitor (producer) and this api (consumer). -->
     <PackageReference Include="TheKrystalShip.KGSM.Monitor.Contracts" Version="1.11.0" />
-    <!-- The Web Push protocol, shared with the assistant leaf. Only the protocol: this API keeps its own
-         subscriptions, preferences and staged actions, because they answer questions the library has no
-         business having an opinion about. -->
-    <PackageReference Include="TheKrystalShip.WebPush" Version="2.0.0" />
+    <!-- The shared notification system's server half: each person's history, push subscriptions, per-kind
+         switches and button handles, behind one route shape. -->
+    <PackageReference Include="TheKrystalShip.Notifications" Version="1.0.0-dev.1" />
   </ItemGroup>
 
   <!-- Stamp the short git SHA onto the build so the assembly InformationalVersion becomes "<Version>+<sha>"

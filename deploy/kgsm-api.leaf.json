@@ -154,6 +154,24 @@
       "risk": "safe"
     },
     {
+      "key": "notificationsActionBaseUrl",
+      "env": "Api__NotificationsActionBaseUrl",
+      "label": "Notification button address",
+      "description": "Where a button on a push notification sends its tap. Empty derives it from the public base URL; with neither set, pushes carry no buttons.",
+      "group": "identity",
+      "type": "string",
+      "risk": "safe"
+    },
+    {
+      "key": "notificationsPushSubject",
+      "env": "Api__NotificationsPushSubject",
+      "label": "Push contact",
+      "description": "The contact a push service is given for this node. Empty uses the public base URL's address, then the public host.",
+      "group": "identity",
+      "type": "string",
+      "risk": "safe"
+    },
+    {
       "key": "monitorSocket",
       "env": "Api__MonitorSocketPath",
       "label": "Monitor socket",
@@ -694,6 +712,15 @@
       "group": "storage",
       "type": "path",
       "default": "kgsm-api.db",
+      "risk": "destructive"
+    },
+    {
+      "key": "notificationsDir",
+      "env": "Api__NotificationsDir",
+      "label": "Notifications directory",
+      "description": "Where every person's notifications and push subscriptions are kept. Pointing it elsewhere starts every history empty and unsubscribes every browser.",
+      "group": "storage",
+      "type": "path",
       "risk": "destructive"
     },
     {

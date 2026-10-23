@@ -10,7 +10,7 @@ using TheKrystalShip.Api.Realtime;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Integrations;
-using TheKrystalShip.Api.Services.Integrations.WebPush;
+using TheKrystalShip.Api.Services.Notifications;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.KGSM.Core.Models;
 

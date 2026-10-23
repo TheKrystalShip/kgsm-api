@@ -43,6 +43,36 @@ public sealed class ApiOptions
     public string DbPath { get; init; } = "kgsm-api.db";
 
     /// <summary>
+    /// Where the notification library keeps its history, subscriptions and push keys
+    /// (<c>Api__NotificationsDir</c>). Default: a <c>notifications/</c> dir beside the SQLite DB.
+    /// </summary>
+    public string NotificationsDir { get; init; } = "notifications";
+
+    /// <summary>What <c>Api__NotificationsActionBaseUrl</c> says: the absolute address a notification button
+    /// posts to, without its handle. Empty derives it, see <see cref="NotificationActionsUrl"/>.</summary>
+    public string NotificationsActionBaseUrl { get; init; } = "";
+
+    /// <summary>What <c>Api__NotificationsPushSubject</c> says. Empty derives it, see
+    /// <see cref="PushSubject"/>.</summary>
+    public string NotificationsPushSubject { get; init; } = "";
+
+    /// <summary>
+    /// The address a button posts to: the configured one, else the public origin and the actions path, else
+    /// empty — and a push then carries no buttons.
+    /// </summary>
+    public string NotificationActionsUrl =>
+        NotificationsActionBaseUrl.Length > 0 ? NotificationsActionBaseUrl.TrimEnd('/')
+        : PublicOrigin is { } origin ? origin + Services.Notifications.FleetNotifications.ActionsPath
+        : "";
+
+    /// <summary>How a push service reaches whoever runs this node: the configured contact, else the public
+    /// origin, else the public host, else a placeholder the push services accept.</summary>
+    public string PushSubject =>
+        NotificationsPushSubject.Length > 0 ? NotificationsPushSubject
+        : PublicOrigin
+          ?? (PublicHost.Length > 0 ? "https://" + PublicHost : "https://localhost");
+
+    /// <summary>
     /// Stable identity of THIS host. Config-driven (default: machine name) and deliberately
     /// NOT derived from a leaf snapshot — identity must not flap when the monitor blips.
     /// Every server/alert this host reports carries it as <c>hostId</c> (architecture §4·a).
@@ -685,6 +715,9 @@ public sealed class ApiOptions
                 JournalLayout.DirectoryFor(ApiJournalProducer, Defaulted(s.JournalStateRoot, JournalLayout.DefaultStateRoot))),
             JournalStateRoot = Defaulted(s.JournalStateRoot, JournalLayout.DefaultStateRoot),
             DbPath = BlankFallback(s.DbPath, "kgsm-api.db"),
+            NotificationsDir = BlankFallback(s.NotificationsDir, DefaultNotificationsDir(s.DbPath)),
+            NotificationsActionBaseUrl = Defaulted(s.NotificationsActionBaseUrl, ""),
+            NotificationsPushSubject = Defaulted(s.NotificationsPushSubject, ""),
 
             // Realtime pump cadences. The domain (instance) poll is relaxed by default (5s) — it
             // spawns kgsm.sh and the roster changes rarely (the SPA also has a manual refresh); floored at
@@ -785,6 +818,14 @@ public sealed class ApiOptions
             LocalAnchorUrl = Defaulted(s.LocalAnchorUrl, "http://127.0.0.1:8098").Trim(),
             HostProviderFilePath = BlankFallback(s.HostProviderFilePath, HostProviderFile.DefaultPath),
         };
+    }
+
+    // The default notification state dir: a notifications/ subdir beside the SQLite DB, so it lands in the
+    // StateDirectory the systemd unit sets via Api__DbPath.
+    private static string DefaultNotificationsDir(string? dbPath)
+    {
+        string? dir = string.IsNullOrWhiteSpace(dbPath) ? null : Path.GetDirectoryName(dbPath.Trim());
+        return string.IsNullOrEmpty(dir) ? "notifications" : Path.Combine(dir, "notifications");
     }
 
     // The default RAWG image cache dir: a covers/ subdir beside the SQLite DB (so it inherits the

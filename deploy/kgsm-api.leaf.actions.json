@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "component": "api",
-  "version": "0.220.0",
+  "version": "1.0.0",
   "actions": [
     {
       "id": "alerts.read",
@@ -107,7 +107,7 @@
     },
     {
       "id": "push.devices",
-      "title": "Register your own push devices",
+      "title": "Read your own notifications and register your push devices",
       "effect": "write",
       "scope": "node",
       "self": true

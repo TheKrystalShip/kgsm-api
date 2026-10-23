@@ -31,6 +31,7 @@ public sealed class NotificationDeliveryWorker(
     IServiceScopeFactory scopeFactory,
     IntegrationStore store,
     NotificationDigestStore digests,
+    Notifications.FleetNotifications people,
     ILogger<NotificationDeliveryWorker> logger) : BackgroundService
 {
     /// <summary>Minimum gap between two deliveries of the same <c>(provider,server,catalog)</c> — the
@@ -74,6 +75,10 @@ public sealed class NotificationDeliveryWorker(
 
     private async Task DispatchAsync(NotificationEvent ev, DateTimeOffset now, CancellationToken ct)
     {
+        // The people who may read the event hear of it through the shared notification library, whatever
+        // the channel integrations below are set to.
+        await people.TellAsync(ev, now, ct).ConfigureAwait(false);
+
         using IServiceScope scope = scopeFactory.CreateScope();
         IEnumerable<INotificationProvider> providers = scope.ServiceProvider.GetServices<INotificationProvider>();
 

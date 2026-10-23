@@ -51,21 +51,4 @@ public static class NotificationDigest
             _ => $"{n} thing{(n == 1 ? "" : "s")} happened while you were away",
         };
     }
-
-    /// <summary>
-    /// The servers a batch of <c>update_available</c> facts names, or empty when the batch is not
-    /// uniformly that — the one case where a single tap on a summary is an unambiguous instruction.
-    /// </summary>
-    /// <remarks>
-    /// De-duplicated and ordered, because the batch may hold two facts about one server if it sat long
-    /// enough, and a button offering to update six things that are four things would be lying about its
-    /// own scope.
-    /// </remarks>
-    public static IReadOnlyList<string> UpdatableServers(IReadOnlyList<NotificationEvent> events)
-    {
-        if (!events.All(e => e.CatalogId == "update_available" && !string.IsNullOrEmpty(e.ServerId)))
-            return [];
-
-        return events.Select(e => e.ServerId!).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
-    }
 }

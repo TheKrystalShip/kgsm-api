@@ -20,7 +20,7 @@ using TheKrystalShip.KGSM.ComponentConfig;
 [assembly: Action(ActionIds.MembersRead, "View the cluster's members", DeclaredEffect.Read, DeclaredScope.Cluster)]
 [assembly: Action(ActionIds.MembersManage, "Manage the cluster's members", DeclaredEffect.Write, DeclaredScope.Cluster)]
 [assembly: Action(ActionIds.MembersRemove, "Remove members from the cluster", DeclaredEffect.Write, DeclaredScope.Cluster)]
-[assembly: Action(ActionIds.PushDevices, "Register your own push devices", DeclaredEffect.Write, DeclaredScope.Node, Self = true)]
+[assembly: Action(ActionIds.PushDevices, "Read your own notifications and register your push devices", DeclaredEffect.Write, DeclaredScope.Node, Self = true)]
 
 // What this API reads from the engine as itself, for everybody: the roster, run state and players behind
 // every page and the realtime stream, the library catalog, the engine's configuration, each console the

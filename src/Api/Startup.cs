@@ -1,4 +1,4 @@
-using TheKrystalShip.WebPush;
+using TheKrystalShip.Notifications;
 using System.Net;
 using System.Security.Claims;
 
@@ -26,7 +26,7 @@ using TheKrystalShip.KGSM.Cluster.Messaging;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Files;
 using TheKrystalShip.Api.Services.Integrations;
-using TheKrystalShip.Api.Services.Integrations.WebPush;
+using TheKrystalShip.Api.Services.Notifications;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.Api.Services.Players;
@@ -393,15 +393,6 @@ public class Startup(IConfiguration configuration)
                 c => c.Timeout = TimeSpan.FromSeconds(10))
             .RemoveAllLoggers();
 
-        // Web Push — the third provider. It fans out over per-device subscriptions instead of posting to
-        // one webhook, so the subscription table and the sender are their own services and the provider
-        // itself takes no HttpClient.
-        //
-        // RemoveAllLoggers here for the same reason as the webhook client above: a push endpoint URL is a
-        // capability to notify somebody's phone, and the default factory logging handler would write one
-        // per send into the service log.
-        services.AddHttpClient<WebPushSender>(c => c.Timeout = TimeSpan.FromSeconds(10))
-            .RemoveAllLoggers();
         // The general per-account preference store — what a person has set, per device, plus the
         // account switch that makes one device's set authoritative. A singleton for the same reason the
         // push stores are: it owns a scope per operation and a write gate, and the version bump behind
@@ -409,13 +400,20 @@ public class Startup(IConfiguration configuration)
         // layout and the UI theme are tenants rather than features here.
         services.AddSingleton<UserPreferenceStore>();
 
-        services.AddSingleton<PushSubscriptionStore>();
-        services.AddSingleton<PushPreferenceStore>();
-        services.AddSingleton<PushSnoozeStore>();
-        services.AddSingleton<PushQuietHoursStore>();
-        services.AddSingleton<PushActionStore>();
-        services.AddSingleton<VapidKeyStore>();
-        services.AddTransient<INotificationProvider, WebPushNotificationProvider>();
+        // The shared notification library: each person's history, push subscriptions and per-kind
+        // switches, in its own SQLite file beside the API's database. FleetNotifications tells it about
+        // fleet events; the signed-in routes and the anonymous button route are mapped in Configure.
+        services.AddNotifications(o =>
+        {
+            o.StateDirectory = apiOptions.NotificationsDir;
+            o.PushSubject = apiOptions.PushSubject;
+            o.PushTitle = FleetNotifications.PushTitle;
+            o.ActionBaseUrl = apiOptions.NotificationActionsUrl;
+            o.Kinds = FleetNotifications.Kinds;
+        });
+        services.AddSingleton<NotificationActors>();
+        services.AddSingleton<FleetNotifications>();
+        services.AddScoped<INotificationActionHandler, FleetNotificationActions>();
 
         // M8·c Increment B — the delivery worker. The bus is the ALWAYS-ON tap: AuditService.AppendAsync
         // publishes every audit row to it (the bus keeps only catalog-mapped actions; the worker routes to
@@ -1059,6 +1057,9 @@ public class Startup(IConfiguration configuration)
         app.UseEndpoints(endpoints =>
         {
             endpoints.MapControllers();
+
+            // A person's own notifications and devices, and the anonymous redemption of a button.
+            endpoints.MapFleetNotifications();
 
             // The member-to-member wire, served by the cluster package beside this API's own routes:
             // one implementation of the status codes, the size cap, the token check and the spoof
