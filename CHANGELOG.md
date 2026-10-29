@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — transfer events known to the catalog (1.1.1, `Lib` 9.4.0-dev.2)
+
+- `server.transfer.started`, `.completed` and `.failed` are in `kgsm-lib`'s event catalog, so reading
+  this API's own journal no longer logs them as unknown event types and the host conformance check
+  passes on a journal whose newest line is one. Their payload classes come from `kgsm-lib`.
+
 ### Added — moving a stopped server to another node (1.1.0, Api.Contracts 4.1.0-dev.1, `Lib` 9.4.0-dev.1, `Dns` 0.3.0-dev.1)
 
 The API's half of an instance transfer (`kgsm-docs/plans/instance-transfer.md`): the source mints a ticket

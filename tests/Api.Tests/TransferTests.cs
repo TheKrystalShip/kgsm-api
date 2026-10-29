@@ -13,6 +13,7 @@ using TheKrystalShip.KGSM.Cluster.Messaging;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Dns.Member;
 using TheKrystalShip.KGSM.Dns.Messages;
+using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Tests;
 
