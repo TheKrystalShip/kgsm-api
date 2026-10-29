@@ -439,7 +439,8 @@ public sealed class ClusterNodeFactory(
     int gossipMs = 250,
     int suspectMs = 1500,
     int reapMs = 4000,
-    int pollMs = 250) : AuthTestFactory
+    int pollMs = 250,
+    Action<IServiceCollection>? configureServices = null) : AuthTestFactory
 {
     public string NodeId { get; } = nodeId;
     public string ClusterHostId { get; } = hostId;
@@ -506,5 +507,8 @@ public sealed class ClusterNodeFactory(
                 services.AddHttpClient(MemberLatencyPoller.HttpClientName)
                     .ConfigurePrimaryHttpMessageHandler(latencyHandlerFactory));
         }
+
+        if (configureServices is not null)
+            builder.ConfigureTestServices(configureServices);
     }
 }

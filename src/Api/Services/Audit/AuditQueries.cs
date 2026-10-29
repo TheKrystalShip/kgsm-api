@@ -117,7 +117,8 @@ public static class AuditQueries
         string? actor,
         string? since,
         string? category,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<string, string?>? memberLabel = null)
     {
         AuditCursor? c = AuditCursor.Parse(cursor);
         string[]? severities = ParseSeverities(severity);
@@ -130,7 +131,7 @@ public static class AuditQueries
 
         (List<AuditRecord> engineRecords, bool degraded, bool journalFull, IReadOnlyList<AuditJournalCoverage>? journals) = await QueryJournalAsync(
             journal, hostId, c, limit, severities, serverId, actor, sinceTs?.ToUnixTimeMilliseconds(),
-            categoryPrefix, ct).ConfigureAwait(false);
+            categoryPrefix, memberLabel, ct).ConfigureAwait(false);
 
         List<AuditRecord> merged = localRecords.Concat(engineRecords)
             .GroupBy(r => r.Id, StringComparer.Ordinal).Select(g => g.First()) // defensive boundary dedup
@@ -218,7 +219,7 @@ public static class AuditQueries
     private static async Task<(List<AuditRecord> Records, bool Degraded, bool JournalFull, IReadOnlyList<AuditJournalCoverage>? Journals)> QueryJournalAsync(
         IEventJournalHistory? journal, string hostId, AuditCursor? cursor, int limit,
         string[]? severities, string? serverId, string? actor, long? sinceMs, string? categoryPrefix,
-        CancellationToken ct)
+        Func<string, string?>? memberLabel, CancellationToken ct)
     {
         // No engine provisioned on this host: there is no journal to read, which is a missing
         // capability rather than a failure. Reported the same way an unreadable one is — the
@@ -270,7 +271,7 @@ public static class AuditQueries
 
             foreach (EventHistoryEntry item in page.Events)
             {
-                AuditRecord? shaped = EngineEventShaping.Shape(item, hostId);
+                AuditRecord? shaped = EngineEventShaping.Shape(item, hostId, memberLabel);
                 if (shaped is null) continue; // deliberately-silent type
                 if (severities is { Length: > 0 } && !severities.Contains(shaped.Severity)) continue;
                 if (!string.IsNullOrWhiteSpace(serverId) && shaped.ServerId != serverId) continue;

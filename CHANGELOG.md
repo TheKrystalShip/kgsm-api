@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — moving a stopped server to another node (1.1.0, Api.Contracts 4.1.0-dev.1, `Lib` 9.4.0-dev.1, `Dns` 0.3.0-dev.1)
+
+The API's half of an instance transfer (`kgsm-docs/plans/instance-transfer.md`): the source mints a ticket
+and holds the engine's lock, the target pulls the server across part by part as a job, and the commit
+travels back on the cluster bus.
+
+- Person-facing routes: `POST /api/v1/servers/{id}/transfers` and
+  `DELETE /api/v1/servers/{id}/transfers/current[?force=true]` on the source (`kgsm:server.export`),
+  `POST /api/v1/transfers/preflight` and `POST /api/v1/transfers` on the target (`kgsm:server.import`).
+  A refusal is the error envelope with a transfer refusal code as `error.code`.
+- Member routes under `/api/v1/members/self/transfers/{transferId}`: on the source `manifest`, `lock`,
+  `parts/{partId}`, `parts/{partId}/sha256` and `abort`, each redeeming the `KGSM-Transfer-Ticket`
+  header, which re-evaluates the minting account's access every time; on the target the outcome the
+  source's recovery asks for. Both nodes hash each part and the target fetches a mismatched one again.
+- The ticket is single-transfer and expires ten minutes after minting unless the lock was taken.
+- `server.transfer.commit` on the bus; the source's handler applies it once, retries a transient engine
+  failure, and records a commit for a transfer it already released as a conflict.
+- Recovery: the source asks the target about every lock it holds at startup and every five minutes; the
+  target aborts a transfer a stopped process left running and re-sends a commit that never reached the
+  outbox.
+- `Server.transfer` and `Job.transfer`; the job's verb is `transfer`.
+- A server arriving by transfer is reported to the DNS anchor inheriting the source's game name.
+- Journal lines `server.transfer.started`, `server.transfer.completed` and `server.transfer.failed`, with
+  audit rows that name the other node by its label.
+- Transfer records in the `transfers` table, created beside an existing database without a wipe.
+
 ### Changed — notifications are the shared system's (1.0.0, Api.Contracts 4.0.0)
 
 Every person's notifications are kept and pushed by `TheKrystalShip.Notifications`, the library every

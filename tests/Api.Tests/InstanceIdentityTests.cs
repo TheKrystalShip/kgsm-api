@@ -71,7 +71,7 @@ public sealed class InstanceIdentityTests
         Assert.Equal(AuditSeverity.Info, w.Severity);
         // Immutable identity: the rename did not touch the id, so every earlier row still joins to it.
         Assert.Equal("factorio-42", w.ServerId);
-        Assert.Equal("factorio-42", w.Target.Id);
+        Assert.Equal("factorio-42", w.Target!.Id);
         Assert.Equal("haru", w.Actor.Name);
         Assert.Equal("ui", w.Origin);
         Assert.Equal("Typo Proof", w.Meta!["oldDisplayName"]);

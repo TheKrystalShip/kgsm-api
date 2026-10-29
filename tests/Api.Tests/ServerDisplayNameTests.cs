@@ -294,6 +294,16 @@ public sealed class ServerDisplayNameTests
         public KgsmResult GenerateId(string blueprintName, string? id = null) => throw new NotImplementedException();
         public KgsmResult Install(string blueprintName, string? library = null, string? version = null, string? displayName = null, string? actor = null, string? origin = null, int? port = null, bool? start = null, string? id = null) => throw new NotImplementedException();
         public KgsmResult Uninstall(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public TransferOutcome<TransferManifest> ExportManifest(string instanceName, string? lockToken = null, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public Task<StreamResult> ExportPartAsync(string instanceName, string partId, string lockToken, Stream destination, string? actor = null, string? origin = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public KgsmResult CommitExport(string instanceName, string lockToken, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public KgsmResult Unlock(string instanceName, string? lockToken = null, bool force = false, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public ImportVerdict ImportCheck(TransferManifest manifest, string? library = null, string? blueprintSuffix = null, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public ImportBeginResult ImportBegin(TransferManifest manifest, string? library = null, string? blueprintSuffix = null, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public Task<StreamResult> ImportPartAsync(string importId, string partId, Stream source, string? actor = null, string? origin = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public TransferOutcome<ImportedInstance> ImportFinish(string importId, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public KgsmResult ImportAbort(string importId, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public TransferOutcome<List<StagedImport>> ImportList() => throw new NotImplementedException();
         public KgsmResult Move(string instanceName, string library, bool skipSpaceCheck = false, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult Start(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();
         public KgsmResult Stop(string instanceName, string? actor = null, string? origin = null) => throw new NotImplementedException();

@@ -27,7 +27,7 @@ namespace TheKrystalShip.Api.Controllers;
 [Route("api/v1/audit")]
 [RequiresAction(ActionIds.AuditRead)]
 public sealed class AuditController(
-    AppDbContext db, ApiOptions options, NodeAccess access)
+    AppDbContext db, ApiOptions options, NodeAccess access, Services.Cluster.MemberLabels memberLabels)
     : ControllerBase
 {
     /// <summary>
@@ -76,7 +76,8 @@ public sealed class AuditController(
             actor,
             since,
             category,
-            ct).ConfigureAwait(false);
+            ct,
+            memberLabels.Label).ConfigureAwait(false);
 
         // Without api:audit.personal-fields, the values the engine classifies as personal or privileged
         // come off the rows — a player's connection address, what somebody typed at a console, who a ban

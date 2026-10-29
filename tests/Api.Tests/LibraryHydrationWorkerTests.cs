@@ -396,6 +396,7 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
         public List<string> List() => throw new NotImplementedException();
         public List<string> ListDefault() => throw new NotImplementedException();
         public List<string> ListCustom() => throw new NotImplementedException();
+        public BlueprintRequirements? BlueprintRequirements(string blueprintName) => throw new NotImplementedException();
         public Blueprint? GetInfo(string blueprintName) => throw new NotImplementedException();
         public string? FindPath(string blueprintName) => throw new NotImplementedException();
         public BlueprintCandidates? FindAll(string blueprintName) => throw new NotImplementedException();

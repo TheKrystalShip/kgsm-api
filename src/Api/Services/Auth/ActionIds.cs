@@ -26,6 +26,8 @@ public static class ActionIds
     public const string ServerInstall = "kgsm:server.install";
     public const string ServerUninstall = "kgsm:server.uninstall";
     public const string ServerMove = "kgsm:server.move";
+    public const string ServerExport = "kgsm:server.export";
+    public const string ServerImport = "kgsm:server.import";
     public const string ServerStart = "kgsm:server.start";
     public const string ServerStop = "kgsm:server.stop";
     public const string ServerRestart = "kgsm:server.restart";

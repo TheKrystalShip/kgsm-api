@@ -37,6 +37,7 @@ public sealed class DomainPump(
     Services.Availability.RunTimesIndex runTimes,
     Services.Library.BlueprintCache blueprints,
     TheKrystalShip.KGSM.Dns.Member.DnsNameBook names,
+    Services.Transfers.TransferStore transfers,
     ApiOptions options,
     ILogger<DomainPump> logger)
     : BackgroundService
@@ -141,7 +142,8 @@ public sealed class DomainPump(
                             ServerAggregator.BlueprintMinRamOf(blueprints),
                             connectHost: options.ConnectHost,
                             publishedHost: names.GameName,
-                            portCollisions: ServerAggregator.PortCollisionsOf(names));
+                            portCollisions: ServerAggregator.PortCollisionsOf(names),
+                            transfer: transfers.ActiveFor);
 
                     if (!primed)
                     {
@@ -216,7 +218,10 @@ public sealed class DomainPump(
         || a.PublishedHost != b.PublishedHost
         // Moves when a server on another member behind the same address takes or gives up one of this
         // one's ports — rare, and exactly what somebody looking at the server needs to see arrive.
-        || !SameCollisions(a.PortCollisions, b.PortCollisions);
+        || !SameCollisions(a.PortCollisions, b.PortCollisions)
+        // A transfer taking hold of a server or letting it go: the panel disables and re-enables the
+        // server's controls on it, on both nodes.
+        || a.Transfer != b.Transfer;
 
     private static bool SameCollisions(IReadOnlyList<PortCollision>? a, IReadOnlyList<PortCollision>? b) =>
         a is null ? b is null : b is not null && a.SequenceEqual(b);

@@ -30,4 +30,16 @@ internal static class EngineExit
     /// to be refused again until something else stops.
     /// </remarks>
     public const int InsufficientMemory = 51;
+
+    /// <summary>
+    /// kgsm's <c>EC_INSTANCE_RUNNING</c>: the verb needs the instance stopped. A transfer reads it as the
+    /// <c>instance_running</c> refusal rather than as a fault.
+    /// </summary>
+    public const int InstanceRunning = 57;
+
+    /// <summary>
+    /// kgsm's <c>EC_INSUFFICIENT_DISK</c>: the library lacks the room. A transfer reads it as the
+    /// <c>insufficient_disk</c> refusal.
+    /// </summary>
+    public const int InsufficientDisk = 56;
 }

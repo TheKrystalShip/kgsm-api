@@ -72,7 +72,9 @@ public static class EngineEventShaping
     /// silently dropped from the audit trail (Locked decision #8's whole point — a neutral raw store
     /// means an event the domain layer hasn't wired a mapper for yet still shows up).
     /// </summary>
-    public static AuditRecord? Shape(EventHistoryEntry item, string hostId)
+    /// <param name="memberLabel">A cluster member's label by its id, for the rows that name another node;
+    /// absent, a member reads as its id.</param>
+    public static AuditRecord? Shape(EventHistoryEntry item, string hostId, Func<string, string?>? memberLabel = null)
     {
         ArgumentNullException.ThrowIfNull(item);
         if (IsPhase(item.Type)) return null;
@@ -286,6 +288,13 @@ public static class EngineEventShaping
                 d => AuditMapping.FromLibraryRenamedEvent(d, hostId)),
             ApiJournal.LibraryFailedEvent => Map<LibraryOutcomeEventData>(item,
                 d => AuditMapping.FromLibraryFailedEvent(d, hostId)),
+            // A server moving between nodes: each node writes its own half, naming the other by member id.
+            ApiJournal.TransferStartedEvent => Map<TransferStartedEventData>(item,
+                d => AuditMapping.FromTransferStartedEvent(d, hostId, memberLabel)),
+            ApiJournal.TransferCompletedEvent => Map<TransferCompletedEventData>(item,
+                d => AuditMapping.FromTransferCompletedEvent(d, hostId, memberLabel)),
+            ApiJournal.TransferFailedEvent => Map<TransferFailedEventData>(item,
+                d => AuditMapping.FromTransferFailedEvent(d, hostId)),
             _ => null,
         };
 

@@ -731,6 +731,24 @@ public class Startup(IConfiguration configuration)
         // so no new client. The self/* exposing endpoints live on PeersController (no extra service).
         services.AddSingleton<ClusterPeerRelay>();
 
+        // A cluster member's label by its id, for the audit rows that name another node.
+        services.AddSingleton<MemberLabels>();
+
+        // Moving a stopped server between nodes. Each node holds its half of every transfer in its own
+        // records: the source mints the ticket, holds the engine's lock and applies the commit; the target
+        // runs the job that pulls the parts across. The commit travels on the bus, recovery settles what a
+        // stopped process left behind, and the member calls go through a client of their own with no
+        // timeout, because a part streams for as long as it takes.
+        services.AddSingleton(new Services.Transfers.TransferClock(TimeProvider.System));
+        services.AddSingleton<Services.Transfers.TransferStore>();
+        services.AddHttpClient(Services.Transfers.TransferPeerClient.HttpClientName,
+            c => c.Timeout = Timeout.InfiniteTimeSpan);
+        services.AddSingleton<Services.Transfers.TransferPeerClient>();
+        services.AddSingleton<Services.Transfers.TransferSource>();
+        services.AddSingleton<Services.Transfers.TransferTarget>();
+        services.AddSingleton<IClusterMessageHandler, Services.Transfers.TransferCommitHandler>();
+        services.AddHostedService<Services.Transfers.TransferRecovery>();
+
         // Auth. This node signs nobody in: every session it accepts was minted by the cluster's auth
         // anchor — which on a machine that is a cluster of one runs beside it — and is verified here
         // against the key that member publishes. The keys, the audience and the issuer are read through

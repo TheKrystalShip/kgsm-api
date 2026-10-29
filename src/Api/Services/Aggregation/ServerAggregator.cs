@@ -40,6 +40,7 @@ public sealed class ServerAggregator
     private readonly Availability.SupervisionPhaseIndex _phases;
     private readonly Library.BlueprintCache _blueprints;
     private readonly DnsNameBook _names;
+    private readonly Transfers.TransferStore _transfers;
     private readonly ILogger<ServerAggregator> _logger;
 
     public ServerAggregator(
@@ -57,6 +58,7 @@ public sealed class ServerAggregator
         Availability.SupervisionPhaseIndex phases,
         Library.BlueprintCache blueprints,
         DnsNameBook names,
+        Transfers.TransferStore transfers,
         ILogger<ServerAggregator> logger)
     {
         _options = options;
@@ -73,6 +75,7 @@ public sealed class ServerAggregator
         _phases = phases;
         _blueprints = blueprints;
         _names = names;
+        _transfers = transfers;
         _logger = logger;
     }
 
@@ -183,7 +186,7 @@ public sealed class ServerAggregator
             metricsById, _options.HostId, _cache.IsStarting, _jobs.InFlightFor,
             IndexDiskBytes(snapshotTask.Result), OnlinePlayersOf(_players, _observability), _updateLag.Lookup,
             _runTimes.Lookup, BlueprintMinRamOf(_blueprints), _phases.ParkedLookup,
-            _options.ConnectHost, _names.GameName, PortCollisionsOf(_names));
+            _options.ConnectHost, _names.GameName, PortCollisionsOf(_names), _transfers.ActiveFor);
 
         // The required ports come from the instance roster we already read (Instance.Ports, no extra spawn);
         // the firewall probe is the only added I/O, bounded inside NetworkAggregator.
@@ -242,7 +245,8 @@ public sealed class ServerAggregator
             servers.Add(BuildServer(id, instance, statuses, backupReadings, metricsById,
                 _options.HostId, _cache.IsStarting, _jobs.InFlightFor, diskById,
                 OnlinePlayersOf(_players, _observability), _updateLag.Lookup, _runTimes.Lookup,
-                BlueprintMinRamOf(_blueprints), _phases.ParkedLookup, _options.ConnectHost, _names.GameName, PortCollisionsOf(_names)));
+                BlueprintMinRamOf(_blueprints), _phases.ParkedLookup, _options.ConnectHost, _names.GameName, PortCollisionsOf(_names),
+                _transfers.ActiveFor));
 
         // Deterministic order so polling/diffing is stable.
         servers.Sort(static (a, b) => string.CompareOrdinal(a.Id, b.Id));
@@ -307,7 +311,8 @@ public sealed class ServerAggregator
         Func<string, bool>? isParked = null,
         string? connectHost = null,
         Func<string, string?>? publishedHost = null,
-        Func<string, IReadOnlyList<PortCollision>?>? portCollisions = null)
+        Func<string, IReadOnlyList<PortCollision>?>? portCollisions = null,
+        Func<string, ServerTransfer?>? transfer = null)
     {
         string? libraryState = LibraryStateOf(instance);
 
@@ -482,7 +487,9 @@ public sealed class ServerAggregator
             Library: string.IsNullOrWhiteSpace(instance.Library) ? null : instance.Library,
             LibraryPath: string.IsNullOrWhiteSpace(instance.LibraryDir) ? null : instance.LibraryDir,
             LibraryState: libraryState,
-            InstallNonce: string.IsNullOrEmpty(instance.InstallNonce) ? null : instance.InstallNonce);
+            InstallNonce: string.IsNullOrEmpty(instance.InstallNonce) ? null : instance.InstallNonce,
+            // From this node's transfer records: set while a transfer holds the server, null otherwise.
+            Transfer: transfer?.Invoke(id));
     }
 
     /// <summary>

@@ -78,6 +78,16 @@ namespace TheKrystalShip.Api.Contracts;
 [JsonSerializable(typeof(ComponentConfigUpdate))]
 [JsonSerializable(typeof(ComponentConfigApplyResult))]
 [JsonSerializable(typeof(LogPage))]
+// Moving a server between nodes: the person-facing routes, and what the two nodes say to each other.
+[JsonSerializable(typeof(TransferCreateRequest))]
+[JsonSerializable(typeof(TransferTicket))]
+[JsonSerializable(typeof(TransferStartRequest))]
+[JsonSerializable(typeof(TransferPreflight))]
+[JsonSerializable(typeof(TransferAccepted))]
+[JsonSerializable(typeof(TransferOutcome))]
+[JsonSerializable(typeof(TransferAbortRequest))]
+[JsonSerializable(typeof(TransferPartHash))]
+[JsonSerializable(typeof(TransferCommit))]
 // And the one shape every refusal arrives in.
 [JsonSerializable(typeof(ErrorEnvelope))]
 [JsonSerializable(typeof(AccountNames))]

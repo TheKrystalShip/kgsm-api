@@ -48,6 +48,7 @@ public sealed class KgsmAuditConsumer(
     StreamHub hub,
     Realtime.DomainPump domainPump,
     JobRegistry jobRegistry,
+    Cluster.MemberLabels memberLabels,
     ILogger<KgsmAuditConsumer> logger) : IHostedService
 {
     // Captures the journal-position id for each engine envelope (via a RegisterRawHandler
@@ -134,6 +135,7 @@ public sealed class KgsmAuditConsumer(
         ApiJournal.FileWrittenEvent, ApiJournal.BackupDownloadedEvent,
         ApiJournal.CommandFailedEvent, ApiJournal.CommandRefusedEvent, ApiJournal.CommandCancelledEvent,
         ApiJournal.LibraryRenamedEvent, ApiJournal.LibraryFailedEvent,
+        ApiJournal.TransferStartedEvent, ApiJournal.TransferCompletedEvent, ApiJournal.TransferFailedEvent,
     };
 
     /// <summary>
@@ -202,7 +204,7 @@ public sealed class KgsmAuditConsumer(
                 Data: wrapper.Data,
                 Producer: position.Producer);
 
-            if (EngineEventShaping.Shape(entry, options.HostId) is { } record)
+            if (EngineEventShaping.Shape(entry, options.HostId, memberLabels.Label) is { } record)
                 audit.PublishLive(record);
         }
         catch (Exception ex)

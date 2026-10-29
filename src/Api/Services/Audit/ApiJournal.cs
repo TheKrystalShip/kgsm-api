@@ -94,6 +94,10 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     public const string LibraryRenamedEvent = "library.renamed";
     public const string LibraryFailedEvent = "library.failed";
 
+    public const string TransferStartedEvent = "server.transfer.started";
+    public const string TransferCompletedEvent = "server.transfer.completed";
+    public const string TransferFailedEvent = "server.transfer.failed";
+
     /// <summary>Records a leaf's runtime provisioning being flipped.</summary>
     public Task ServiceProvisioningAsync(
         bool provisioned, string leaf, string? displayName, string actor, string? origin,
@@ -254,6 +258,58 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
                 w.WriteNumber("ExitCode", code);
             else
                 w.WriteNull("ExitCode");
+        }, ct);
+
+    /// <summary>
+    /// Records the target's first line for a server arriving from another node: the transfer began here.
+    /// </summary>
+    /// <remarks>
+    /// The engine's own <c>server.imported</c> names no node, because the engine knows none. Only this
+    /// API knows where the server came from, so the line naming it is this API's.
+    /// </remarks>
+    public Task TransferStartedAsync(
+        string transferId, string sourceMember, string sourceInstance, string? actor, string? origin,
+        CancellationToken ct = default) =>
+        WriteAsync(TransferStartedEvent, actor ?? "", origin, w =>
+        {
+            w.WriteString("TransferId", transferId);
+            w.WriteString("SourceMember", sourceMember);
+            w.WriteString("SourceInstance", sourceInstance);
+        }, ct);
+
+    /// <summary>
+    /// Records the source's last line for a server that left: the commit was applied and the server lives
+    /// on the target under <paramref name="targetInstance"/>.
+    /// </summary>
+    public Task TransferCompletedAsync(
+        string transferId, string instance, string targetMember, string targetInstance, string? actor,
+        string? origin, CancellationToken ct = default) =>
+        WriteAsync(TransferCompletedEvent, actor ?? "", origin, w =>
+        {
+            w.WriteString("TransferId", transferId);
+            w.WriteString("InstanceName", instance);
+            w.WriteString("TargetMember", targetMember);
+            w.WriteString("TargetInstance", targetInstance);
+        }, ct);
+
+    /// <summary>
+    /// Records a transfer ending without moving the server, on whichever node observed it.
+    /// </summary>
+    /// <remarks>
+    /// The source names its own instance as <c>InstanceName</c>; the target, which holds no instance for
+    /// it, names the source's as <c>SourceInstance</c>. <paramref name="reason"/> is a refusal code and
+    /// <paramref name="phase"/> the step the transfer had reached.
+    /// </remarks>
+    public Task TransferFailedAsync(
+        string transferId, string? instance, string? sourceInstance, string reason, string phase,
+        string? actor, string? origin, CancellationToken ct = default) =>
+        WriteAsync(TransferFailedEvent, actor ?? "", origin, w =>
+        {
+            w.WriteString("TransferId", transferId);
+            if (instance is not null) w.WriteString("InstanceName", instance);
+            if (sourceInstance is not null) w.WriteString("SourceInstance", sourceInstance);
+            w.WriteString("Reason", reason);
+            w.WriteString("Phase", phase);
         }, ct);
 
     /// <summary>

@@ -278,7 +278,13 @@ public sealed record Server(
     // instance's life. It is what an access grant on this server names (`instance:<node>/<id>#<nonce>`)
     // and what `/me/access` keys its instances by, so a reinstall under the same id is a different
     // target. Null while the engine has not reported one.
-    string? InstallNonce = null);
+    string? InstallNonce = null,
+    // The transfer holding this server: on the source from the ticket until the commit or the abort. A
+    // surface disables the lifecycle controls while it is set. Null otherwise, and written as null so
+    // the patch that ends a transfer clears it. The target's server appears only once the transfer has
+    // committed, so it carries none; the target's progress is the transfer job. Read from this node's
+    // transfer records, never inferred from run-state.
+    ServerTransfer? Transfer = null);
 
 /// <summary>
 /// A server's note — free text somebody running it writes for players and teammates

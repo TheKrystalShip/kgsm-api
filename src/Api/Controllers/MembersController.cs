@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Net.Http.Headers;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Auth;
@@ -345,20 +344,9 @@ public sealed class MembersController(
     /// error result to hand straight back, or null when the caller passed.</summary>
     private async Task<IActionResult?> AuthenticateEnabledMemberAsync()
     {
-        string? token = ExtractBearerToken(Request);
-        if (token is null)
-            return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token", "missing bearer token");
-
-        ClusterPrincipal? principal = await clusterTokens.ValidateAsync(token).ConfigureAwait(false);
-        if (principal is null)
-            return Error(StatusCodes.Status401Unauthorized, "invalid_cluster_token",
-                "invalid, expired, or unsigned cluster service token");
-
-        if (!await memberGate.IsEnabledAsync(principal.MemberId).ConfigureAwait(false))
-            return Error(StatusCodes.Status403Forbidden, "member_disabled",
-                $"member '{principal.MemberId}' is not an enabled member of this cluster");
-
-        return null;
+        (string? member, int status, ErrorEnvelope? refusal) =
+            await ClusterCaller.AuthenticateAsync(Request, clusterTokens, memberGate).ConfigureAwait(false);
+        return member is null ? StatusCode(status, refusal) : null;
     }
 
     /// <summary>Map one handshake outcome onto its status code and error envelope, in the same words the
@@ -411,17 +399,6 @@ public sealed class MembersController(
         new(m.MemberId, m.Nickname ?? m.MemberId, m.Kind,
             MemberCandidates.ClientUrl(MemberCandidates.Decode(m.Candidates)),
             GossipState.Display(m.MembershipState, m.LastSeen), m.Status, m.LatencyMs);
-
-    /// <summary>Extract a bearer token, or null when absent or not a bearer. These endpoints have no other
-    /// credential form.</summary>
-    private static string? ExtractBearerToken(HttpRequest request)
-    {
-        string? header = request.Headers[HeaderNames.Authorization];
-        const string prefix = "Bearer ";
-        return header is not null && header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
-            ? header[prefix.Length..].Trim()
-            : null;
-    }
 
     private ObjectResult Error(int statusCode, string code, string message) =>
         StatusCode(statusCode, new ErrorEnvelope(new ErrorBody(code, message)));

@@ -176,6 +176,11 @@ public static class CommandVerb
     /// for the same reason as <see cref="BackupDelete"/>: it removes the bytes a restore would read.</summary>
     public const string BackupPrune = "backup_prune";
 
+    /// <summary>Bring a server over from another node (<c>POST /transfers</c> on the target). NOT in
+    /// <see cref="IsKnown"/>; the job's <see cref="Job.ServerId"/> is the source instance id and its
+    /// progress rides <see cref="Job.Transfer"/>.</summary>
+    public const string Transfer = "transfer";
+
     public static bool IsKnown(string? verb) => verb is Start or Stop or Restart or Update;
 }
 
@@ -194,6 +199,9 @@ public static class CommandVerb
 /// <param name="QueuedPosition">The job's stable 1-based ordinal within its batch, so ten jobs all
 /// reading <c>queued</c> still say which moves next. A <b>count, not a clock</b>: no completion time
 /// is offered, because how long a verb takes is not something this API has measured.</param>
+/// <param name="Transfer">A <see cref="CommandVerb.Transfer"/> job's progress; null on every other verb.
+/// A transfer job's <see cref="ServerId"/> is the source instance id, and its <see cref="Error"/> on failure
+/// is a <see cref="TransferRefusalCodes"/> value.</param>
 public sealed record Job(
     string Id,
     string ServerId,
@@ -205,7 +213,8 @@ public sealed record Job(
     string? Phase = null,
     string? Blueprint = null,
     string? BatchId = null,
-    int? QueuedPosition = null);
+    int? QueuedPosition = null,
+    JobTransfer? Transfer = null);
 
 /// <summary>The <c>202 Accepted</c> body: <c>{ "job": { ... } }</c> (reference/node-api.md commands).</summary>
 public sealed record CommandAccepted(Job Job);

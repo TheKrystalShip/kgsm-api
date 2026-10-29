@@ -83,8 +83,28 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// which device switched it on. Same creation posture as <see cref="UserPreferences"/>.</summary>
     public DbSet<UserSyncEntity> UserSync => Set<UserSyncEntity>();
 
+    /// <summary>Each node's half of every transfer between nodes (see <see cref="TransferEntity"/>). Created by
+    /// <c>EnsureCreated</c> on a fresh DB and by <see cref="Services.Transfers.TransferStore"/>'s idempotent
+    /// <c>CREATE TABLE IF NOT EXISTS</c> on an existing one.</summary>
+    public DbSet<TransferEntity> Transfers => Set<TransferEntity>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<TransferEntity>(e =>
+        {
+            e.ToTable("transfers");
+            e.HasKey(t => new { t.TransferId, t.Role });
+            e.Property(t => t.CreatedAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            e.Property(t => t.UpdatedAt).HasConversion(
+                v => v.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+            e.Property(t => t.TicketExpiresAt).HasConversion(
+                v => v!.Value.UtcTicks,
+                v => new DateTimeOffset(v, TimeSpan.Zero));
+        });
+
         modelBuilder.Entity<BatchEntity>(e =>
         {
             e.ToTable("batches");

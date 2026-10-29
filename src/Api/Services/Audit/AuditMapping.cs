@@ -1584,6 +1584,79 @@ public static class AuditMapping
             hostId, $"downloaded a backup of {d.InstanceName}", meta, serverId: d.InstanceName);
     }
 
+    /// <summary>Map a <c>server.transfer.started</c> event — a server began arriving on this node.</summary>
+    /// <remarks>
+    /// The server has no id here yet, so the row targets the source's instance by name and carries no
+    /// <c>serverId</c>: pinning it to a local server would file it under whatever this node happens to
+    /// call an unrelated instance of the same name. A member is shown by its label, its id in
+    /// <c>meta</c>.
+    /// </remarks>
+    public static AuditWrite FromTransferStartedEvent(
+        TransferStartedEventData d, string hostId, Func<string, string?>? memberLabel = null)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string member = MemberDisplay(d.SourceMember, memberLabel);
+        return ApiWrite(d, ApiJournal.TransferStartedEvent, AuditSeverity.Info,
+            new AuditTarget(AuditTargetKind.Server, d.SourceInstance, d.SourceInstance),
+            hostId, $"started bringing {Display(d.SourceInstance)} over from {member}",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["transferId"] = d.TransferId,
+                ["sourceMember"] = d.SourceMember,
+                ["sourceInstance"] = d.SourceInstance,
+            });
+    }
+
+    /// <summary>Map a <c>server.transfer.completed</c> event — a server now lives on another node.</summary>
+    public static AuditWrite FromTransferCompletedEvent(
+        TransferCompletedEventData d, string hostId, Func<string, string?>? memberLabel = null)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        string member = MemberDisplay(d.TargetMember, memberLabel);
+        return ApiWrite(d, ApiJournal.TransferCompletedEvent, AuditSeverity.Info,
+            new AuditTarget(AuditTargetKind.Server, d.InstanceName, d.InstanceName),
+            hostId, $"moved {Display(d.InstanceName)} to {member} as {Display(d.TargetInstance)}",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["transferId"] = d.TransferId,
+                ["targetMember"] = d.TargetMember,
+                ["targetInstance"] = d.TargetInstance,
+            },
+            serverId: d.InstanceName);
+    }
+
+    /// <summary>Map a <c>server.transfer.failed</c> event — a transfer ended without moving the server.</summary>
+    /// <remarks>
+    /// Warn, not Danger: the server is where it was, whole, on the source. The refusal code and the step
+    /// ride in <c>meta</c>. The source's line names its own server and is filed under it; the target's
+    /// names the source's instance and, like the started line, under no local server.
+    /// </remarks>
+    public static AuditWrite FromTransferFailedEvent(TransferFailedEventData d, string hostId)
+    {
+        ArgumentNullException.ThrowIfNull(d);
+
+        bool source = !string.IsNullOrEmpty(d.InstanceName);
+        string instance = source ? d.InstanceName : d.SourceInstance ?? "";
+        var meta = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["transferId"] = d.TransferId,
+            ["reason"] = d.Reason,
+            ["phase"] = d.Phase,
+        };
+        if (!source && d.SourceInstance is { Length: > 0 } si) meta["sourceInstance"] = si;
+
+        return ApiWrite(d, ApiJournal.TransferFailedEvent, AuditSeverity.Warn,
+            new AuditTarget(AuditTargetKind.Server, instance, instance),
+            hostId, $"transfer of {Display(instance)} ended without moving it ({d.Reason})", meta,
+            serverId: source ? d.InstanceName : null);
+    }
+
+    // A member by the label the roster gives it, falling back to its id when the roster does not know it.
+    private static string MemberDisplay(string memberId, Func<string, string?>? memberLabel) =>
+        memberLabel?.Invoke(memberId) is { Length: > 0 } label ? label : memberId;
+
     /// <summary>
     /// Map a <c>command.failed</c> / <c>command.refused</c> / <c>command.cancelled</c> event.
     /// </summary>
