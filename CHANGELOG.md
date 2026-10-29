@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — four event types the catalog now knows (1.1.3, `Lib` 9.4.0-dev.4)
+
+- **`dns.name.published`, `dns.name.withdrawn`, `library.renamed` and `library.failed`** no longer log as
+  "Unknown event type". The library payload the API reads for the two library events is the library's own
+  `LibraryOutcomeEventData`.
+
 ### Fixed — the arriving server's first line is in the audit (1.1.2, `Lib` 9.4.0-dev.3)
 
 - **`server.transfer.started` reaches the target node's audit view.** The catalog weighs it as a fact, so
