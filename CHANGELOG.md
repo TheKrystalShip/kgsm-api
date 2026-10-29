@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — the arriving server's first line is in the audit (1.1.2, `Lib` 9.4.0-dev.3)
+
+- **`server.transfer.started` reaches the target node's audit view.** The catalog weighs it as a fact, so
+  the audit shaping maps it instead of dropping it as a phase: the target shows which node an arriving
+  server came from.
+
 ### Fixed — transfer events known to the catalog (1.1.1, `Lib` 9.4.0-dev.2)
 
 - `server.transfer.started`, `.completed` and `.failed` are in `kgsm-lib`'s event catalog, so reading
