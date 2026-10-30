@@ -201,9 +201,18 @@ public sealed class NodeAccess(
             Owner: true);
     }
 
-    private IEnumerable<ActionManifest> Manifests()
+    /// <summary>
+    /// The document the provider pulls: the manifests of this node's engine, its leaves and the anchors
+    /// beside it.
+    /// </summary>
+    public NodeActionManifest ServedManifest() => NodeActionManifest.From(
+        Manifests(manifests.ManifestDirectories.Append(Path.Combine(options.AnchorDescriptorDir, "actions"))));
+
+    private IEnumerable<ActionManifest> Manifests() => Manifests(manifests.ManifestDirectories);
+
+    private IEnumerable<ActionManifest> Manifests(IEnumerable<string> directories)
     {
-        foreach (string directory in manifests.ManifestDirectories)
+        foreach (string directory in directories)
         {
             if (!Directory.Exists(directory))
                 continue;

@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — the node serves its action manifest (1.2.0)
+
+- **`GET /.well-known/tks-actions.json`**, anonymous, answers with the actions this node's engine, leaves
+  and co-located anchors perform: one manifest per component, each in its own namespace, every action at
+  the one scope an application has and no requirements. The provider's own `auth:*` actions are left out.
+
 ### Fixed — `dns.name.moved` is a known event type (1.1.4, `Lib` 9.4.0-dev.5)
 
 - **`dns.name.moved`** no longer logs as "Unknown event type".

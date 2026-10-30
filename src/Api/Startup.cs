@@ -1,4 +1,5 @@
 using TheKrystalShip.Notifications;
+using System.Text.Json;
 using System.Net;
 using System.Security.Claims;
 
@@ -1094,6 +1095,10 @@ public class Startup(IConfiguration configuration)
                 .AllowAnonymous()
                 .RequireCors(policy => policy.AllowAnyOrigin().WithMethods("GET"));
 
+            // What this node's components perform, for the provider to pull into the application's
+            // catalog. Public: it names actions and grants nothing.
+            endpoints.MapGet(NodeActionManifest.Path, NodeActionsAsync).AllowAnonymous();
+
             // SPA fallback: a client-routed GET (deep link / refresh — no file extension, matched no
             // controller) boots the app by returning index.html. Asset files (with extensions) were
             // already served by UseStaticFiles, so they never reach this :nonfile fallback.
@@ -1172,6 +1177,16 @@ public class Startup(IConfiguration configuration)
     /// sessions against, read through the holder, never configured here. The route's own CORS policy
     /// admits any origin without credentials: nothing here depends on who is asking.
     /// </remarks>
+    private static async Task NodeActionsAsync(HttpContext context)
+    {
+        NodeActionManifest document = context.RequestServices.GetRequiredService<NodeAccess>().ServedManifest();
+
+        context.Response.Headers.CacheControl = "no-cache";
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(
+            JsonSerializer.Serialize(document, NodeActionManifestJson.Default.NodeActionManifest));
+    }
+
     private static async Task ProtectedResourceDocumentAsync(HttpContext context)
     {
         string resource = $"{context.Request.Scheme}://{context.Request.Host}{context.Request.PathBase}";

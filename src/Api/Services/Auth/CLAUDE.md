@@ -95,6 +95,9 @@ assignments, the catalog), on every request. The authority for the model is
 - **It introduces itself to the anchor beside it only on the machine that founded the cluster**, and
   only while it knows no member (`LocalAnchorJoin`, `ClusterFounding.IsFoundedHere`). A machine holding
   another cluster's secret is joined by an Owner; the anchor beside it holds nothing there.
+- **`/.well-known/tks-actions.json` is the node's action manifest** (`NodeActionManifest`), anonymous: the
+  engine's, every leaf's and every co-located anchor's manifests as read for `NodeAccess`, one per
+  component, flattened to the application format (scope `cluster`, no requirements), without `auth:*`.
 - **There is no `/auth` path here at all.** A surface finds the provider from the protected-resource
   document above; an `/auth/*` request is an ordinary `404`, never the SPA's HTML.
 - **CORS admits the provider's registered clients' origins** (`IClientOrigins`, read through the holder
