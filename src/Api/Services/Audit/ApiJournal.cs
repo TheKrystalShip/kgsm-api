@@ -1,5 +1,4 @@
 using System.Text.Json;
-using TheKrystalShip.Auth.Journal;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Services;
 
@@ -16,7 +15,6 @@ namespace TheKrystalShip.Api.Services.Audit;
 /// releasing a backup archive, a command that failed or was refused before reaching the engine — the
 /// engine runs nothing for any of them, so nothing else on this host can honestly say they happened. They
 /// are written here, beside the engine's journal and each leaf's, and the audit page is the merge.
-/// Sign-ins and account changes are the auth anchor's to record, and this API reads them from its journal.
 /// </para>
 /// <para>
 /// <b>Nothing publishes from here.</b> This API already tails every journal it can discover, its own
@@ -42,42 +40,6 @@ public sealed class ApiJournal(IEventJournalWriter writer, ILogger<ApiJournal> l
     : JournalRecorder(writer, logger)
 {
     // ---- the types this producer owns ----------------------------------------------------------
-
-    // The account and session events are NOT this producer's vocabulary: the auth anchor records them,
-    // and this API reads them to shape audit rows. The names come from the shared contract rather than
-    // being spelled again here, because a reader deserializes each into a fixed shape and a name spelled
-    // differently would not throw — it would simply match nothing.
-    public const string LoginEvent = AuthEvents.SignedIn;
-    public const string LogoutEvent = AuthEvents.SignedOut;
-    public const string SessionRevokedEvent = AuthEvents.SessionRevoked;
-    public const string LockedOutEvent = AuthEvents.LockedOut;
-    public const string AdminRefusedEvent = AuthEvents.AdminRefused;
-
-    public const string UserProvisionedEvent = AuthEvents.UserProvisioned;
-    public const string UserApprovedEvent = AuthEvents.UserApproved;
-    public const string UserDisabledEvent = AuthEvents.UserDisabled;
-    public const string UserDeletedEvent = AuthEvents.UserDeleted;
-    public const string UserPasswordChangedEvent = AuthEvents.UserPasswordChanged;
-
-    public const string IdentityLinkedEvent = AuthEvents.IdentityLinked;
-    public const string IdentityUnlinkedEvent = AuthEvents.IdentityUnlinked;
-
-    public const string AssignmentGrantedEvent = AuthEvents.AssignmentGranted;
-    public const string AssignmentRevokedEvent = AuthEvents.AssignmentRevoked;
-    public const string RoleChangedEvent = AuthEvents.RoleChanged;
-    public const string RoleRemovedEvent = AuthEvents.RoleRemoved;
-    public const string PermissionChangedEvent = AuthEvents.PermissionChanged;
-    public const string PermissionRemovedEvent = AuthEvents.PermissionRemoved;
-    public const string CatalogChangedEvent = AuthEvents.CatalogChanged;
-    public const string ServiceRequirementApprovedEvent = AuthEvents.ServiceRequirementApproved;
-    public const string ServiceRequirementRevokedEvent = AuthEvents.ServiceRequirementRevoked;
-
-    public const string ApplicationChangedEvent = AuthEvents.ApplicationChanged;
-    public const string ApplicationRemovedEvent = AuthEvents.ApplicationRemoved;
-    public const string ApplicationClientRemovedEvent = AuthEvents.ApplicationClientRemoved;
-    public const string ClientSecretRotatedEvent = AuthEvents.ClientSecretRotated;
-    public const string TokenExchangedEvent = AuthEvents.TokenExchanged;
-    public const string TokenExchangeRefusedEvent = AuthEvents.TokenExchangeRefused;
 
     public const string ServiceConnectedEvent = "service.connected";
     public const string ServiceDisconnectedEvent = "service.disconnected";

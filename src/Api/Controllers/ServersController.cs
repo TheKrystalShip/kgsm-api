@@ -53,8 +53,8 @@ public sealed class ServersController(
             return Error(StatusCodes.Status503ServiceUnavailable, "engine_unavailable",
                 "the game-server engine could not be read; last-known state is preserved");
 
-        HashSet<string> readable = await access.AllowedServersAsync(
-            User, ActionIds.ServerRead, read.Servers.Select(s => s.Id), ct);
+        HashSet<string> readable = access.AllowedServers(
+            User, ActionIds.ServerRead, read.Servers.Select(s => s.Id));
         return Ok(read.Servers.Where(s => readable.Contains(s.Id)).ToList());
     }
 
@@ -86,8 +86,8 @@ public sealed class ServersController(
         // "no engine history" into a 500 on the very endpoint that reports there is none.
         IEventJournalHistory? journal = HttpContext.RequestServices.GetService<IEventJournalHistory>();
 
-        HashSet<string> readable = await access.AllowedServersAsync(
-            User, ActionIds.ServerRead, read.Servers.Select(s => s.Id), ct);
+        HashSet<string> readable = access.AllowedServers(
+            User, ActionIds.ServerRead, read.Servers.Select(s => s.Id));
 
         string label = string.IsNullOrWhiteSpace(window) ? "7d" : window.Trim().ToLowerInvariant();
         return await AvailabilityQueries.BuildAsync(
@@ -144,7 +144,7 @@ public sealed class ServersController(
                 "unknown or missing verb; expected one of: start, stop, restart, update");
 
         // Each verb is its own action, so the gate is decided here, once the verb is known.
-        if (!await access.AllowsOnServerAsync(User, action, id, ct))
+        if (!access.Allows(User, action))
             return Error(StatusCodes.Status403Forbidden, "forbidden", $"'{verb}' on this server needs {action}");
 
         // Provenance to stamp on the engine command (M5) so the resulting kgsm event — and the audit row
@@ -253,7 +253,7 @@ public sealed class ServersController(
             return Error(StatusCodes.Status400BadRequest, "bad_request", "serverIds must name at least one server");
 
         IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct);
-        HashSet<string> allowed = await access.AllowedServersAsync(User, action, requested, ct);
+        HashSet<string> allowed = access.AllowedServers(User, action, requested);
         string? actor = AuditPrincipal.ActorString(User);
         string batchId = "batch_" + Guid.NewGuid().ToString("N")[..12];
         DateTimeOffset now = DateTimeOffset.UtcNow;

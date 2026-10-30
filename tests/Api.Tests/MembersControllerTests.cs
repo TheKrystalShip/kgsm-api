@@ -14,7 +14,6 @@ using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Identity;
 
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -61,7 +60,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
         });
 
     private static string OwnerToken(WebApplicationFactory<Program> app) =>
-        AuthTestFactory.MintAccessOn(app.Services, Persona.Owner);
+        AuthTestFactory.MintAccess(Persona.Owner);
 
     private static HttpRequestMessage Bearer(HttpMethod method, string path, string token, object? body = null)
     {
@@ -181,7 +180,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
     {
         using WebApplicationFactory<Program> app = BuildApp();
         using HttpClient client = app.CreateClient();
-        string viewerToken = AuthTestFactory.MintAccessOn(app.Services, Persona.Reader);
+        string viewerToken = AuthTestFactory.MintAccess(Persona.Reader);
 
         HttpResponseMessage resp = await client.SendAsync(
             Bearer(HttpMethod.Post, "/api/v1/members", viewerToken, new { url = "https://node-b.test" }));
@@ -288,7 +287,7 @@ public sealed class MembersControllerTests : IClassFixture<AuthTestFactory>
     {
         using WebApplicationFactory<Program> app = BuildApp();
         using HttpClient client = app.CreateClient();
-        string viewerToken = AuthTestFactory.MintAccessOn(app.Services, Persona.Reader);
+        string viewerToken = AuthTestFactory.MintAccess(Persona.Reader);
 
         HttpResponseMessage resp = await client.SendAsync(
             Bearer(HttpMethod.Delete, "/api/v1/members/whatever", viewerToken));

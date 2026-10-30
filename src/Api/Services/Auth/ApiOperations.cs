@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Routing.Patterns;
 
-using TheKrystalShip.Auth.Access;
-
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
@@ -12,9 +10,8 @@ namespace TheKrystalShip.Api.Services.Auth;
 /// Built from the endpoints this node serves, out of the metadata it enforces with:
 /// <see cref="RequiresActionAttribute"/>, which the authorization policy checks, and the
 /// <see cref="OperationActionsAttribute"/> kinds, whose entries come from the functions their handlers
-/// check with. A server route is published at the server's install by <see cref="NodeAccess.IsServerRoute"/>,
-/// the test <see cref="NodeAccess.TargetOf"/> evaluates with. Every entry matching a request must be held:
-/// a settings change carrying the windows needs both the route's action and the windows'.
+/// check with. Every entry matching a request must be held: a settings change carrying the windows needs
+/// both the route's action and the windows'.
 /// </remarks>
 public static class ApiOperations
 {
@@ -34,15 +31,13 @@ public static class ApiOperations
                 continue;
             string relative = route[Base.Length..];
 
-            bool server = NodeAccess.IsServerRoute(raw);
-            string scope = server ? Operation.Scopes.Instance : Operation.Scopes.Node;
-            string? target = server ? NodeAccess.ServerParameter : null;
+            const string scope = Operation.Scopes.Cluster;
             IReadOnlyList<string> methods = e.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods ?? [];
 
             foreach (string method in methods)
             {
                 foreach (RequiresActionAttribute a in e.Metadata.GetOrderedMetadata<RequiresActionAttribute>())
-                    ops.Add(new Operation(method, relative, a.Action, scope, target));
+                    ops.Add(new Operation(method, relative, a.Action, scope));
 
                 foreach (OperationActionsAttribute kind in e.Metadata.GetOrderedMetadata<OperationActionsAttribute>())
                 {
@@ -51,7 +46,7 @@ public static class ApiOperations
                         string at = entry.RouteParameter is { } p && entry.RouteValue is { } v
                             ? relative.Replace("{" + p + "}", v, StringComparison.Ordinal)
                             : relative;
-                        ops.Add(new Operation(method, at, entry.Action, scope, target, entry.Field, entry.Value));
+                        ops.Add(new Operation(method, at, entry.Action, scope, entry.Field, entry.Value));
                     }
                 }
             }

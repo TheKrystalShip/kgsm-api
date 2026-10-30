@@ -90,7 +90,6 @@ public static class NotificationCatalog
         new("leaf_degraded", "Service degraded", "A KGSM service on this host reported that part of its job stopped working and stayed that way."),
         new("leaf_recovered", "Service recovered", "A KGSM service reported that a part that had stopped working is working again."),
         new("restart_soon", "Scheduled restart due", "A running server is minutes away from its scheduled restart."),
-        new("awaiting_approval", "Account awaiting approval", "Somebody signed in for the first time and cannot do anything until somebody approves them (user.provisioned)."),
         new("reactor_offer", "Reactor offer", "A reactor rule staged an action and is waiting for somebody to confirm or dismiss it (reactor.proposed)."),
     ];
 
@@ -148,7 +147,6 @@ public static class NotificationCatalog
         var a when a == KgsmEventCatalog.NameOf<InstanceFailedData>() => "crash_loop",
 
         var a when a == KgsmEventCatalog.NameOf<InstancePlayerJoinedData>() => "player_join",
-        var a when a == ApiJournal.UserProvisionedEvent => "awaiting_approval",
         var a when a == KgsmEventCatalog.NameOf<InstanceVersionUpdatedData>() => "update",
         var a when a == KgsmEventCatalog.NameOf<InstanceUpdateAvailableData>() => "update_available",
         var a when a == KgsmEventCatalog.NameOf<InstanceInstalledData>() => "installed",

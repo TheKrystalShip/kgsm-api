@@ -169,21 +169,22 @@ public sealed class LeafSurfaceRelayTests : IDisposable
     }
 
     [Fact]
-    public async Task TheAccountAskingTravelsWithTheRequest()
+    public async Task TheTokenOfThePersonAskingTravelsWithTheRequest()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         Task served = await ServeAsync("scheduler", HttpStatusCode.OK, "{}", cts.Token);
 
-        // The leaf records this account as the author of any automation the change switches on.
+        // The leaf admits the person on this token and records its subject as the author of any
+        // automation the change switches on.
         await Relay().SendAsync("scheduler", HttpMethod.Put, "config",
-            """{"values":{"updateCheckEnabled":"true"}}""", "local:usr_asking", cts.Token);
+            """{"values":{"updateCheckEnabled":"true"}}""", "the-persons-token", cts.Token);
         await served;
 
-        Assert.Contains($"{LeafSurfaceRelay.ActingAccountHeader}: local:usr_asking", Requests[0]);
+        Assert.Contains("Authorization: Bearer the-persons-token", Requests[0]);
     }
 
     [Fact]
-    public async Task NoAccount_SendsNoHeader()
+    public async Task NoToken_SendsNoHeader()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         Task served = await ServeAsync("scheduler", HttpStatusCode.OK, "{}", cts.Token);
@@ -191,7 +192,7 @@ public sealed class LeafSurfaceRelayTests : IDisposable
         await Relay().SendAsync("scheduler", HttpMethod.Get, "config", null, null, cts.Token);
         await served;
 
-        Assert.DoesNotContain(LeafSurfaceRelay.ActingAccountHeader, Requests[0]);
+        Assert.DoesNotContain("Authorization", Requests[0]);
     }
 
     [Fact]

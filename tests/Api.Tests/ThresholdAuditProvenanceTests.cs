@@ -4,7 +4,6 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Audit;
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

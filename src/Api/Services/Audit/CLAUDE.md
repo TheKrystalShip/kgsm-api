@@ -7,8 +7,7 @@ side is `../../../../../kgsm-docs/systems/events/`. This file is the local "what
 ## Locked decisions (do not relitigate)
 
 - **Event-sourced, and every producer records its own actions.** kgsm **owns** `server.*`/`backup.*`;
-  the watchdog owns what it supervises; the monitor owns what it measured; the auth anchor owns sign-ins
-  and account changes; and this API owns `service.*`, `file.written`, `backup.downloaded`, `command.*`,
+  the watchdog owns what it supervises; the monitor owns what it measured; and this API owns `service.*`, `file.written`, `backup.downloaded`, `command.*`,
   `library.*` and `server.transfer.*` (only the API knows the other node), which it writes to **its own journal** (`ApiJournal` → `Api__EventJournalDir`). `GET /audit` is the merge of every journal plus the
   local table's historical rows. **Nothing writes an audit row directly** — there is no append
   path on `AuditService`.

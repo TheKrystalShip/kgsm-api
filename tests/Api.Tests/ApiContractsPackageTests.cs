@@ -104,7 +104,6 @@ public sealed class ApiContractsPackageTests
     [InlineData(typeof(List<LibraryEntry>))]
     [InlineData(typeof(AuditPage))]
     [InlineData(typeof(ErrorEnvelope))]
-    [InlineData(typeof(AccountNames))]
     public void Every_root_a_caller_reads_is_registered(Type root)
     {
         JsonTypeInfo? info = ApiContractsJson.Default.GetTypeInfo(root);

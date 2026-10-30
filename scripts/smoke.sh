@@ -75,14 +75,9 @@ KGSM_SOCK="${SMOKE_KGSM_SOCKET:-/tmp/kgsm-api-smoke-events.sock}"; rm -f "$KGSM_
 # so they exercise the domain contracts unchanged; the auth boundary itself gets its own ENABLED
 # instance + no-token sweep at the end (and the full access matrix lives in tests/Api.Tests).
 export Api__AuthDisabled=true
-# NEVER the machine's own files. /var/lib/kgsm/auth/users.db is this machine's authority replica, which
-# this API owns and sets aside when it finds an older schema there; the provider file is what this
-# machine's leaves verify sessions against; the founded marker and the local anchor are this machine's
-# real cluster. Every API the smoke starts gets its own.
+# NEVER the machine's own files: the founded marker is this machine's real cluster. Every API the smoke
+# starts gets its own.
 SMOKE_STATE="$(mktemp -d /tmp/kgsm-api-smoke-state.XXXXXX)"
-export Api__UsersDbPath="${SMOKE_STATE}/users.db"
-export Api__HostProviderFilePath="${SMOKE_STATE}/auth-provider.json"
-export Api__LocalAnchorUrl=""
 export Cluster__FoundedPath="${SMOKE_STATE}/cluster-founded"
 # Auth is off for these checks, so nothing authenticates a caller. This names who the audit log
 # attributes the run to; the API refuses to start without it.

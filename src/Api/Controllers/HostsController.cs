@@ -47,7 +47,7 @@ public sealed class HostsController(
         // reader is the mistake the audit rows already avoid. The withheld memory is kept as one unnamed
         // row per device, so the card still totals honestly: what is withheld is an identity, never a
         // quantity.
-        return await access.AllowsAsync(User, ActionIds.ServicesRead, access.NodeTarget, ct)
+        return access.Allows(User, ActionIds.ServicesRead)
             ? host
             : host with { GpuProcesses = GpuRedaction.Redacted(host.GpuProcesses) };
     }

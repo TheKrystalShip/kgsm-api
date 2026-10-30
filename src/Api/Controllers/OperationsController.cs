@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 using TheKrystalShip.Api.Services.Auth;
-using TheKrystalShip.Auth.Access;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -22,5 +21,5 @@ public sealed class OperationsController(EndpointDataSource endpoints) : Control
 {
     [HttpGet]
     public IActionResult Get() =>
-        new JsonResult(ApiOperations.Build(endpoints), AccessJsonContext.Default.Options);
+        new JsonResult(ApiOperations.Build(endpoints), AuthJson.Default.Options);
 }

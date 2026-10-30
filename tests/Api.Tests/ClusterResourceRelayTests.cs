@@ -9,7 +9,6 @@ using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Identity;
 
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

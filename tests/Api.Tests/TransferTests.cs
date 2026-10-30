@@ -233,20 +233,6 @@ public sealed class TransferTests
         Assert.Equal(pair.SourceEngine.PartHash("tree"), sent!.Sha256);
     }
 
-    [Fact]
-    public async Task Ticket_RedeemedForAnAccountThatLostTheAction_IsTicketInvalid()
-    {
-        await using TransferPair pair = await TransferPair.StartAsync();
-        TransferTicket ticket = await MintAsync(pair);
-
-        // Re-minting a session as Runner re-points the standing identity's account at that role: the
-        // account that minted the ticket no longer holds kgsm:server.export.
-        pair.Source.AccessToken(Persona.Runner);
-
-        TransferPreflight verdict = await PreflightAsync(pair, ticket);
-        Assert.Equal(TransferRefusalCodes.TicketInvalid, verdict.Refusals.Single().Code);
-    }
-
     // ── the member routes ──────────────────────────────────────────────────────────────────────────
 
     [Fact]

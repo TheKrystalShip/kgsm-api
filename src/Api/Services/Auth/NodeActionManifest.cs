@@ -1,8 +1,6 @@
 using System.Reflection;
 using System.Text.Json.Serialization;
 
-using TheKrystalShip.Auth.Access;
-
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
@@ -23,16 +21,19 @@ public sealed record NodeActionManifest(
     /// <summary>The route the document is served at, anonymously.</summary>
     public const string Path = "/.well-known/tks-actions.json";
 
+    /// <summary>The component of the sign-in provider's own actions, which are the provider's and not this cluster's.</summary>
+    public const string ProviderComponent = "auth";
+
     /// <summary>
     /// The document for the manifests <paramref name="installed"/> on this node. The provider's own
-    /// <c>auth:*</c> actions are the provider's, not this cluster's, and are left out.
+    /// <c>auth:*</c> actions are left out.
     /// </summary>
     public static NodeActionManifest From(IEnumerable<ActionManifest> installed) => new(
         ActionManifest.SupportedSchemaVersion,
         typeof(NodeActionManifest).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             .Split('+')[0] ?? "0.0.0",
         [.. installed
-            .Where(m => m.Component != global::TheKrystalShip.Auth.Access.ActionIds.AuthComponent)
+            .Where(m => m.Component != ProviderComponent)
             .OrderBy(m => m.Component, StringComparer.Ordinal)
             .Select(m => m with
             {
@@ -41,8 +42,3 @@ public sealed record NodeActionManifest(
                     .Select(a => a with { Scope = "cluster", Self = a.Self is true ? true : null })],
             })]);
 }
-
-/// <summary>Source-generated JSON for <see cref="NodeActionManifest"/>.</summary>
-[JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
-[JsonSerializable(typeof(NodeActionManifest))]
-public sealed partial class NodeActionManifestJson : JsonSerializerContext;

@@ -41,8 +41,8 @@ public sealed class JobsController(JobRegistry jobs, NodeAccess access) : Contro
     /// <summary><c>GET /jobs/{id}</c> → the <see cref="Job"/>, or <c>404</c> for an id this host has no
     /// record of.</summary>
     [HttpGet("{id}")]
-    public async Task<IActionResult> Get(string id, CancellationToken ct) =>
-        jobs.Get(id) is { } job && await access.AllowsOnServerAsync(User, ActionIds.ServerRead, job.ServerId, ct)
+    public IActionResult Get(string id) =>
+        jobs.Get(id) is { } job && access.Allows(User, ActionIds.ServerRead)
             ? Ok(job)
             : NotFound();
 }

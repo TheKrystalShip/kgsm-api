@@ -28,9 +28,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The auth anchor's minter: a signed-in caller here holds a session minted exactly as the anchor
-         mints one, and this node verifies it through its own composition. -->
-    <PackageReference Include="TheKrystalShip.Auth.Testing" Version="2.0.0" />
+    <!-- A provider in-process: discovery, keys and the access tokens a signed-in caller presents. -->
+    <PackageReference Include="TheKrystalShip.KGSM.Sessions.Testing" Version="1.0.0-dev.1" />
   </ItemGroup>
 
   <!-- Mirrors Api.csproj: suppress the transitive SQLite native-lib advisory (no patched version

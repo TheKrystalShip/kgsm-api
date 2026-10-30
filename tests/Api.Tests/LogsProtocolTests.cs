@@ -1,6 +1,5 @@
 using TheKrystalShip.Api.Realtime;
 
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

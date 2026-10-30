@@ -4,7 +4,6 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Services.Preferences;
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -56,7 +55,7 @@ public sealed class UserPreferencesTests(AuthTestFactory factory) : IClassFixtur
     /// overwrite an enable performs, since while sync is on every device READS the synced record.</summary>
     private async Task<IReadOnlyList<PreferenceRow>> Slot(string device) =>
         await factory.Services.GetRequiredService<UserPreferenceStore>()
-            .SlotAsync(TestIdentity.Identity.Handle, device);
+            .SlotAsync(TestIdentity.Person.Subject, device);
 
     [Fact]
     public async Task A_write_comes_back_on_the_device_that_made_it()

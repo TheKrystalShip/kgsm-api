@@ -10,9 +10,7 @@ using TheKrystalShip.Api.Services.Library;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
-using TheKrystalShip.Auth;
 
-using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -187,7 +185,7 @@ public sealed class LibraryController(
     {
         if (Resolve() is not { } files) return EngineUnavailable();
 
-        bool canWrite = await access.AllowsAsync(User, ActionIds.BlueprintsWrite, access.NodeTarget, ct);
+        bool canWrite = access.Allows(User, ActionIds.BlueprintsWrite);
         BlueprintReadResult r = files.Read(id, options.BlueprintMaxEditBytes);
         return r.Status switch
         {

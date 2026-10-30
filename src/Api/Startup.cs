@@ -37,10 +37,8 @@ using TheKrystalShip.KGSM.Services;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Extensions;
 
-using TheKrystalShip.Auth;
-
-using TheKrystalShip.Auth.Cluster;
 using TheKrystalShip.KGSM.Lifecycle;
+using TheKrystalShip.KGSM.Sessions;
 
 namespace TheKrystalShip.Api;
 
@@ -88,12 +86,6 @@ public class Startup(IConfiguration configuration)
     }
 
     private const string CorsPolicy = "frontend";
-
-    // The CORS policy is built in ConfigureServices, before any service exists to resolve, but it has to
-    // consult the origins the cluster's sign-in provider publishes, which arrive at runtime. The reader is
-    // dropped in here once the provider is up (Configure), and the policy predicate asks it per request.
-    // Null until then, which admits nobody.
-    private IClientOrigins? _clientOrigins;
 
     public void ConfigureServices(IServiceCollection services)
     {
@@ -413,6 +405,7 @@ public class Startup(IConfiguration configuration)
             o.ActionBaseUrl = apiOptions.NotificationActionsUrl;
             o.Kinds = FleetNotifications.Kinds;
         });
+        services.AddSingleton(TimeProvider.System);
         services.AddSingleton<NotificationActors>();
         services.AddSingleton<FleetNotifications>();
         services.AddScoped<INotificationActionHandler, FleetNotificationActions>();
@@ -684,43 +677,11 @@ public class Startup(IConfiguration configuration)
         // successful read — an instance missing from what it is told loses its name.
         services.AddKgsmDnsGameNames<Services.Cluster.EngineInstanceSource>();
 
-        // session.revoke is registered rather than built in: the transport dispatches by type and
-        // knows nothing about sessions, and the handler is every member's rather than this API's. The
-        // retention is how long a record of an ended session is worth keeping.
-        services.AddSingleton<EndedSessionStore>();
-        services.AddSingleton<IClusterSessionDenyList>(sp => sp.GetRequiredService<EndedSessionStore>());
-
-        services.AddSingleton<IClusterMessageHandler>(sp => new SessionRevokeHandler(
-            sp.GetRequiredService<IClusterSessionDenyList>(),
-            sp.GetRequiredService<ClusterSessionRevocations>(),
-            EndedSessionStore.Retention,
-            sp.GetRequiredService<ILogger<SessionRevokeHandler>>()));
-
-        // What this node is responsible for, told to the auth anchor: the engine's action manifest and
-        // every leaf's, from the actions directory below the leaf descriptors, where each one's deploy
-        // installs it. The anchor's catalog of what can be granted is the union of every member's. Inert
-        // with no cluster; the uninstall half is called by the audit consumer.
-        services.AddSingleton(new AuthorityReporterOptions
-        {
-            ManifestDirectories = [Path.Combine(apiOptions.LeafDescriptorDir, "actions")],
-        });
-        services.AddSingleton<AuthorityReporter>();
-        services.AddHostedService(sp => sp.GetRequiredService<AuthorityReporter>());
-
-        // This node's own copy of the cluster's authority — accounts, roles, permissions, assignments
-        // and the catalog. It is what lets access be evaluated here rather than by asking the member
-        // that holds them, so a change lands on the next request and an outage over there costs this
-        // node nothing it serves. This API owns the file: it creates it, sets aside one written at an
-        // older schema, and takes the anchor's snapshot into it; the leaves on this machine read it.
-        // The shared handlers apply what the anchor publishes, and every change taken is carried to
-        // open streams and the me topic.
-        services.AddSingleton<IReplicatedAuthority>(sp => new OwnedReplicaFile(
-            apiOptions.UsersDbPath, sp.GetRequiredService<ILogger<OwnedReplicaFile>>()));
-        services.AddAuthorityReplica();
-        services.AddSingleton<MemberAccess>();
+        // What this node performs, for the access report and the manifest the provider pulls: the
+        // engine's and every leaf's manifests, from the actions directory below the leaf descriptors,
+        // where each one's deploy installs it.
+        services.AddSingleton(new ManifestSources([Path.Combine(apiOptions.LeafDescriptorDir, "actions")]));
         services.AddSingleton<NodeAccess>();
-        services.AddSingleton<IAuthorityChangeListener, MeAccessPush>();
-        services.AddSingleton<IAuthorityChangeListener, StreamAccessRefresh>();
 
         // The roster-backed fan-out target list. A durable, identity-carrying message goes only to members
         // this node has authenticated first-hand — never to one it has merely heard about — or the outbox
@@ -750,58 +711,17 @@ public class Startup(IConfiguration configuration)
         services.AddSingleton<IClusterMessageHandler, Services.Transfers.TransferCommitHandler>();
         services.AddHostedService<Services.Transfers.TransferRecovery>();
 
-        // Auth. This node signs nobody in: every session it accepts was minted by the cluster's auth
-        // anchor — which on a machine that is a cluster of one runs beside it — and is verified here
-        // against the key that member publishes. The keys, the audience and the issuer are read through
-        // the capability's holder and refreshed at the gossip cadence, so a reassignment or a rotation
-        // needs no restart. Until gossip has said who holds the accounts there is nothing to verify
-        // against, and every session is refused.
-        services.AddSingleton<ClusterSessionKeys>();
-        services.AddSingleton<IClusterSessionKeys>(sp => sp.GetRequiredService<ClusterSessionKeys>());
-        services.AddSingleton<IClientOrigins>(sp => sp.GetRequiredService<ClusterSessionKeys>());
-        services.AddHostedService(sp => sp.GetRequiredService<ClusterSessionKeys>());
-
-        // What this node verifies sessions with, written for the leaves on its machine: a leaf joins no
-        // cluster and cannot read the holder itself, so it accepts exactly what this node accepts.
-        services.AddHostedService(sp => new HostProviderFileWriter(
-            sp.GetRequiredService<ClusterSessionKeys>(),
-            sp.GetRequiredService<ClusterOptions>(),
-            apiOptions.HostProviderFilePath,
-            sp.GetRequiredService<ILogger<HostProviderFileWriter>>()));
-
-        // Who holds the accounts, by name. It is what a browser asking this node how to sign in is told,
-        // and what the startup report says when nobody does.
-        services.AddSingleton<AnchorHeldGate>();
-        services.AddHostedService<AuthAnchorReport>();
-
-        // A machine that founded its own cluster runs the anchor beside this node; a node that knows no
-        // member introduces itself to it, because nobody can sign in to add it until it has.
-        services.AddHostedService<LocalAnchorJoin>();
-
-        // A session has no row here, so the only thing worth storing about one is that it has been
-        // ended. Cached on the request path; a revoke arriving over the bus evicts.
-        services.AddSingleton(sp => new ClusterSessionRevocations(
-            sp.GetRequiredService<IClusterSessionDenyList>(),
-            sp.GetRequiredService<IMemoryCache>(),
-            TimeSpan.FromMilliseconds(sp.GetRequiredService<ApiOptions>().SessionsCacheTtlMs)));
-
-        // The account behind every request, from the replica; every gate evaluates one action for it at
-        // the target its route names. A policy named action:<id> is built on demand, so an action needs
-        // no registration beside the attribute that names it.
-        services.AddSingleton<LiveAuthority>();
-        services.AddSingleton<IAuthorizationPolicyProvider, ActionPolicyProvider>();
-        services.AddSingleton<IAuthorizationHandler, ActionAuthorizationHandler>();
-        services.AddSingleton<IAuthorizationMiddlewareResultHandler, ActionRefusalResultHandler>();
-
-        // Auth is ON by default; Api__AuthDisabled=true swaps the default scheme for a synthetic-Owner
-        // handler so every policy passes (the explicit, loudly-logged dev/open window). When enabled, the
-        // JwtBearer scheme accepts the auth anchor's sessions and nothing else. SSE streams carry the
-        // bearer as an Authorization header; a refresh token is never accepted as an access bearer.
+        // Auth. This node signs nobody in: a person presents the access token the sign-in provider issued,
+        // which is checked against the provider's published keys, and what the person may do is the
+        // actions the token lists. Nothing about a person is stored here. With no provider configured
+        // there is nothing to check a token against, so nobody is a person and the node answers its own
+        // machine alone (the loopback guard in Configure).
+        //
         // Opening the door is allowed; opening it anonymously is not. Every request that comes through
         // it is attributed to Api__DisabledAuthActor and lands in the audit log under that name, so the
         // host refuses to start until it has been told a real one. Failing here rather than at the first
         // request is deliberate: the alternative is a host that runs fine and mis-attributes everything.
-        if (apiOptions.AuthDisabled && !KgsmActor.TryParse(apiOptions.DisabledAuthActor, out _, out _))
+        if (apiOptions.AuthDisabled && !IsProviderQualifiedActor(apiOptions.DisabledAuthActor))
         {
             throw new InvalidOperationException(
                 "Api__AuthDisabled is set but Api__DisabledAuthActor is not a 'provider:name' actor "
@@ -809,129 +729,48 @@ public class Startup(IConfiguration configuration)
                 + "attributed to it, so it must name somebody — e.g. 'local:claude'.");
         }
 
-        string defaultScheme = apiOptions.AuthEnabled
-            ? JwtBearerDefaults.AuthenticationScheme
-            : DisabledAuthHandler.SchemeName;
-        // One door with two kinds of caller behind it. A person presents a session; another member of
-        // this cluster presents its own service token and names the person it is acting for, because
-        // that person may never have signed in here at all — they asked the cluster's assistant
-        // something in Discord, and the assistant runs on a different machine.
-        //
-        // Which handler answers is decided by the acting header, not by trying one and falling back:
-        // the two establish trust in completely different ways, and a fallback would mean a failed
-        // member-acting call quietly re-examined as a session.
-        const string routingScheme = "KgsmCaller";
-        AuthenticationBuilder authBuilder = services.AddAuthentication(routingScheme);
-
-        authBuilder.AddPolicyScheme(routingScheme, routingScheme, o =>
-            o.ForwardDefaultSelector = context =>
-                context.Request.Headers.ContainsKey(MemberActing.ActingHandleHeader)
-                    ? MemberActing.Scheme
-                    : defaultScheme);
-
-        // The decision itself is the shared package's, so every member reaches the same answer about who
-        // somebody is; the handler here is the ASP.NET half — reading the request and shaping the ticket.
-        services.AddSingleton<MemberActingAccountResolver>();
-
-        // Registered whether or not this host is clustered. Without a cluster secret the token check
-        // refuses every caller, which is the correct answer for a member-to-member call on a machine
-        // that is in no cluster.
-        authBuilder.AddScheme<AuthenticationSchemeOptions, MemberActingHandler>(
-            MemberActing.Scheme, displayName: null, configureOptions: null);
-        if (apiOptions.AuthEnabled)
+        if (apiOptions.AuthEnabled && apiOptions.SessionsConfigured)
         {
-            authBuilder.AddJwtBearer(options =>
+            services.AddKgsmSessions(o =>
             {
-                options.MapInboundClaims = false; // keep claim types verbatim ("sub", "sid", …)
-                options.Events = new JwtBearerEvents
-                {
-                    OnTokenValidated = async ctx =>
-                    {
-                        // A refresh token is spent at the anchor, never presented here as a bearer.
-                        if (ctx.Principal?.FindFirst(KgsmAuthClaims.TokenKind)?.Value != KgsmTokenKind.Access)
-                        {
-                            ctx.Fail("not an access token");
-                            return;
-                        }
-
-                        // Whether the session behind a genuine token has been ended. It runs AFTER the
-                        // signature, issuer, audience and lifetime have all been confirmed. The session
-                        // has no row here — the sign-in happened at the anchor — so what is asked is a
-                        // deny-list the bus fills when somebody ends one, cached on this path. A token
-                        // carrying no sid is refused: a session nothing can end is not one this node is
-                        // willing to hold open. The SSE path rides the same event.
-                        var svc = ctx.HttpContext.RequestServices;
-                        string? sid = ctx.Principal?.FindFirst(KgsmAuthClaims.SessionId)?.Value;
-                        if (string.IsNullOrEmpty(sid))
-                        {
-                            ctx.Fail("no session id");
-                            return;
-                        }
-
-                        if (ctx.Principal?.Identity is not ClaimsIdentity claims)
-                        {
-                            ctx.Fail("the bearer carries no claims identity");
-                            return;
-                        }
-
-                        if (await svc.GetRequiredService<ClusterSessionRevocations>()
-                            .IsRevokedAsync(sid, ctx.HttpContext.RequestAborted).ConfigureAwait(false))
-                        {
-                            ctx.Fail("session ended");
-                            return;
-                        }
-
-                        // The account behind the session, resolved now from the replica; nothing about
-                        // access is read off the token, so a change lands on the next request and this
-                        // API and the assistant beside it cannot disagree about the same person. A
-                        // disabled account fails here, which is what makes the switch cut live sessions
-                        // on every surface with no cross-service call.
-                        if (await svc.GetRequiredService<LiveAuthority>()
-                            .ApplyAsync(claims, ctx.HttpContext.RequestAborted).ConfigureAwait(false) is { } refusal)
-                        {
-                            ctx.Fail(refusal);
-                        }
-                    },
-
-                    // An unreachable account store is not a bad token. Answering the standard 401
-                    // would send a browser back to a sign-in that reads the same file and fails the
-                    // same way, so the challenge for that one failure is a 502 naming it — the same
-                    // posture as an unreachable identity provider at the callback.
-                    OnChallenge = ctx =>
-                    {
-                        if (ctx.AuthenticateFailure is not AuthorityUnavailableException failure)
-                            return Task.CompletedTask;
-
-                        ctx.HandleResponse();
-                        ctx.Response.StatusCode = StatusCodes.Status502BadGateway;
-                        ctx.Response.ContentType = "application/json";
-                        return ctx.Response.WriteAsJsonAsync(
-                            new ErrorEnvelope(new ErrorBody("authority_unavailable", failure.Message)));
-                    },
-                };
+                o.Issuer = apiOptions.SessionsIssuer;
+                o.Audience = apiOptions.SessionsAudience;
+                o.ActionsClaim = apiOptions.SessionsActionsClaim;
             });
-            // The anchor's published keys, audience and issuer, re-read as gossip moves them. Nothing
-            // this node could sign is ever accepted, because it holds no key to sign with.
-            services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
-                .Configure<IClusterSessionKeys>((o, clusterKeys) =>
-                    o.TokenValidationParameters = ClusterSessionValidation.Accepting(clusterKeys));
-        }
-        else
-        {
-            authBuilder.AddScheme<AuthenticationSchemeOptions, DisabledAuthHandler>(
-                DisabledAuthHandler.SchemeName, _ => { });
         }
 
-        // An unauthenticated caller fails an action policy's first requirement → 401 challenge; an
-        // authenticated caller refused the action → 403 (the authorization middleware picks challenge vs
-        // forbid). 401/403 already render the frozen {error} envelope below.
+        // One door with three kinds of caller behind it: a person presents a session token; another
+        // member acting as itself presents its cluster service token; an open host presents nothing.
+        // Which handler answers is decided from the request, not by trying one and falling back (see
+        // MemberAuthentication).
+        AuthenticationBuilder authBuilder = services.AddAuthentication(MemberAuthentication.Caller);
+        authBuilder.AddPolicyScheme(MemberAuthentication.Caller, MemberAuthentication.Caller, o =>
+            o.ForwardDefaultSelector = context => MemberAuthentication.SchemeFor(context.Request, apiOptions));
+        authBuilder.AddScheme<AuthenticationSchemeOptions, MemberAuthenticationHandler>(
+            MemberAuthentication.Scheme, displayName: null, configureOptions: null);
+        authBuilder.AddScheme<AuthenticationSchemeOptions, NoProviderHandler>(
+            MemberAuthentication.NoProvider, displayName: null, configureOptions: null);
+        authBuilder.AddScheme<AuthenticationSchemeOptions, DisabledAuthHandler>(
+            DisabledAuthHandler.SchemeName, displayName: null, configureOptions: null);
+
+        // A policy named action:<id> is built on demand, so an action needs no registration beside the
+        // attribute that names it. The sessions package admits a person whose token lists the action;
+        // the trusted handler admits a member acting as itself and an open host.
+        services.AddSingleton<IAuthorizationPolicyProvider, ActionPolicyProvider>();
+        services.AddSingleton<IAuthorizationHandler, TrustedCallerHandler>();
+        services.AddSingleton<IAuthorizationMiddlewareResultHandler, ActionRefusalResultHandler>();
+
+        // An unauthenticated caller fails an action policy → 401 challenge; an authenticated caller
+        // refused the action → 403 (the authorization middleware picks challenge vs forbid). 401/403
+        // already render the frozen {error} envelope below.
         services.AddAuthorization(o =>
         {
             // Secure-by-default: any endpoint without an explicit [Authorize]/[AllowAnonymous] still
             // requires an authenticated caller — so a future controller can't ship silently open. The
             // open probes (/health, /api/v1) opt out with [AllowAnonymous].
             // (Under the disabled escape hatch the synthetic-Owner scheme satisfies this too.)
-            o.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
+            o.FallbackPolicy = new AuthorizationPolicyBuilder(MemberAuthentication.Caller)
+                .RequireAuthenticatedUser().Build();
         });
 
         // Behind a reverse proxy the request this app sees is the PROXY's: plain http, from 127.0.0.1.
@@ -965,26 +804,30 @@ public class Startup(IConfiguration configuration)
         services.AddExceptionHandler<ApiExceptionHandler>();
         services.AddProblemDetails();
 
-        // CORS admits the origins the cluster's sign-in provider has registered clients at, read through
-        // the holder — so registering a client at the provider is what lets it call every node, and no
-        // node is configured with a list. Without credentials: a session rides the Authorization header,
-        // and nothing here reads a cookie.
+        // CORS admits the configured origins (Api__CorsOrigins). Without credentials: a session rides the
+        // Authorization header, and nothing here reads a cookie.
         //
         // A host with auth disabled admits any origin. It has no session to protect, and it is the posture
         // the development harness runs a panel on another port against.
         bool anyOrigin = apiOptions.AuthDisabled;
+        HashSet<string> origins = new(apiOptions.CorsOrigins.Select(o => o.TrimEnd('/')), StringComparer.OrdinalIgnoreCase);
         services.AddCors(options => options.AddPolicy(CorsPolicy, policy =>
-            policy.SetIsOriginAllowed(origin => anyOrigin || (_clientOrigins?.Admits(origin) ?? false))
+            policy.SetIsOriginAllowed(origin => anyOrigin || origins.Contains(origin.TrimEnd('/')))
                   .AllowAnyHeader()
                   .AllowAnyMethod()
                   .SetPreflightMaxAge(TimeSpan.FromMinutes(10))));
+    }
+
+    private static bool IsProviderQualifiedActor(string actor)
+    {
+        int colon = actor.IndexOf(':');
+        return colon > 0 && colon < actor.Length - 1;
     }
 
     public void Configure(IApplicationBuilder app, IWebHostEnvironment env, ILoggerFactory loggerFactory)
     {
         // Make the trust posture impossible to miss in the logs.
         ApiOptions options = app.ApplicationServices.GetRequiredService<ApiOptions>();
-        _clientOrigins = app.ApplicationServices.GetRequiredService<IClientOrigins>();
         ILogger startupLog = loggerFactory.CreateLogger("TheKrystalShip.Api.Startup");
         if (options.AuthDisabled)
             startupLog.LogWarning(
@@ -1001,12 +844,6 @@ public class Startup(IConfiguration configuration)
         if (serveSpa)
         {
             startupLog.LogInformation("Serving the Control Panel SPA from {WebRoot} (same-origin).", spaWebRoot);
-
-            // The panel served here is a client of the cluster's sign-in provider, announced over gossip
-            // so the provider sends people back to it with nobody registering it. A node serving no
-            // panel announces nothing, and the provider sends nobody here.
-            app.ApplicationServices.GetRequiredService<SelfPublications>()
-                .Publish(ClusterClientAnnouncement.FactKey, ClusterClientAnnouncement.ControlPanel.ToJson());
         }
 
         // FIRST, before anything reads the scheme or the caller's address: rewrite the request from
@@ -1015,6 +852,25 @@ public class Startup(IConfiguration configuration)
         app.UseForwardedHeaders();
 
         app.UseExceptionHandler(); // unhandled -> 500 error envelope (ApiExceptionHandler)
+
+        // A node with no sign-in provider has nobody to admit and serves its own machine alone: the
+        // caller's address, as the forwarded headers left it, has to be loopback. A caller behind the
+        // local proxy is judged by the address the proxy forwarded, so a stranger it relays is refused.
+        if (options.AuthEnabled && !options.SessionsConfigured)
+        {
+            startupLog.LogWarning(
+                "No sign-in provider is configured (Sessions__Issuer). This node answers requests from its own machine only.");
+            app.Use(async (context, next) =>
+            {
+                if (context.Connection.RemoteIpAddress is { } remote && !IPAddress.IsLoopback(remote))
+                {
+                    await ApiErrors.WriteAsync(context, StatusCodes.Status403Forbidden, "no_issuer",
+                        "This node has no sign-in provider configured and answers its own machine only.");
+                    return;
+                }
+                await next();
+            });
+        }
 
         // HTTP → HTTPS upgrade (production posture: NO bare HTTP on the internet). A plain-HTTP request
         // from a client OUT ON THE INTERNET is permanently redirected (308 — it preserves the method and
@@ -1091,7 +947,7 @@ public class Startup(IConfiguration configuration)
             // address to remember. Public by design: the provider is reached by browsers, so its name is
             // in public DNS already. Readable from any origin, because a panel served from somewhere with
             // no member behind it asks whichever member a person gives it.
-            endpoints.MapGet(ProtectedResourceMetadata.Path, ProtectedResourceDocumentAsync)
+            endpoints.MapGet(ProtectedResourceDocument.Path, ProtectedResourceDocumentAsync)
                 .AllowAnonymous()
                 .RequireCors(policy => policy.AllowAnyOrigin().WithMethods("GET"));
 
@@ -1167,37 +1023,36 @@ public class Startup(IConfiguration configuration)
         });
     }
 
-    /// <summary>
-    /// The document naming this node's sign-in provider, or <c>503 no_issuer</c> while it knows of none
-    /// a browser can be sent to.
-    /// </summary>
-    /// <remarks>
-    /// The resource is the origin the document was asked for at — what a client compares it against —
-    /// read after the forwarded headers have been applied. The issuer is the one this node verifies
-    /// sessions against, read through the holder, never configured here. The route's own CORS policy
-    /// admits any origin without credentials: nothing here depends on who is asking.
-    /// </remarks>
     private static async Task NodeActionsAsync(HttpContext context)
     {
         NodeActionManifest document = context.RequestServices.GetRequiredService<NodeAccess>().ServedManifest();
 
         context.Response.Headers.CacheControl = "no-cache";
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(
-            JsonSerializer.Serialize(document, NodeActionManifestJson.Default.NodeActionManifest));
+        await context.Response.WriteAsync(JsonSerializer.Serialize(document, AuthJson.Default.NodeActionManifest));
     }
 
+    /// <summary>
+    /// The document naming this node's sign-in provider, or <c>503 no_issuer</c> while none is
+    /// configured.
+    /// </summary>
+    /// <remarks>
+    /// The resource is the origin the document was asked for at — what a client compares it against —
+    /// read after the forwarded headers have been applied. The issuer is <c>Sessions__Issuer</c>. The
+    /// route's own CORS policy admits any origin without credentials: nothing here depends on who is
+    /// asking.
+    /// </remarks>
     private static async Task ProtectedResourceDocumentAsync(HttpContext context)
     {
         string resource = $"{context.Request.Scheme}://{context.Request.Host}{context.Request.PathBase}";
-        string? issuer = context.RequestServices.GetRequiredService<IClusterSessionKeys>().Issuer;
-        string? document = ProtectedResourceMetadata.Document(resource, issuer);
+        string issuer = context.RequestServices.GetRequiredService<ApiOptions>().SessionsIssuer;
+        bool named = ProtectedResourceDocument.IsProvider(issuer);
 
         context.Response.Headers.CacheControl = "no-cache";
-        context.Response.StatusCode = document is null
-            ? StatusCodes.Status503ServiceUnavailable
-            : StatusCodes.Status200OK;
+        context.Response.StatusCode = named ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable;
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(document ?? ProtectedResourceMetadata.NoProvider);
+        await context.Response.WriteAsync(named
+            ? JsonSerializer.Serialize(ProtectedResourceDocument.For(resource, issuer), AuthJson.Default.ProtectedResourceDocument)
+            : ProtectedResourceDocument.NoIssuer);
     }
 }

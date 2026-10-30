@@ -44,9 +44,6 @@ public sealed class LeafSurfaceRelay(ApiOptions options, ILogger<LeafSurfaceRela
     /// about which leaf it is forwarding to.</summary>
     private const string Prefix = "/component/";
 
-    /// <summary>The header a leaf's component surface reads the relayed caller's account from.</summary>
-    public const string ActingAccountHeader = "Kgsm-Acting-Account";
-
     // The dial is local and the leaf is answering about files on this machine. One that has not
     // answered in this long is one the caller should stop waiting for and read for itself.
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
@@ -69,13 +66,13 @@ public sealed class LeafSurfaceRelay(ApiOptions options, ILogger<LeafSurfaceRela
     /// <summary>
     /// Forwards one request to the leaf and hands back what it said, or null when it said nothing.
     /// </summary>
-    /// <param name="actingAccount">
-    /// The account this request is made for, sent as <see cref="ActingAccountHeader"/>. A leaf records it
-    /// as the author of an automation the change switches on, and trusts it because this socket is
-    /// reachable by this API alone. Null when the caller has no account to name.
+    /// <param name="callerToken">
+    /// The access token of the person this request is made for, sent as <c>Authorization: Bearer</c>. The
+    /// leaf admits the person on it as it would on any other request, and records the token's subject and
+    /// name as the author of an automation the change switches on. Null when the caller is not a person.
     /// </param>
     public async Task<LeafSurfaceAnswer?> SendAsync(
-        string leafId, HttpMethod method, string route, string? body, string? actingAccount, CancellationToken ct)
+        string leafId, HttpMethod method, string route, string? body, string? callerToken, CancellationToken ct)
     {
         if (!ServesOwnSurface(leafId))
             return null;
@@ -105,8 +102,8 @@ public sealed class LeafSurfaceRelay(ApiOptions options, ILogger<LeafSurfaceRela
         using var client = new HttpClient(handler) { Timeout = Timeout };
         using var request = new HttpRequestMessage(method, "http://leaf" + Prefix + route.TrimStart('/'));
 
-        if (!string.IsNullOrWhiteSpace(actingAccount))
-            request.Headers.Add(ActingAccountHeader, actingAccount);
+        if (!string.IsNullOrWhiteSpace(callerToken))
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", callerToken);
 
         if (body is not null)
             request.Content = new StringContent(body, Encoding.UTF8, new MediaTypeHeaderValue("application/json"));

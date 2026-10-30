@@ -27,10 +27,10 @@ public sealed class ServicesProvisioningController(
     NodeAccess access,
     ApiOptions options) : ControllerBase
 {
-    private async Task<IActionResult?> RefuseConfigAsync(string leaf, bool write, CancellationToken ct)
+    private IActionResult? RefuseConfig(string leaf, bool write)
     {
         string action = ActionIds.ConfigAction(leaf, write);
-        return await access.AllowsAsync(User, action, access.NodeTarget, ct).ConfigureAwait(false)
+        return access.Allows(User, action)
             ? null
             : StatusCode(StatusCodes.Status403Forbidden,
                 new ErrorEnvelope(new ErrorBody("forbidden", $"this needs {action}")));
@@ -100,11 +100,11 @@ public sealed class ServicesProvisioningController(
         if (!IsThisHost(id))
             return NotFound();
 
-        if (await RefuseConfigAsync(leaf, write: false, ct) is { } refused)
+        if (RefuseConfig(leaf, write: false) is { } refused)
             return refused;
 
         // The leaf answers for itself where it can: it owns the descriptor, the file and the rules.
-        if (await relay.SendAsync(leaf, HttpMethod.Get, "config", null, NodeAccess.AccountOf(User), ct) is { } answered)
+        if (await relay.SendAsync(leaf, HttpMethod.Get, "config", null, CallerId.PersonToken(HttpContext), ct) is { } answered)
             return Relayed(answered);
 
         ComponentConfigView? cfg = await config.GetConfigAsync(leaf, ct);
@@ -122,7 +122,7 @@ public sealed class ServicesProvisioningController(
         if (!IsThisHost(id))
             return NotFound();
 
-        if (await RefuseConfigAsync(leaf, write: true, ct) is { } refused)
+        if (RefuseConfig(leaf, write: true) is { } refused)
             return refused;
 
         // The leaf applies its own change where it can: it owns the file, the validation and the
@@ -140,7 +140,7 @@ public sealed class ServicesProvisioningController(
             string json = System.Text.Json.JsonSerializer.Serialize(
                 forwarded, ApiContractsJson.Default.ComponentConfigUpdate);
 
-            if (await relay.SendAsync(leaf, HttpMethod.Put, "config", json, NodeAccess.AccountOf(User), ct) is { } answered)
+            if (await relay.SendAsync(leaf, HttpMethod.Put, "config", json, CallerId.PersonToken(HttpContext), ct) is { } answered)
             {
                 await journal.ServiceConfigAsync(
                     leaf, null, KeysIn(forwarded), OutcomeOf(answered.Status),
@@ -222,7 +222,7 @@ public sealed class ServicesProvisioningController(
         // The account too: the rule acts as its author beside the reactor's own service account, so the
         // leaf records who that is.
         (string? body, int status) = await reactor.WriteRuleAsync(
-            ruleId, rule, actor, NodeAccess.AccountOf(User), ct);
+            ruleId, rule, actor, CallerId.PersonToken(HttpContext), ct);
 
         if (status == 0)
         {

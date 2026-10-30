@@ -7,7 +7,6 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TheKrystalShip.Api.Services.Backups;
-using TheKrystalShip.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
@@ -175,27 +174,23 @@ public sealed class BackupDownloadTests
 
     // ===== the ticket store's own semantics =========================================================
 
-    private static Task<bool> Allowed(BackupDownloadTicket _, CancellationToken __) => Task.FromResult(true);
-
-    private static Task<bool> Refused(BackupDownloadTicket _, CancellationToken __) => Task.FromResult(false);
-
     [Fact]
-    public async Task Ticket_ExpiresAfterItsTtl()
+    public void Ticket_ExpiresAfterItsTtl()
     {
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 9, 12, 0, 0, TimeSpan.Zero));
         var store = new BackupDownloadTickets(clock);
 
-        (string handle, _) = store.Mint("s", "b", "usr_haru", "discord:haru", "ui", "sid-1");
-        BackupRedemption? first = await store.RedeemAsync(handle, "s", "b", Allowed);
+        (string handle, _) = store.Mint("s", "b", "local:haru", "ui");
+        BackupRedemption? first = store.Redeem(handle, "s", "b");
         Assert.NotNull(first);
         Assert.True(first.First);
 
         clock.Advance(BackupDownloadTickets.Ttl + TimeSpan.FromSeconds(1));
-        Assert.Null(await store.RedeemAsync(handle, "s", "b", Allowed));
+        Assert.Null(store.Redeem(handle, "s", "b"));
     }
 
     [Fact]
-    public async Task Ticket_IsRedeemableMoreThanOnce_ButAuditsOnlyOnFirst()
+    public void Ticket_IsRedeemableMoreThanOnce_ButAuditsOnlyOnFirst()
     {
         // Deliberately NOT single-use: a resumed or ranged download is a second request for the same
         // bytes, and burning the ticket on first contact would make the resumability this whole design
@@ -203,38 +198,24 @@ public sealed class BackupDownloadTests
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 8, 9, 12, 0, 0, TimeSpan.Zero));
         var store = new BackupDownloadTickets(clock);
 
-        (string handle, _) = store.Mint("s", "b", "usr_haru", "discord:haru", "ui", "sid-1");
+        (string handle, _) = store.Mint("s", "b", "local:haru", "ui");
 
-        Assert.True((await store.RedeemAsync(handle, "s", "b", Allowed))!.First);
-        Assert.False((await store.RedeemAsync(handle, "s", "b", Allowed))!.First);
-        Assert.False((await store.RedeemAsync(handle, "s", "b", Allowed))!.First);
+        Assert.True((store.Redeem(handle, "s", "b"))!.First);
+        Assert.False((store.Redeem(handle, "s", "b"))!.First);
+        Assert.False((store.Redeem(handle, "s", "b"))!.First);
     }
 
     [Fact]
-    public async Task Ticket_WhoseAccountMayNoLongerDownload_RedeemsNothing_AndSpendsNoAuditRow()
+    public void Ticket_CarriesTheMintersProvenance()
     {
-        // Evaluated again at redemption: a ticket outlives nothing its account has since lost. A refused
-        // redemption spends nothing, so a download allowed afterwards is still recorded once.
+        // The redeeming request is anonymous, so the row would otherwise have no actor. The ticket is
+        // what carries who asked for it across the two requests.
         var store = new BackupDownloadTickets();
-        (string handle, _) = store.Mint("s", "b", "usr_haru", "discord:haru", "ui", "sid-1");
+        (string handle, BackupDownloadTicket minted) = store.Mint("s", "b", "local:haru", "ui");
 
-        Assert.Null(await store.RedeemAsync(handle, "s", "b", Refused));
-        Assert.True((await store.RedeemAsync(handle, "s", "b", Allowed))!.First);
-    }
-
-    [Fact]
-    public async Task Ticket_CarriesTheMintersAccountAndProvenance()
-    {
-        // The redeeming request is anonymous, so the row would otherwise have no actor and the check no
-        // account. The ticket is what carries who asked for it across the two requests.
-        var store = new BackupDownloadTickets();
-        (string handle, BackupDownloadTicket minted) = store.Mint("s", "b", "usr_haru", "discord:haru", "ui", "sid-1");
-
-        BackupDownloadTicket redeemed = (await store.RedeemAsync(handle, "s", "b", Allowed))!.Ticket;
-        Assert.Equal("usr_haru", redeemed.AccountId);
-        Assert.Equal("discord:haru", redeemed.Actor);
+        BackupDownloadTicket redeemed = (store.Redeem(handle, "s", "b"))!.Ticket;
+        Assert.Equal("local:haru", redeemed.Actor);
         Assert.Equal("ui", redeemed.Origin);
-        Assert.Equal("sid-1", redeemed.SessionId);
         Assert.Equal(minted.ExpiresAt, redeemed.ExpiresAt);
     }
 

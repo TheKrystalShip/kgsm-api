@@ -340,58 +340,6 @@ public static class AuditQueries
     /// construction rather than by caller discipline.
     /// </summary>
     /// <summary>
-    /// The most recent <c>auth.login</c> rows for one person, newest first.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Reads the MERGE, not the local table. A person's login history spans the moment this API started
-    /// recording sign-ins in its own journal, and a query against either source alone would answer for
-    /// one side of that line while looking complete — the local table freezing at the cutover, the
-    /// journal starting there.
-    /// </para>
-    /// <para>
-    /// Filtered by action EQUALITY, deliberately. The merge's <c>category</c> filter matches a dotted
-    /// PREFIX, so <c>"auth."</c> would pull logouts into a list labelled "recent logins".
-    /// </para>
-    /// <para>
-    /// The walk is bounded: a person whose recent activity is mostly not logins gets a short list
-    /// rather than an unbounded scan back through the retention window.
-    /// </para>
-    /// </remarks>
-    public static async Task<IReadOnlyList<AuditRecord>> RecentLoginsAsync(
-        AppDbContext db, IEventJournalHistory? journal, string hostId, string actorName, int limit,
-        CancellationToken ct)
-    {
-        const int MaxPages = 4;
-
-        var found = new List<AuditRecord>(limit);
-        string? cursor = null;
-
-        for (int page = 0; page < MaxPages && found.Count < limit; page++)
-        {
-            AuditPage merged = await PageMergedAsync(
-                db, journal, hostId, cursor, limit: MaxLimit, severity: null, serverId: null,
-                actor: actorName, since: null, category: null, ct).ConfigureAwait(false);
-
-            foreach (AuditRecord row in merged.Data)
-            {
-                if (!string.Equals(row.Action, ApiJournal.LoginEvent, StringComparison.Ordinal))
-                    continue;
-
-                found.Add(row);
-                if (found.Count == limit)
-                    break;
-            }
-
-            if (merged.NextCursor is not { Length: > 0 } next)
-                break;
-
-            cursor = next;
-        }
-
-        return found;
-    }
-    /// <summary>
     /// kgsm-lib's per-journal coverage, in this API's wire shape.
     /// </summary>
     /// <remarks>

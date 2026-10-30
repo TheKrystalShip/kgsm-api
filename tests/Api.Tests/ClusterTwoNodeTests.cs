@@ -11,15 +11,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using TheKrystalShip.Api.Data;
-using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Cluster;
 using TheKrystalShip.KGSM.Cluster.Membership;
 using TheKrystalShip.KGSM.Cluster.Identity;
 using TheKrystalShip.KGSM.Cluster;
 using TheKrystalShip.KGSM.Cluster.Messaging;
 
-using TheKrystalShip.Auth;
-using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -33,7 +30,7 @@ namespace TheKrystalShip.Api.Tests;
 /// ("node-a"/"node-b") in the same process and routing node A's real <see cref="OutboxDrainer"/> HTTP
 /// traffic into node B's real in-memory <c>TestServer</c> pipeline — no sockets, no ports, but every byte
 /// still crosses the real <see cref="Controllers.PeersController.Inbox"/> action, the real
-/// <see cref="IClusterTokenService"/> mint/validate, and the real <see cref="SessionRevokeHandler"/>.
+/// <see cref="IClusterTokenService"/> mint/validate, and a handler of the tests' own.
 /// </summary>
 /// <remarks>
 /// <b>The routing trick.</b> <c>TestServer.CreateHandler()</c> returns an <see cref="HttpMessageHandler"/>
@@ -62,18 +59,17 @@ public sealed class ClusterTwoNodeTests
             await using var factoryA = new ClusterNodeFactory(
                 "node-a", "host-a", secret, dbPath: dbA, drainerHandlerFactory: () => handlerToB);
 
-            EndedSessionStore endedB = factoryB.Services.GetRequiredService<EndedSessionStore>();
-            string sid = "sid_2node_happy_" + Guid.NewGuid().ToString("N");
+            PingLedger pingsB = factoryB.Services.GetRequiredService<PingLedger>();
 
             IClusterBus busA = factoryA.Services.GetRequiredService<IClusterBus>();
             await busA.EnqueueJsonAsync(
-                "session.revoke", $$"""{"scope":"sid","sid":"{{sid}}"}""",
+                PingHandler.MessageType, """{"ping":true}""",
                 [new ClusterTarget("node-b", "http://node-b")], CancellationToken.None);
 
-            bool revoked = await PollUntilAsync(
-                () => endedB.IsRevokedAsync(sid),
+            bool applied = await PollUntilAsync(
+                () => Task.FromResult(pingsB.Count > 0),
                 TimeSpan.FromSeconds(5));
-            Assert.True(revoked, "expected node B to record the session as ended via the cluster bus within 5s");
+            Assert.True(applied, "expected node B to apply the message via the cluster bus within 5s");
 
             // The drainer marks its own row `delivered` only AFTER it observes B's 2xx response — that
             // happens strictly after (and racily close to) B applying the handler above, so poll here
@@ -94,7 +90,7 @@ public sealed class ClusterTwoNodeTests
     // ── 2. Down-then-up: the keystone test — B is unreachable, then comes back ─────────────────────
 
     [Fact]
-    public async Task DownThenUp_QueuedWhileBDown_RedeliveredAndRevokedOnceBRecovers()
+    public async Task DownThenUp_QueuedWhileBDown_RedeliveredAndAppliedOnceBRecovers()
     {
         const string secret = "two-node-down-up-secret";
         string dbA = NewDbPath("a-downup"), dbB = NewDbPath("b-downup");
@@ -105,12 +101,11 @@ public sealed class ClusterTwoNodeTests
             await using var factoryA = new ClusterNodeFactory(
                 "node-a", "host-a", secret, dbPath: dbA, drainerHandlerFactory: () => toggle);
 
-            EndedSessionStore endedB = factoryB.Services.GetRequiredService<EndedSessionStore>();
-            string sid = "sid_2node_downup_" + Guid.NewGuid().ToString("N");
+            PingLedger pingsB = factoryB.Services.GetRequiredService<PingLedger>();
 
             IClusterBus busA = factoryA.Services.GetRequiredService<IClusterBus>();
             await busA.EnqueueJsonAsync(
-                "session.revoke", $$"""{"scope":"sid","sid":"{{sid}}"}""",
+                PingHandler.MessageType, """{"ping":true}""",
                 [new ClusterTarget("node-b", "http://node-b")], CancellationToken.None);
 
             // While B is "down" (the toggle short-circuits every request to a 503), give the drainer a
@@ -125,7 +120,7 @@ public sealed class ClusterTwoNodeTests
                 TimeSpan.FromSeconds(3));
             Assert.True(retriedWhileDown, "expected at least one failed delivery attempt while B is down");
 
-            Assert.False(await endedB.IsRevokedAsync(sid), "the session must NOT be ended while B is unreachable");
+            Assert.Equal(0, pingsB.Count);
 
             OutboxRow? pendingRow = await GetOutboxRowAsync(factoryA, "node-b");
             Assert.NotNull(pendingRow);
@@ -134,10 +129,10 @@ public sealed class ClusterTwoNodeTests
             // Node B "comes back online".
             toggle.Down = false;
 
-            bool revoked = await PollUntilAsync(
-                () => endedB.IsRevokedAsync(sid),
+            bool applied = await PollUntilAsync(
+                () => Task.FromResult(pingsB.Count > 0),
                 TimeSpan.FromSeconds(8));
-            Assert.True(revoked, "expected the queued revoke to be redelivered and applied once B recovers");
+            Assert.True(applied, "expected the queued message to be redelivered and applied once B recovers");
 
             // Same race as the happy-path test: A's row flips to `delivered` slightly AFTER B applies
             // the handler (the drainer marks it once the 2xx response comes back) — poll, don't
@@ -158,7 +153,7 @@ public sealed class ClusterTwoNodeTests
     // ── 3. Auth fail-closed end-to-end: mismatched cluster secrets ──────────────────────────────────
 
     [Fact]
-    public async Task AuthFailClosed_MismatchedClusterSecrets_RowDeadLetters_SessionUntouched()
+    public async Task AuthFailClosed_MismatchedClusterSecrets_RowDeadLetters_NothingApplied()
     {
         string dbA = NewDbPath("a-authfail"), dbB = NewDbPath("b-authfail");
         try
@@ -168,12 +163,11 @@ public sealed class ClusterTwoNodeTests
             await using var factoryA = new ClusterNodeFactory(
                 "node-a", "host-a", "a-only-secret", dbPath: dbA, drainerHandlerFactory: () => handlerToB);
 
-            EndedSessionStore endedB = factoryB.Services.GetRequiredService<EndedSessionStore>();
-            string sid = "sid_2node_authfail_" + Guid.NewGuid().ToString("N");
+            PingLedger pingsB = factoryB.Services.GetRequiredService<PingLedger>();
 
             IClusterBus busA = factoryA.Services.GetRequiredService<IClusterBus>();
             await busA.EnqueueJsonAsync(
-                "session.revoke", $$"""{"scope":"sid","sid":"{{sid}}"}""",
+                PingHandler.MessageType, """{"ping":true}""",
                 [new ClusterTarget("node-b", "http://node-b")], CancellationToken.None);
 
             bool dead = await PollUntilAsync(
@@ -185,7 +179,7 @@ public sealed class ClusterTwoNodeTests
             Assert.NotNull(row);
             Assert.Contains("401", row!.LastError ?? "", StringComparison.Ordinal);
 
-            Assert.False(await endedB.IsRevokedAsync(sid), "B must never apply a message from a token it rejected");
+            Assert.Equal(0, pingsB.Count);
         }
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
     }
@@ -207,7 +201,7 @@ public sealed class ClusterTwoNodeTests
                 "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
 
             using HttpClient clientA = factoryA.CreateClient();
-            string ownerToken = AuthTestFactory.MintAccessOn(factoryA.Services, Persona.Owner);
+            string ownerToken = AuthTestFactory.MintAccess(Persona.Owner);
 
             var addRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/members")
             {
@@ -231,76 +225,6 @@ public sealed class ClusterTwoNodeTests
         finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); }
     }
 
-    // ── 4b. The local join: a node that knows nobody introduces itself to its machine's anchor ──────
-
-    [Fact]
-    public async Task ANodeThatKnowsNoMemberJoinsItsLocalAnchorWithNobodySignedIn()
-    {
-        // The fresh cluster of one: nobody can sign in to add a member until the node knows who holds
-        // the accounts, so the node takes that step itself against the configured local address. Node B
-        // stands in for the anchor, reached through the same handshake an owner's paste would use.
-        const string secret = "two-node-local-join-secret";
-        string dbA = NewDbPath("a-localjoin"), dbB = NewDbPath("b-localjoin");
-        string founded = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-founded-{Guid.NewGuid():N}");
-        File.WriteAllText(founded, ClusterFounding.Fingerprint(secret) + "\n");
-        try
-        {
-            await using var factoryB = new ClusterNodeFactory("node-b", "host-b", secret, dbPath: dbB);
-            HttpMessageHandler handlerToB = factoryB.Server.CreateHandler();
-            await using var factoryA = new ClusterNodeFactory(
-                "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
-            using WebApplicationFactory<Program> nodeA = factoryA.WithWebHostBuilder(builder =>
-                builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
-                    new Dictionary<string, string?>
-                    {
-                        ["Api:LocalAnchorUrl"] = "http://node-b",
-                        ["Cluster:FoundedPath"] = founded,
-                    })));
-
-            MembersStore membersA = nodeA.Services.GetRequiredService<MembersStore>();
-            bool joined = await PollUntilAsync(
-                async () => (await membersA.ListAsync(CancellationToken.None)).Any(m => m.MemberId == "node-b"),
-                TimeSpan.FromSeconds(10));
-
-            Assert.True(joined, "a node with an empty roster never introduced itself to its local anchor");
-        }
-        finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); DeleteBestEffort(founded); }
-    }
-
-    [Fact]
-    public async Task ANodeOnAMachineThatDidNotFoundItsClusterWaitsToBeAdded()
-    {
-        // A machine given another cluster's secret — joining, or a founding machine that has moved — is
-        // joined by an owner. Introducing itself would put the anchor beside it, which holds nothing in
-        // this cluster, in the roster as a member nobody asked for.
-        const string secret = "two-node-joined-machine-secret";
-        string dbA = NewDbPath("a-notfounded"), dbB = NewDbPath("b-notfounded");
-        string founded = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-founded-{Guid.NewGuid():N}");
-        File.WriteAllText(founded, ClusterFounding.Fingerprint("the cluster this machine left") + "\n");
-        try
-        {
-            await using var factoryB = new ClusterNodeFactory("node-b", "host-b", secret, dbPath: dbB);
-            HttpMessageHandler handlerToB = factoryB.Server.CreateHandler();
-            await using var factoryA = new ClusterNodeFactory(
-                "node-a", "host-a", secret, dbPath: dbA, handshakeHandlerFactory: () => handlerToB);
-            using WebApplicationFactory<Program> nodeA = factoryA.WithWebHostBuilder(builder =>
-                builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
-                    new Dictionary<string, string?>
-                    {
-                        ["Api:LocalAnchorUrl"] = "http://node-b",
-                        ["Cluster:FoundedPath"] = founded,
-                    })));
-
-            MembersStore membersA = nodeA.Services.GetRequiredService<MembersStore>();
-            bool joined = await PollUntilAsync(
-                async () => (await membersA.ListAsync(CancellationToken.None)).Count > 0,
-                TimeSpan.FromSeconds(3));
-
-            Assert.False(joined, "a node whose machine did not found its cluster introduced itself anyway");
-        }
-        finally { DeleteBestEffort(dbA); DeleteBestEffort(dbB); DeleteBestEffort(founded); }
-    }
-
     // ── 5. Disable-list gate, cross-node (P0 §9 checklist item 3) ────────────────────────────────────
 
     [Fact]
@@ -320,10 +244,10 @@ public sealed class ClusterTwoNodeTests
             string Envelope() => JsonSerializer.Serialize(new
             {
                 id = Guid.NewGuid().ToString("N"),
-                type = "session.revoke",
+                type = PingHandler.MessageType,
                 from = "node-b",
                 ts = DateTimeOffset.UtcNow,
-                payload = new { scope = "sid", sid = "does-not-matter" },
+                payload = new { ping = true },
             });
 
             // node-b is unknown to A's roster — absence is not rejection.
@@ -402,7 +326,7 @@ public sealed class ClusterTwoNodeTests
     /// while <see cref="Down"/> is <see langword="true"/> every request short-circuits to a <c>503</c>
     /// (simulating the target being unreachable) without ever touching the inner handler; otherwise it
     /// forwards into the wrapped handler (node B's real <c>TestServer</c> handler) unchanged. Flipping
-    /// <see cref="Down"/> mid-test is how <see cref="DownThenUp_QueuedWhileBDown_RedeliveredAndRevokedOnceBRecovers"/>
+    /// <see cref="Down"/> mid-test is how <see cref="DownThenUp_QueuedWhileBDown_RedeliveredAndAppliedOnceBRecovers"/>
     /// simulates node B going down and then coming back.</summary>
     private sealed class TogglableHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
     {
@@ -508,7 +432,41 @@ public sealed class ClusterNodeFactory(
                     .ConfigurePrimaryHttpMessageHandler(latencyHandlerFactory));
         }
 
+        builder.ConfigureTestServices(services =>
+        {
+            services.AddSingleton<PingLedger>();
+            services.AddSingleton<IClusterMessageHandler, PingHandler>();
+        });
+
         if (configureServices is not null)
             builder.ConfigureTestServices(configureServices);
+    }
+}
+
+/// <summary>What a node has been delivered by <see cref="PingHandler"/>.</summary>
+public sealed class PingLedger
+{
+    private int _count;
+
+    /// <summary>How many pings the node applied.</summary>
+    public int Count => Volatile.Read(ref _count);
+
+    internal void Add() => Interlocked.Increment(ref _count);
+}
+
+/// <summary>A message type of the tests' own, whose application is observable: it counts deliveries.</summary>
+public sealed class PingHandler(PingLedger ledger) : IClusterMessageHandler
+{
+    /// <summary>The <c>type</c> a ping travels as.</summary>
+    public const string MessageType = "test.ping";
+
+    /// <inheritdoc />
+    public string Type => MessageType;
+
+    /// <inheritdoc />
+    public Task HandleAsync(ClusterEnvelope envelope, CancellationToken ct)
+    {
+        ledger.Add();
+        return Task.CompletedTask;
     }
 }

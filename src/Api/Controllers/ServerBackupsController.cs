@@ -8,7 +8,6 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Backups;
 using TheKrystalShip.Api.Services.Commands;
-using TheKrystalShip.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
@@ -43,7 +42,6 @@ public sealed class ServerBackupsController(
     CommandRunner runner,
     BackupDownloadTickets tickets,
     ApiJournal journal,
-    NodeAccess access,
     ILogger<ServerBackupsController> logger) : ControllerBase
 {
     /// <summary>
@@ -442,10 +440,8 @@ public sealed class ServerBackupsController(
 
         (string handle, BackupDownloadTicket ticket) = tickets.Mint(
             id, backupId,
-            NodeAccess.AccountOf(User),
             AuditPrincipal.ActorString(User),
-            origin,
-            User.FindFirst(KgsmAuthClaims.SessionId)?.Value);
+            origin);
 
         return Ok(new BackupDownloadTicketResponse(
             handle,
@@ -472,12 +468,10 @@ public sealed class ServerBackupsController(
     public async Task<IActionResult> DownloadArchive(
         string id, string backupId, [FromQuery] string? ticket, CancellationToken ct)
     {
-        // The ticket's account is evaluated again here, from the replica: a ticket outlives nothing its
-        // account has since lost. The refusal is the same as an unknown ticket's, so a link says nothing
-        // about why it stopped working.
-        if (await tickets.RedeemAsync(ticket, id, backupId,
-                (t, token) => access.AllowsAccountAsync(t.AccountId, BackupDownloadTicket.Action, access.ServerTarget(t.ServerId), token),
-                ct) is not { } redemption)
+        // The ticket was minted for a caller who held the action, and its short life bounds what a role
+        // taken away since can still do. An unknown, spent or expired ticket is refused the same way, so a
+        // link says nothing about why it stopped working.
+        if (tickets.Redeem(ticket, id, backupId) is not { } redemption)
             return Error(StatusCodes.Status401Unauthorized, "invalid_ticket",
                 "this download link is invalid or has expired; request the download again");
 

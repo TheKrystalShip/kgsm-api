@@ -19,18 +19,16 @@ designed, not built · `open` = not yet decided.
 ## 0 · The security boundary (read this first)
 
 **A cluster is one trust domain, single-owner.** Every member holds the **same**
-cluster secret, which proves membership between members, and accepts the sessions
-of the **one** auth anchor the cluster has. Who a person is and what they may do
-are the anchor's: it holds the accounts, permissions, roles and assignments, and
-every member evaluates a caller against its own read-only replica of them
+cluster secret, which proves membership between members, and admits people on the
+access tokens of the **one** sign-in provider it is configured with. Who a person is and
+what they may do are the provider's: its token lists the actions the person holds
 (`../kgsm-docs/systems/authorization/`). What follows from that:
 
-- Authorization is coherent across the cluster by construction — a role assigned
-  at cluster scope means the same thing on every member, and a narrower one
-  (`node:<id>`, an instance) is evaluated identically wherever it is asked.
-- Single sign-on needs nothing between nodes — a session the anchor minted is
-  valid on every member, because each verifies it against the key the anchor
-  publishes and none can mint one.
+- Authorization is coherent across the cluster by construction — a role is
+  cluster-wide and means the same thing on every member.
+- Single sign-on needs nothing between nodes — a token the provider issued is valid
+  on every member, because each verifies it against the keys the provider publishes
+  and none can mint one.
 - **The cost, accepted eyes-open:** the members are not security-independent. A
   fully-compromised member holds the cluster secret and can speak as a member to
   every other one; it cannot forge a session. Treat the cluster's blast radius as
@@ -70,7 +68,7 @@ per-leaf status, not from a status line on the capability itself.
 |---|---|---|
 | 1 | Peer transport | REST over HTTPS on the existing API surface |
 | 2 | Node identity | Config-driven `nodeId` (default: machine name, same as HostId) |
-| 3 | Cluster membership proof | A shared **`Cluster__Secret`** (HMAC), host-level and unrelated to the auth anchor's session signing key |
+| 3 | Cluster membership proof | A shared **`Cluster__Secret`** (HMAC), host-level and unrelated to the sign-in provider's token signing key |
 | 4 | Node-to-node auth | A **service JWT** signed with the cluster secret (`sub=node:<id>`, `aud=cluster`, `iss=<id>`, short TTL) |
 | 5 | No per-node keypairs | Symmetric shared secret only — no Ed25519, no per-request asymmetric signing |
 | 6 | Handshake | Somebody holding `api:members.manage` pastes a URL → the two nodes exchange **node cards** in one symmetric `POST /members/introduce` over TLS (§7), each validating the other with the same predicate and each recording the mirror of what the other records. No key exchange, no fingerprint confirmation |
@@ -104,10 +102,10 @@ two controller endpoints), **no new service, broker, or dependency**.
 
 | # | Decision | Choice |
 |---|---|---|
-| 13 | One sign-in, whole cluster | A person signs in **once**, at the auth anchor; the session it mints is accepted by every member, and what it may do is evaluated per action on each (`../kgsm-docs/systems/identity/sign-in.md`) |
-| 14 | No session lives on a node | A member verifies a session against the key the anchor publishes and keeps no row for it — only the list of sessions that have ended |
+| 13 | One sign-in, whole cluster | A person signs in **once**, at the sign-in provider; the access token it issues is accepted by every member, and what the person may do is the actions the token lists (`../kgsm-docs/systems/identity/sign-in.md`) |
+| 14 | No session lives on a node | A member verifies a token against the keys the provider publishes and keeps nothing about it |
 | 17 | SPA connection model | A **direct multi-host client** — one session, per-node SSE, browser fans out |
-| 19 | Logout everywhere | An ended session is announced over the message bus (`session.revoke`) — durable, so a node that is down when it ends refuses it when it returns |
+| 19 | Logout everywhere | A token lives five minutes; a signed-out session is refused at its next renewal, and an open stream ends when its token expires |
 
 ### Placement & failure
 
@@ -127,7 +125,7 @@ two controller endpoints), **no new service, broker, or dependency**.
 
 ```
 Cluster secret       Cluster__Secret  (HMAC, shared by every member — proves membership)
-Session signing key  held by the auth anchor alone (ES256); members hold its public half
+Token signing key    held by the sign-in provider alone (ES256); members read its public keys
                      └─ leaking the cluster secret hands over no session forgery: a member
                         verifies a session it cannot mint.
 ```
@@ -163,18 +161,17 @@ where it matters.
 ### A person's session
 
 ```
-Person → auth anchor: sign in (the anchor is the cluster's OpenID Connect provider)
-  The anchor mints one session, audienced to the cluster, signed with its own key.
+Person → sign-in provider: sign in
+  The provider issues an access token for the cluster's audience, listing the person's actions.
 
 The SPA calls any member with that bearer:
-  The member verifies it against the anchor's published key, refuses it if the
-  ended-session list names its sid, and evaluates the request's action against
-  its replica of the cluster's authority.
+  The member verifies it against the provider's published keys and takes the person's
+  actions from the token.
 ```
 
-- No member talks to an identity provider and no member mints a session.
-- Ending a session is the anchor's; it reaches every member as a durable
-  `session.revoke` (§6, P1).
+- No member talks to an identity provider on a request's path and no member mints a token.
+- A token lives five minutes, so a signed-out session or a removed role ends within that;
+  an open stream ends when its token expires.
 
 ### Compromise & rotation
 
@@ -365,17 +362,13 @@ pre-told its own address (§2 #13a-c).
   this node's own copy, and gossip refills it.
 
 ### P1 — Single sign-on · `built`
-- **One session, every member.** The auth anchor mints it; each member verifies it against
-  the anchor's published key and evaluates every request against its own replica of the
-  cluster's authority (§0, §3). No member serves an `/auth` path.
-- **Ending a session reaches every member.** The anchor announces an ended session as a
-  durable `session.revoke`; each member's `SessionRevokeHandler` records it on the
-  ended-session list and drops the cached answer, so the refusal is immediate. Durable to
-  down nodes (outbox redelivery on return), and idempotent, so a replay is harmless.
+- **One token, every member.** The sign-in provider issues it; each member verifies it against
+  the provider's published keys and takes the person's actions from it (§0, §3). No member
+  serves an `/auth` path.
 - **Durable fan-out targets first-hand-`alive` peers only (locked).** The two
   transports split their target sets the same way §2·b G4 splits their retention:
   ephemeral gossip (`/members/sync`) reaches **any** enabled roster member, but a
-  **durable**, identity-carrying message (`session.revoke` names a session) fans
+  **durable**, identity-carrying message fans
   out **only** to peers this node has authenticated first-hand. First-hand-alive is
   **two** conditions, not one: `MembershipState == alive` **AND** `LastSeen` set — a
   purely gossip-learned peer is *stored* `alive` with a null `LastSeen` (it displays
@@ -549,9 +542,9 @@ the cluster package's `docs/cluster-message-bus.md`.
   - Lists the local node + all peers; add/remove/enable/disable; latency;
     reachable/unreachable/disabled status.
   - **No resource dashboard** — per-node resources stay on the per-node pages.
-- **Single sign-on:** one sign-in at the auth anchor; the SPA presents that one
-  session to every node. "Sign out everywhere" is the anchor's, and reaches every
-  member over the bus.
+- **Single sign-on:** one sign-in at the provider; the SPA presents that one
+  token to every node. "Sign out everywhere" is the provider's, and reaches every
+  member at the token's next renewal.
 - **Cross-node install:** the install modal's node dropdown is populated from the
   cached Cluster-page data. Selecting a peer switches the SPA to talk **directly**
   to that peer with the same session; the source node drops out of the loop.
@@ -592,10 +585,8 @@ the cluster package's `docs/cluster-message-bus.md`.
   reports `unreachable` while holding no invented address.
 
 ### P1
-- Sign in at the anchor; the one session reads A and B.
-- An ended session is refused on A **and** B.
-- Down-node revocation: stop B, end the session at the anchor, restart B → the queued
-  `session.revoke` is delivered on B's return (bus redelivery), session refused.
+- Sign in at the provider; the one token reads A and B.
+- A signed-out session is refused on A **and** B at its next renewal.
 
 ### P2
 - Query a peer's resources/capabilities/library.

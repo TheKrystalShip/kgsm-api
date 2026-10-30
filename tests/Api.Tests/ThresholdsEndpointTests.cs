@@ -3,7 +3,6 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

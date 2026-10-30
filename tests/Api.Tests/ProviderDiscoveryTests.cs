@@ -1,37 +1,21 @@
 using System.Net;
 using System.Text.Json;
-using Microsoft.AspNetCore.Hosting;
+
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.AspNetCore.TestHost;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using TheKrystalShip.Auth.Cluster;
-using TheKrystalShip.KGSM.Cluster.Membership;
+using Microsoft.Extensions.Configuration;
+
+using TheKrystalShip.Api.Services.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 
-/// <summary>
-/// How a browser surface this node served finds its sign-in provider, and how the panel this node
-/// serves becomes a client of it.
-/// </summary>
+/// <summary>How a browser surface this node served finds its sign-in provider, and which origins may call it.</summary>
 public sealed class ProviderDiscoveryTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>
 {
-    private const string Issuer = "https://auth.anchors.test";
-
-    private WebApplicationFactory<Program> KnowingIssuer(string? issuer) => factory.WithWebHostBuilder(builder =>
-        builder.ConfigureTestServices(services =>
-        {
-            services.RemoveAll<IClusterSessionKeys>();
-            services.AddSingleton<IClusterSessionKeys>(
-                AuthTestFactory.PublishedAnchor.Default with { Issuer = issuer });
-        }));
-
     [Fact]
-    public async Task The_node_names_the_issuer_it_verifies_against_to_anybody_who_asks()
+    public async Task The_node_names_the_configured_issuer_to_anybody_who_asks()
     {
-        using WebApplicationFactory<Program> node = KnowingIssuer(Issuer);
-        using HttpClient client = node.CreateClient();
-        using var request = new HttpRequestMessage(HttpMethod.Get, ProtectedResourceMetadata.Path);
+        using HttpClient client = factory.CreateClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, ProtectedResourceDocument.Path);
         request.Headers.Add("Origin", "https://panel.somewhere-else.test");
 
         using HttpResponseMessage response = await client.SendAsync(request);
@@ -39,7 +23,7 @@ public sealed class ProviderDiscoveryTests(AuthTestFactory factory) : IClassFixt
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         Assert.Equal("http://localhost", document.RootElement.GetProperty("resource").GetString());
-        Assert.Equal(Issuer,
+        Assert.Equal(AuthTestFactory.Provider.Issuer,
             Assert.Single(document.RootElement.GetProperty("authorization_servers").EnumerateArray()).GetString());
 
         // Readable from any origin — a panel served with no member behind it asks whichever member a
@@ -48,20 +32,27 @@ public sealed class ProviderDiscoveryTests(AuthTestFactory factory) : IClassFixt
         Assert.False(response.Headers.Contains("Access-Control-Allow-Credentials"));
     }
 
-    private sealed class Registered(params string[] origins) : IClientOrigins
+    [Fact]
+    public async Task A_node_with_no_issuer_says_so()
     {
-        public bool Admits(string? origin) => origin is not null && origins.Contains(origin, StringComparer.Ordinal);
+        using WebApplicationFactory<Program> node = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
+                new Dictionary<string, string?> { ["Sessions:Issuer"] = "" })));
+        using HttpClient client = node.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync(ProtectedResourceDocument.Path);
+
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("no_issuer", document.RootElement.GetProperty("error").GetString());
     }
 
     [Fact]
-    public async Task A_registered_client_s_origin_is_admitted_across_origins_and_nothing_else_is()
+    public async Task A_configured_origin_is_admitted_across_origins_and_nothing_else_is()
     {
         using WebApplicationFactory<Program> node = factory.WithWebHostBuilder(builder =>
-            builder.ConfigureTestServices(services =>
-            {
-                services.RemoveAll<IClientOrigins>();
-                services.AddSingleton<IClientOrigins>(new Registered("https://kgsm.example.test"));
-            }));
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
+                new Dictionary<string, string?> { ["Api:CorsOrigins"] = "https://kgsm.example.test, https://other.example.test" })));
         using HttpClient client = node.CreateClient();
 
         async Task<HttpResponseMessage> PreflightFrom(string origin)
@@ -73,69 +64,11 @@ public sealed class ProviderDiscoveryTests(AuthTestFactory factory) : IClassFixt
             return await client.SendAsync(preflight);
         }
 
-        // Registering a client at the provider is what lets it call this node; no node holds a list.
         using HttpResponseMessage admitted = await PreflightFrom("https://kgsm.example.test");
         Assert.Equal("https://kgsm.example.test", admitted.Headers.GetValues("Access-Control-Allow-Origin").Single());
         Assert.False(admitted.Headers.Contains("Access-Control-Allow-Credentials"));
 
         using HttpResponseMessage refused = await PreflightFrom("https://elsewhere.test");
         Assert.False(refused.Headers.Contains("Access-Control-Allow-Origin"));
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData(AuthTestFactory.AnchorIssuer)]
-    public async Task A_node_knowing_no_provider_a_browser_can_reach_says_so(string? issuer)
-    {
-        using WebApplicationFactory<Program> node = KnowingIssuer(issuer);
-        using HttpClient client = node.CreateClient();
-
-        using HttpResponseMessage response = await client.GetAsync(ProtectedResourceMetadata.Path);
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-        using JsonDocument document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("no_issuer", document.RootElement.GetProperty("error").GetString());
-    }
-
-    [Fact]
-    public async Task A_node_serving_the_panel_announces_it_as_a_client()
-    {
-        string webRoot = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-wwwroot-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(webRoot);
-        await File.WriteAllTextAsync(Path.Combine(webRoot, "index.html"), "<!doctype html><title>panel</title>");
-        try
-        {
-            using WebApplicationFactory<Program> node = factory.WithWebHostBuilder(builder => builder.UseWebRoot(webRoot));
-            using HttpClient client = node.CreateClient();
-
-            ClusterClientAnnouncement? announced = ClusterClientAnnouncement.Read(
-                node.Services.GetRequiredService<SelfPublications>().Current
-                    .GetValueOrDefault(ClusterClientAnnouncement.FactKey));
-
-            ClusterClientAnnouncement panel = ClusterClientAnnouncement.ControlPanel;
-            Assert.NotNull(announced);
-            Assert.Equal(panel.Name, announced.Name);
-            Assert.Equal(panel.RedirectPaths, announced.RedirectPaths);
-            Assert.Equal(panel.PostLogoutRedirectPaths, announced.PostLogoutRedirectPaths);
-
-            // And the path the provider sends a code to is the panel, not a 404.
-            using HttpResponseMessage landing = await client.GetAsync(
-                $"{ClusterClientAnnouncement.ControlPanel.RedirectPaths[0]}?code=x&state=y");
-            Assert.Equal(HttpStatusCode.OK, landing.StatusCode);
-            Assert.Contains("panel", await landing.Content.ReadAsStringAsync());
-        }
-        finally
-        {
-            try { Directory.Delete(webRoot, recursive: true); } catch (IOException) { }
-        }
-    }
-
-    [Fact]
-    public void A_node_serving_no_panel_announces_nothing()
-    {
-        using HttpClient client = factory.CreateClient();
-
-        Assert.False(factory.Services.GetRequiredService<SelfPublications>().Current
-            .ContainsKey(ClusterClientAnnouncement.FactKey));
     }
 }

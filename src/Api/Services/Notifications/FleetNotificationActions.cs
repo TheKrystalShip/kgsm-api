@@ -6,8 +6,6 @@ using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Leaves;
 using TheKrystalShip.Api.Services.Players;
-using TheKrystalShip.Auth.Access;
-using TheKrystalShip.Auth.Cluster;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
@@ -26,9 +24,9 @@ namespace TheKrystalShip.Api.Services.Notifications;
 /// <b>The anonymous tap route is the only write without a session, and this is what keeps it sound.</b>
 /// A service worker holds no session, so the library's handle stands in for a bearer: single-use, bound to
 /// the device it was minted for, and short-lived. Nothing in the request describes what to do. Whether the
-/// person may perform the operation's action at its target is asked here, at the tap, from this node's
-/// replica, so somebody whose access changed or who was switched off in between is refused like on any
-/// other request.
+/// person may perform the operation's action is asked here, at the tap, of what their token last listed
+/// (<see cref="NotificationActors"/>): a tap carries no token of its own, so somebody whose access was
+/// taken away is refused once that memory is older than <see cref="NotificationActors.Freshness"/>.
 /// </para>
 /// <para>
 /// <b>It writes no audit row of its own.</b> The operations are kgsm's events to emit, so this stamps the
@@ -38,8 +36,6 @@ namespace TheKrystalShip.Api.Services.Notifications;
 /// </remarks>
 public sealed class FleetNotificationActions(
     NotificationActors actors,
-    MemberAccess memberAccess,
-    NodeAccess nodeAccess,
     ServerAggregator aggregator,
     PlayerHistoryService history,
     JobRegistry jobs,
@@ -47,7 +43,6 @@ public sealed class FleetNotificationActions(
     IUnitController units,
     ApiJournal journal,
     IServiceProvider services,
-    ApiOptions options,
     ILogger<FleetNotificationActions> logger) : INotificationActionHandler
 {
     public async Task<(bool Ok, string Message)> RedeemAsync(
@@ -56,26 +51,12 @@ public sealed class FleetNotificationActions(
         if (!PushActionKind.IsKnown(name) || ButtonArgument.Unpack(argument) is not { } target)
             return Refuse("This build does not know how to do that.");
 
-        if (actors.ActorOf(person) is not { } actor)
-            return Refuse("This action could not be attributed to an account.");
+        if (actors.Known(person) is not { } known)
+            return Refuse("This action could not be attributed to an account that was recently signed in.");
 
-        if (!options.AuthDisabled)
-        {
-            AccessEvaluator? evaluator = await memberAccess.EvaluatorAsync(ct).ConfigureAwait(false);
-            if (evaluator is null)
-            {
-                logger.LogError("notification action: could not read the account replica for {Person}", person);
-                return Unavailable("The account store on this host could not be read, so nothing can be authorized right now.");
-            }
+        string actor = known.Actor;
 
-            if (!evaluator.Snapshot.Accounts.TryGetValue(person, out AccessAccount? account))
-                return Refuse("That account is not known on this host.");
-            if (account.Status == AccountStatus.Disabled)
-                return Refuse("That account has been switched off.");
-        }
-
-        async Task<bool> Allows(string action, AccessScope scope) =>
-            await nodeAccess.AllowsAccountAsync(person, action, scope, ct).ConfigureAwait(false);
+        bool Allows(string action) => actors.Allows(person, action);
 
         if (PushActionKind.VerbFor(name) is { } verb)
             return await LifecycleAsync(target.Target, verb, actor, Allows, ct).ConfigureAwait(false);
@@ -98,9 +79,9 @@ public sealed class FleetNotificationActions(
     /// refused here rather than shelling a command the privilege underneath would deny.
     /// </summary>
     private async Task<(bool, string)> RestartLeafAsync(
-        string leafId, string actor, Func<string, AccessScope, Task<bool>> allows, CancellationToken ct)
+        string leafId, string actor, Func<string, bool> allows, CancellationToken ct)
     {
-        if (!await allows(ActionIds.ServicesManage, nodeAccess.NodeTarget).ConfigureAwait(false))
+        if (!allows(ActionIds.ServicesManage))
             return Refuse("That account is not allowed to restart a service.");
 
         if (!LeafCatalog.IsRestartable(leafId) || LeafCatalog.Find(leafId) is not { } leaf)
@@ -125,9 +106,9 @@ public sealed class FleetNotificationActions(
     /// window it moves, because the daemon refuses an instruction naming none.
     /// </summary>
     private async Task<(bool, string)> PostponeAsync(
-        ButtonArgument button, string actor, Func<string, AccessScope, Task<bool>> allows, CancellationToken ct)
+        ButtonArgument button, string actor, Func<string, bool> allows, CancellationToken ct)
     {
-        if (!await allows(ActionIds.SchedulerWindowsWrite, nodeAccess.NodeTarget).ConfigureAwait(false))
+        if (!allows(ActionIds.SchedulerWindowsWrite))
             return Refuse("That account is not allowed to change when a server restarts.");
 
         if (services.GetService(typeof(SchedulerClient)) is not SchedulerClient scheduler || !scheduler.CanControl)
@@ -158,10 +139,10 @@ public sealed class FleetNotificationActions(
     /// server somebody else already started is told it is already running.
     /// </summary>
     private async Task<(bool, string)> LifecycleAsync(
-        string serverId, string verb, string actor, Func<string, AccessScope, Task<bool>> allows, CancellationToken ct)
+        string serverId, string verb, string actor, Func<string, bool> allows, CancellationToken ct)
     {
         if (ActionIds.ForVerb(verb) is not { } verbAction
-            || !await allows(verbAction, nodeAccess.ServerTarget(serverId)).ConfigureAwait(false))
+            || !allows(verbAction))
             return Refuse($"That account is not allowed to {verb} this server.");
 
         IReadOnlyList<Server> servers = await aggregator.GetServersAsync(ct).ConfigureAwait(false);
@@ -200,12 +181,12 @@ public sealed class FleetNotificationActions(
     /// resolves to.
     /// </summary>
     private async Task<(bool, string)> ModerateAsync(
-        ButtonArgument button, string moderation, string actor, Func<string, AccessScope, Task<bool>> allows)
+        ButtonArgument button, string moderation, string actor, Func<string, bool> allows)
     {
         string moderationAction = moderation == ModerationAction.Kick
             ? ActionIds.ServerPlayersKick
             : ActionIds.ServerPlayersBan;
-        if (!await allows(moderationAction, nodeAccess.ServerTarget(button.Target)).ConfigureAwait(false))
+        if (!allows(moderationAction))
             return Refuse($"That account is not allowed to {moderation} a player on this server.");
 
         if (string.IsNullOrEmpty(button.Subject))

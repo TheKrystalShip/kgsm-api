@@ -31,7 +31,6 @@ public sealed class NotificationDigestTests
     {
         Assert.Equal("1 server has an update", NotificationDigest.Headline([Event("update_available", "a")]));
         Assert.Equal("1 crash", NotificationDigest.Headline([Event("crash", "a")]));
-        Assert.Equal("1 person waiting to be let in", NotificationDigest.Headline([Event("awaiting_approval")]));
     }
 
     [Fact]

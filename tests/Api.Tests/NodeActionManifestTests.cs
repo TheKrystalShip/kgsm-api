@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 
 using TheKrystalShip.Api.Services.Auth;
-using TheKrystalShip.Auth.Access;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -62,7 +61,7 @@ public sealed class NodeActionManifestTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
         NodeActionManifest document = JsonSerializer.Deserialize(
-            await response.Content.ReadAsStringAsync(), NodeActionManifestJson.Default.NodeActionManifest)!;
+            await response.Content.ReadAsStringAsync(), AuthJson.Default.NodeActionManifest)!;
 
         Assert.Equal(1, document.SchemaVersion);
         Assert.Equal(["api", "dns", "kgsm"], document.Manifests.Select(m => m.Component));
@@ -76,7 +75,7 @@ public sealed class NodeActionManifestTests : IDisposable
 
         string body = await client.GetStringAsync(NodeActionManifest.Path);
         NodeActionManifest document = JsonSerializer.Deserialize(
-            body, NodeActionManifestJson.Default.NodeActionManifest)!;
+            body, AuthJson.Default.NodeActionManifest)!;
 
         Assert.All(document.Manifests.SelectMany(m => m.Actions!), a => Assert.Equal("cluster", a.Scope));
         Assert.All(document.Manifests, m => Assert.Empty(m.Requires!));

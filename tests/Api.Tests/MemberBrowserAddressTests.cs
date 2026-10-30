@@ -4,7 +4,6 @@ using System.Text.Json;
 
 using Microsoft.Extensions.DependencyInjection;
 
-using TheKrystalShip.Auth;
 using TheKrystalShip.KGSM.Cluster.Membership;
 
 namespace TheKrystalShip.Api.Tests;
@@ -39,7 +38,7 @@ public sealed class MemberBrowserAddressTests
     {
         using HttpClient client = factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", AuthTestFactory.MintAccessOn(factory.Services, Persona.Owner));
+            "Bearer", AuthTestFactory.MintAccess(Persona.Owner));
 
         JsonElement body = JsonDocument.Parse(
             await (await client.GetAsync("/api/v1/members")).Content.ReadAsStringAsync()).RootElement;

@@ -13,30 +13,20 @@ same treatment before the suite runs on a live machine.
 ## How it works (the pattern to follow)
 
 - **`AuthTestFactory : WebApplicationFactory<Program>`** boots the real app with **auth ON**, the
-  cluster's auth anchor stood in for by a signer (`AuthTestFactory.AnchorSigner`, one for the whole
-  run), and the **engine/monitor left unprovisioned** so reads degrade to `200` with no external
-  dependency. It replaces `IClusterSessionKeys` with `PublishedAnchor.Default` — what gossip would have
-  delivered — so the JwtBearer pipeline verifies the stand-in anchor's sessions exactly as production
-  verifies the real one's.
-- **Access comes from roles in the replica, never from the token.** A caller is a `Persona` — `None`,
-  `Reader`, `Runner`, `Owner` — and each is a real role in the replica holding the actions listed in
-  `TestAuthority` (`Owner` holds everything). `TestAuthority` is the stand-in anchor: an authority store
-  of its own beside the factory's replica, where accounts, roles and assignments are made, and from
-  which the anchor's snapshot is delivered into the replica after every change. `SetAccountOn` then
-  tells the node its replica changed, as replication does, so a change reaches open streams.
-  `TestAuthority.Grant` gives one account one action at one scope, for a case about a scoped grant.
-- **Sessions are minted as the anchor mints them** — `factory.AccessToken(persona)` and
-  `factory.RefreshToken(persona)` sign with the stand-in anchor's `SessionTokenService`, audienced to
-  `AuthTestFactory.ClusterId`, and set the account behind the token to the persona. A factory built with
-  `WithWebHostBuilder` has its own replica, so mint for it with
-  `AuthTestFactory.MintAccessOn(derived.Services, persona)`. The refusal shapes a node must hold are in
-  `TestTokens`: a session signed by a key nobody published, a symmetric token, and an anchor-signed one
-  with no `sid`. `AccessToken` mints for the **one standing identity** (`TestIdentity.Identity`),
-  so every token it hands out is the same person holding whichever persona was asked for last. A case
-  about **who** something reaches, or about one account changing while another watches, needs two
-  people: `TestIdentity.IdentityFor(subject)` names one and `factory.AccessTokenFor(identity,
-  persona, status)` gives them a session and an account of their own; `AuthTestFactory.RemoveAccountOn`
-  takes an account away.
+  sign-in provider stood in for by `KGSM.Sessions.Testing`'s `TestIssuer` (`AuthTestFactory.Provider`, one
+  for the whole run, serving discovery and keys in-process), and the **engine/monitor left unprovisioned**
+  so reads degrade to `200` with no external dependency. The sessions package validates its tokens exactly
+  as it validates the real provider's.
+- **Access is the token's actions.** A caller is a `Persona` — `None`, `Reader`, `Runner`, `Owner` — and
+  each is the list of actions its token carries (`Personas`; `Owner` lists every `ActionIds` constant and
+  the configuration actions of the known leaves). `factory.AccessToken(persona)` mints for the **one
+  standing person** (`TestIdentity.Person`); `factory.AccessTokenFor(TestIdentity.PersonFor(subject),
+  persona)` names another, which a case about **who** something reaches needs;
+  `factory.AccessTokenWith(person, actions, lifetime)` lists exactly what it is given. A factory built
+  with `WithWebHostBuilder` verifies the same tokens, so `AuthTestFactory.MintAccess(persona)` serves it.
+  The refusal shapes a node must hold are minted from the provider with one thing changed: signed by
+  another `TestIssuer`, another issuer, another audience, expired, not an access token, signed with
+  another algorithm.
 - **`/api/v1/stream` (fetch-based SSE; protocol: `../../src/Api/Realtime/CLAUDE.md`)** is
   exercised with `SseTestHelpers.OpenStream(client, path, token)` — a `GET` with
   `HttpCompletionOption.ResponseHeadersRead` and an `Authorization: Bearer` header (never a query-string
@@ -86,8 +76,7 @@ pipeline. Use the same trick for any other `HttpContext.Connection` fact a test 
 ## What lives here vs. smoke
 
 - **Here:** behavior that needs in-process service replacement or deterministic control — the auth
-  **401/403 access matrix** against anchor-signed sessions, the ended-session deny-list, a replicated
-  change reaching an open stream. `401` (no/invalid bearer) vs `403` (authenticated, action not held)
+  **401/403 access matrix** against provider-signed tokens, the stream ending with its token. `401` (no/invalid bearer) vs `403` (authenticated, action not held)
   is the load-bearing split — assert both.
 - **`scripts/smoke.sh`:** the HTTP **contract surface** end-to-end (envelopes, DTO shapes, the SSE
   stream protocol, the no-token sweep) against a real running process. The two are complementary, not
@@ -96,5 +85,5 @@ pipeline. Use the same trick for any other `HttpContext.Connection` fact a test 
 ## Convention for new tests
 
 *Behavioral* tests land here, faking the relevant boundary (the leaf client, the event socket, the
-auth anchor); smoke keeps proving the wire contract. Keep fakes switch-on-input rather than mutable,
+sign-in provider); smoke keeps proving the wire contract. Keep fakes switch-on-input rather than mutable,
 so tests stay parallel-safe.

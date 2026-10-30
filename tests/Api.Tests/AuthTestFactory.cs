@@ -6,63 +6,30 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.IdentityModel.Tokens;
 using TheKrystalShip.Api;
-
-using TheKrystalShip.Auth;
-using TheKrystalShip.Auth.Users;
-
-using TheKrystalShip.Auth.Cluster;
-using TheKrystalShip.Auth.Minting;
+using TheKrystalShip.KGSM.Sessions.Testing;
 
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// Boots the real API in-process with auth ON, standing in for the cluster's auth anchor with a signer
-/// of its own and an authority store of its own (<see cref="TestAuthority"/>). Everything else is the
-/// production pipeline — the JwtBearer validation against the anchor's published key, the ended-session
-/// check, the account read from the replica, the action gates, the controllers — so the access matrix
-/// exercises the real wiring. The engine/monitor are left unprovisioned so reads degrade to 200 (empty
-/// roster / null capacity) with no external dependency.
+/// Boots the real API in-process with auth ON, against a stand-in sign-in provider (<see cref="Provider"/>)
+/// that serves discovery and keys in-process and mints the access tokens a signed-in caller presents.
+/// Everything else is the production pipeline — the sessions package's token validation, the action
+/// gates, the controllers — so the access matrix exercises the real wiring. The engine/monitor are left
+/// unprovisioned so reads degrade to 200 (empty roster / null capacity) with no external dependency.
 /// </summary>
 public class AuthTestFactory : WebApplicationFactory<Program>
 {
     public const string HostId = "test-host";
 
-    /// <summary>The audience every session the stand-in anchor mints carries: the cluster.</summary>
-    public const string ClusterId = "test-cluster";
-
-    /// <summary>The issuer the stand-in anchor stamps, which is the anchor's rather than this API's.</summary>
-    public const string AnchorIssuer = "kgsm";
+    /// <summary>The application the stand-in provider issues this cluster's tokens for.</summary>
+    public const string Audience = TestIssuer.DefaultAudience;
 
     /// <summary>
-    /// The stand-in anchor's private key. One for the whole run: a node verifies against what the anchor
-    /// publishes, and every factory is told the same thing, so a session minted through one factory's
-    /// helper verifies on any derived factory that inherits the registration.
+    /// The stand-in provider. One for the whole run: every factory is told its issuer, and a token it
+    /// minted verifies on any factory.
     /// </summary>
-    public static readonly EcdsaSessionSigner AnchorSigner = EcdsaSessionSigner.Generate();
-
-    /// <summary>The stand-in anchor's token service: asymmetric, audienced to the cluster.</summary>
-    public static readonly SessionTokenService Anchor = new(
-        new SessionTokenOptions(
-            Audience: ClusterId,
-            AccessLifetime: TimeSpan.FromMinutes(15),
-            RefreshLifetime: TimeSpan.FromDays(30),
-            Issuer: AnchorIssuer),
-        AnchorSigner);
-
-    /// <summary>What gossip would have delivered from the member holding the accounts.</summary>
-    public sealed record PublishedAnchor(string? Audience, string? Issuer, IReadOnlyList<SecurityKey> Keys)
-        : IClusterSessionKeys
-    {
-        /// <summary>The stand-in anchor, as every factory is told about it.</summary>
-        public static PublishedAnchor Default { get; } =
-            new(ClusterId, AnchorIssuer, SessionKeys.VerificationKeysFrom(AnchorSigner.PublicKeys));
-
-        /// <summary>A node that has not heard from any anchor.</summary>
-        public static PublishedAnchor Nothing { get; } = new(null, null, []);
-    }
+    public static readonly TestIssuer Provider = new();
 
     /// <summary>
     /// A database in a state directory of its own, for one factory, so the files the API keeps beside
@@ -82,6 +49,8 @@ public class AuthTestFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Api:HostId"] = HostId,
+                ["Sessions:Issuer"] = Provider.Issuer,
+                ["Sessions:Audience"] = Audience,
                 // No engine / monitor — reads degrade to 200, no external dependency.
                 ["Api:KgsmPath"] = "",
                 ["Api:MonitorSocketPath"] = "/tmp/kgsm-api-tests-no-monitor.sock",
@@ -118,132 +87,32 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 // disk — so an unpinned run would read the developer's own live daemons.
                 ["Api:LeafSurfaceRoot"] =
                     Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-surfaces-{Guid.NewGuid():N}"),
-                // Never the default. /var/lib/kgsm/auth/users.db is the MACHINE's real replica, shared
-                // with every KGSM service on the box, and this API creates it — so an unpinned test run
-                // would hand the operator a live authority file that nobody made.
-                ["Api:UsersDbPath"] = Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-users-{Guid.NewGuid():N}.db"),
-                // Never the default. http://127.0.0.1:8098 is where the machine running the suite keeps
-                // its real auth anchor, and a clustered test node with an empty roster would introduce
-                // itself to it. A test about the local join names its own target.
-                ["Api:LocalAnchorUrl"] = "",
-                // Never the default. /var/lib/kgsm/cluster/auth-provider.json is what the leaves on the
-                // machine running the suite verify sessions against, and a test node knowing a stand-in
-                // anchor would rewrite it — or, knowing none, remove it.
-                ["Api:HostProviderFilePath"] =
-                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-provider-{Guid.NewGuid():N}.json"),
                 // Never the default either: /etc/kgsm/cluster-founded describes the machine running the
-                // suite. A test about the local join writes its own.
+                // suite.
                 ["Cluster:FoundedPath"] =
                     Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-founded-{Guid.NewGuid():N}"),
             });
         });
 
-        builder.ConfigureTestServices(services =>
-        {
-            // What gossip would have delivered: the stand-in anchor's key, audience and issuer.
-            services.RemoveAll<IClusterSessionKeys>();
-            services.AddSingleton<IClusterSessionKeys>(PublishedAnchor.Default);
-        });
+        builder.ConfigureTestServices(services => Provider.UseTestIssuer(services));
     }
 
-    /// <summary>
-    /// A session the stand-in anchor minted for the one standing identity, whose account on this node
-    /// holds <paramref name="persona"/>.
-    /// </summary>
-    public string AccessToken(Persona persona) => MintAccessOn(Services, persona);
+    /// <summary>A token the stand-in provider minted for the standing person, listing what <paramref name="persona"/> holds.</summary>
+    public string AccessToken(Persona persona) => MintAccess(persona);
 
-    /// <summary>
-    /// A refresh token the stand-in anchor genuinely signed, for proving one is never accepted as a
-    /// bearer: a refresh token is spent at the anchor and nowhere else.
-    /// </summary>
-    public string RefreshToken(Persona persona)
-    {
-        GiveTheFakeIdentityAnAccount(Services, persona);
-        return Anchor.MintRefresh(TestIdentity.Identity, NewSessionId()).Token;
-    }
+    /// <summary>A token the stand-in provider minted for the standing person, listing what <paramref name="persona"/> holds.</summary>
+    public static string MintAccess(Persona persona) => MintAccess(TestIdentity.Person, persona);
 
-    /// <summary>
-    /// A session the stand-in anchor minted for <paramref name="identity"/>, with an account on this
-    /// node holding <paramref name="persona"/> at <paramref name="status"/> — the whole setup for one
-    /// person.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="AccessToken"/> mints for the one standing identity, so every token it hands out is
-    /// the same person holding whichever persona was asked for last. A test about who a frame reaches,
-    /// or about one account changing while another watches, needs two people, and this is how it gets
-    /// them: <see cref="TestIdentity.IdentityFor"/> names one, and this gives them a session
-    /// and an account of their own.
-    /// </remarks>
-    public string AccessTokenFor(KgsmIdentity identity, Persona persona, UserStatus status = UserStatus.Active)
-    {
-        SetAccount(identity, persona, status);
-        return MintAccess(identity);
-    }
+    /// <summary>A token the stand-in provider minted for <paramref name="person"/>, listing what <paramref name="persona"/> holds.</summary>
+    public static string MintAccess(TestPerson person, Persona persona) =>
+        Provider.Mint(person.Subject, person.Name, Personas.Of(persona), Audience);
 
-    /// <summary>A session the stand-in anchor minted for <paramref name="identity"/>, and nothing else.</summary>
-    public static string MintAccess(KgsmIdentity identity) =>
-        Anchor.MintAccess(identity, NewSessionId()).Token;
+    /// <summary>A token the stand-in provider minted for <paramref name="person"/>, listing what <paramref name="persona"/> holds.</summary>
+    public string AccessTokenFor(TestPerson person, Persona persona) => MintAccess(person, persona);
 
-    private static string NewSessionId() => "sid_test_" + Guid.NewGuid().ToString("N");
-
-    /// <summary>
-    /// A session for the standing identity, whose account is set through <paramref name="services"/>.
-    /// </summary>
-    /// <remarks>
-    /// Takes an <see cref="IServiceProvider"/> so a factory built via <c>WithWebHostBuilder</c> — a
-    /// DERIVED factory with its OWN random database, replica and service provider — gets the account
-    /// written where its own requests will read it.
-    /// </remarks>
-    internal static string MintAccessOn(IServiceProvider services, Persona persona)
-    {
-        // A token names who; the replica says what they may do, and the replica is what every gate
-        // reads. So a token only means anything once the account behind it holds the persona — which
-        // is the production rule, not a test convenience.
-        GiveTheFakeIdentityAnAccount(services, persona);
-        return MintAccess(TestIdentity.Identity);
-    }
-
-    /// <summary>Create or move the account behind the fake identity to <paramref name="persona"/>.</summary>
-    internal static void GiveTheFakeIdentityAnAccount(IServiceProvider services, Persona persona)
-    {
-        // A factory pointed at a replica that will not open is testing exactly that, and minting a
-        // token for it must not be the thing that fails.
-        if (services.GetRequiredService<IReplicatedAuthority>().Replica is not null)
-            SetAccountOn(services, TestIdentity.Identity, persona);
-    }
-
-    /// <summary>
-    /// Give an identity an account on this node holding a persona at a status of the test's choosing —
-    /// what replication from the anchor would have delivered.
-    /// </summary>
-    public KgsmUser SetAccount(KgsmIdentity identity, Persona persona, UserStatus status = UserStatus.Active) =>
-        SetAccountOn(Services, identity, persona, status);
-
-    /// <summary>The account an identity proves here, or <see langword="null"/>.</summary>
-    public KgsmUser? AccountOf(KgsmIdentity identity) => TestAuthority.For(Services).AccountOf(identity);
-
-    /// <summary>The replica file a factory's node reads, opened directly.</summary>
-    internal static SqliteAuthorityStore ReplicaOf(IServiceProvider services) => TestAuthority.For(services).Replica;
-
-    /// <summary>
-    /// Set the account at the stand-in anchor, deliver it to the node's replica, and tell the node the
-    /// replica changed — the three steps replication performs.
-    /// </summary>
-    internal static KgsmUser SetAccountOn(
-        IServiceProvider services, KgsmIdentity identity, Persona persona,
-        UserStatus status = UserStatus.Active)
-    {
-        KgsmUser account = TestAuthority.For(services).Set(identity, persona, status);
-        services.GetService<AuthorityChangeNotifier>()?.NotifyAsync(CancellationToken.None).GetAwaiter().GetResult();
-        return account;
-    }
-
-    /// <summary>Remove the account an identity proves, at the stand-in anchor and on the node.</summary>
-    internal static void RemoveAccountOn(IServiceProvider services, KgsmIdentity identity)
-    {
-        TestAuthority.For(services).Remove(identity);
-        services.GetService<AuthorityChangeNotifier>()?.NotifyAsync(CancellationToken.None).GetAwaiter().GetResult();
-    }
+    /// <summary>A token for <paramref name="person"/> listing exactly <paramref name="actions"/>.</summary>
+    public string AccessTokenWith(TestPerson person, IEnumerable<string> actions, TimeSpan? lifetime = null) =>
+        Provider.Mint(person.Subject, person.Name, actions, Audience, lifetime: lifetime);
 
     /// <summary>
     /// Seed one row straight into the local audit table.

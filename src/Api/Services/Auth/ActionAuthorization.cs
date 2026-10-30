@@ -3,22 +3,13 @@ using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.Extensions.Options;
 
 using TheKrystalShip.Api.Infrastructure;
+using TheKrystalShip.KGSM.Sessions;
 
 namespace TheKrystalShip.Api.Services.Auth;
 
-/// <summary>The claims a caller's access is resolved from on this node.</summary>
-public static class AccessClaims
-{
-    /// <summary>
-    /// The account a verified caller resolved to in this node's replica. Absent for a stranger — a
-    /// session whose identity no account here holds — who is then refused every action.
-    /// </summary>
-    public const string Account = "kgsm_account";
-}
-
 /// <summary>
-/// Gates an endpoint on one action, evaluated for the caller at the target the route names: a server
-/// route at that server's install, anything else at this node.
+/// Gates an endpoint on one action: the caller's token must list it. Actions are held cluster-wide, so
+/// the route's target does not narrow the check.
 /// </summary>
 /// <remarks>
 /// The action id is the attribute's argument, which is also what tells the action generator that the
@@ -54,12 +45,10 @@ public static class ActionPolicies
     public const string Prefix = "action:";
 }
 
-/// <summary>The one requirement an action gate carries.</summary>
-public sealed record ActionRequirement(string Action) : IAuthorizationRequirement;
-
 /// <summary>
 /// Builds the policy for any <c>action:&lt;id&gt;</c> name on demand, so a new action needs no
-/// registration beside the attribute that names it.
+/// registration beside the attribute that names it. The policy is the sessions package's requirement,
+/// authenticated through the caller scheme so a person, a member and an open host are each admitted.
 /// </summary>
 public sealed class ActionPolicyProvider(IOptions<AuthorizationOptions> options) : DefaultAuthorizationPolicyProvider(options)
 {
@@ -68,9 +57,8 @@ public sealed class ActionPolicyProvider(IOptions<AuthorizationOptions> options)
     {
         if (policyName.StartsWith(ActionPolicies.Prefix, StringComparison.Ordinal))
         {
-            return Task.FromResult<AuthorizationPolicy?>(new AuthorizationPolicyBuilder()
-                .RequireAuthenticatedUser()
-                .AddRequirements(new ActionRequirement(policyName[ActionPolicies.Prefix.Length..]))
+            return Task.FromResult<AuthorizationPolicy?>(new AuthorizationPolicyBuilder(MemberAuthentication.Caller)
+                .AddRequirements(new ActionRequirement([policyName[ActionPolicies.Prefix.Length..]]))
                 .Build());
         }
 
@@ -79,20 +67,18 @@ public sealed class ActionPolicyProvider(IOptions<AuthorizationOptions> options)
 }
 
 /// <summary>
-/// Decides an action gate: the caller's account, evaluated from this node's replica at the route's
-/// target. An unauthenticated caller fails the policy's first requirement and is challenged (<c>401</c>);
-/// one who is refused here is forbidden (<c>403</c>).
+/// Admits the callers that hold every action without a token listing them: another member acting as
+/// itself, and the open caller of a host with authentication disabled. A person is admitted by the
+/// sessions package's own handler, from the actions their token lists.
 /// </summary>
-public sealed class ActionAuthorizationHandler(NodeAccess access) : AuthorizationHandler<ActionRequirement>
+public sealed class TrustedCallerHandler : AuthorizationHandler<ActionRequirement>
 {
     /// <inheritdoc />
-    protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, ActionRequirement requirement)
+    protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, ActionRequirement requirement)
     {
-        HttpContext? http = context.Resource as HttpContext;
-        if (await access.AllowsAsync(context.User, requirement.Action, access.TargetOf(http), http?.RequestAborted ?? default))
+        if (CallerId.Of(context.User) is { Kind: CallerKind.Member or CallerKind.Open })
             context.Succeed(requirement);
-        else
-            context.Fail(new AuthorizationFailureReason(this, requirement.Action));
+        return Task.CompletedTask;
     }
 }
 
@@ -108,8 +94,7 @@ public sealed class ActionRefusalResultHandler : IAuthorizationMiddlewareResultH
     public Task HandleAsync(RequestDelegate next, HttpContext context, AuthorizationPolicy policy, PolicyAuthorizationResult authorizeResult)
     {
         string? action = authorizeResult.Forbidden
-            ? authorizeResult.AuthorizationFailure?.FailureReasons
-                .FirstOrDefault(r => r.Handler is ActionAuthorizationHandler)?.Message
+            ? policy.Requirements.OfType<ActionRequirement>().FirstOrDefault()?.AnyOf.FirstOrDefault()
             : null;
         return action is null
             ? _default.HandleAsync(next, context, policy, authorizeResult)

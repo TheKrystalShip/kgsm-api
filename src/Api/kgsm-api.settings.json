@@ -94,15 +94,8 @@
       // Who every request is attributed to while auth is off, as 'provider:name'.
       // Required whenever AuthDisabled is set; the host refuses to start without it.
       "DisabledAuthActor": "",
-      // This node's replica of the cluster's authority, kept current by the auth anchor. This API owns
-      // it; every other KGSM service on the machine reads the same file.
-      "UsersDbPath": "/var/lib/kgsm/auth/users.db",
-      // How long "has this session been ended" is reused. The sign-out lag on this node. Floor 500.
-      "SessionsCacheTtlMs": 5000,
-      // This machine's own auth anchor, joined while this node knows no member. Empty turns it off.
-      "LocalAnchorUrl": "http://127.0.0.1:8098",
-      // Who signs the cluster's sessions, written for the services on this machine that are not members.
-      "HostProviderFilePath": "/var/lib/kgsm/cluster/auth-provider.json",
+      // Browser origins admitted across origins, comma-separated. Blank admits none.
+      "CorsOrigins": "",
 
       // ── Game library & cover art ──
       // RAWG.io API key. Blank no-ops the hydration worker.
@@ -180,6 +173,15 @@
       // ── General ──
       // HTTP bind address(es), semicolon-separated. Read before the host exists, so it is bound separately in Program.
       "Urls": "http://0.0.0.0:8080"
+  },
+
+  // The sign-in provider whose access tokens this node admits. The host sets Issuer and Audience once, in
+  // /etc/kgsm/kgsm-cluster.env, and every component that admits a person reads them there. With no Issuer
+  // nobody can sign in, and this node answers requests from its own machine alone.
+  "Sessions": {
+    "Issuer": "",
+    "Audience": "",
+    "ActionsClaim": "tks_actions"
   },
 
   // --- Standard ASP.NET Core keys ---------------------------------------------------------------

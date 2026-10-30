@@ -1,6 +1,5 @@
 using System.Threading.Channels;
 using TheKrystalShip.Api.Contracts;
-using TheKrystalShip.Auth.Users;
 using TheKrystalShip.KGSM.Events;
 using TheKrystalShip.Api.Services.Audit;
 
@@ -120,18 +119,6 @@ public sealed class NotificationBus : INotificationBus
 
     private static bool IsWorthAnnouncing(AuditRecord record)
     {
-        // A provisioning that did not leave somebody waiting is not an approval request. Which one it was
-        // is on the row: a host whose policy activates an account on sight writes the same action with a
-        // different status, and announcing that would ask somebody to approve what is already approved.
-        //
-        // The key is "to" — the state the account landed in. An account-lifecycle row carries the move
-        // as a from/to pair (AuditMapping.FromUserAccountEvent), and a provision has no "from" because
-        // there was nothing to move out of.
-        if (record.Action == ApiJournal.UserProvisionedEvent)
-            return record.Meta is not null
-                && record.Meta.TryGetValue("to", out string? status)
-                && status == UserStatuses.ToWire(UserStatus.Pending);
-
         if (!IsThreshold(record.Action)) return true;
 
         if (record.Action == KgsmEventCatalog.NameOf<HostThresholdClearedData>()
@@ -158,11 +145,6 @@ public sealed class NotificationBus : INotificationBus
         if (record.Action == KgsmEventCatalog.NameOf<InstancePlayerJoinedData>())
             return ActionSubjectOf(record) is { Length: > 0 } who ? $"player/{who}/{record.ServerId}" : null;
 
-        // Same reasoning for accounts: two people signing up a minute apart are two people to approve, and
-        // they both carry a null server.
-        if (record.Action == ApiJournal.UserProvisionedEvent)
-            return ActionSubjectOf(record) is { Length: > 0 } account ? $"user/{account}" : null;
-
         if (!IsThreshold(record.Action)) return null;
         if (record.Meta is null) return null;
         record.Meta.TryGetValue("ruleKey", out string? rule);
@@ -178,12 +160,6 @@ public sealed class NotificationBus : INotificationBus
     /// </summary>
     private static string? ActionSubjectOf(AuditRecord record)
     {
-        // The account, for a provisioning: the id the account store is keyed on, never the username, which
-        // is a label somebody can change out from under a staged handle.
-        if (record.Action == ApiJournal.UserProvisionedEvent)
-            return record.Meta is not null && record.Meta.TryGetValue("userId", out string? userId)
-                && !string.IsNullOrWhiteSpace(userId) ? userId : null;
-
         if (record.Action != KgsmEventCatalog.NameOf<InstancePlayerJoinedData>()
             && record.Action != KgsmEventCatalog.NameOf<InstancePlayerLeftData>()) return null;
         if (record.Meta is null) return null;

@@ -1,9 +1,5 @@
 using System.Security.Claims;
 
-using TheKrystalShip.Auth;
-
-using TheKrystalShip.Auth.Cluster;
-
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
@@ -15,20 +11,9 @@ namespace TheKrystalShip.Api.Services.Auth;
 public static class AuditPrincipal
 {
     /// <summary>
-    /// <c>&lt;provider&gt;:&lt;username&gt;</c> for an authenticated identity (the human-readable handle,
-    /// falling back to the provider's subject), or <see langword="null"/> when there is no resolvable principal —
-    /// in which case the command is sent with no actor and the event records unclaimed, rather than the
-    /// API fabricating an identity.
+    /// <c>&lt;provider&gt;:&lt;name&gt;</c> for an authenticated caller (<see cref="CallerId.Actor"/>), or
+    /// <see langword="null"/> when there is no resolvable principal — in which case the command is sent
+    /// with no actor and the event records unclaimed, rather than the API fabricating an identity.
     /// </summary>
-    public static string? ActorString(ClaimsPrincipal? user)
-    {
-        if (user?.Identity is not ClaimsIdentity ci || !ci.IsAuthenticated)
-            return null;
-
-        KgsmIdentity? id = SessionClaims.ReadIdentity(ci);
-        if (id is null)
-            return null;
-
-        return id.ActorString;
-    }
+    public static string? ActorString(ClaimsPrincipal? user) => CallerId.Of(user)?.Actor;
 }

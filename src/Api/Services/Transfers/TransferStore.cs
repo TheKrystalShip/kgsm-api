@@ -67,7 +67,6 @@ public sealed class TransferStore(IServiceScopeFactory scopeFactory, ILogger<Tra
                     "CommitEnqueued" INTEGER NOT NULL DEFAULT 0,
                     "TicketHash" TEXT NULL,
                     "TicketExpiresAt" INTEGER NULL,
-                    "AccountId" TEXT NULL,
                     "Actor" TEXT NULL,
                     "Origin" TEXT NULL,
                     "CreatedAt" INTEGER NOT NULL,

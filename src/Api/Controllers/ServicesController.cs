@@ -70,7 +70,7 @@ public sealed class ServicesController(
         // The leaf declares its own commands, so it answers where it can. Its manifest travels
         // verbatim either way — this API cannot verify a check it does not implement, so it restates
         // nothing and holds no copy of the file's schema.
-        if (await relay.SendAsync(leaf, HttpMethod.Get, "commands", null, NodeAccess.AccountOf(User), ct) is { } answered)
+        if (await relay.SendAsync(leaf, HttpMethod.Get, "commands", null, CallerId.PersonToken(HttpContext), ct) is { } answered)
         {
             return new ContentResult
             {
@@ -589,7 +589,7 @@ public sealed class ServicesController(
         }
 
         (string? body, int status) =
-            await reactor.RedeemProposalAsync(handle, confirm, by, NodeAccess.AccountOf(User), ct).ConfigureAwait(false);
+            await reactor.RedeemProposalAsync(handle, confirm, by, CallerId.PersonToken(HttpContext), ct).ConfigureAwait(false);
 
         if (body is null)
         {

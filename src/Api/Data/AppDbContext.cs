@@ -49,13 +49,6 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     /// Created by the same <c>EnsureCreated</c>; the deployed DB needs a one-time wipe when it lands.</summary>
     public DbSet<PlayerRecord> PlayerHistory => Set<PlayerRecord>();
 
-    /// <summary>Sessions the auth anchor minted that somebody has since ended (see
-    /// <see cref="EndedSessionEntity"/>). Created by <c>EndedSessionStore</c>'s own
-    /// <c>CREATE TABLE IF NOT EXISTS</c> beside <c>EnsureCreated</c>, so an existing database gains it
-    /// without a wipe.</summary>
-    public DbSet<EndedSessionEntity> EndedSessions => Set<EndedSessionEntity>();
-
-
     /// <summary>Facts held back for a provider whose rule for them says <c>digest</c>. Durable because a
     /// summary lost to a restart was never delivered and never reported undelivered.</summary>
     public DbSet<NotificationDigestEntity> NotificationDigests => Set<NotificationDigestEntity>();
@@ -262,21 +255,5 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             e.HasIndex(a => new { a.ActorName, a.RowId }).IsDescending(false, true);
             e.HasIndex(a => new { a.Severity, a.RowId }).IsDescending(false, true);
         });
-
-        // Ended anchor sessions, keyed by the `sid` claim. Timestamps are UTC ticks (INTEGER), the same
-        // posture as every other table here: SQLite has no date type, and the sweep's `Until < now` has
-        // to translate.
-        modelBuilder.Entity<EndedSessionEntity>(e =>
-        {
-            e.ToTable("ended_sessions");
-            e.HasKey(s => s.SessionId);
-            e.Property(s => s.EndedAt).HasConversion(
-                v => v.UtcTicks,
-                v => new DateTimeOffset(v, TimeSpan.Zero));
-            e.Property(s => s.Until).HasConversion(
-                v => v.UtcTicks,
-                v => new DateTimeOffset(v, TimeSpan.Zero));
-        });
-
     }
 }

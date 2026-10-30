@@ -1,18 +1,15 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
-
-using TheKrystalShip.Auth;
-using TheKrystalShip.Auth.Users;
+using TheKrystalShip.KGSM.Sessions.Testing;
 
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
-/// <c>GET /me</c> — the caller's identity and scopes projected from the bearer, and the status of the
-/// account behind it read from the replica, proven in-process against the real JwtBearer pipeline. The
-/// load-bearing honesty facts: <c>/me</c> is <c>[Authorize]</c> (any authenticated caller) rather than
-/// gated on an action, so somebody holding nothing reaches it and honestly reads their own status; no
-/// bearer → the frozen <c>401</c> envelope.
+/// <c>GET /me</c> — the caller's identity projected from the access token, proven in-process against the
+/// real pipeline. The load-bearing honesty facts: <c>/me</c> is <c>[Authorize]</c> (any authenticated
+/// caller) rather than gated on an action, so somebody holding nothing reaches it; no bearer → the frozen
+/// <c>401</c> envelope; and a token the provider did not sign, or that is for another audience, is refused.
 /// </summary>
 public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>
 {
@@ -36,29 +33,25 @@ public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFac
     }
 
     [Fact]
-    public async Task Viewer_200_ProjectsTheIdentitySnapshotAndScopes()
+    public async Task Reader_200_ProjectsTheTokensIdentity()
     {
         HttpResponseMessage resp = await Client(factory.AccessToken(Persona.Reader)).GetAsync("/api/v1/me");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
 
         JsonElement body = await Json(resp);
         JsonElement user = body.GetProperty("user");
-        Assert.Equal("discord:198772043", user.GetProperty("id").GetString());   // the prefixed handle
-        Assert.Equal("haru", user.GetProperty("username").GetString());
-        Assert.Equal("haru", user.GetProperty("display").GetString());
-        Assert.Equal("https://cdn.discordapp.com/avatars/198772043/abc.png",
-            user.GetProperty("avatarUrl").GetString());
+        Assert.Equal(TestIdentity.Person.Subject, user.GetProperty("id").GetString());
+        Assert.Equal(TestIdentity.Person.Name, user.GetProperty("username").GetString());
+        Assert.Equal(TestIdentity.Person.Name, user.GetProperty("display").GetString());
         Assert.Equal("active", body.GetProperty("status").GetString());
-        Assert.False(body.TryGetProperty("tier", out _));
-        Assert.Equal(
-            new[] { "identify", "guilds" },
-            body.GetProperty("scopes").EnumerateArray().Select(s => s.GetString()).ToArray());
+        Assert.Empty(body.GetProperty("scopes").EnumerateArray());
+        Assert.Empty(body.GetProperty("recentLogins").EnumerateArray());
     }
 
-    // /me is [Authorize], gated on no action: somebody whose account holds nothing reaches it and reads
-    // who they are — the "who am I / why am I refused elsewhere" surface.
+    // /me is [Authorize], gated on no action: somebody whose token lists nothing reaches it and reads who
+    // they are — the "who am I / why am I refused elsewhere" surface.
     [Fact]
-    public async Task HoldingNothing_200_StillReadsTheirOwnAccount()
+    public async Task HoldingNothing_200_StillReadsTheirOwnIdentity()
     {
         HttpResponseMessage resp = await Client(factory.AccessToken(Persona.None)).GetAsync("/api/v1/me");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
@@ -66,39 +59,40 @@ public sealed class MeTests(AuthTestFactory factory) : IClassFixture<AuthTestFac
     }
 
     [Fact]
-    public async Task PendingAccount_200_ReportsPending()
+    public async Task ASecondPerson_IsNamedByTheirOwnToken()
     {
-        KgsmIdentity waiting = TestIdentity.IdentityFor("me-pending");
-        string token = factory.AccessTokenFor(waiting, Persona.None, UserStatus.Pending);
+        TestPerson other = TestIdentity.PersonFor("me-other");
 
-        HttpResponseMessage resp = await Client(token).GetAsync("/api/v1/me");
-        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        Assert.Equal("pending", (await Json(resp)).GetProperty("status").GetString());
-    }
+        HttpResponseMessage resp = await Client(factory.AccessTokenFor(other, Persona.None)).GetAsync("/api/v1/me");
 
-    [Fact]
-    public async Task Stranger_200_ReportsUnknown()
-    {
-        string token = AuthTestFactory.MintAccess(TestIdentity.IdentityFor("me-stranger"));
-
-        HttpResponseMessage resp = await Client(token).GetAsync("/api/v1/me");
-        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        Assert.Equal("unknown", (await Json(resp)).GetProperty("status").GetString());
-    }
-
-    [Fact]
-    public async Task RefreshToken_AsAccessBearer_401()
-    {
-        // A refresh token must never authenticate a protected call (the pipeline rejects tkn != access).
-        HttpResponseMessage resp = await Client(factory.RefreshToken(Persona.Owner)).GetAsync("/api/v1/me");
-        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        Assert.Equal(other.Subject, (await Json(resp)).GetProperty("user").GetProperty("id").GetString());
     }
 
     [Fact]
     public async Task WrongSignature_401()
     {
-        string forged = TestTokens.MintByAnUnpublishedAnchor();
+        string forged = AuthTestFactory.Provider.Mint(
+            TestIdentity.Person.Subject, actions: Personas.AllActions, signedBy: new TestIssuer());
+
         HttpResponseMessage resp = await Client(forged).GetAsync("/api/v1/me");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task AnotherAudience_401()
+    {
+        string token = AuthTestFactory.Provider.Mint(TestIdentity.Person.Subject, audience: "someone-else");
+
+        HttpResponseMessage resp = await Client(token).GetAsync("/api/v1/me");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task AnExpiredToken_401()
+    {
+        string token = factory.AccessTokenWith(TestIdentity.Person, [], lifetime: TimeSpan.FromMinutes(-5));
+
+        HttpResponseMessage resp = await Client(token).GetAsync("/api/v1/me");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 }

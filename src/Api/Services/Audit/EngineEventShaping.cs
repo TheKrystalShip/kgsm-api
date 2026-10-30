@@ -202,41 +202,6 @@ public static class EngineEventShaping
             "host.threshold.breached" => Map<HostThresholdBreachedData>(item, d => AuditMapping.FromThresholdBreachedEvent(d, hostId)),
             "host.threshold.cleared" => Map<HostThresholdClearedData>(item, d => AuditMapping.FromThresholdClearedEvent(d, hostId)),
 
-            // The account events: what a person's access did, as the cluster's auth anchor recorded
-            // it. Shaped here like any other producer's — nothing about these mappers knows which
-            // journal a line came from, which keeps one code path serving the whole merged feed.
-            ApiJournal.LoginEvent or ApiJournal.LogoutEvent =>
-                Map<AuthSessionEventData>(item, d => AuditMapping.FromAuthSessionEvent(d, item.Type, hostId)),
-            ApiJournal.SessionRevokedEvent =>
-                Map<AuthSessionRevokedData>(item, d => AuditMapping.FromSessionRevokedEvent(d, hostId)),
-            ApiJournal.LockedOutEvent =>
-                Map<AuthLockedOutData>(item, d => AuditMapping.FromLockedOutEvent(d, hostId)),
-            ApiJournal.AdminRefusedEvent =>
-                Map<AuthAdminRefusedData>(item, d => AuditMapping.FromAdminRefusedEvent(d, hostId)),
-
-            ApiJournal.UserProvisionedEvent or ApiJournal.UserApprovedEvent
-                or ApiJournal.UserDisabledEvent
-                or ApiJournal.UserDeletedEvent or ApiJournal.UserPasswordChangedEvent =>
-                Map<UserAccountEventData>(item, d => AuditMapping.FromUserAccountEvent(d, item.Type, hostId)),
-
-            ApiJournal.IdentityLinkedEvent or ApiJournal.IdentityUnlinkedEvent =>
-                Map<IdentityLinkEventData>(item, d => AuditMapping.FromIdentityEvent(d, item.Type, hostId)),
-
-            // Who may do what: the auth anchor's record of access moving, one line per change.
-            ApiJournal.AssignmentGrantedEvent or ApiJournal.AssignmentRevokedEvent =>
-                Map<AssignmentEventData>(item, d => AuditMapping.FromAssignmentEvent(d, item.Type, hostId)),
-            ApiJournal.RoleChangedEvent or ApiJournal.RoleRemovedEvent
-                or ApiJournal.PermissionChangedEvent or ApiJournal.PermissionRemovedEvent =>
-                Map<AuthorityRecordEventData>(item, d => AuditMapping.FromAuthorityRecordEvent(d, item.Type, hostId)),
-            ApiJournal.CatalogChangedEvent =>
-                Map<CatalogEventData>(item, d => AuditMapping.FromCatalogEvent(d, hostId)),
-            ApiJournal.ServiceRequirementApprovedEvent or ApiJournal.ServiceRequirementRevokedEvent =>
-                Map<ServiceRequirementEventData>(item, d => AuditMapping.FromServiceRequirementEvent(d, item.Type, hostId)),
-            ApiJournal.ApplicationChangedEvent or ApiJournal.ApplicationRemovedEvent
-                or ApiJournal.ApplicationClientRemovedEvent or ApiJournal.ClientSecretRotatedEvent =>
-                Map<ApplicationEventData>(item, d => AuditMapping.FromApplicationEvent(d, item.Type, hostId)),
-            ApiJournal.TokenExchangedEvent or ApiJournal.TokenExchangeRefusedEvent =>
-                Map<TokenExchangeEventData>(item, d => AuditMapping.FromTokenExchangeEvent(d, item.Type, hostId)),
 
             ApiJournal.ServiceConnectedEvent or ApiJournal.ServiceDisconnectedEvent =>
                 Map<ServiceProvisioningEventData>(item,

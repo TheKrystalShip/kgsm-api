@@ -8,20 +8,15 @@ namespace TheKrystalShip.Api.Services.Backups;
 /// </summary>
 /// <param name="ServerId">The instance the backup belongs to.</param>
 /// <param name="BackupId">The single backup this ticket authorises — and no other.</param>
-/// <param name="AccountId">The account it was minted for, whose access to <see cref="Action"/> at the
-/// server is evaluated again at redemption. <see langword="null"/> on an auth-disabled host.</param>
 /// <param name="Actor">Who minted it, carried so the audit row at redemption names them rather than
 /// the anonymous request that redeems it.</param>
 /// <param name="Origin">The surface that asked for it.</param>
-/// <param name="SessionId">The session that minted it, for correlation.</param>
 /// <param name="ExpiresAt">When it stops being redeemable.</param>
 public sealed record BackupDownloadTicket(
     string ServerId,
     string BackupId,
-    string? AccountId,
     string? Actor,
     string? Origin,
-    string? SessionId,
     DateTimeOffset ExpiresAt)
 {
     /// <summary>What redeeming a ticket performs: reading the server's files, in bulk.</summary>
@@ -93,13 +88,11 @@ public sealed class BackupDownloadTickets
     /// <summary>Mints a ticket for one backup and returns its opaque handle.</summary>
     /// <param name="serverId">The instance the backup belongs to.</param>
     /// <param name="backupId">The backup being authorised.</param>
-    /// <param name="accountId">The account minting it, evaluated again at every redemption.</param>
     /// <param name="actor">Who is minting it.</param>
     /// <param name="origin">The surface driving the request.</param>
-    /// <param name="sessionId">The minting session, for correlation.</param>
     /// <returns>The handle and the ticket it maps to.</returns>
     public (string Handle, BackupDownloadTicket Ticket) Mint(
-        string serverId, string backupId, string? accountId, string? actor, string? origin, string? sessionId)
+        string serverId, string backupId, string? actor, string? origin)
     {
         Sweep();
 
@@ -107,7 +100,7 @@ public sealed class BackupDownloadTickets
         // that matters here: the handle IS the credential for its window.
         string handle = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
         var ticket = new BackupDownloadTicket(
-            serverId, backupId, accountId, actor, origin, sessionId, _time.GetUtcNow().Add(Ttl));
+            serverId, backupId, actor, origin, _time.GetUtcNow().Add(Ttl));
 
         _tickets[handle] = new Entry { Ticket = ticket };
         return (handle, ticket);
@@ -119,20 +112,12 @@ public sealed class BackupDownloadTickets
     /// <param name="handle">The handle from the URL.</param>
     /// <param name="serverId">The server the request is for — must match what was minted.</param>
     /// <param name="backupId">The backup the request is for — must match what was minted.</param>
-    /// <param name="stillAllowed">
-    /// Whether the ticket's account may still perform <see cref="BackupDownloadTicket.Action"/> at its
-    /// server, asked before anything is spent.
-    /// </param>
-    /// <param name="ct">Cancels the access check.</param>
     /// <returns>
-    /// The redemption when the handle is live, authorises precisely this backup and its account may still
-    /// download it; otherwise <see langword="null"/>. <see cref="BackupRedemption.First"/> is true exactly
+    /// The redemption when the handle is live and authorises precisely this backup; otherwise <see langword="null"/>. <see cref="BackupRedemption.First"/> is true exactly
     /// once per ticket, on whichever allowed request wins the race — the caller writes the audit row only
     /// then, so a resumed download does not log twice.
     /// </returns>
-    public async Task<BackupRedemption?> RedeemAsync(
-        string? handle, string serverId, string backupId,
-        Func<BackupDownloadTicket, CancellationToken, Task<bool>> stillAllowed, CancellationToken ct = default)
+    public BackupRedemption? Redeem(string? handle, string serverId, string backupId)
     {
         if (string.IsNullOrWhiteSpace(handle)) return null;
         if (!_tickets.TryGetValue(handle, out Entry? entry)) return null;
@@ -148,9 +133,6 @@ public sealed class BackupDownloadTickets
         // may download would serve as a ticket for any other, which is the whole authorisation.
         if (!string.Equals(entry.Ticket.ServerId, serverId, StringComparison.Ordinal)
             || !string.Equals(entry.Ticket.BackupId, backupId, StringComparison.Ordinal))
-            return null;
-
-        if (!await stillAllowed(entry.Ticket, ct).ConfigureAwait(false))
             return null;
 
         return new BackupRedemption(entry.Ticket, Interlocked.Exchange(ref entry.Audited, 1) == 0);

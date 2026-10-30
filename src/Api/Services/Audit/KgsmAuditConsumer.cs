@@ -6,7 +6,6 @@ using TheKrystalShip.Api.Services.Aggregation;
 using TheKrystalShip.Api.Services.Alerts;
 using TheKrystalShip.Api.Services.Commands;
 using TheKrystalShip.Api.Services.Players;
-using TheKrystalShip.Auth.Cluster;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Events;
@@ -119,17 +118,10 @@ public sealed class KgsmAuditConsumer(
     /// the raw hook rather than through a typed handler.
     /// </summary>
     /// <remarks>
-    /// Matched on the type alone, deliberately: the account events are written by the cluster's auth
-    /// anchor and read here from its journal, so a sign-in reaches an open browser as soon as it is
-    /// recorded, whichever producer's journal carried it.
+    /// Matched on the type alone, deliberately, whichever producer's journal carried the line.
     /// </remarks>
     private static readonly HashSet<string> OwnEventTypes = new(StringComparer.Ordinal)
     {
-        ApiJournal.LoginEvent, ApiJournal.LogoutEvent,
-        ApiJournal.SessionRevokedEvent, ApiJournal.LockedOutEvent, ApiJournal.AdminRefusedEvent,
-        ApiJournal.UserProvisionedEvent, ApiJournal.UserApprovedEvent, ApiJournal.UserDisabledEvent,
-        ApiJournal.UserDeletedEvent, ApiJournal.UserPasswordChangedEvent,
-        ApiJournal.IdentityLinkedEvent, ApiJournal.IdentityUnlinkedEvent,
         ApiJournal.ServiceConnectedEvent, ApiJournal.ServiceDisconnectedEvent,
         ApiJournal.ServiceConfigChangedEvent, ApiJournal.ServiceRestartedEvent,
         ApiJournal.FileWrittenEvent, ApiJournal.BackupDownloadedEvent,
@@ -310,17 +302,9 @@ public sealed class KgsmAuditConsumer(
             domainPump.Nudge();
             return WriteServerAndBridge(d, "restarted");
         });
-        // The auth anchor is told which install went, so every grant naming it goes too — and a later
-        // install under the same name, which has a nonce of its own, inherits none of them. No nonce is
-        // an instance on an offline library, whose config nothing could read; its grants name an
-        // install that can never match again.
-        AuthorityReporter? authority = services.GetService<AuthorityReporter>();
         events.RegisterHandler<InstanceUninstalledData>(async d =>
         {
             instanceCache.TryRefresh();
-            if (authority is not null && d.InstallNonce is { Length: > 0 } nonce)
-                await authority.ReportUninstalledAsync(d.InstanceName, nonce, CancellationToken.None).ConfigureAwait(false);
-
             await WriteServer(d, AuditSeverity.Warn, "uninstalled").ConfigureAwait(false);
         });
 

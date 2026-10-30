@@ -6,8 +6,6 @@ using Microsoft.Extensions.Options;
 
 using TheKrystalShip.Api.Contracts;
 
-using TheKrystalShip.Auth.Access;
-using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Realtime;
 
@@ -71,8 +69,8 @@ public sealed class StreamHub
     /// at most once, and only when there is at least one subscriber.
     /// </summary>
     /// <param name="serverId">
-    /// The server the frame is about, on a server collection topic (<see cref="TopicGateKind.PerServer"/>):
-    /// a reader who may not read that server is not sent it. <see langword="null"/> on any other topic.
+    /// Set on a frame about a server (<see cref="TopicGateKind.PerServer"/>): a reader who may not read
+    /// servers is not sent it. <see langword="null"/> on any other topic.
     /// </param>
     /// <param name="redacted">
     /// The message to send instead to a reader who lacks the action it names. Null — the usual case —
@@ -93,7 +91,7 @@ public sealed class StreamHub
         {
             if (!c.Receives(topic)) continue;
 
-            if (serverId is not null && !c.Access.Allows(StreamProtocol.ServerReadAction, serverId)) continue;
+            if (serverId is not null && !c.Access.Allows(StreamProtocol.ServerReadAction)) continue;
 
             if (redacted is not null && !c.Access.Allows(redacted.Action))
             {
@@ -109,40 +107,20 @@ public sealed class StreamHub
 
     /// <summary>
     /// Route one frame made of per-server <paramref name="rows"/> to every connection receiving
-    /// <paramref name="topic"/>, each cut to the rows whose server its reader may read.
+    /// <paramref name="topic"/> whose reader may read servers. Every reader that may sees the same rows,
+    /// so the frame is serialized once.
     /// </summary>
-    /// <remarks>
-    /// Readers who may read the same servers share one serialization: frames are built once per distinct
-    /// set, and on a host where everybody reads everything that is once.
-    /// </remarks>
     public void PublishRows<T>(
-        string topic, string coalesceKey, IReadOnlyList<T> rows, Func<T, string> serverOf,
-        Func<IReadOnlyList<T>, StreamMessage> render)
+        string topic, string coalesceKey, IReadOnlyList<T> rows, Func<IReadOnlyList<T>, StreamMessage> render)
     {
-        Dictionary<string, ReadOnlyMemory<byte>>? frames = null;
+        ReadOnlyMemory<byte>? frame = null;
 
         foreach (StreamConnection c in _connections.Keys)
         {
-            if (!c.Receives(topic)) continue;
+            if (!c.Receives(topic) || !c.Access.Allows(StreamProtocol.ServerReadAction)) continue;
 
-            var visible = new List<T>(rows.Count);
-            var signature = new StringBuilder(rows.Count);
-            foreach (T row in rows)
-            {
-                bool allowed = c.Access.Allows(StreamProtocol.ServerReadAction, serverOf(row));
-                signature.Append(allowed ? '1' : '0');
-                if (allowed) visible.Add(row);
-            }
-
-            frames ??= new Dictionary<string, ReadOnlyMemory<byte>>(StringComparer.Ordinal);
-            string key = signature.ToString();
-            if (!frames.TryGetValue(key, out ReadOnlyMemory<byte> frame))
-            {
-                frame = BuildSseFrame(render(visible));
-                frames[key] = frame;
-            }
-
-            c.Enqueue(coalesceKey, frame);
+            frame ??= BuildSseFrame(render(rows));
+            c.Enqueue(coalesceKey, frame.Value);
         }
     }
 
@@ -176,36 +154,7 @@ public sealed class StreamHub
             c.Enqueue(coalesceKey, frame.Value);
         }
     }
-
-    /// <summary>
-    /// This node's replica took a change: every live connection evaluates from
-    /// <paramref name="evaluator"/> from its next frame on, and a reader whose account status moved is
-    /// told on <c>me</c>.
-    /// </summary>
-    /// <remarks>
-    /// Called once the replica has applied the change, so a change made at the anchor lands on the
-    /// affected person's open panel at once. The connection's own re-check is the backstop, and answers
-    /// within its own interval.
-    /// </remarks>
-    public void AccessChanged(AccessEvaluator evaluator)
-    {
-        foreach (StreamConnection c in _connections.Keys)
-            c.AccessChanged(evaluator);
-    }
 }
 
 /// <summary>The variant of a frame sent to a reader who lacks <paramref name="Action"/>.</summary>
 public sealed record StreamRedaction(string Action, StreamMessage Message);
-
-/// <summary>
-/// Carries every change this node's replica takes to the open streams (<see cref="StreamHub.AccessChanged"/>).
-/// </summary>
-public sealed class StreamAccessRefresh(StreamHub hub, MemberAccess access) : IAuthorityChangeListener
-{
-    /// <inheritdoc />
-    public async Task AuthorityChangedAsync(CancellationToken ct)
-    {
-        if (await access.EvaluatorAsync(ct).ConfigureAwait(false) is { } evaluator)
-            hub.AccessChanged(evaluator);
-    }
-}

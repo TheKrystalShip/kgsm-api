@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
+using TheKrystalShip.KGSM.Sessions.Testing;
+
 namespace TheKrystalShip.Api.Tests;
 
 /// <summary>
@@ -193,36 +195,11 @@ public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<A
     }
 
     [Fact]
-    public async Task RefreshToken_AsAccessBearer_401()
-    {
-        // A refresh token must never authenticate a protected call (OnTokenValidated rejects it).
-        HttpResponseMessage resp = await Client(factory.RefreshToken(Persona.Owner)).GetAsync("/api/v1/hosts");
-        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
-    }
-
-    [Fact]
     public async Task WrongSignature_401()
     {
-        string forged = TestTokens.MintByAnUnpublishedAnchor();
+        string forged = AuthTestFactory.Provider.Mint(
+            TestIdentity.Person.Subject, actions: Personas.AllActions, signedBy: new TestIssuer());
         HttpResponseMessage resp = await Client(forged).GetAsync("/api/v1/hosts");
-        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
-    }
-
-    [Fact]
-    public async Task ASymmetricSessionIsRefusedWhateverItsKey_401()
-    {
-        // This node holds no key to sign or verify one with, so no symmetric token is a session here.
-        string own = TestTokens.MintSymmetric("any-key-at-all-of-no-particular-length");
-        HttpResponseMessage resp = await Client(own).GetAsync("/api/v1/hosts");
-        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
-    }
-
-    [Fact]
-    public async Task ASessionNothingCouldEnd_401()
-    {
-        // Genuinely signed by the anchor, but with no sid: nothing could ever end it.
-        string sidless = TestTokens.MintAnchorSignedWithoutSid();
-        HttpResponseMessage resp = await Client(sidless).GetAsync("/api/v1/hosts");
         Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 

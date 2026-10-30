@@ -77,25 +77,15 @@ JwtBearer pipeline — a query-string token authenticates nothing (regression-pi
 same reactive rotate-on-401 path as every REST call — **don't introduce client-side expiry math for
 this endpoint.**
 
-**The connection re-checks its own session every 20s.** `[Authorize]` gates the CONNECT and nothing in
-the framework re-runs it on a request that lasts hours, so `StreamController` hands the connection a
-probe over `ClusterSessionRevocations` and the write loop ends the stream once the `sid` has been ended —
-a revoke reaches the live channel in ≤20s, the same order as REST's ≤5s. Two things about it are
-load-bearing: it runs on the **loop's own clock**, not inside the heartbeat branch (a busy stream is
-woken by frames faster than any delay completes, so a duty hung off that branch never fires on the
-connections carrying the most data), and it checks the **session, not the token's `exp`** — tearing a
-stream down when the access token lapses would churn every client four times an hour and surface a
-reconnect banner each time, for a credential the client is about to rotate anyway. A check that
-THROWS ends the stream too: "couldn't measure" is not "still valid", and the redial re-runs the full
-auth pipeline, which is the authority. No `sid` (auth-disabled) → no probe, unchanged behaviour.
+**The stream ends when the caller's access token expires.** `[Authorize]` gates the CONNECT and nothing in
+the framework re-runs it on a request that lasts hours, so `StreamController` runs the connection on
+`KgsmPerson.UntilExpiry(HttpContext)`: the request's cancellation, cut short at the token's `exp`. The
+client reconnects with a fresh token, and the redial re-runs the full auth pipeline, which is the
+authority. A revoked session and a changed role therefore reach the live channel within one token
+lifetime, the same bound REST has. A member acting as itself and an auth-disabled host carry no person,
+so their streams end with the request alone.
 
-**Access is evaluated per frame, and the evaluator is replaced whenever the replica moves.** The
-connection keeps the topics the client asked for and asks on every frame whether its reader reaches
-them, so access granted or taken away applies to the next frame, both ways, with no reconnect. Every
-change the replica takes reaches every connection at once (`StreamAccessRefresh`, an
-`IAuthorityChangeListener`, calls `StreamHub.AccessChanged`), and a reader whose account status moved
-is sent a `me.patch`. The loop also re-reads the replica on the same 20s clock as the session check —
-the backstop for a change that reached the file without this process being told. An unreadable replica
-**ends the stream** rather than refusing everything: "we could not ask" is a third answer, and
-flattening it into a refusal would report an outage as everybody having lost their access. The redial
-re-runs the full auth pipeline, which is the authority.
+**Access is evaluated per frame, from the actions the token listed.** The connection keeps the topics
+the client asked for and asks on every frame whether its reader reaches them (`StreamAccess`, fixed for
+the connection's life). A frame about one person (`StreamHub.PublishToAccount`) reaches only the
+connections whose token subject is that person.

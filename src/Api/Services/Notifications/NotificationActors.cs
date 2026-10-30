@@ -1,99 +1,133 @@
 using System.Collections.Concurrent;
-using System.Security.Claims;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using TheKrystalShip.Api.Services.Auth;
-using TheKrystalShip.Auth;
-using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Services.Notifications;
 
 /// <summary>
-/// Who a notification's person is, from both ends: the person a request is made by, and the audit actor
-/// a button tap acts as.
+/// What a notification's person last presented: the audit actor they act as, the name they go by and the
+/// actions their token listed, as of <paramref name="SeenAt"/>.
+/// </summary>
+public sealed record KnownPerson(string Actor, string DisplayName, IReadOnlyList<string> Actions, DateTimeOffset SeenAt)
+{
+    /// <summary>Whether the person held <paramref name="action"/> when last seen.</summary>
+    public bool Held(string action) => Actions.Contains(action, StringComparer.Ordinal);
+}
+
+/// <summary>
+/// Who a notification's person is, from both ends: the person a request is made by, and the actor and
+/// access a notification is sent for or a button tap acts as.
 /// </summary>
 /// <remarks>
 /// <para>
-/// A person is the account id the node's replica knows them by (the synthetic caller's actor on a host
-/// with auth off). The replica names an account by a username and holds no provider, but an audit actor
-/// is <c>provider:name</c>, so the actor a signed-in person presented is remembered beside the library's
-/// state. A button can only be tapped from a device its person subscribed through a signed-in route,
-/// which is where the actor is recorded; a person with none recorded is refused at the tap rather than
-/// attributed to a provider they never signed in with.
+/// A person is the subject of the token they presented (the synthetic caller's actor on a host with auth
+/// off). A notification is told and a button is tapped when its person is not here with a token, so what
+/// the person may do is what their token last listed, remembered beside the library's state every time a
+/// signed-in request names them. That memory is bounded by <see cref="Freshness"/>: a person not seen
+/// within it is told nothing and acts on nothing, so a revoked role stops reaching a phone within that
+/// window even when its owner never opens the panel again.
 /// </para>
 /// </remarks>
-public sealed class NotificationActors(ApiOptions options, ILogger<NotificationActors> logger)
+public sealed class NotificationActors(ApiOptions options, TimeProvider time, ILogger<NotificationActors> logger)
 {
-    private readonly Lock _gate = new();
-    private ConcurrentDictionary<string, string>? _actors;
+    /// <summary>How long what a person's token listed is trusted for a notification sent or tapped without one.</summary>
+    public static readonly TimeSpan Freshness = TimeSpan.FromDays(7);
 
-    private string FilePath => Path.Combine(options.NotificationsDir, "actors.json");
+    private readonly Lock _gate = new();
+    private ConcurrentDictionary<string, KnownPerson>? _people;
+
+    private string FilePath => Path.Combine(options.NotificationsDir, "people.json");
 
     /// <summary>The person a signed-in request is made by, or null when there is none.</summary>
     public string? PersonOf(HttpContext http)
     {
-        ClaimsPrincipal user = http.User;
-        if (user.Identity is not ClaimsIdentity ci || SessionClaims.ReadIdentity(ci) is not { } identity)
+        if (CallerId.Of(http.User) is not { Kind: CallerKind.Person or CallerKind.Open } caller)
             return null;
 
-        string? person = options.AuthDisabled ? options.DisabledAuthActor : NodeAccess.AccountOf(user);
-        if (person is null)
-            return null;
-
-        Remember(person, identity.ActorString);
-        return person;
+        IReadOnlyList<string> held = http.RequestServices.GetRequiredService<NodeAccess>().HeldList(http.User);
+        Remember(caller.Subject, new KnownPerson(caller.Actor, caller.DisplayName, held, time.GetUtcNow()));
+        return caller.Subject;
     }
 
-    /// <summary>The audit actor <paramref name="person"/> last presented, or null when none is known.</summary>
-    public string? ActorOf(string person)
+    /// <summary>What <paramref name="person"/> last presented, or null when unknown or not seen within <see cref="Freshness"/>.</summary>
+    public KnownPerson? Known(string person)
     {
         if (options.AuthDisabled && person == options.DisabledAuthActor)
-            return person;
+            return new KnownPerson(person, person, [], time.GetUtcNow());
 
-        return Actors().TryGetValue(person, out string? actor) ? actor : null;
+        return People().TryGetValue(person, out KnownPerson? known) && time.GetUtcNow() - known.SeenAt <= Freshness
+            ? known
+            : null;
     }
 
-    private void Remember(string person, string actor)
+    /// <summary>Everyone seen within <see cref="Freshness"/> who held <paramref name="action"/>.</summary>
+    public IReadOnlyList<string> Holding(string action)
     {
-        ConcurrentDictionary<string, string> actors = Actors();
-        if (actors.TryGetValue(person, out string? known) && known == actor)
-            return;
+        if (options.AuthDisabled)
+            return [options.DisabledAuthActor];
 
-        actors[person] = actor;
+        DateTimeOffset now = time.GetUtcNow();
+        return [.. People().Where(p => now - p.Value.SeenAt <= Freshness && p.Value.Held(action)).Select(p => p.Key)];
+    }
+
+    /// <summary>Whether <paramref name="person"/> may perform <paramref name="action"/>: they held it when last seen, recently enough.</summary>
+    public bool Allows(string person, string action) =>
+        options.AuthDisabled ? person == options.DisabledAuthActor : Known(person)?.Held(action) == true;
+
+    private void Remember(string person, KnownPerson known)
+    {
+        ConcurrentDictionary<string, KnownPerson> people = People();
+        if (people.TryGetValue(person, out KnownPerson? previous)
+            && previous.Actor == known.Actor
+            && previous.DisplayName == known.DisplayName
+            && previous.Actions.SequenceEqual(known.Actions, StringComparer.Ordinal)
+            && known.SeenAt - previous.SeenAt < TimeSpan.FromHours(1))
+        {
+            return;
+        }
+
+        people[person] = known;
         lock (_gate)
         {
             try
             {
                 Directory.CreateDirectory(options.NotificationsDir);
                 string temp = FilePath + ".tmp";
-                File.WriteAllText(temp, JsonSerializer.Serialize(actors));
+                File.WriteAllText(temp, JsonSerializer.Serialize(
+                    new Dictionary<string, KnownPerson>(people, StringComparer.Ordinal),
+                    NotificationPeopleJson.Default.DictionaryStringKnownPerson));
                 File.Move(temp, FilePath, overwrite: true);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                logger.LogWarning(ex, "could not record the actor of a notification person in {Path}", FilePath);
+                logger.LogWarning(ex, "could not record a notification person in {Path}", FilePath);
             }
         }
     }
 
-    private ConcurrentDictionary<string, string> Actors()
+    private ConcurrentDictionary<string, KnownPerson> People()
     {
         lock (_gate)
         {
-            if (_actors is not null)
-                return _actors;
+            if (_people is not null)
+                return _people;
 
             try
             {
                 if (File.Exists(FilePath)
-                    && JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(FilePath)) is { } read)
-                    return _actors = new ConcurrentDictionary<string, string>(read, StringComparer.Ordinal);
+                    && JsonSerializer.Deserialize(File.ReadAllText(FilePath), NotificationPeopleJson.Default.DictionaryStringKnownPerson) is { } read)
+                    return _people = new ConcurrentDictionary<string, KnownPerson>(read, StringComparer.Ordinal);
             }
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
             {
-                logger.LogWarning(ex, "could not read {Path}; actors are learned again as people sign in", FilePath);
+                logger.LogWarning(ex, "could not read {Path}; people are learned again as they use the panel", FilePath);
             }
 
-            return _actors = new ConcurrentDictionary<string, string>(StringComparer.Ordinal);
+            return _people = new ConcurrentDictionary<string, KnownPerson>(StringComparer.Ordinal);
         }
     }
 }
+
+[JsonSerializable(typeof(Dictionary<string, KnownPerson>))]
+internal sealed partial class NotificationPeopleJson : JsonSerializerContext;

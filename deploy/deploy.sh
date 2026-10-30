@@ -107,15 +107,13 @@ if wait_health; then
     systemctl --no-pager --lines=0 status "$SERVICE" 2>/dev/null | head -n 4 || true
 
     # ── 5. Who signs people in ─────────────────────────────────────────────────
-    # This node signs nobody in; the cluster's auth anchor does, and a machine that founded its own
-    # cluster runs it beside this unit. Said here because a deploy that succeeds on a machine with no
-    # secret, or with no anchor running where one should be, serves a panel nobody can sign in to.
-    if ! host_is_clustered; then
-        warn "no cluster secret in ${SHARED_CLUSTER_FILE}: nobody can sign in to this node. Run deploy/setup.sh, which founds a cluster of one."
-    elif [[ -r "$CLUSTER_FOUNDED_FILE" ]] && ! systemctl is-active --quiet tks-auth.service; then
-        warn "this machine founded its cluster but tks-auth is not running, so nobody can sign in. Deploy tks-auth (its deploy/setup.sh, then deploy/deploy.sh); its first start leaves the administrator's one-time password in /var/lib/tks-auth/initial-admin-password."
+    # This node signs nobody in; the sign-in provider named by Sessions__Issuer does. Said here because
+    # a deploy that succeeds with no issuer serves a panel nobody can sign in to: the node answers its
+    # own machine alone.
+    if ! grep -qsE '^[[:space:]]*Sessions__Issuer[[:space:]]*=[[:space:]]*[^[:space:]]' "$SHARED_CLUSTER_FILE" "$ENV_FILE"; then
+        warn "no Sessions__Issuer in ${SHARED_CLUSTER_FILE}: nobody can sign in to this node, and it answers its own machine only."
     else
-        log "sign-in: the cluster's auth anchor (see this unit's log for which member holds the accounts)."
+        log "sign-in: the provider named by Sessions__Issuer."
     fi
 else
     err "service started but ${HEALTH_URL} did not return 200 within ${HEALTH_TRIES}s."

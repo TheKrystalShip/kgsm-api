@@ -68,7 +68,7 @@ public sealed class MetricsPump(StreamHub hub, MonitorClient monitor, ApiOptions
                     {
                         lastRoster = Environment.TickCount64;
                         hub.PublishRows(StreamProtocol.ServersMetricsTopic, StreamProtocol.ServersMetricsEntityKey,
-                            BuildRoster(snap).Servers, row => row.Id,
+                            BuildRoster(snap).Servers,
                             rows => new StreamMessage(StreamProtocol.ServersMetricsTopic, StreamProtocol.MetricsRoster,
                                 new ServerMetricsRoster(rows)));
                     }

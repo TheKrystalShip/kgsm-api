@@ -47,7 +47,6 @@ public static class NotificationDigest
             "leaf_up" => $"{n} service{(n == 1 ? "" : "s")} came back",
             "leaf_degraded" => $"{n} service fault{(n == 1 ? "" : "s")} reported",
             "leaf_recovered" => $"{n} service fault{(n == 1 ? "" : "s")} fixed",
-            "awaiting_approval" => $"{n} {(n == 1 ? "person" : "people")} waiting to be let in",
             _ => $"{n} thing{(n == 1 ? "" : "s")} happened while you were away",
         };
     }

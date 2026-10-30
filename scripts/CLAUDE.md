@@ -31,9 +31,3 @@ no-ops on an existing database.
 The diagnostics endpoints it probes (`/api/v1/_throw`, `/api/v1/_dbcheck`) exist for it alone — restrict
 them before any public exposure. `_dbcheck` is a **read** round-trip: the append-only audit table must
 never be probe-written.
-
-## `mint-dev-token.py`
-
-Mints a session signed with the local anchor's key for an existing account, for testing against a live
-auth-enabled API on a trusted dev host. It reads the key at runtime and writes neither the key nor a
-token anywhere.

@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — KGSM is an OpenID Connect relying party (2.0.0, Api.Contracts 5.0.0-dev.1, `Lib` 9.5.0-dev.2, `Sessions` 1.0.0-dev.1)
+
+- **A person is admitted on the sign-in provider's access token.** `AddKgsmSessions` checks the bearer
+  against the keys the provider publishes (`Sessions__Issuer`, `Sessions__Audience`, `Sessions__ActionsClaim`,
+  set once per host in `/etc/kgsm/kgsm-cluster.env`), and what the person may do is the actions the token
+  lists. Nothing about a person is stored, copied or replicated here: the account replica, the ended-session
+  list, `session.revoke`, the live access push and the `Auth.*` packages are gone.
+- **Grants are cluster-wide.** There are no node or server scopes. A collection is all of its servers or
+  none; `GET /operations` publishes every entry at the `cluster` scope; `GET /me/access` is the token's
+  actions among the ones this node performs (`owner` is true only on an auth-disabled host); `GET /me`
+  reports `status: active`, an empty `recentLogins`, and the identity the token carries.
+- **A member acting as itself authenticates with its cluster service token**, `Authorization: Bearer`
+  signed HS256 with the cluster secret, and is fully trusted. A member acting for a person forwards that
+  person's access token. The acting-header scheme, which named an account to evaluate, is gone.
+- **A stream ends when the caller's token expires** and the client reconnects with a fresh one.
+- **A node with no `Sessions__Issuer` answers its own machine only**: a non-loopback caller is refused
+  with `403 no_issuer`, and no person can authenticate.
+- **A leaf is asked on the person's own token.** The leaf-surface relay and the reactor client send the
+  person's `Authorization` header instead of the `Kgsm-Acting-Account` header and an `account` body field.
+- **A person is named by their token.** The audit actor is `local:<name>` for a person and
+  `system:<member>` for a member; a maintenance window's author is the token's subject. Tickets (backup
+  download, transfer) are no longer re-evaluated against an account at redemption; a notification is told,
+  and a button tapped, on what the person's token last listed within `NotificationActors.Freshness`.
+- **`Api__CorsOrigins`** names the origins admitted across origins; the protected-resource document's issuer
+  is `Sessions__Issuer`.
+- **Removed:** `LocalAnchorJoin` and `Api__LocalAnchorUrl`, `HostProviderFileWriter` and
+  `Api__HostProviderFilePath`, `Api__UsersDbPath`, `Api__SessionsCacheTtlMs`, `AuthAnchorReport`, the
+  `auth.client` announcement, `AccountNamesController` (`GET /accounts/names`), `scripts/mint-dev-token.py`,
+  the audit mappers for sign-in and account events (the audit stops reading `tks-auth`'s journal), the
+  `awaiting_approval` notification kind, and `AccountNames` and `ClusterAuthAnchor` from `Api.Contracts`.
+
 ### Added — the node serves its action manifest (1.2.0)
 
 - **`GET /.well-known/tks-actions.json`**, anonymous, answers with the actions this node's engine, leaves

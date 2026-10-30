@@ -2,9 +2,6 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 
-using TheKrystalShip.Api.Contracts;
-
-using TheKrystalShip.Auth.Access;
 
 namespace TheKrystalShip.Api.Realtime;
 
@@ -25,45 +22,24 @@ namespace TheKrystalShip.Api.Realtime;
 /// connection is torn down, and §3·j's client falls back to polling, reconnects, and re-hydrates.</para>
 /// <para><b>No initial snapshot.</b> The client hydrates via REST on (re)connect (§3·j) and the stream
 /// only pushes patches from the next tick on — so subscribing never replays state here.</para>
-/// <para><b>The session is re-checked while the stream runs.</b> Authorization is evaluated per
-/// REQUEST, and this stream is one request that lasts hours — so the connect-time
-/// <c>[Authorize]</c> is the only gate the framework applies, and a session revoked afterwards would
-/// keep receiving the host's roster, metrics, console lines and audit rows until the tab closed.
-/// <c>sessionAlive</c> closes that: the write loop asks the ended-session list every
-/// <see cref="RecheckInterval"/> whether this connection's <c>sid</c> is still live, and ends
-/// the connection when it isn't. Revoking a session therefore cuts its live channel within 20s, the
-/// same order as the ≤5s bound REST already has. The check is <b>on the session, not on the access
-/// token's expiry</b>: an access token lapses every ~15 minutes by design and the client rotates it
-/// reactively, so tearing down on that would churn every stream four times an hour for a credential
-/// that is about to be renewed.</para>
-/// <para><b>What the reader may see is evaluated on every frame</b>, by <see cref="Access"/> against this
-/// node's replica. The subscriptions are what the client asked for; whether each one delivers is asked
-/// again per frame, so access granted or taken away while the stream runs applies to the next frame,
-/// both ways, with no reconnect. A change the replica takes reaches the connection at once through
-/// <see cref="StreamHub.AccessChanged"/>; the loop's own re-read of the replica on the re-check clock is
-/// the backstop for a change that reached the replica some other way.</para>
+/// <para><b>The stream ends with the token.</b> Authorization is evaluated per REQUEST, and this stream is
+/// one request that lasts hours, so the connect-time gate is the only one the framework applies. The
+/// controller runs the connection on a token that is cancelled when the caller's access token expires
+/// (<c>KgsmPerson.UntilExpiry</c>); the client reconnects with a fresh token, and a role change or a
+/// revoked session reaches it there. Within one token's life the actions it lists are fixed.</para>
+/// <para><b>What the reader may see is evaluated on every frame</b>, by <see cref="Access"/>. The
+/// subscriptions are what the client asked for; whether each one delivers is asked again per frame.</para>
 /// </remarks>
 public sealed class StreamConnection
 {
     private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(10);
-    // The lag bound for an OPEN stream — how long a revoked session keeps its live channel, and how
-    // long access changed out of this process keeps its old reach. Its own constant, not the
-    // heartbeat's: retuning the keepalive cadence must not silently move either.
-    private static readonly TimeSpan RecheckInterval = TimeSpan.FromSeconds(20);
-
     private readonly Stream _body;
     private readonly JsonSerializerOptions _json;
     private readonly ILogger _logger;
-    private readonly Func<CancellationToken, ValueTask<bool>>? _sessionAlive;
-    private readonly Func<CancellationToken, ValueTask<AccessEvaluator?>>? _evaluate;
-    private readonly TimeSpan _recheckInterval;
 
     private readonly HashSet<string> _subscriptions = new(StringComparer.Ordinal);
     private readonly object _subLock = new();
-
-    // The account status the reader was last told, so a re-read that changes it says so once.
-    private string? _status;
 
     // coalesce key -> latest unsent frame. The wake channel is a 1-slot signal (extra writes dropped):
     // the writer always drains ALL pending under the lock, so the token is only a "something changed" hint.
@@ -72,64 +48,21 @@ public sealed class StreamConnection
     private readonly Channel<byte> _wake = Channel.CreateBounded<byte>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true, SingleWriter = false });
 
-    /// <param name="sessionAlive">
-    /// Asks whether the session behind this connection is still live. <see langword="null"/> when there
-    /// is no session to check — an auth-disabled host's synthetic principal carries no <c>sid</c> — in
-    /// which case the stream runs unchecked.
-    /// </param>
     /// <param name="access">
     /// What the reader behind this connection may see. <b>Defaults to <see cref="StreamAccess.Nobody"/></b>:
     /// a connection nobody stated access for receives its own <c>me</c> topic and nothing else.
-    /// </param>
-    /// <param name="sessionId">
-    /// The session behind this connection, for the view of who is streaming.
-    /// <see langword="null"/> on a host whose principal carries no <c>sid</c>.
-    /// </param>
-    /// <param name="evaluate">
-    /// Re-reads this node's replica, on the same clock as <paramref name="sessionAlive"/>;
-    /// <see langword="null"/> from it means the replica could not be read, which ends the connection.
-    /// <see langword="null"/> itself when there is nothing to re-read — an auth-disabled host's synthetic
-    /// Owner, or a reader with no account here.
     /// </param>
     public StreamConnection(
         Stream body,
         IEnumerable<string> topics,
         JsonSerializerOptions json,
         ILogger logger,
-        Func<CancellationToken, ValueTask<bool>>? sessionAlive = null,
-        StreamAccess? access = null,
-        string? sessionId = null,
-        Func<CancellationToken, ValueTask<AccessEvaluator?>>? evaluate = null)
-        : this(body, topics, json, logger, sessionAlive, RecheckInterval, access, sessionId, evaluate)
-    {
-    }
-
-    /// <summary>
-    /// Overload taking the re-check cadence, so a test can prove the teardown without sitting through
-    /// the real 20s. Deliberately not an <c>ApiOptions</c> knob: this interval is a security bound
-    /// (how long a revoked session keeps its live channel, and how long changed access keeps its old
-    /// reach), not an operational tuning dial.
-    /// </summary>
-    internal StreamConnection(
-        Stream body,
-        IEnumerable<string> topics,
-        JsonSerializerOptions json,
-        ILogger logger,
-        Func<CancellationToken, ValueTask<bool>>? sessionAlive,
-        TimeSpan recheckInterval,
-        StreamAccess? access = null,
-        string? sessionId = null,
-        Func<CancellationToken, ValueTask<AccessEvaluator?>>? evaluate = null)
+        StreamAccess? access = null)
     {
         _body = body;
         _json = json;
         _logger = logger;
-        _sessionAlive = sessionAlive;
-        _evaluate = evaluate;
-        _recheckInterval = recheckInterval;
         Access = access ?? StreamAccess.Nobody;
-        _status = Access.Status;
-        SessionId = sessionId;
         foreach (string t in topics)
             _subscriptions.Add(t);
     }
@@ -138,33 +71,16 @@ public sealed class StreamConnection
     public StreamAccess Access { get; }
 
     /// <summary>
-    /// The KGSM account this connection is authenticated as, which is what a frame about one person is
-    /// addressed to. The account id rather than the token's handle, because an account can be proved
-    /// several ways and all of them are one person here. <see langword="null"/> when the caller proves no
-    /// account on this host, in which case nothing addressed to an account ever reaches it.
+    /// The person this connection is authenticated as (the token's subject), which is what a frame about
+    /// one person is addressed to. <see langword="null"/> for a member or an open host, in which case
+    /// nothing addressed to a person ever reaches it.
     /// </summary>
     public string? AccountId => Access.AccountId;
-
-    /// <summary>The session behind this connection. See the constructor.</summary>
-    public string? SessionId { get; }
 
     /// <summary>Is this connection authenticated as <paramref name="accountId"/>? A connection that
     /// proves no account is nobody's, and answers <see langword="false"/> to every id.</summary>
     public bool BelongsTo(string accountId) =>
         AccountId is not null && string.Equals(AccountId, accountId, StringComparison.Ordinal);
-
-    /// <summary>
-    /// Take a new reading of this node's replica: every frame from here on is evaluated by it, and the
-    /// reader is told when their account's status has moved.
-    /// </summary>
-    public void AccessChanged(AccessEvaluator evaluator)
-    {
-        Access.Update(evaluator);
-
-        string? status = Access.Status;
-        if (status is not null && !string.Equals(Interlocked.Exchange(ref _status, status), status, StringComparison.Ordinal))
-            EnqueueStanding(status);
-    }
 
     // --- subscription state (read by the hub on every publish) ---
 
@@ -192,25 +108,6 @@ public sealed class StreamConnection
     {
         lock (_queueLock) _pending[coalesceKey] = frame;
         _wake.Writer.TryWrite(0); // wake the writer; dropped if a wake is already pending (it drains all anyway)
-    }
-
-    /// <summary>
-    /// Tell this connection's reader their account's status, on the <c>me</c> topic.
-    /// </summary>
-    /// <remarks>
-    /// Subscription is still the gate: a client that never asked for <c>me</c> is not sent one, the
-    /// same rule every other topic follows. The frame is built here rather than by the hub because
-    /// this is the one message with an audience of exactly one connection — nothing is saved by
-    /// serializing it anywhere else.
-    /// </remarks>
-    private void EnqueueStanding(string status)
-    {
-        if (!IsSubscribed(StreamProtocol.MeTopic))
-            return;
-
-        Enqueue(StreamProtocol.MeEntityKey, StreamHub.BuildFrame(
-            new StreamMessage(StreamProtocol.MeTopic, StreamProtocol.MePatch, new MeStanding(status)),
-            _json));
     }
 
     /// <summary>Run the write loop until cancel/disconnect/failed-write.</summary>
@@ -242,14 +139,11 @@ public sealed class StreamConnection
 
     private async Task WriteLoopAsync(CancellationToken ct)
     {
-        // The loop's two TIMED duties, each on its own due-time. They are clock-driven rather than
-        // "whichever task won the race", because the race answers a different question: a busy stream
-        // is woken by frames far more often than any delay completes, so a duty hung off the delay
-        // branch simply never runs on the connections carrying the most data. Both clocks are the
-        // connect time plus their interval — [Authorize] has just run, and the client has just been
-        // told ": connected".
-        bool rechecks = _sessionAlive is not null || _evaluate is not null;
-        DateTimeOffset nextRecheck = DateTimeOffset.UtcNow + _recheckInterval;
+        // The loop's one TIMED duty, on its own due-time. It is clock-driven rather than "whichever task
+        // won the race", because the race answers a different question: a busy stream is woken by frames
+        // far more often than any delay completes, so a duty hung off the delay branch simply never runs
+        // on the connections carrying the most data. The clock is the connect time plus its interval —
+        // the client has just been told ": connected".
         DateTimeOffset nextHeartbeat = DateTimeOffset.UtcNow + HeartbeatInterval;
 
         while (!ct.IsCancellationRequested)
@@ -264,11 +158,6 @@ public sealed class StreamConnection
             // pushes its own due-time forward before the next iteration.
             DateTimeOffset now = DateTimeOffset.UtcNow;
             TimeSpan wait = nextHeartbeat - now;
-            if (rechecks)
-            {
-                TimeSpan untilCheck = nextRecheck - now;
-                if (untilCheck < wait) wait = untilCheck;
-            }
             if (wait < TimeSpan.Zero) wait = TimeSpan.Zero;
 
             using var tick = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -280,66 +169,9 @@ public sealed class StreamConnection
 
             if (ct.IsCancellationRequested) break; // client gone — tear down, never spin
 
-            // Duty 1: does this connection still stand? Two questions on one clock — is the session
-            // behind it live, and what may its reader see now. Ordered before any write, so a session
-            // that has just been revoked receives nothing further.
-            if (rechecks && DateTimeOffset.UtcNow >= nextRecheck)
-            {
-                nextRecheck = DateTimeOffset.UtcNow + _recheckInterval;
-
-                bool alive;
-                try
-                {
-                    alive = _sessionAlive is null || await _sessionAlive(ct).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex)
-                {
-                    // Couldn't measure. "Unknown" is not "still valid" (the ecosystem's never-fabricate
-                    // rule, in its security form), and the teardown is self-correcting rather than
-                    // final: the client re-dials, and that redial re-runs the FULL authentication
-                    // pipeline — which is the authority on whether it may stream — instead of us
-                    // guessing here.
-                    _logger.LogWarning(ex, "SSE stream: session re-check failed; ending the connection");
-                    break;
-                }
-                if (!alive)
-                {
-                    _logger.LogInformation("SSE stream: session no longer valid (revoked or expired) — ending the connection");
-                    break;
-                }
-
-                if (_evaluate is not null)
-                {
-                    AccessEvaluator? evaluator;
-                    try
-                    {
-                        evaluator = await _evaluate(ct).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException) { break; }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "SSE stream: access re-check failed; ending the connection");
-                        break;
-                    }
-
-                    // Same rule as the session above, and the same reason it is not softened into a
-                    // refusal: an unreadable replica means this connection's reach cannot be measured,
-                    // and a stream carrying an unmeasurable reach is one nobody can vouch for. Ending it
-                    // costs a redial, which asks the replica properly.
-                    if (evaluator is null)
-                    {
-                        _logger.LogWarning("SSE stream: the authority replica could not be read; ending the connection");
-                        break;
-                    }
-
-                    AccessChanged(evaluator);
-                }
-            }
-
-            // Duty 2: the keepalive comment, which is also the dead-client detector (alongside
-            // RequestAborted). On its own clock too, so the client hears from us every 20s whether the
-            // stream has been silent or saturated.
+            // The keepalive comment, which is also the dead-client detector (alongside RequestAborted).
+            // On its own clock, so the client hears from us every heartbeat whether the stream has been
+            // silent or saturated.
             if (DateTimeOffset.UtcNow >= nextHeartbeat)
             {
                 nextHeartbeat = DateTimeOffset.UtcNow + HeartbeatInterval;

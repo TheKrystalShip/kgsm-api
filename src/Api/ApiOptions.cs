@@ -1,8 +1,5 @@
 using TheKrystalShip.KGSM.Events;
 using TheKrystalShip.Api.Services.Alerts;
-using TheKrystalShip.Auth;
-using TheKrystalShip.Auth.Cluster;
-using TheKrystalShip.Auth.Users;
 
 namespace TheKrystalShip.Api;
 
@@ -605,50 +602,32 @@ public sealed class ApiOptions
     /// </summary>
     public required string DisabledAuthActor { get; init; }
 
-    /// <summary>
-    /// This node's replica of the cluster's accounts (<c>Api__UsersDbPath</c>, default
-    /// <c>/var/lib/kgsm/auth/users.db</c>) — the accounts, roles, permissions, assignments and catalog,
-    /// kept current by replication from the auth anchor. This API owns the file; the machine's leaves read it.
-    /// </summary>
-    /// <remarks>
-    /// Deliberately outside <see cref="DbPath"/>. This API's own database is its operational state and
-    /// is wiped when its schema changes; the replica is the <em>machine's</em>, shared with every other
-    /// KGSM service running beside it and never wiped. It has one correct value on every host in the
-    /// ecosystem, so a default here is the shared location rather than a guess.
-    /// </remarks>
-    public string UsersDbPath { get; init; } = UserStoreOptions.DefaultPath;
-
     /// <summary>Auth is on unless the dev escape hatch is set.</summary>
     public bool AuthEnabled => !AuthDisabled;
 
     /// <summary>
-    /// How long "has this session been ended" is reused on the request path
-    /// (<c>Api__SessionsCacheTtlMs</c>, default 5000 = 5s, floor 500). The accepted lag between a
-    /// sign-out arriving over the bus and the session stopping on this node: a revoke evicts the
-    /// cached answer at once, and the TTL is the backstop for a read that raced it.
+    /// The sign-in provider's issuer (<c>Sessions__Issuer</c>). Blank means none: a person cannot be
+    /// admitted, and a request from beyond this machine is refused.
     /// </summary>
-    public required int SessionsCacheTtlMs { get; init; }
+    public string SessionsIssuer { get; init; } = "";
+
+    /// <summary>The audience the provider's tokens for this cluster carry (<c>Sessions__Audience</c>).</summary>
+    public string SessionsAudience { get; init; } = "";
+
+    /// <summary>The claim of a token that lists a person's actions (<c>Sessions__ActionsClaim</c>, default <c>tks_actions</c>).</summary>
+    public string SessionsActionsClaim { get; init; } = DefaultActionsClaim;
+
+    /// <summary>The claim a token lists its actions in unless configuration names another.</summary>
+    public const string DefaultActionsClaim = "tks_actions";
+
+    /// <summary>Whether a sign-in provider is configured, and so whether a person can be admitted.</summary>
+    public bool SessionsConfigured => !string.IsNullOrWhiteSpace(SessionsIssuer);
 
     /// <summary>
-    /// Where this machine's own auth anchor is reached (<c>Api__LocalAnchorUrl</c>, default
-    /// <c>http://127.0.0.1:8098</c>, the anchor's own default bind). Empty turns the local join off.
+    /// The browser origins admitted across origins (<c>Api__CorsOrigins</c>, comma-separated). Empty admits
+    /// none: a panel this node serves is same-origin and needs no entry.
     /// </summary>
-    /// <remarks>
-    /// A machine that founded its own cluster runs the anchor beside this node, and the two only find
-    /// each other through a handshake. Nobody can sign in to ask for one until they have, so a node
-    /// that knows no member introduces itself here on its own (<c>LocalAnchorJoin</c>).
-    /// </remarks>
-    public string LocalAnchorUrl { get; init; } = "http://127.0.0.1:8098";
-
-    /// <summary>
-    /// Where this node writes who signs the cluster's sessions for the leaves on its machine
-    /// (<c>Api__HostProviderFilePath</c>, default <c>/var/lib/kgsm/cluster/auth-provider.json</c>).
-    /// </summary>
-    /// <remarks>
-    /// A leaf joins no cluster and cannot read the holder itself, so it verifies against what this node
-    /// read through the holder. This node is the one writer on its machine.
-    /// </remarks>
-    public string HostProviderFilePath { get; init; } = HostProviderFile.DefaultPath;
+    public IReadOnlyList<string> CorsOrigins { get; init; } = [];
 
     /// <summary>
     /// The address a browser reaches this API on, scheme and authority only — the origin of
@@ -662,7 +641,9 @@ public sealed class ApiOptions
             : null;
 
     public static ApiOptions FromConfiguration(IConfiguration configuration) =>
-        FromSettings(configuration.GetSection(ApiSettings.Section).Get<ApiSettings>() ?? new ApiSettings());
+        FromSettings(
+            configuration.GetSection(ApiSettings.Section).Get<ApiSettings>() ?? new ApiSettings(),
+            configuration.GetSection(SessionsSettings.Section).Get<SessionsSettings>());
 
     /// <summary>
     /// Validates what configuration supplied and produces the form the API runs on: clamps every
@@ -678,7 +659,7 @@ public sealed class ApiOptions
     /// that difference; <see cref="BlankFallback"/> deliberately collapses it, for the few paths an
     /// empty string would make <c>Path.*</c> throw on.
     /// </remarks>
-    public static ApiOptions FromSettings(ApiSettings s)
+    public static ApiOptions FromSettings(ApiSettings s, SessionsSettings? sessions = null)
     {
         string hostId = Clean(s.HostId) ?? Environment.MachineName;
 
@@ -814,14 +795,10 @@ public sealed class ApiOptions
             // Auth. On by default; the dev escape hatch is the only way to the old open window.
             AuthDisabled = s.AuthDisabled ?? false,
             DisabledAuthActor = Defaulted(s.DisabledAuthActor, ""),
-            // Blank falls back to the shared machine location rather than to a file beside this API's
-            // own database: the replica belongs to the machine, and a private copy would be one no
-            // replication updates and the services beside us cannot see.
-            UsersDbPath = BlankFallback(s.UsersDbPath, UserStoreOptions.DefaultPath),
-            SessionsCacheTtlMs = Math.Max(500, s.SessionsCacheTtlMs ?? 5000),
-            // Defaulted, not BlankFallback: an empty value is the deliberate "never join locally".
-            LocalAnchorUrl = Defaulted(s.LocalAnchorUrl, "http://127.0.0.1:8098").Trim(),
-            HostProviderFilePath = BlankFallback(s.HostProviderFilePath, HostProviderFile.DefaultPath),
+            SessionsIssuer = Clean(sessions?.Issuer) ?? "",
+            SessionsAudience = Clean(sessions?.Audience) ?? "",
+            SessionsActionsClaim = Clean(sessions?.ActionsClaim) ?? DefaultActionsClaim,
+            CorsOrigins = Csv(s.CorsOrigins),
         };
     }
 

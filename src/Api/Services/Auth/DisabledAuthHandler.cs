@@ -3,16 +3,13 @@ using System.Text.Encodings.Web;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.Options;
 
-using TheKrystalShip.Auth;
-
 namespace TheKrystalShip.Api.Services.Auth;
 
 /// <summary>
 /// The <c>Api__AuthDisabled=true</c> escape hatch. Authenticates EVERY request as a synthetic Owner —
-/// <see cref="NodeAccess"/> allows every action to an authenticated caller on such a host, and
-/// <c>/me/access</c> reports the Owner — so the smoke/dev flow runs with no login. Registered as
-/// the default scheme only when auth is off; the loud warning is logged once at startup (see
-/// <c>Startup.Configure</c>). Never wire this on an exposed host.
+/// <see cref="NodeAccess"/> admits every action to it, and <c>/me/access</c> reports the Owner — so the
+/// smoke/dev flow runs with no login. Chosen by the caller scheme only when auth is off; the loud warning
+/// is logged once at startup (see <c>Startup.Configure</c>). Never wire this on an exposed host.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -35,20 +32,10 @@ public sealed class DisabledAuthHandler(
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        // Startup refuses to build this handler's host without a parseable actor, so the split holds.
-        // The provider half rides on `sub`, which is where every reader takes it from.
-        KgsmActor.TryParse(api.DisabledAuthActor, out _, out string name);
-
-        Claim[] claims =
-        [
-            new("sub", api.DisabledAuthActor),
-            new(KgsmAuthClaims.Host, api.HostId),
-            new(KgsmAuthClaims.TokenKind, KgsmTokenKind.Access),
-            new(KgsmAuthClaims.Username, name),
-            new(KgsmAuthClaims.Display, name),
-            new("scope", "identify guilds"),
-        ];
-        var identity = new ClaimsIdentity(claims, SchemeName, "sub", roleType: null);
+        // The actor is provider:name; the name half is what the caller is called.
+        string name = api.DisabledAuthActor[(api.DisabledAuthActor.IndexOf(':') + 1)..];
+        Claim[] claims = [new("sub", api.DisabledAuthActor), new("name", name)];
+        var identity = new ClaimsIdentity(claims, SchemeName, "name", roleType: null);
         var ticket = new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName);
         return Task.FromResult(AuthenticateResult.Success(ticket));
     }

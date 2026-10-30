@@ -6,7 +6,6 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
 using TheKrystalShip.Api.Services.Auth;
-using TheKrystalShip.Auth.Access;
 
 using ActionIds = TheKrystalShip.Api.Services.Auth.ActionIds;
 
@@ -24,7 +23,7 @@ public sealed class OperationsTests(AuthTestFactory factory) : IClassFixture<Aut
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", factory.AccessToken(Persona.None));
         HttpResponseMessage resp = await c.GetAsync("/api/v1/operations");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        return (await resp.Content.ReadFromJsonAsync(AccessJsonContext.Default.OperationManifest))!;
+        return (await resp.Content.ReadFromJsonAsync(AuthJson.Default.OperationManifest))!;
     }
 
     private static Operation One(OperationManifest m, string method, string route, string? value = null) =>
@@ -38,17 +37,16 @@ public sealed class OperationsTests(AuthTestFactory factory) : IClassFixture<Aut
     }
 
     [Fact]
-    public async Task AServerRoute_IsPublishedAtTheServersInstall()
+    public async Task EveryRoute_IsPublishedAtTheClusterScope()
     {
         OperationManifest m = await ReadAsync();
 
         Assert.Equal("/api/v1", m.Base);
         Operation backup = One(m, "POST", "/servers/{id}/backups");
         Assert.Equal(ActionIds.ServerBackupsCreate, backup.Action);
-        Assert.Equal(Operation.Scopes.Instance, backup.Scope);
-        Assert.Equal("id", backup.Target);
+        Assert.Equal(Operation.Scopes.Cluster, backup.Scope);
 
-        Assert.Equal(Operation.Scopes.Node, One(m, "GET", "/alerts").Scope);
+        Assert.Equal(Operation.Scopes.Cluster, One(m, "GET", "/alerts").Scope);
     }
 
     [Fact]

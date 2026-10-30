@@ -219,37 +219,12 @@ public sealed class ApiSettings
     [ConfigField("disabledAuthActor", "Actor while auth is disabled", Group = "auth", NoDefault = true)]
     public string? DisabledAuthActor { get; set; }
 
-    /// <summary>This node's replica of the cluster's authority. Blank falls back to /var/lib/kgsm/auth/users.db.</summary>
-    /// <panel>The file this node keeps its copy of the cluster's accounts, roles and assignments in, kept
-    /// current by the auth anchor. Every KGSM service on the machine reads the same file, so pointing this
-    /// somewhere else resolves people against a copy nothing updates.</panel>
-    [ConfigField("usersDbPath", "Account replica", Group = "auth", Type = ConfigType.Path,
-        Risk = ConfigRisk.Wiring)]
-    public string? UsersDbPath { get; set; }
-
-    /// <summary>How long "has this session been ended" is reused before it is asked again. Floor 500.</summary>
-    /// <panel>How long this node reuses its answer to whether a session has been ended. It is how long a
-    /// session somebody has just signed out of can still be used here — longer means fewer lookups and a
-    /// longer wait before a sign-out takes effect on this node.</panel>
-    [ConfigField("sessionsCacheTtlMs", "Session lookup cache", Group = "auth", Min = 500, Unit = "ms")]
-    public int? SessionsCacheTtlMs { get; set; }
-
-    /// <summary>Where this machine's own auth anchor is reached, joined while this node knows no member. Blank turns it off.</summary>
-    /// <panel>The address of the auth anchor on this machine. A node that knows no other member
-    /// introduces itself here, which is how a machine that is its own cluster comes to have somebody
-    /// who can sign people in. Once the node has any member at all it never asks again. Empty turns
-    /// this off, for a node that only ever joins a cluster someone else runs.</panel>
-    [ConfigField("localAnchorUrl", "Local auth anchor", Group = "auth", Risk = ConfigRisk.Wiring)]
-    public string? LocalAnchorUrl { get; set; }
-
-    /// <summary>Where this node records who signs the cluster's sessions, for this machine's leaves. Blank falls back to /var/lib/kgsm/cluster/auth-provider.json.</summary>
-    /// <panel>The file this node keeps saying who signs the cluster's sessions — the issuer and its
-    /// keys — for services on this machine that are not members themselves, such as an assistant
-    /// running beside this node. They accept only what this file names, so pointing it somewhere else
-    /// leaves them accepting nobody.</panel>
-    [ConfigField("hostProviderFilePath", "Sign-in record for this machine", Group = "auth", Type = ConfigType.Path,
-        Risk = ConfigRisk.Wiring)]
-    public string? HostProviderFilePath { get; set; }
+    /// <summary>The browser origins admitted across origins, comma-separated. Blank admits none.</summary>
+    /// <panel>The addresses a Control Panel served from somewhere other than this node may call it from, one
+    /// per origin, separated by commas — for example https://kgsm.example.com. A panel this node serves
+    /// itself needs none. Empty admits no other origin.</panel>
+    [ConfigField("corsOrigins", "Allowed origins", Group = "auth", NoDefault = true)]
+    public string? CorsOrigins { get; set; }
 
 
     // ── Game library & cover art ──────────────────────────────────────────────────────
@@ -463,4 +438,36 @@ public sealed class ApiSettings
     /// <panel>Addresses this API serves on. The Control Panel and every other surface reach it here.</panel>
     [ConfigField("bindAddress", "Listen address", Group = "general", Risk = ConfigRisk.Wiring)]
     public string? Urls { get; set; }
+}
+
+/// <summary>
+/// Which sign-in provider this node admits people from. Bound from the <c>Sessions</c> section, which every
+/// component that admits a person shares: the host sets both values once, in
+/// <c>/etc/kgsm/kgsm-cluster.env</c>, and the sessions package reads the same keys.
+/// </summary>
+[ConfigSection(Section)]
+public sealed class SessionsSettings
+{
+    /// <summary>The configuration section this type binds to.</summary>
+    public const string Section = "Sessions";
+
+    /// <summary>The provider's issuer address, whose discovery document names its keys.</summary>
+    /// <panel>The address of the sign-in provider. Every token it issued is checked against the keys it
+    /// publishes. Empty, nobody can sign in and this node answers its own machine alone.</panel>
+    [ConfigField("sessionsIssuer", "Sign-in provider", Group = "auth", Type = ConfigType.String,
+        Risk = ConfigRisk.Wiring, NoDefault = true)]
+    public string? Issuer { get; set; }
+
+    /// <summary>The audience of the tokens the provider issues for this cluster.</summary>
+    /// <panel>The application the provider issues this cluster's tokens for. A token for any other
+    /// application is refused.</panel>
+    [ConfigField("sessionsAudience", "Token audience", Group = "auth", Type = ConfigType.String,
+        Risk = ConfigRisk.Wiring, NoDefault = true)]
+    public string? Audience { get; set; }
+
+    /// <summary>The claim of a token that lists the actions its person holds.</summary>
+    /// <panel>The name of the claim in a token that lists what its person may do. Change it only for a
+    /// provider that names it differently.</panel>
+    [ConfigField("sessionsActionsClaim", "Actions claim", Group = "auth", Risk = ConfigRisk.Wiring)]
+    public string? ActionsClaim { get; set; }
 }

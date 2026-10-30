@@ -54,7 +54,6 @@ public sealed class TransferSource(
     InstanceCache cache,
     JobRegistry jobs,
     DnsNameBook names,
-    NodeAccess access,
     ApiJournal journal,
     DomainPump pump,
     TransferClock time,
@@ -151,7 +150,6 @@ public sealed class TransferSource(
             State = TransferState.Ticketed,
             TicketHash = Hash(ticket),
             TicketExpiresAt = expires,
-            AccountId = NodeAccess.AccountOf(user),
             Actor = actor,
             Origin = AuditOrigin.Api,
             CreatedAt = now,
@@ -262,13 +260,6 @@ public sealed class TransferSource(
             return (null, new TransferProblem(403, TransferRefusalCodes.TicketInvalid, "the transfer has ended"));
         if (r.State == TransferState.Ticketed && !TransferStore.IsLive(r, time.GetUtcNow()))
             return (null, new TransferProblem(403, TransferRefusalCodes.TicketInvalid, "the ticket has expired"));
-
-        if (!await access.AllowsAccountAsync(r.AccountId, ActionIds.ServerExport, access.ServerTarget(r.InstanceId), ct)
-                .ConfigureAwait(false))
-        {
-            return (null, new TransferProblem(403, TransferRefusalCodes.TicketInvalid,
-                "the account that minted the ticket may no longer transfer this server"));
-        }
 
         return (r, null);
     }

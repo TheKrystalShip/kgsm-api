@@ -8,9 +8,7 @@ using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 
-using TheKrystalShip.Auth;
 
-using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -32,11 +30,6 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
     }
 
     // A factory variant that registers a fake IWatchdogClient (the base leaves it unprovisioned/absent).
-    // WithWebHostBuilder builds a DERIVED factory with its OWN random account replica + service provider —
-    // different from the base factory. The account behind the token MUST land in the derived factory's
-    // replica (the request goes through the derived pipeline, which resolves authority there), so the
-    // token is minted via the derived factory's Services (AuthTestFactory.MintAccessOn), NOT
-    // factory.AccessToken — whose account would be invisible to the derived pipeline, a stranger at none.
     private HttpClient ClientWithWatchdog(IWatchdogClient watchdog, Persona persona)
     {
         var derived = factory.WithWebHostBuilder(b =>
@@ -47,7 +40,7 @@ public sealed class ConsoleControllerTests(AuthTestFactory factory) : IClassFixt
             }));
         HttpClient c = derived.CreateClient();
         c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
-            AuthTestFactory.MintAccessOn(derived.Services, persona));
+            AuthTestFactory.MintAccess(persona));
         return c;
     }
 

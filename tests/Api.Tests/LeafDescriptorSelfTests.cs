@@ -3,7 +3,6 @@ using System.Text.RegularExpressions;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Leaves;
 
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -104,12 +103,13 @@ public class LeafDescriptorSelfTests
 
     /// <summary>
     /// Every key the settings file can bind — the env-var spelling of every property on the <c>Api</c>
-    /// section, which is the one section this API binds. A key declared in the file and bound nowhere
-    /// would silently drop.
+    /// and <c>Sessions</c> sections, which are the two this API binds. A key declared in the file and
+    /// bound nowhere would silently drop.
     /// </summary>
     private static HashSet<string> SettingsPropertyKeys() =>
     [
         .. typeof(ApiSettings).GetProperties().Select(p => $"{ApiSettings.Section}__{p.Name}"),
+        .. typeof(SessionsSettings).GetProperties().Select(p => $"{SessionsSettings.Section}__{p.Name}"),
     ];
 
     /// <summary>The declared value of one <c>Api</c> key, rendered the way a descriptor default is

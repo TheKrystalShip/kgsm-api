@@ -8,7 +8,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Leaves;
 
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -167,7 +166,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         using WebApplicationFactoryWithFake fakeFactory = new(monitorBody);
         HttpClient client = fakeFactory.Factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", AuthTestFactory.MintAccessOn(fakeFactory.Factory.Services, Persona.Reader));
+            "Bearer", AuthTestFactory.MintAccess(Persona.Reader));
 
         HttpResponseMessage r = await client.GetAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}/services/watchdog/metrics/history?range=1h");
@@ -191,7 +190,7 @@ public sealed class MetricsHistoryEndpointTests(AuthTestFactory factory) : IClas
         using WebApplicationFactoryWithFake fakeFactory = new(monitorBody);
         HttpClient client = fakeFactory.Factory.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
-            "Bearer", AuthTestFactory.MintAccessOn(fakeFactory.Factory.Services, Persona.Reader));
+            "Bearer", AuthTestFactory.MintAccess(Persona.Reader));
 
         HttpResponseMessage r = await client.GetAsync(
             $"/api/v1/hosts/{AuthTestFactory.HostId}/metrics/history?range=1h");

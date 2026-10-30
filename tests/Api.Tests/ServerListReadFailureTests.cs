@@ -12,7 +12,6 @@ using TheKrystalShip.KGSM.Core.Models.Enums;
 using TheKrystalShip.KGSM.Dns.Member;
 using TheKrystalShip.KGSM.Dns.Messages;
 
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

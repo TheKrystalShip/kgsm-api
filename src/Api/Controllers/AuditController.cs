@@ -84,8 +84,7 @@ public sealed class AuditController(
         // named. The rows themselves stay, and the page is the same length: withholding a value is a
         // different thing from reporting a shorter history to a reader, and only the first is honest.
         // The audit topic redacts its live frames by the same action.
-        bool personal = await access.AllowsAsync(User, ActionIds.AuditPersonalFields, access.NodeTarget, ct)
-            .ConfigureAwait(false);
+        bool personal = access.Allows(User, ActionIds.AuditPersonalFields);
 
         return personal ? page : page with { Data = AuditRedaction.Redacted(page.Data) };
     }

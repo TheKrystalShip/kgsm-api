@@ -15,7 +15,6 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Integrations;
 
-using TheKrystalShip.Auth;
 using TheKrystalShip.KGSM.Events;
 
 namespace TheKrystalShip.Api.Tests;
@@ -200,78 +199,6 @@ public sealed class NotificationBusTests
 
         List<NotificationEvent> got = await DrainAsync(bus, 3);
         Assert.Equal(["7656119", "Bo", "10.0.0.3:5000"], got.Select(ev => ev.ActionSubject));
-    }
-
-    /// <summary>
-    /// A provisioning row, with its <c>meta</c> built by the <b>real mapper</b> rather than by hand.
-    /// </summary>
-    /// <remarks>
-    /// Hand-building it is how this suite came to pass against a shape production never emitted: the
-    /// fixture wrote <c>meta["status"]</c>, the mapper writes the landing state under
-    /// <c>meta["to"]</c>, and the guard that reads it therefore dropped every real
-    /// <c>awaiting_approval</c> silently. Deriving the meta from
-    /// <see cref="AuditMapping.FromUserAccountEvent"/> means a future rename moves both at once or
-    /// fails here.
-    /// </remarks>
-    private static AuditRecord ProvisionRow(string userId, string status)
-    {
-        AuditWrite mapped = AuditMapping.FromUserAccountEvent(
-            new UserAccountEventData
-            {
-                Timestamp = DateTimeOffset.UtcNow,
-                Actor = "discord:newcomer",
-                Origin = AuditOrigin.Ui,
-                UserId = userId,
-                Username = "newcomer",
-                ToStatus = status,
-            },
-            ApiJournal.UserProvisionedEvent,
-            "test-host");
-
-        return new AuditRecord(
-            Id: "evt_" + Guid.NewGuid().ToString("N")[..10], Ts: mapped.Ts, Origin: mapped.Origin,
-            Actor: mapped.Actor, Action: mapped.Action, Severity: mapped.Severity,
-            Target: mapped.Target, ServerId: mapped.ServerId, HostId: mapped.HostId,
-            Summary: mapped.Summary, Meta: mapped.Meta);
-    }
-
-    [Fact]
-    public async Task A_provisioning_that_left_somebody_waiting_asks_for_an_approval()
-    {
-        NotificationBus bus = NewBus();
-        bus.Publish(ProvisionRow("usr_abc", "pending"));
-
-        NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
-        Assert.Equal("awaiting_approval", only.CatalogId);
-        // The account id, never the username: a label somebody can change out from under a staged handle.
-        Assert.Equal("usr_abc", only.ActionSubject);
-    }
-
-    [Fact]
-    public async Task A_provisioning_that_did_not_is_not_an_approval_request()
-    {
-        NotificationBus bus = NewBus();
-        // A host whose policy activates on sight writes the same action with a different status, and
-        // asking an owner to approve what is already approved is worse than saying nothing.
-        bus.Publish(ProvisionRow("usr_auto", "active"));
-        // The barrier: the channel is FIFO, so receiving this proves the first was dropped, not delayed.
-        bus.Publish(ProvisionRow("usr_waiting", "pending"));
-
-        NotificationEvent only = Assert.Single(await DrainAsync(bus, 1));
-        Assert.Equal("usr_waiting", only.ActionSubject);
-    }
-
-    [Fact]
-    public async Task Two_people_signing_up_are_two_people_to_approve()
-    {
-        NotificationBus bus = NewBus();
-        bus.Publish(ProvisionRow("usr_a", "pending"));
-        bus.Publish(ProvisionRow("usr_b", "pending"));
-
-        List<NotificationEvent> got = await DrainAsync(bus, 2);
-        // Both carry a null server, so a window keyed on that would coalesce the second away.
-        Assert.All(got, ev => Assert.Null(ev.ServerId));
-        Assert.Equal(2, got.Select(ev => ev.SubjectKey).Distinct(StringComparer.Ordinal).Count());
     }
 
     [Fact]

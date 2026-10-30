@@ -7,7 +7,6 @@ using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Integrations;
 using Microsoft.Extensions.Logging.Abstractions;
 
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

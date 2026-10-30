@@ -1,25 +1,16 @@
-using TheKrystalShip.Auth;
-
 namespace TheKrystalShip.Api.Tests;
 
-/// <summary>
-/// The people this suite's sessions name — Discord-shaped, the way the auth anchor names somebody who
-/// signed in through Discord.
-/// </summary>
-/// <remarks>
-/// A session carries who someone is and nothing about what they may do: every gate reads the roles held
-/// by the account the identity proves in this node's replica. So a test chooses a person here and sets
-/// their account separately (<see cref="AuthTestFactory.SetAccount"/>), which is the same split
-/// production has.
-/// </remarks>
+/// <summary>A person a test's token names: the token's <c>sub</c> and <c>name</c>.</summary>
+/// <param name="Subject">The account, as the provider's tokens carry it.</param>
+/// <param name="Name">What the person is called.</param>
+public sealed record TestPerson(string Subject, string Name);
+
+/// <summary>The people this suite's tokens name.</summary>
 public static class TestIdentity
 {
-    /// <summary>The standing identity every <see cref="AuthTestFactory.AccessToken"/> names.</summary>
-    public static readonly KgsmIdentity Identity =
-        new(KgsmActorProvider.Discord, "198772043", "haru", "haru",
-            "https://cdn.discordapp.com/avatars/198772043/abc.png", ["identify", "guilds"]);
+    /// <summary>The standing person every <see cref="AuthTestFactory.AccessToken"/> names.</summary>
+    public static readonly TestPerson Person = new("usr_haru", "haru");
 
     /// <summary>A second person, named by <paramref name="subject"/>, for a test that needs two.</summary>
-    public static KgsmIdentity IdentityFor(string subject) =>
-        Identity with { Subject = subject, Username = "user" + subject, Display = "User " + subject };
+    public static TestPerson PersonFor(string subject) => new("usr_" + subject, "User " + subject);
 }

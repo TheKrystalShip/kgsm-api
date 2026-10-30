@@ -7,7 +7,6 @@ using TheKrystalShip.Api.Services.Audit;
 using TheKrystalShip.Api.Data;
 using TheKrystalShip.Api.Services.Auth;
 
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

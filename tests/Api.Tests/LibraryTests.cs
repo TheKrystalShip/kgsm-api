@@ -11,7 +11,6 @@ using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
 
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 
@@ -331,7 +330,6 @@ public sealed class LibraryAggregatorTests
         LeafDropInDir = "/tmp/kgsm-api-test-dropins",
         DomainPollMs = 5000, MetricsPollMs = 1000, ServicesPollMs = 5000,
         AuthDisabled = true, DisabledAuthActor = "local:test",
-        SessionsCacheTtlMs = 5000,
         NodeId = "test",
     };
 

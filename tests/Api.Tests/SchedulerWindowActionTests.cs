@@ -3,7 +3,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
-using TheKrystalShip.Auth;
 
 namespace TheKrystalShip.Api.Tests;
 

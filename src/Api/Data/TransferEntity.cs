@@ -68,10 +68,6 @@ public sealed class TransferEntity
     /// <summary>Source: when the ticket stops being redeemable unless the lock was taken.</summary>
     public DateTimeOffset? TicketExpiresAt { get; set; }
 
-    /// <summary>Source: the account that minted the ticket, whose access is evaluated again whenever the
-    /// target redeems it. Null on an auth-disabled host.</summary>
-    public string? AccountId { get; set; }
-
     /// <summary>The person who asked, stamped onto every engine call made for the transfer.</summary>
     public string? Actor { get; set; }
 

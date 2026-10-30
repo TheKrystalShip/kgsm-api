@@ -12,17 +12,14 @@ namespace TheKrystalShip.Api.Services.Leaves;
 /// apart — it trusts whoever authenticated the person to have named them.
 /// </para>
 /// <para>
-/// The account id travels beside the name: confirming is performing, and the leaf evaluates the person
-/// for the offer's own action at its server against the node's replica before it runs anything.
+/// The person's access token travels beside the name as the request's bearer: confirming is performing,
+/// and the leaf admits the person for the offer's own action on that token before it runs anything.
 /// </para>
 /// </remarks>
-internal sealed record ReactorRedemptionBody(string By, string? Account)
+internal sealed record ReactorRedemptionBody(string By)
 {
     [System.Text.Json.Serialization.JsonPropertyName("by")]
     public string By { get; init; } = By;
-
-    [System.Text.Json.Serialization.JsonPropertyName("account")]
-    public string? Account { get; init; } = Account;
 }
 
 /// <summary>The one serializer setting this relay needs, so the leaf reads what it expects.</summary>
@@ -420,32 +417,34 @@ public sealed class ReactorClient : IDisposable
     /// <param name="ruleId">The rule's id.</param>
     /// <param name="ruleJson">The rule, in the leaf's own document shape.</param>
     /// <param name="by">The caller, as <c>provider:name</c>.</param>
-    /// <param name="account">
-    /// The caller's account id, which the rule then acts as beside the reactor's own service account.
+    /// <param name="callerToken">
+    /// The caller's access token, sent as the request's bearer: the leaf admits the person on it and
+    /// records its subject and name as the rule's author.
     /// </param>
     /// <param name="ct">Cancellation.</param>
     public async Task<(string? Body, int Status)> WriteRuleAsync(
-        string ruleId, string ruleJson, string by, string? account, CancellationToken ct)
+        string ruleId, string ruleJson, string by, string? callerToken, CancellationToken ct)
     {
         if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
             return (null, 0); // disconnected at runtime: honest absent, no request.
 
         try
         {
-            // The rule travels as the leaf's own document shape, with the actor and the account beside
-            // it. Composed as text rather than through a DTO because this API has no opinion about a
+            // The rule travels as the leaf's own document shape, with the actor beside it. Composed as text rather than through a DTO because this API has no opinion about a
             // rule's contents and adding one here would be a second schema to keep in step with the build.
             string payload =
-                $"{{\"rule\":{ruleJson},\"by\":{JsonSerializer.Serialize(by, ReactorRelayJson.Options)},"
-                + $"\"account\":{JsonSerializer.Serialize(account, ReactorRelayJson.Options)}}}";
+                $"{{\"rule\":{ruleJson},\"by\":{JsonSerializer.Serialize(by, ReactorRelayJson.Options)}}}";
 
             using var content = new StringContent(
                 payload, System.Text.Encoding.UTF8, "application/json");
 
             using CancellationTokenSource bound = Bounded(ct, PreviewWithin);
-            using HttpResponseMessage resp = await _http
-                .PutAsync($"/rules/{Uri.EscapeDataString(ruleId)}", content, bound.Token)
-                .ConfigureAwait(false);
+            using var request = new HttpRequestMessage(HttpMethod.Put, $"/rules/{Uri.EscapeDataString(ruleId)}")
+            {
+                Content = content,
+            };
+            Bearer(request, callerToken);
+            using HttpResponseMessage resp = await _http.SendAsync(request, bound.Token).ConfigureAwait(false);
 
             string body = await resp.Content.ReadAsStringAsync(bound.Token).ConfigureAwait(false);
             return (body, (int)resp.StatusCode);
@@ -498,8 +497,14 @@ public sealed class ReactorClient : IDisposable
         }
     }
 
+    private static void Bearer(HttpRequestMessage request, string? token)
+    {
+        if (!string.IsNullOrWhiteSpace(token))
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+    }
+
     public async Task<(string? Body, int Status)> RedeemProposalAsync(
-        string handle, bool confirm, string by, string? account, CancellationToken ct)
+        string handle, bool confirm, string by, string? callerToken, CancellationToken ct)
     {
         if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
             return (null, 0); // disconnected at runtime: honest absent, no request.
@@ -508,13 +513,16 @@ public sealed class ReactorClient : IDisposable
         {
             string verb = confirm ? "confirm" : "dismiss";
             using var content = new StringContent(
-                JsonSerializer.Serialize(new ReactorRedemptionBody(by, account), ReactorRelayJson.Options),
+                JsonSerializer.Serialize(new ReactorRedemptionBody(by), ReactorRelayJson.Options),
                 System.Text.Encoding.UTF8, "application/json");
 
             using CancellationTokenSource bound = Bounded(ct, PreviewWithin);
-            using HttpResponseMessage resp = await _http
-                .PostAsync($"/proposals/{Uri.EscapeDataString(handle)}/{verb}", content, bound.Token)
-                .ConfigureAwait(false);
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"/proposals/{Uri.EscapeDataString(handle)}/{verb}")
+            {
+                Content = content,
+            };
+            Bearer(request, callerToken);
+            using HttpResponseMessage resp = await _http.SendAsync(request, bound.Token).ConfigureAwait(false);
 
             string body = await resp.Content.ReadAsStringAsync(bound.Token).ConfigureAwait(false);
             return (body, (int)resp.StatusCode);

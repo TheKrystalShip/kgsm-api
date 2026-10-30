@@ -1,4 +1,3 @@
-using TheKrystalShip.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -336,7 +335,6 @@ public sealed class LibraryHydrationWorkerTests : IDisposable
 
 
         AuthDisabled = true, DisabledAuthActor = "local:test",
-        SessionsCacheTtlMs = 5000,
         NodeId = "test",
     };
 

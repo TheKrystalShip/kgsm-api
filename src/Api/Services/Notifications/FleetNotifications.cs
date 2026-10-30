@@ -2,8 +2,6 @@ using System.Collections.Concurrent;
 using TheKrystalShip.Api.Contracts;
 using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Integrations;
-using TheKrystalShip.Auth.Access;
-using TheKrystalShip.Auth.Cluster;
 using TheKrystalShip.KGSM.Events;
 using TheKrystalShip.Notifications;
 
@@ -35,10 +33,8 @@ namespace TheKrystalShip.Api.Services.Notifications;
 /// </remarks>
 public sealed class FleetNotifications(
     INotifier notifier,
-    MemberAccess memberAccess,
-    NodeAccess nodeAccess,
+    NotificationActors actors,
     Aggregation.InstanceCache instances,
-    ApiOptions options,
     ILogger<FleetNotifications> logger)
 {
     /// <summary>The minimum gap between two notifications of one event about one subject.</summary>
@@ -72,7 +68,7 @@ public sealed class FleetNotifications(
         if (Coalesced(ev, now))
             return;
 
-        IReadOnlyList<string> people = await AudienceAsync(ev, ct).ConfigureAwait(false);
+        IReadOnlyList<string> people = Audience(ev);
         if (people.Count == 0)
             return;
 
@@ -176,27 +172,11 @@ public sealed class FleetNotifications(
     }
 
     /// <summary>
-    /// The accounts that may read what <paramref name="ev"/> is about, evaluated from this node's replica as
-    /// it stands. None while the replica cannot be read: what a person would be told cannot be checked.
+    /// The people that may read what <paramref name="ev"/> is about: those whose token, when last seen,
+    /// listed the action that reads it (<see cref="NotificationActors.Freshness"/>).
     /// </summary>
-    private async Task<IReadOnlyList<string>> AudienceAsync(NotificationEvent ev, CancellationToken ct)
-    {
-        if (options.AuthDisabled)
-            return [options.DisabledAuthActor];
-
-        if (await memberAccess.EvaluatorAsync(ct).ConfigureAwait(false) is not { } evaluator)
-            return [];
-
-        bool aboutServer = !string.IsNullOrEmpty(ev.ServerId);
-        string action = aboutServer ? ActionIds.ServerRead : ActionIds.AuditRead;
-        AccessScope target = aboutServer ? nodeAccess.ServerTarget(ev.ServerId!) : nodeAccess.NodeTarget;
-
-        return [.. evaluator.Snapshot.Accounts.Values
-            .Where(a => a.Kind == AccountKind.Person
-                && a.Status == AccountStatus.Active
-                && evaluator.Allows(a.AccountId, action, target).Allowed)
-            .Select(a => a.AccountId)];
-    }
+    private IReadOnlyList<string> Audience(NotificationEvent ev) =>
+        actors.Holding(string.IsNullOrEmpty(ev.ServerId) ? ActionIds.AuditRead : ActionIds.ServerRead);
 
     /// <summary>The line a person reads: what happened, to what.</summary>
     internal static string Title(NotificationEvent ev)
@@ -219,7 +199,6 @@ public sealed class FleetNotifications(
             case "leaf_up": return "A service came back";
             case "leaf_degraded": return "A service is degraded";
             case "leaf_recovered": return "A service recovered";
-            case "awaiting_approval": return "Someone is waiting to be let in";
             case "reactor_offer": return "A rule is waiting for your answer";
         }
 
@@ -267,7 +246,6 @@ public sealed class FleetNotifications(
         "leaf_degraded" => ("triangle-alert", "warning"),
         "leaf_recovered" => ("circle-check", "success"),
         "restart_soon" => ("timer", "warning"),
-        "awaiting_approval" => ("user-check", "info"),
         "reactor_offer" => ("zap", "info"),
         _ => ("bell", "neutral"),
     };

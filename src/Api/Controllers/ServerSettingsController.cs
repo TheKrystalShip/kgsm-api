@@ -79,7 +79,7 @@ public sealed class ServerSettingsController(
         // action on top of changing the server's configuration — the one this route declares for it.
         string windowsAction = ActionWhenPresentAttribute.For(HttpContext, WindowsField);
         if (body.MaintenanceWindows is not null
-            && !await access.AllowsOnServerAsync(User, windowsAction, id, ct).ConfigureAwait(false))
+            && !access.Allows(User, windowsAction))
             return Error(StatusCodes.Status403Forbidden, "forbidden",
                 $"changing maintenance windows needs {windowsAction}");
 
@@ -233,7 +233,7 @@ public sealed class ServerSettingsController(
         // The whole window list is one key, replaced wholesale. The scheduler leaf re-reads kgsm config as
         // its source of truth, so persisting the key is the whole apply — nothing is pushed at the daemon.
         if (packedWindows is not null && !TryApplyWindows(
-                instances, id, packedWindows, NodeAccess.AccountOf(User), actor, origin,
+                instances, id, packedWindows, CallerId.AuthorOf(User), actor, origin,
                 applied, out IActionResult? mwErr))
             return mwErr!;
 

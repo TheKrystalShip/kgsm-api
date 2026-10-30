@@ -3,8 +3,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using TheKrystalShip.Api.Contracts;
+using TheKrystalShip.Api.Services.Auth;
 using TheKrystalShip.Api.Services.Preferences;
-using TheKrystalShip.Auth.Cluster;
 
 namespace TheKrystalShip.Api.Controllers;
 
@@ -60,8 +60,7 @@ public sealed class MePreferencesController(UserPreferenceStore store) : Control
     private IActionResult Error(int status, string code, string message) =>
         StatusCode(status, new ErrorEnvelope(new ErrorBody(code, message, null)));
 
-    private string? UserId() =>
-        User.Identity is ClaimsIdentity ci && SessionClaims.ReadIdentity(ci) is { } id ? id.Handle : null;
+    private string? UserId() => CallerId.Of(User)?.Subject;
 
     /// <summary>
     /// The calling device, or an error result naming what is wrong with it. A blank header and a
