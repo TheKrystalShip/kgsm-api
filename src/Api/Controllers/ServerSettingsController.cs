@@ -142,6 +142,15 @@ public sealed class ServerSettingsController(
             if (!TryPackWindows(candidates, current.Runtime == InstanceRuntime.Container,
                     out packedWindows, out string? windowError))
                 return Error(StatusCodes.Status400BadRequest, "bad_request", windowError!);
+
+            // The scheduler runs a window as itself, attributed to whoever saves it, so the saver has to
+            // hold every action the window runs. Saving again re-checks; a role removed later does not
+            // stop what was saved.
+            string? missing = MaintenanceWindowActions.Required(packedWindows!)
+                .FirstOrDefault(action => !access.Allows(User, action));
+            if (missing is not null)
+                return Error(StatusCodes.Status403Forbidden, "forbidden",
+                    $"these maintenance windows run {missing}, which this account does not hold");
         }
 
         string? actor = AuditPrincipal.ActorString(User);

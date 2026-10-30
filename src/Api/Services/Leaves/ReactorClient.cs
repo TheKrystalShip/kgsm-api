@@ -4,24 +4,6 @@ using System.Text.Json;
 
 namespace TheKrystalShip.Api.Services.Leaves;
 
-/// <summary>Who is answering a proposal, in the shape the leaf takes it.</summary>
-/// <remarks>
-/// <para>
-/// <b>Built here from the authenticated principal, never bound from the request.</b> A caller-supplied
-/// name would let anybody sign anybody else's confirmation, and the leaf has no way to tell the two
-/// apart — it trusts whoever authenticated the person to have named them.
-/// </para>
-/// <para>
-/// The person's access token travels beside the name as the request's bearer: confirming is performing,
-/// and the leaf admits the person for the offer's own action on that token before it runs anything.
-/// </para>
-/// </remarks>
-internal sealed record ReactorRedemptionBody(string By)
-{
-    [System.Text.Json.Serialization.JsonPropertyName("by")]
-    public string By { get; init; } = By;
-}
-
 /// <summary>The one serializer setting this relay needs, so the leaf reads what it expects.</summary>
 internal static class ReactorRelayJson
 {
@@ -416,14 +398,13 @@ public sealed class ReactorClient : IDisposable
     /// </remarks>
     /// <param name="ruleId">The rule's id.</param>
     /// <param name="ruleJson">The rule, in the leaf's own document shape.</param>
-    /// <param name="by">The caller, as <c>provider:name</c>.</param>
     /// <param name="callerToken">
     /// The caller's access token, sent as the request's bearer: the leaf admits the person on it and
     /// records its subject and name as the rule's author.
     /// </param>
     /// <param name="ct">Cancellation.</param>
     public async Task<(string? Body, int Status)> WriteRuleAsync(
-        string ruleId, string ruleJson, string by, string? callerToken, CancellationToken ct)
+        string ruleId, string ruleJson, string? callerToken, CancellationToken ct)
     {
         if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
             return (null, 0); // disconnected at runtime: honest absent, no request.
@@ -433,7 +414,7 @@ public sealed class ReactorClient : IDisposable
             // The rule travels as the leaf's own document shape, with the actor beside it. Composed as text rather than through a DTO because this API has no opinion about a
             // rule's contents and adding one here would be a second schema to keep in step with the build.
             string payload =
-                $"{{\"rule\":{ruleJson},\"by\":{JsonSerializer.Serialize(by, ReactorRelayJson.Options)}}}";
+                $"{{\"rule\":{ruleJson}}}";
 
             using var content = new StringContent(
                 payload, System.Text.Encoding.UTF8, "application/json");
@@ -504,7 +485,7 @@ public sealed class ReactorClient : IDisposable
     }
 
     public async Task<(string? Body, int Status)> RedeemProposalAsync(
-        string handle, bool confirm, string by, string? callerToken, CancellationToken ct)
+        string handle, bool confirm, string? callerToken, CancellationToken ct)
     {
         if (!_registry.IsProvisioned(ProvisionableLeaf.Reactor))
             return (null, 0); // disconnected at runtime: honest absent, no request.
@@ -512,15 +493,8 @@ public sealed class ReactorClient : IDisposable
         try
         {
             string verb = confirm ? "confirm" : "dismiss";
-            using var content = new StringContent(
-                JsonSerializer.Serialize(new ReactorRedemptionBody(by), ReactorRelayJson.Options),
-                System.Text.Encoding.UTF8, "application/json");
-
             using CancellationTokenSource bound = Bounded(ct, PreviewWithin);
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"/proposals/{Uri.EscapeDataString(handle)}/{verb}")
-            {
-                Content = content,
-            };
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"/proposals/{Uri.EscapeDataString(handle)}/{verb}");
             Bearer(request, callerToken);
             using HttpResponseMessage resp = await _http.SendAsync(request, bound.Token).ConfigureAwait(false);
 

@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TheKrystalShip.Api.Services.Auth;
+using TheKrystalShip.Api.Services.Scheduling;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
@@ -238,6 +239,29 @@ public sealed class ServerSettingsTests
     }
 
     // --- Maintenance windows (the whole-list replace) ---------------------------------------------
+
+    [Fact]
+    public async Task Patch_MaintenanceWindows_the_saver_must_hold_every_action_the_windows_run()
+    {
+        // Runner holds the windows action and the reads but not, here, the backup actions.
+        string token = _engine.AccessTokenWith(TestIdentity.Person,
+            [ActionIds.ServerRead, ActionIds.ServerConfigRead, ActionIds.ServerConfigWrite, ActionIds.ServerWindowsWrite, ActionIds.ServerRestart, ActionIds.ServerAnnounce]);
+        using HttpClient c = _engine.CreateClient();
+        c.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        HttpResponseMessage resp = await c.PatchAsync("/api/v1/servers/factorio-1/settings",
+            new StringContent("{\"maintenanceWindows\":[\"weekly.sun@04:00/backup,restart\"]}", Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+        Assert.Contains(ActionIds.ServerBackupsCreate, await resp.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
+    [InlineData("daily@05:00/backup", new[] { "kgsm:server.backups.create", "kgsm:server.backups.manage" })]
+    [InlineData("daily@05:00/update", new[] { "kgsm:server.announce", "kgsm:server.update" })]
+    [InlineData("daily@05:00/restart", new[] { "kgsm:server.announce", "kgsm:server.restart" })]
+    public void The_actions_a_window_runs_are_its_tasks_actions(string window, string[] expected) =>
+        Assert.Equal(expected, MaintenanceWindowActions.Required(window));
 
     [Fact]
     public async Task Patch_MaintenanceWindows_applies_the_one_packed_key()

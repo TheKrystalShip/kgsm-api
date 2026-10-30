@@ -35,10 +35,6 @@ public static class PushActionCatalog
     /// and a capability nobody used should not keep standing.</summary>
     public static readonly TimeSpan ButtonLifetime = TimeSpan.FromHours(2);
 
-    /// <summary>How far one tap defers a scheduled restart. An hour is what the button says, and it is
-    /// enough to finish what you are in the middle of without turning "not now" into a reschedule.</summary>
-    public const int PostponeBy = 60;
-
     /// <param name="moderation">What the event's game declares it can do to a player, or
     /// <see langword="null"/> when that could not be established. <b>The blueprint's placeholder is the
     /// contract</b> — a game that declares no ban template cannot ban, so offering the button would be
@@ -66,14 +62,6 @@ public static class PushActionCatalog
         {
             if (ev.CatalogId == "leaf_down" && Leaves.LeafCatalog.IsRestartable(subject))
                 return [new PushActionOffer(PushActionKind.LeafRestart, subject, "Restart")];
-
-            // The scheduler moves one window, so the button carries which: an instruction naming none is
-            // refused by the daemon, and on a server holding two appointments, moving the wrong one is
-            // worse than refusing. A warning that could not name its window offers nothing.
-            if (ev.CatalogId == "restart_soon")
-                return ev.ActionQualifier is { Length: > 0 } window
-                    ? [new PushActionOffer(PushActionKind.SchedulePostpone, subject, "Postpone 1h", window)]
-                    : [];
         }
 
         // A reactor offer deliberately gets no button, and the absence is the design rather than an

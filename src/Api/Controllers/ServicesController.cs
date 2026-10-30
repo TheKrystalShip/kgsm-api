@@ -174,10 +174,10 @@ public sealed class ServicesController(
         SchedulerControlResponse result = requested switch
         {
             SchedulerVerb.Postpone => await scheduler
-                .PostponeAsync(instance.Trim(), window.Trim(), body.Minutes ?? DefaultPostponeMinutes, ct)
+                .PostponeAsync(instance.Trim(), window.Trim(), body.Minutes ?? DefaultPostponeMinutes, CallerId.PersonToken(HttpContext), ct)
                 .ConfigureAwait(false),
-            SchedulerVerb.Skip => await scheduler.SkipAsync(instance.Trim(), window.Trim(), ct).ConfigureAwait(false),
-            _ => await scheduler.RunNowAsync(instance.Trim(), window.Trim(), ct).ConfigureAwait(false),
+            SchedulerVerb.Skip => await scheduler.SkipAsync(instance.Trim(), window.Trim(), CallerId.PersonToken(HttpContext), ct).ConfigureAwait(false),
+            _ => await scheduler.RunNowAsync(instance.Trim(), window.Trim(), CallerId.PersonToken(HttpContext), ct).ConfigureAwait(false),
         };
 
         // The daemon's own words, either way. A refusal is a 400 carrying them rather than a 200 with an
@@ -589,7 +589,7 @@ public sealed class ServicesController(
         }
 
         (string? body, int status) =
-            await reactor.RedeemProposalAsync(handle, confirm, by, CallerId.PersonToken(HttpContext), ct).ConfigureAwait(false);
+            await reactor.RedeemProposalAsync(handle, confirm, CallerId.PersonToken(HttpContext), ct).ConfigureAwait(false);
 
         if (body is null)
         {

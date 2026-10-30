@@ -67,7 +67,6 @@ public sealed class FleetNotificationActions(
         return name switch
         {
             PushActionKind.LeafRestart => await RestartLeafAsync(target.Target, actor, Allows, ct).ConfigureAwait(false),
-            PushActionKind.SchedulePostpone => await PostponeAsync(target, actor, Allows, ct).ConfigureAwait(false),
             _ => Refuse("This build does not know how to do that."),
         };
     }
@@ -97,39 +96,6 @@ public sealed class FleetNotificationActions(
         return ok
             ? (true, $"Asked systemd to restart {leaf.DisplayName}.")
             : Unavailable($"systemd would not restart {leaf.DisplayName}.");
-    }
-
-    /// <summary>
-    /// Push one of a server's maintenance windows back an hour. <c>scheduler:windows.write</c>, as on the
-    /// panel. The scheduler's control socket carries no identity, so the gate here is the only one there is.
-    /// No audit row: a postponement changes no configuration and leaves no trace on the host. It names the
-    /// window it moves, because the daemon refuses an instruction naming none.
-    /// </summary>
-    private async Task<(bool, string)> PostponeAsync(
-        ButtonArgument button, string actor, Func<string, bool> allows, CancellationToken ct)
-    {
-        if (!allows(ActionIds.SchedulerWindowsWrite))
-            return Refuse("That account is not allowed to change when a server restarts.");
-
-        if (services.GetService(typeof(SchedulerClient)) is not SchedulerClient scheduler || !scheduler.CanControl)
-            return Unavailable("This host is not wired to the scheduler.");
-
-        if (button.Subject is not { Length: > 0 } window)
-            return Refuse("That notification does not say which maintenance window to move.");
-
-        SchedulerControlResponse result = await scheduler
-            .PostponeAsync(button.Target, window, PushActionCatalog.PostponeBy, ct).ConfigureAwait(false);
-
-        logger.LogInformation("notification action: postpone {Window} on {Server} — {Message} (actor={Actor})",
-            window, button.Target, result.Message, actor);
-
-        if (!result.Ok)
-            return Refuse(Capitalize(result.Message) + ".");
-
-        // The new time, in the words the person will read it in; the scheduler answers with it so a caller
-        // never has to ask again.
-        string when = result.NextFireUtc is { } next ? $" It runs at {next.ToLocalTime():HH:mm} instead." : "";
-        return (true, $"{button.Target}'s {window} maintenance is pushed back an hour.{when}");
     }
 
     /// <summary>

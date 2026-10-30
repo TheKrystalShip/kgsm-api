@@ -52,9 +52,13 @@ replicated here. The authority for the model is `../../../../../kgsm-docs/system
 - **A person is named by their token.** `CallerId` reads `sub` (the key records hold), `name` (stored beside
   the subject wherever a record keeps only a subject) and the audit actor (`local:<name>` for a person,
   `system:<member>` for a member). A record written for a person never asks the provider who they are.
-- **A leaf is asked on the person's own token.** `LeafSurfaceRelay` and `ReactorClient` forward the person's
-  `Authorization` header (`CallerId.PersonToken`), so the leaf admits them itself and records the token's
-  subject and name as the author of an automation. A caller who is not a person forwards nothing.
+- **A leaf is asked on the person's own token.** `LeafSurfaceRelay`, `SchedulerClient` and `ReactorClient`
+  forward the person's `Authorization` header (`CallerId.PersonToken`), so the leaf admits them itself and
+  records the token's subject and name as the author of an automation. A caller who is not a person
+  forwards nothing.
+- **Windows are checked when saved.** `ServerSettingsController` refuses a maintenance-window save unless
+  the saver's token lists every action `MaintenanceWindowActions` derives from the windows' tasks; the
+  scheduler then runs them as itself, attributed to the subject passed as the engine author.
 - **Streams end with the token.** The SSE loop's cancellation is `KgsmPerson.UntilExpiry`; the client
   reconnects with a fresh token (`Realtime/CLAUDE.md`).
 - **`/.well-known/oauth-protected-resource` names the provider** (RFC 9728): `Sessions__Issuer` when it is a

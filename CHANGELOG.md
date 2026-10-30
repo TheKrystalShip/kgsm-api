@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — windows are checked when saved; leaves are asked on the bearer (2.1.0)
+
+- **Saving maintenance windows requires the saver's token to list every action the windows run**
+  (`MaintenanceWindowActions`): a backup needs `kgsm:server.backups.create` and `.manage`, an update
+  `kgsm:server.update`, a restart `kgsm:server.restart`, and a window that updates or restarts also
+  `kgsm:server.announce`. A save missing one answers `403`. The author passed to the engine stays the
+  token's subject.
+- **The scheduler client sends the person's `Authorization: Bearer`** on postpone, skip and run-now, and
+  the reactor client sends no `by` or `account` body field: a rule is `{rule}` and a confirmation has no
+  body.
+- **The scheduled-restart notification carries no "Postpone 1h" button.** A tap carries no token, and the
+  scheduler admits a postponement on the person's own.
+
 ### Changed — KGSM is an OpenID Connect relying party (2.0.0, Api.Contracts 5.0.0-dev.1, `Lib` 9.5.0-dev.2, `Sessions` 1.0.0-dev.1)
 
 - **A person is admitted on the sign-in provider's access token.** `AddKgsmSessions` checks the bearer

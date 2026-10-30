@@ -33,17 +33,9 @@ public static class PushActionKind
     /// </summary>
     public const string LeafRestart = "leaf.restart";
 
-    /// <summary>
-    /// Push <c>Target</c>'s <c>Subject</c> window back an hour. It changes nothing about the schedule —
-    /// the fire after this one lands where it always would have — which is what makes it the one
-    /// scheduling verb a single tap can mean unambiguously.
-    /// </summary>
-    public const string SchedulePostpone = "schedule.postpone";
-
     public static bool IsKnown(string? kind) =>
         kind is ServerUpdate or ServerStart or ServerStop
-             or PlayerKick or PlayerBan or LeafRestart
-             or SchedulePostpone;
+             or PlayerKick or PlayerBan or LeafRestart;
 
     /// <summary>The moderation action a kind runs, or <see langword="null"/> when it is not one. Maps onto
     /// the same <see cref="Contracts.ModerationAction"/> vocabulary the panel's own route takes, so the two

@@ -134,21 +134,22 @@ public sealed class SchedulerClient
 
     /// <summary>
     /// Push one window's next run back by <paramref name="minutes"/>. The schedule is untouched, so the fire
-    /// after this one lands where it always would have.
+    /// after this one lands where it always would have. Every instruction carries the person's access
+    /// token (<paramref name="callerToken"/>), which the scheduler admits for <c>scheduler:windows.write</c>.
     /// </summary>
     public Task<SchedulerControlResponse> PostponeAsync(
-        string instance, string window, int minutes, CancellationToken ct = default) =>
-        SendAsync(SchedulerVerb.Postpone, new SchedulerControlRequest(instance, window, minutes), ct);
+        string instance, string window, int minutes, string? callerToken, CancellationToken ct = default) =>
+        SendAsync(SchedulerVerb.Postpone, new SchedulerControlRequest(instance, window, minutes), callerToken, ct);
 
     /// <summary>Drop this occurrence of one window. The one after it is unaffected.</summary>
     public Task<SchedulerControlResponse> SkipAsync(
-        string instance, string window, CancellationToken ct = default) =>
-        SendAsync(SchedulerVerb.Skip, new SchedulerControlRequest(instance, window), ct);
+        string instance, string window, string? callerToken, CancellationToken ct = default) =>
+        SendAsync(SchedulerVerb.Skip, new SchedulerControlRequest(instance, window), callerToken, ct);
 
     /// <summary>Bring one window forward to the scheduler's next poll — the same run a due one would get.</summary>
     public Task<SchedulerControlResponse> RunNowAsync(
-        string instance, string window, CancellationToken ct = default) =>
-        SendAsync(SchedulerVerb.RunNow, new SchedulerControlRequest(instance, window), ct);
+        string instance, string window, string? callerToken, CancellationToken ct = default) =>
+        SendAsync(SchedulerVerb.RunNow, new SchedulerControlRequest(instance, window), callerToken, ct);
 
     /// <summary>
     /// One instruction to the scheduler: the verb is the route, the body is what it acts on.
@@ -165,7 +166,7 @@ public sealed class SchedulerClient
     /// </para>
     /// </remarks>
     private async Task<SchedulerControlResponse> SendAsync(
-        string verb, SchedulerControlRequest request, CancellationToken ct)
+        string verb, SchedulerControlRequest request, string? callerToken, CancellationToken ct)
     {
         if (!CanControl)
             return new SchedulerControlResponse(false, "this host is not wired to a scheduler");
@@ -174,8 +175,13 @@ public sealed class SchedulerClient
         timed.CancelAfter(ReadTimeout);
         try
         {
-            using HttpResponseMessage response = await _http
-                .PostAsJsonAsync("/windows/" + verb, request, Json, timed.Token).ConfigureAwait(false);
+            using var message = new HttpRequestMessage(HttpMethod.Post, "/windows/" + verb)
+            {
+                Content = JsonContent.Create(request, options: Json),
+            };
+            if (!string.IsNullOrWhiteSpace(callerToken))
+                message.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", callerToken);
+            using HttpResponseMessage response = await _http.SendAsync(message, timed.Token).ConfigureAwait(false);
 
             // A non-2xx means the scheduler could not read the instruction, which is this API's fault
             // rather than the caller's — and never a refusal, which arrives 200 carrying its own reason.

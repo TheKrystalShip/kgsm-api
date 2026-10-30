@@ -222,7 +222,7 @@ public sealed class ServicesProvisioningController(
         // The account too: the rule acts as its author beside the reactor's own service account, so the
         // leaf records who that is.
         (string? body, int status) = await reactor.WriteRuleAsync(
-            ruleId, rule, actor, CallerId.PersonToken(HttpContext), ct);
+            ruleId, rule, CallerId.PersonToken(HttpContext), ct);
 
         if (status == 0)
         {

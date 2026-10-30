@@ -10,10 +10,8 @@ namespace TheKrystalShip.Api.Tests;
 /// <summary>
 /// The button on a maintenance-window warning, and the conditions under which it is not offered.
 /// <para>
-/// The warning is only worth sending because something can be done about it, so the cases that matter are
-/// the ones where nothing can: a host that cannot reach the scheduler's control socket, and a warning that
-/// cannot say which of a server's windows to move. In both the notification still goes out and carries
-/// nothing to press, rather than offering a button that would fail.
+/// A scheduled-restart warning carries nothing to press: postponing a window needs the person's own token,
+/// which a notification tap does not carry.
 /// </para>
 /// </summary>
 public sealed class ScheduledRestartWarningTests
@@ -25,30 +23,9 @@ public sealed class ScheduledRestartWarningTests
             ActionSubject: actionSubject, ActionQualifier: window);
 
     [Fact]
-    public void A_warning_offers_to_push_that_window_back()
-    {
-        PushActionOffer only = Assert.Single(PushActionCatalog.For(Warning("romestead")));
-        Assert.Equal(PushActionKind.SchedulePostpone, only.Kind);
-        Assert.Equal("romestead", only.Target);
-        Assert.Equal("Postpone 1h", only.Label);
-        // The scheduler moves one window and refuses an instruction that names none, so the button carries
-        // which — on a server holding two appointments, moving the wrong one is worse than refusing.
-        Assert.Equal("weekly.sun@04:00", only.Subject);
-    }
-
-    [Fact]
-    public void A_host_that_cannot_reach_the_scheduler_offers_nothing() =>
-        // The watcher clears the subject when the control socket is unconfigured, and a button offered
-        // there would be an offer to fail — which on a lock screen is worse than no button at all.
-        Assert.Empty(PushActionCatalog.For(Warning(null)));
-
-    [Fact]
-    public void A_warning_that_cannot_name_its_window_offers_nothing() =>
-        Assert.Empty(PushActionCatalog.For(Warning("romestead", window: null)));
-
-    [Fact]
-    public void An_hour_is_what_the_button_says_and_what_it_does() =>
-        Assert.Equal(60, PushActionCatalog.PostponeBy);
+    public void A_warning_offers_no_button() =>
+        // A tap carries no token, and the scheduler admits a postponement on the person's own.
+        Assert.Empty(PushActionCatalog.For(Warning("romestead")));
 
     [Fact]
     public void The_warning_is_its_own_subject_per_window_per_fire_time()
