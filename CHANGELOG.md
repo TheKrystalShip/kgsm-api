@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `dns.name.moved` is a known event type (1.1.4, `Lib` 9.4.0-dev.5)
+
+- **`dns.name.moved`** no longer logs as "Unknown event type".
+
 ### Fixed — four event types the catalog now knows (1.1.3, `Lib` 9.4.0-dev.4)
 
 - **`dns.name.published`, `dns.name.withdrawn`, `library.renamed` and `library.failed`** no longer log as
