@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — a notification's buttons last a day (2.2.0)
+
+- **A tap is honoured only for a person seen with the action within `NotificationActors.ActionFreshness`
+  (24 hours)**, the ceiling on acting from a notification. A button's own ticket still lives
+  `PushActionCatalog.ButtonLifetime` (2 hours), inside it.
+- **Who is told keeps `NotificationActors.Freshness` (7 days)** for a notification without buttons, so a
+  person last seen two days ago is still told but cannot tap.
+- The Web Push TTL is the sender's own (`kgsm-webpush`, 4 hours), inside the day. "Postpone 1h" stays
+  dropped.
+
 ### Changed — windows are checked when saved; leaves are asked on the bearer (2.1.0)
 
 - **Saving maintenance windows requires the saver's token to list every action the windows run**

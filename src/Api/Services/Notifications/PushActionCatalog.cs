@@ -32,7 +32,8 @@ public sealed record PushActionOffer(string Kind, string Target, string Label, s
 public static class PushActionCatalog
 {
     /// <summary>How long a button stays redeemable. A button is answered in the minutes after it arrives,
-    /// and a capability nobody used should not keep standing.</summary>
+    /// and a capability nobody used should not keep standing. Never longer than
+    /// <see cref="NotificationActors.ActionFreshness"/>, the ceiling on acting from a notification.</summary>
     public static readonly TimeSpan ButtonLifetime = TimeSpan.FromHours(2);
 
     /// <param name="moderation">What the event's game declares it can do to a player, or

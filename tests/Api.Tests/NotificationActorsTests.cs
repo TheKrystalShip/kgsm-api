@@ -52,7 +52,41 @@ public sealed class NotificationActorsTests(AuthTestFactory factory) : IClassFix
     }
 
     [Fact]
-    public async Task A_person_stops_being_told_once_their_token_has_not_been_seen_for_the_freshness_window()
+    public async Task A_tap_just_past_the_action_bound_is_refused()
+    {
+        (WebApplicationFactory<Program> node, ManualTime clock) = NodeOnAClock();
+        using WebApplicationFactory<Program> _node = node;
+        TestPerson reader = TestIdentity.PersonFor("notified-tap");
+        using HttpClient client = node.CreateClient();
+        await SeenAsync(client, factory.AccessTokenFor(reader, Persona.Reader));
+        NotificationActors actors = node.Services.GetRequiredService<NotificationActors>();
+
+        clock.Advance(NotificationActors.ActionFreshness - TimeSpan.FromMinutes(1));
+        Assert.True(actors.AllowsTap(reader.Subject, ActionIds.ServerRead));
+
+        clock.Advance(TimeSpan.FromMinutes(2));
+        Assert.False(actors.AllowsTap(reader.Subject, ActionIds.ServerRead));
+        Assert.Null(actors.Known(reader.Subject, NotificationActors.ActionFreshness));
+    }
+
+    [Fact]
+    public async Task A_person_last_seen_two_days_ago_is_still_told_but_cannot_tap()
+    {
+        (WebApplicationFactory<Program> node, ManualTime clock) = NodeOnAClock();
+        using WebApplicationFactory<Program> _node = node;
+        TestPerson reader = TestIdentity.PersonFor("notified-two-days");
+        using HttpClient client = node.CreateClient();
+        await SeenAsync(client, factory.AccessTokenFor(reader, Persona.Reader));
+        NotificationActors actors = node.Services.GetRequiredService<NotificationActors>();
+
+        clock.Advance(TimeSpan.FromDays(2));
+
+        Assert.Contains(reader.Subject, actors.Holding(ActionIds.ServerRead));
+        Assert.False(actors.AllowsTap(reader.Subject, ActionIds.ServerRead));
+    }
+
+    [Fact]
+    public async Task A_person_is_not_told_once_unseen_for_the_freshness_window()
     {
         (WebApplicationFactory<Program> node, ManualTime clock) = NodeOnAClock();
         using WebApplicationFactory<Program> _node = node;
@@ -60,13 +94,10 @@ public sealed class NotificationActorsTests(AuthTestFactory factory) : IClassFix
         using HttpClient client = node.CreateClient();
         await SeenAsync(client, factory.AccessTokenFor(reader, Persona.Reader));
         NotificationActors actors = node.Services.GetRequiredService<NotificationActors>();
-        Assert.True(actors.Allows(reader.Subject, ActionIds.ServerRead));
 
         clock.Advance(NotificationActors.Freshness + TimeSpan.FromMinutes(1));
 
-        Assert.False(actors.Allows(reader.Subject, ActionIds.ServerRead));
         Assert.DoesNotContain(reader.Subject, actors.Holding(ActionIds.ServerRead));
-        Assert.Null(actors.Known(reader.Subject));
     }
 
     [Fact]
@@ -79,9 +110,20 @@ public sealed class NotificationActorsTests(AuthTestFactory factory) : IClassFix
         NotificationActors actors = node.Services.GetRequiredService<NotificationActors>();
 
         await SeenAsync(client, factory.AccessTokenFor(person, Persona.Runner));
-        Assert.True(actors.Allows(person.Subject, ActionIds.ServerStart));
+        Assert.True(actors.AllowsTap(person.Subject, ActionIds.ServerStart));
 
         await SeenAsync(client, factory.AccessTokenFor(person, Persona.Reader));
-        Assert.False(actors.Allows(person.Subject, ActionIds.ServerStart));
+        Assert.False(actors.AllowsTap(person.Subject, ActionIds.ServerStart));
+    }
+
+    [Fact]
+    public void A_buttons_life_is_within_the_action_bound_and_so_within_a_day() =>
+        Assert.True(PushActionCatalog.ButtonLifetime <= NotificationActors.ActionFreshness);
+
+    [Fact]
+    public void The_action_bound_is_a_day_and_tighter_than_the_telling_bound()
+    {
+        Assert.True(NotificationActors.ActionFreshness <= TimeSpan.FromHours(24));
+        Assert.True(NotificationActors.ActionFreshness < NotificationActors.Freshness);
     }
 }

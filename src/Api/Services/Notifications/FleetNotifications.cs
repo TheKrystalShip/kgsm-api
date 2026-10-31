@@ -173,7 +173,7 @@ public sealed class FleetNotifications(
 
     /// <summary>
     /// The people that may read what <paramref name="ev"/> is about: those whose token, when last seen,
-    /// listed the action that reads it (<see cref="NotificationActors.Freshness"/>).
+    /// listed the action that reads it, within <see cref="NotificationActors.Freshness"/>.
     /// </summary>
     private IReadOnlyList<string> Audience(NotificationEvent ev) =>
         actors.Holding(string.IsNullOrEmpty(ev.ServerId) ? ActionIds.AuditRead : ActionIds.ServerRead);

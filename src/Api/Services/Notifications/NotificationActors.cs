@@ -24,15 +24,24 @@ public sealed record KnownPerson(string Actor, string DisplayName, IReadOnlyList
 /// A person is the subject of the token they presented (the synthetic caller's actor on a host with auth
 /// off). A notification is told and a button is tapped when its person is not here with a token, so what
 /// the person may do is what their token last listed, remembered beside the library's state every time a
-/// signed-in request names them. That memory is bounded by <see cref="Freshness"/>: a person not seen
-/// within it is told nothing and acts on nothing, so a revoked role stops reaching a phone within that
-/// window even when its owner never opens the panel again.
+/// signed-in request names them. That memory is bounded twice. Who is <em>told</em> is bounded by
+/// <see cref="Freshness"/>; who may <em>act</em> from a button is bounded by the tighter
+/// <see cref="ActionFreshness"/>, a ceiling above any button's own life. A revoked role therefore stops
+/// buttons within a day and stops notifications within a week, even when its owner never opens the panel
+/// again.
 /// </para>
 /// </remarks>
 public sealed class NotificationActors(ApiOptions options, TimeProvider time, ILogger<NotificationActors> logger)
 {
-    /// <summary>How long what a person's token listed is trusted for a notification sent or tapped without one.</summary>
+    /// <summary>How long what a person's token listed is trusted to decide who is told a notification with no buttons.</summary>
     public static readonly TimeSpan Freshness = TimeSpan.FromDays(7);
+
+    /// <summary>
+    /// How recently a person must have been seen with
+    /// the action for a tap to be honoured. A tap carries no token, so this is the whole bound on acting
+    /// from a notification.
+    /// </summary>
+    public static readonly TimeSpan ActionFreshness = TimeSpan.FromHours(24);
 
     private readonly Lock _gate = new();
     private ConcurrentDictionary<string, KnownPerson>? _people;
@@ -50,13 +59,13 @@ public sealed class NotificationActors(ApiOptions options, TimeProvider time, IL
         return caller.Subject;
     }
 
-    /// <summary>What <paramref name="person"/> last presented, or null when unknown or not seen within <see cref="Freshness"/>.</summary>
-    public KnownPerson? Known(string person)
+    /// <summary>What <paramref name="person"/> last presented, or null when unknown or not seen within <paramref name="within"/>.</summary>
+    public KnownPerson? Known(string person, TimeSpan within)
     {
         if (options.AuthDisabled && person == options.DisabledAuthActor)
             return new KnownPerson(person, person, [], time.GetUtcNow());
 
-        return People().TryGetValue(person, out KnownPerson? known) && time.GetUtcNow() - known.SeenAt <= Freshness
+        return People().TryGetValue(person, out KnownPerson? known) && time.GetUtcNow() - known.SeenAt <= within
             ? known
             : null;
     }
@@ -71,9 +80,12 @@ public sealed class NotificationActors(ApiOptions options, TimeProvider time, IL
         return [.. People().Where(p => now - p.Value.SeenAt <= Freshness && p.Value.Held(action)).Select(p => p.Key)];
     }
 
-    /// <summary>Whether <paramref name="person"/> may perform <paramref name="action"/>: they held it when last seen, recently enough.</summary>
-    public bool Allows(string person, string action) =>
-        options.AuthDisabled ? person == options.DisabledAuthActor : Known(person)?.Held(action) == true;
+    /// <summary>
+    /// Whether a tap for <paramref name="person"/> may perform <paramref name="action"/>: they held it when
+    /// last seen, within <see cref="ActionFreshness"/>.
+    /// </summary>
+    public bool AllowsTap(string person, string action) =>
+        options.AuthDisabled ? person == options.DisabledAuthActor : Known(person, ActionFreshness)?.Held(action) == true;
 
     private void Remember(string person, KnownPerson known)
     {

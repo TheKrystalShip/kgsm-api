@@ -26,7 +26,7 @@ namespace TheKrystalShip.Api.Services.Notifications;
 /// the device it was minted for, and short-lived. Nothing in the request describes what to do. Whether the
 /// person may perform the operation's action is asked here, at the tap, of what their token last listed
 /// (<see cref="NotificationActors"/>): a tap carries no token of its own, so somebody whose access was
-/// taken away is refused once that memory is older than <see cref="NotificationActors.Freshness"/>.
+/// taken away is refused once that memory is older than <see cref="NotificationActors.ActionFreshness"/>.
 /// </para>
 /// <para>
 /// <b>It writes no audit row of its own.</b> The operations are kgsm's events to emit, so this stamps the
@@ -51,12 +51,12 @@ public sealed class FleetNotificationActions(
         if (!PushActionKind.IsKnown(name) || ButtonArgument.Unpack(argument) is not { } target)
             return Refuse("This build does not know how to do that.");
 
-        if (actors.Known(person) is not { } known)
-            return Refuse("This action could not be attributed to an account that was recently signed in.");
+        if (actors.Known(person, NotificationActors.ActionFreshness) is not { } known)
+            return Refuse("This action could not be attributed to an account that signed in during the last day.");
 
         string actor = known.Actor;
 
-        bool Allows(string action) => actors.Allows(person, action);
+        bool Allows(string action) => actors.AllowsTap(person, action);
 
         if (PushActionKind.VerbFor(name) is { } verb)
             return await LifecycleAsync(target.Target, verb, actor, Allows, ct).ConfigureAwait(false);

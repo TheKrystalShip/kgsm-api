@@ -47,8 +47,9 @@ replicated here. The authority for the model is `../../../../../kgsm-docs/system
   machine.
 - **Credentials handed out ahead of use are short-lived, not re-evaluated.** A backup download ticket and a
   transfer ticket are bound to what they authorise and expire quickly. A notification button's handle names
-  the person, and `NotificationActors` remembers what that person's token last listed and trusts it for
-  `NotificationActors.Freshness`: a tap carries no token of its own.
+  the person, and `NotificationActors` remembers what that person's token last listed: trusted for
+  `NotificationActors.Freshness` to decide who is told, and for the tighter `ActionFreshness` (a
+  ceiling above a button's own life) to honour a tap, which carries no token of its own.
 - **A person is named by their token.** `CallerId` reads `sub` (the key records hold), `name` (stored beside
   the subject wherever a record keeps only a subject) and the audit actor (`local:<name>` for a person,
   `system:<member>` for a member). A record written for a person never asks the provider who they are.
@@ -88,7 +89,7 @@ replicated here. The authority for the model is `../../../../../kgsm-docs/system
   keeps that sound is that the handle names an operation **held server-side**, is **minted per device**, is
   **single-use with a short life**, and — the load-bearing one — **`FleetNotificationActions` checks the
   person's access to the operation at redemption** against what their token last listed, within
-  `NotificationActors.Freshness`. Every refusal answers `200 { ok: false, message }`, and a handle that is
+  `NotificationActors.ActionFreshness`. Every refusal answers `200 { ok: false, message }`, and a handle that is
   unknown, spent or expired says one thing, so separate answers cannot be used to probe which handles
   exist. A person's own notification routes sit under `/api/v1/me` on `api:push.devices`, the self action
   every signed-in person holds.
