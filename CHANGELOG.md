@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — a patched SQLite native library (2.3.2)
+
+`SQLitePCLRaw.bundle_e_sqlite3` is pinned at a build whose native SQLite library the advisory
+GHSA-2m69-gcr7-jv3q does not cover, and the audit suppression is gone.
+
 ### Removed — the `me` stream topic (2.3.1)
 
 - **The `me` topic, its `me.patch` and `me.access` frames and per-account delivery are gone.** Nothing

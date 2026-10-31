@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>2.3.1</Version>
+    <Version>2.3.2</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -107,19 +107,11 @@
     <None Include="kgsm-api.settings.Development.json" Condition="Exists('kgsm-api.settings.Development.json')" />
   </ItemGroup>
 
-  <!-- Scoped NuGet-audit suppression (NOT a blanket NuGetAudit=off): GHSA-2m69-gcr7-jv3q is an
-       advisory on the native SQLite lib pulled TRANSITIVELY by Microsoft.EntityFrameworkCore.Sqlite
-       (SQLitePCLRaw.lib.e_sqlite3 2.1.11). 2.1.11 is the LATEST published build of that native lib —
-       there is no fixed version to move to yet, so the only options are suppress-with-documentation or
-       break every build. Exposure here is minimal: SQLite stores only this host's local append-only
-       audit log on a trusted single host (no untrusted SQL, no network DB). Revisit and DELETE this
-       the moment a patched SQLitePCLRaw bundle ships (bump EF Core / add a patched override instead). -->
-  <ItemGroup>
-    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-2m69-gcr7-jv3q" />
-  </ItemGroup>
-
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.5" />
+    <!-- The bundle is pinned above the one Microsoft.EntityFrameworkCore.Sqlite asks for, so the native SQLite lib it
+         brings is a build the advisory GHSA-2m69-gcr7-jv3q does not cover. -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.14" />
 
     <!-- The single C#<->engine chokepoint: instances, run-state, the watchdog client
          (IWatchdogClient, M1 capability probe), the kgsm event stream's Origin field + the

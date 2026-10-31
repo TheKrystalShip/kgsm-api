@@ -509,12 +509,6 @@ migrated WebSocket→SSE 2026-07-02, protocol in `src/Api/Realtime/CLAUDE.md`; f
   ordering, and the engine-unconfigured / read-failure degrade-to-empty; + the held/not-held/no-token gate
   through the real pipeline). kgsm-lib **green** (`Blueprint`/`PortMapping` suites 36/36). kgsm-bot rebuilt
   clean against the breaking `Blueprint.Ports` (the `KgsmBlueprintService` field-copy is List=List). Release **0-warning**.
-- **Build hygiene (environmental, not M8·a):** a freshly-published advisory (GHSA-2m69-gcr7-jv3q) on the
-  SQLite **native lib** pulled transitively by EF Core (`SQLitePCLRaw.lib.e_sqlite3` 2.1.11, the latest —
-  no patched build exists yet) tripped `TreatWarningsAsErrors`. Cleared with a **scoped** `NuGetAuditSuppress`
-  for that one advisory (NOT a blanket audit-off) in both csprojs, documented inline + **to be deleted the
-  moment a patched bundle ships**. Exposure is minimal (SQLite holds only this host's local append-only
-  audit log on a trusted single host).
 - **Depends:** M1·b (the kgsm-lib engine-base wiring + the optional-resolve pattern).
 - **Frontend gate:** `libraryStore` swaps mock → real; the install picker's game grid renders from real
   blueprints. **Not a clean backing-flip:** `cover` is reserved-`null` (the grid falls back to the themed

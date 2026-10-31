@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "component": "api",
-  "version": "2.3.1",
+  "version": "2.3.2",
   "actions": [
     {
       "id": "alerts.read",
