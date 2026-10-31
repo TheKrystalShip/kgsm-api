@@ -11,30 +11,23 @@ namespace TheKrystalShip.Api.Realtime;
 /// <para>
 /// The hub asks it on every frame. A host run with auth switched off, and another member acting as itself,
 /// stream to a reader that is <see cref="Unrestricted"/>. A reader whose token lists nothing is
-/// <see cref="Nobody"/> and sees only its own <c>me</c> topic.
+/// <see cref="Nobody"/> and sees only the server collections its (empty) grant reads none of.
 /// </para>
 /// </remarks>
 public sealed class StreamAccess
 {
     private readonly IReadOnlySet<string>? _held;
 
-    private StreamAccess(string? accountId, IReadOnlySet<string>? held)
-    {
-        AccountId = accountId;
-        _held = held;
-    }
+    private StreamAccess(IReadOnlySet<string>? held) => _held = held;
 
     /// <summary>A reader holding every action: the open caller of an auth-disabled host, or a member acting as itself.</summary>
-    public static StreamAccess Unrestricted { get; } = new(null, null);
+    public static StreamAccess Unrestricted { get; } = new(null);
 
-    /// <summary>A reader holding no action: its own <c>me</c> topic and nothing else.</summary>
-    public static StreamAccess Nobody { get; } = new(null, new HashSet<string>());
+    /// <summary>A reader holding no action: the server collections, each frame cut to nothing.</summary>
+    public static StreamAccess Nobody { get; } = new(new HashSet<string>());
 
-    /// <summary>The reader whose token names <paramref name="accountId"/> and lists <paramref name="held"/>.</summary>
-    public static StreamAccess For(string accountId, IReadOnlySet<string> held) => new(accountId, held);
-
-    /// <summary>The person the reader is, or <see langword="null"/> for the two fixed readers.</summary>
-    public string? AccountId { get; }
+    /// <summary>The reader whose token lists <paramref name="held"/>.</summary>
+    public static StreamAccess For(IReadOnlySet<string> held) => new(held);
 
     /// <summary>Whether the reader may perform <paramref name="action"/>.</summary>
     public bool Allows(string action) => _held is null || _held.Contains(action);
@@ -48,7 +41,7 @@ public sealed class StreamAccess
         TopicGate gate = StreamProtocol.Gate(topic);
         return gate.Kind switch
         {
-            TopicGateKind.Open or TopicGateKind.PerServer => true,
+            TopicGateKind.PerServer => true,
             TopicGateKind.Node or TopicGateKind.Server => Allows(gate.Action!),
             _ => HoldsEverything,
         };

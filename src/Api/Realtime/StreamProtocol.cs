@@ -5,9 +5,6 @@ namespace TheKrystalShip.Api.Realtime;
 /// <summary>How reading a topic is gated.</summary>
 public enum TopicGateKind
 {
-    /// <summary>Nothing needed: the caller's own <c>me</c>.</summary>
-    Open,
-
     /// <summary>A server collection: open to subscribe, each frame cut to the servers the reader may read.</summary>
     PerServer,
 
@@ -105,8 +102,7 @@ public static class StreamProtocol
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <see cref="MeTopic"/> is news about the caller's own account and needs nothing. The server
-    /// collections — <see cref="ServersTopic"/>, <see cref="ServersMetricsTopic"/>, <see cref="JobsTopic"/>,
+    /// The server collections — <see cref="ServersTopic"/>, <see cref="ServersMetricsTopic"/>, <see cref="JobsTopic"/>,
     /// <see cref="PlayersTopic"/> — are open to subscribe and cut per frame to the servers the reader may
     /// read (<see cref="StreamHub.Publish"/>'s <c>serverId</c>). One server's metrics or console is gated
     /// at that server, and a host topic at this node.
@@ -118,9 +114,6 @@ public static class StreamProtocol
     /// </remarks>
     public static TopicGate Gate(string topic)
     {
-        if (topic == MeTopic)
-            return new TopicGate(TopicGateKind.Open);
-
         if (topic is ServersTopic or ServersMetricsTopic or JobsTopic or PlayersTopic)
             return new TopicGate(TopicGateKind.PerServer, ServerReadAction);
 
@@ -163,36 +156,6 @@ public static class StreamProtocol
         string id = topic["servers/".Length..^suffix.Length];
         return id.Length > 0 && !id.Contains('/') ? id : null;
     }
-
-    // --- me (the caller's own standing on this host) ---
-    /// <summary>What this host says about the <em>caller's own</em> account: <c>me</c>. The live
-    /// companion to <c>GET /api/v1/me</c> — the client hydrates there and applies
-    /// <see cref="MePatch"/> and <see cref="MeAccess"/> frames from here on, so a change to the account's
-    /// status or access lands on an open panel instead of waiting for a reload.
-    /// <para>The one topic delivered by <em>audience</em> rather than by subscription alone: a frame
-    /// reaches only the connections authenticated as the account it is about, never the host at large
-    /// (<see cref="StreamHub.PublishToAccount"/>). It is also the one topic <see cref="Gate"/> leaves
-    /// open — somebody awaiting approval holds nothing on this host and is exactly who needs to hear
-    /// that it changed.</para></summary>
-    public const string MeTopic = "me";
-
-    /// <summary>The caller's account status changed: <c>data</c> is a <see cref="Contracts.MeStanding"/>,
-    /// in the vocabulary <c>GET /api/v1/me</c> answers in. The client merges it over what it
-    /// hydrated.</summary>
-    public const string MePatch = "me.patch";
-
-    /// <summary>The per-connection coalesce key for <see cref="MePatch"/>: one key for the whole
-    /// topic. Supersede-by-latest is the whole truth here — a connection carries one account's
-    /// standing, and an older reading of it says nothing the newest does not.</summary>
-    public const string MeEntityKey = "me";
-
-    /// <summary>The caller's access on this node changed: <c>data</c> is the whole
-    /// <c>GET /api/v1/me/access</c> answer, which the client replaces what it holds with.</summary>
-    public const string MeAccess = "me.access";
-
-    /// <summary>The coalesce key for <see cref="MeAccess"/>, apart from <see cref="MeEntityKey"/> so a
-    /// standing patch and an access report queued together both arrive.</summary>
-    public const string MeAccessEntityKey = "me.access";
 
     // --- server -> client message types (the `type` field of the { topic, type, data } envelope) ---
     /// <summary>A full honest <c>Server</c> element to merge by id (doc-given). Fired on status/roster change.</summary>

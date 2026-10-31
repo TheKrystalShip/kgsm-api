@@ -18,7 +18,7 @@ public sealed class StreamHubAccessTests
 {
     private static StreamHub NewHub() => new(Options.Create(new JsonOptions()));
 
-    private static StreamAccess Reader(string subject, Persona persona) => StreamAccess.For(subject, Personas.Of(persona));
+    private static StreamAccess Reader(Persona persona) => StreamAccess.For(Personas.Of(persona));
 
     private static (StreamConnection Conn, MemoryStream Body) Connect(StreamHub hub, StreamAccess access, params string[] topics)
     {
@@ -32,8 +32,8 @@ public sealed class StreamHubAccessTests
     public void EachConnectionGetsTheAuditVariantItsReaderIsEntitledTo()
     {
         StreamHub hub = NewHub();
-        (StreamConnection op, MemoryStream opBody) = Connect(hub, Reader("usr_op", Persona.Runner), "audit");
-        (StreamConnection viewer, MemoryStream viewerBody) = Connect(hub, Reader("usr_viewer", Persona.Reader), "audit");
+        (StreamConnection op, MemoryStream opBody) = Connect(hub, Reader(Persona.Runner), "audit");
+        (StreamConnection viewer, MemoryStream viewerBody) = Connect(hub, Reader(Persona.Reader), "audit");
 
         hub.Publish("audit", "k1",
             new StreamMessage("audit", "audit.append", new { summary = "ran 'op somebody' on mc" }),
@@ -51,8 +51,8 @@ public sealed class StreamHubAccessTests
     public void AFrameWithNoRedactedVariantGoesToEveryReaderOfTheTopic()
     {
         StreamHub hub = NewHub();
-        (StreamConnection op, MemoryStream opBody) = Connect(hub, Reader("usr_op2", Persona.Runner), "audit");
-        (StreamConnection viewer, MemoryStream viewerBody) = Connect(hub, Reader("usr_viewer2", Persona.Reader), "audit");
+        (StreamConnection op, MemoryStream opBody) = Connect(hub, Reader(Persona.Runner), "audit");
+        (StreamConnection viewer, MemoryStream viewerBody) = Connect(hub, Reader(Persona.Reader), "audit");
 
         hub.Publish("audit", "k1", new StreamMessage("audit", "audit.append", new { summary = "started mc" }));
         DrainAll(op, viewer);
@@ -62,19 +62,18 @@ public sealed class StreamHubAccessTests
     }
 
     /// <summary>
-    /// A connection nobody stated access for is nobody's: its own <c>me</c> and nothing else. The default
+    /// A connection nobody stated access for is nobody's: it reads no server and no node topic. The default
     /// matters, because every other construction site is a test and a permissive default would make the
     /// one production call site the only thing standing between a reader and a frame.
     /// </summary>
     [Fact]
-    public void AConnectionWithNoStatedAccessReachesOnlyMe()
+    public void AConnectionWithNoStatedAccessReadsNoServer()
     {
         StreamHub hub = NewHub();
-        var conn = new StreamConnection(new MemoryStream(), ["audit", "servers", "me"], hub.Json, NullLogger.Instance);
+        var conn = new StreamConnection(new MemoryStream(), ["audit", "servers"], hub.Json, NullLogger.Instance);
 
         Assert.False(conn.Receives("audit"));
         Assert.True(conn.Receives("servers"), "a collection is open to subscribe; its frames are cut to its readers");
-        Assert.True(conn.Receives("me"));
         Assert.False(conn.Access.Allows(ActionIds.ServerRead));
     }
 
@@ -82,8 +81,8 @@ public sealed class StreamHubAccessTests
     public void ACollectionFrameReachesOnlyReadersOfServers()
     {
         StreamHub hub = NewHub();
-        (StreamConnection reader, MemoryStream readerBody) = Connect(hub, Reader("usr_reads", Persona.Reader), "servers");
-        (StreamConnection none, MemoryStream noneBody) = Connect(hub, Reader("usr_none", Persona.None), "servers");
+        (StreamConnection reader, MemoryStream readerBody) = Connect(hub, Reader(Persona.Reader), "servers");
+        (StreamConnection none, MemoryStream noneBody) = Connect(hub, Reader(Persona.None), "servers");
 
         hub.Publish("servers", "servers:mc", new StreamMessage("servers", "server.patch", new { id = "mc" }), "mc");
         DrainAll(reader, none);
@@ -96,8 +95,8 @@ public sealed class StreamHubAccessTests
     public void ARosterFrameReachesOnlyReadersOfServers()
     {
         StreamHub hub = NewHub();
-        (StreamConnection reader, MemoryStream readerBody) = Connect(hub, Reader("usr_reads2", Persona.Reader), "servers/metrics");
-        (StreamConnection none, MemoryStream noneBody) = Connect(hub, Reader("usr_none2", Persona.None), "servers/metrics");
+        (StreamConnection reader, MemoryStream readerBody) = Connect(hub, Reader(Persona.Reader), "servers/metrics");
+        (StreamConnection none, MemoryStream noneBody) = Connect(hub, Reader(Persona.None), "servers/metrics");
 
         hub.PublishRows("servers/metrics", "servers-metrics", ["mc", "ark"],
             rows => new StreamMessage("servers/metrics", "metrics.roster", new { servers = rows }));
@@ -107,33 +106,11 @@ public sealed class StreamHubAccessTests
         Assert.DoesNotContain("metrics.roster", Read(noneBody), StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// The whole point of a per-account audience. A fact about one person reaches every connection they hold
-    /// and no connection anybody else holds.
-    /// </summary>
-    [Fact]
-    public void AFrameForAnAccountReachesThatAccountAndNoOther()
-    {
-        StreamHub hub = NewHub();
-        (StreamConnection laptop, MemoryStream laptopBody) = Connect(hub, Reader("usr_alice", Persona.Reader), "me");
-        (StreamConnection phone, MemoryStream phoneBody) = Connect(hub, Reader("usr_alice", Persona.Reader), "me");
-        (StreamConnection bob, MemoryStream bobBody) = Connect(hub, Reader("usr_bob", Persona.Reader), "me");
-        (StreamConnection stranger, MemoryStream strangerBody) = Connect(hub, StreamAccess.Nobody, "me");
-
-        hub.PublishToAccount("usr_alice", "me", "k", new StreamMessage("me", "me.patch", new { status = "active" }));
-        DrainAll(laptop, phone, bob, stranger);
-
-        Assert.Contains("me.patch", Read(laptopBody), StringComparison.Ordinal);
-        Assert.Contains("me.patch", Read(phoneBody), StringComparison.Ordinal);
-        Assert.DoesNotContain("me.patch", Read(bobBody), StringComparison.Ordinal);
-        Assert.DoesNotContain("me.patch", Read(strangerBody), StringComparison.Ordinal);
-    }
-
     [Fact]
     public void ATopicThisBuildDoesNotKnowIsAnOwnersAlone()
     {
         StreamHub hub = NewHub();
-        (StreamConnection op, MemoryStream _) = Connect(hub, Reader("usr_op3", Persona.Runner), "future/topic");
+        (StreamConnection op, MemoryStream _) = Connect(hub, Reader(Persona.Runner), "future/topic");
         (StreamConnection member, MemoryStream _) = Connect(hub, StreamAccess.Unrestricted, "future/topic");
 
         Assert.False(op.Receives("future/topic"));

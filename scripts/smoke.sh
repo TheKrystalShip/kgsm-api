@@ -40,7 +40,7 @@
 # are guaranteed on a host.
 #
 # Usage:  scripts/smoke.sh                 # build + run all checks (both phases)
-#         SMOKE_PORT=9001 scripts/smoke.sh
+#         SMOKE_PORT=9001 scripts/smoke.sh      # default: a free port picked per run
 #         SMOKE_SKIP_BUILD=1 scripts/smoke.sh   # reuse the existing Release build
 #         SMOKE_KGSM_PATH=/path/to/kgsm.sh scripts/smoke.sh   # engine on another host
 #         SMOKE_MONITOR_SOCKET=/run/kgsm-monitor/metrics.sock scripts/smoke.sh   # live monitor in Phase A
@@ -48,7 +48,13 @@
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PORT="${SMOKE_PORT:-8099}"
+# A port the run did not pick must be free: something already listening there (a leaf on the host)
+# answers every check with its own responses, and every one fails against the wrong process.
+PORT="${SMOKE_PORT:-$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')}"
+if ss -ltn "sport = :${PORT}" | grep -q LISTEN; then
+  echo "port ${PORT} is already in use; set SMOKE_PORT to a free one" >&2
+  exit 2
+fi
 BASE="http://127.0.0.1:${PORT}"
 DLL="${REPO_ROOT}/src/Api/bin/Release/net10.0/kgsm-api.dll"
 DB="${SMOKE_DB:-/tmp/kgsm-api-smoke.db}"; rm -f "$DB"

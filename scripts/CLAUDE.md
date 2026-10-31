@@ -19,7 +19,7 @@ reads honest ticks, and — killing **then restarting** the stub monitor mid-str
 degrade→recover capability lifecycle (down flip + tick silence, then operational flip + ticks resume,
 `provisioned:true` throughout).
 
-Knobs: `SMOKE_PORT`, `SMOKE_SKIP_BUILD=1`, `SMOKE_DB`, `SMOKE_KGSM_PATH` (the engine on another host),
+Knobs: `SMOKE_PORT` (a free port picked per run when unset; a taken one is refused), `SMOKE_SKIP_BUILD=1`, `SMOKE_DB`, `SMOKE_KGSM_PATH` (the engine on another host),
 `SMOKE_MONITOR_SOCKET` (a live monitor in Phase A), `SMOKE_WATCHDOG_SOCKET` and `SMOKE_FIREWALL_SOCKET`
 (both empty, and so absent, unless given: an unset leaf socket resolves to the well-known one wherever
 that leaf is installed, which would hand the run the host's live leaf), `SMOKE_SERVER` (the server every

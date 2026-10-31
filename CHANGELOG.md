@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — the `me` stream topic (2.3.1)
+
+- **The `me` topic, its `me.patch` and `me.access` frames and per-account delivery are gone.** Nothing
+  published to it; the panel never subscribed. `StreamHub.PublishToAccount`, `AccountsSubscribedTo`,
+  `StreamConnection.BelongsTo`, `StreamAccess.AccountId`, `TopicGateKind.Open` and the `MeStanding` contract
+  record go with it. An unrecognised topic, `me` included, is an Owner's alone.
+- **`scripts/smoke.sh` picks a free port per run** and refuses a taken one; the fixed default was a port a
+  node's DNS leaf can hold, and every check then failed against the wrong process.
+- **The DNS-roster tests load the transfer records themselves** instead of racing the hosted service that
+  does it after start.
+
 ### Changed — the cluster has no auth capability or founding; maintenance windows keep their author's name (2.3.0, Api.Contracts 6.0.0-dev.1, `Lib` 9.5.0-dev.4, `Cluster` 2.0.0, `ComponentConfig` 4.0.0, `ComponentSurface` 2.0.0)
 
 - **Maintenance windows record the saver's display name** beside the subject (`authorName` to the engine,

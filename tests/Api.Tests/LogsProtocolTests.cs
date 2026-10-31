@@ -36,7 +36,6 @@ public sealed class LogsProtocolTests
     [InlineData("audit", TopicGateKind.Node, "api:audit.read", null)]
     [InlineData("alerts", TopicGateKind.Node, "api:alerts.read", null)]
     [InlineData("batches", TopicGateKind.Node, "api:batches.read", null)]
-    [InlineData("me", TopicGateKind.Open, null, null)]
     [InlineData("servers", TopicGateKind.PerServer, "kgsm:server.read", null)]
     [InlineData("servers/metrics", TopicGateKind.PerServer, "kgsm:server.read", null)]
     [InlineData("jobs", TopicGateKind.PerServer, "kgsm:server.read", null)]

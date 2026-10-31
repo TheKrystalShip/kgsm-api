@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using TheKrystalShip.Api.Services.Auth;
+using TheKrystalShip.Api.Services.Transfers;
 using TheKrystalShip.KGSM.Core.Interfaces;
 using TheKrystalShip.KGSM.Core.Models;
 using TheKrystalShip.KGSM.Core.Models.Enums;
@@ -63,6 +64,7 @@ public sealed class ServerListReadFailureTests
     {
         await using var factory = new RosterFactory(roster: new());
         factory.CreateClient();
+        await LoadTransfers(factory);
 
         IDnsInstanceSource source = factory.Services.GetRequiredService<IDnsInstanceSource>();
 
@@ -82,6 +84,7 @@ public sealed class ServerListReadFailureTests
         };
         await using var factory = new RosterFactory(roster);
         factory.CreateClient();
+        await LoadTransfers(factory);
 
         IReadOnlyList<DnsInstance> read =
             (await factory.Services.GetRequiredService<IDnsInstanceSource>().ReadAsync(CancellationToken.None))!;
@@ -91,6 +94,12 @@ public sealed class ServerListReadFailureTests
         Assert.Equal("factorio", only.Blueprint);
         Assert.Equal(new DnsPort(34197, 34197, "udp"), Assert.Single(only.Ports));
     }
+
+    // The source holds its answer back until the transfer records are loaded, which a hosted service
+    // does in the background after start. Loading is idempotent, so the test loads them itself rather
+    // than racing that service.
+    private static Task LoadTransfers(AuthTestFactory factory) =>
+        factory.Services.GetRequiredService<TransferStore>().LoadAsync();
 
     private static HttpClient Reader(AuthTestFactory factory)
     {

@@ -41,17 +41,6 @@ public sealed record SessionUser(
     string Display,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AvatarUrl);
 
-/// <summary>
-/// The mutable half of <see cref="MeResponse"/>, pushed on the <c>me</c> stream topic as
-/// <c>me.patch</c>: what state the caller's own account is in.
-/// </summary>
-/// <remarks>
-/// <c>status</c> carries the vocabulary <c>GET /me</c> answers in, so a client merges a frame straight
-/// over what it hydrated with no second mapping. The identity half is left out because nothing on this
-/// path changes it; access changes arrive as <c>me.access</c>.
-/// </remarks>
-public sealed record MeStanding(string Status);
-
 /// <summary>One sign-in, shaped for the <c>/me</c> recent-logins list. <c>Device</c> is the
 /// <c>User-Agent</c> the sign-in arrived with, or <see langword="null"/> when the caller sent none
 /// (honest-unknown, never a guessed label).</summary>

@@ -70,18 +70,6 @@ public sealed class StreamConnection
     /// <summary>What this connection's reader may see, evaluated per frame.</summary>
     public StreamAccess Access { get; }
 
-    /// <summary>
-    /// The person this connection is authenticated as (the token's subject), which is what a frame about
-    /// one person is addressed to. <see langword="null"/> for a member or an open host, in which case
-    /// nothing addressed to a person ever reaches it.
-    /// </summary>
-    public string? AccountId => Access.AccountId;
-
-    /// <summary>Is this connection authenticated as <paramref name="accountId"/>? A connection that
-    /// proves no account is nobody's, and answers <see langword="false"/> to every id.</summary>
-    public bool BelongsTo(string accountId) =>
-        AccountId is not null && string.Equals(AccountId, accountId, StringComparison.Ordinal);
-
     // --- subscription state (read by the hub on every publish) ---
 
     /// <summary>Whether the client asked for <paramref name="topic"/>.</summary>

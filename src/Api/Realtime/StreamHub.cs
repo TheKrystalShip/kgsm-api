@@ -54,9 +54,8 @@ public sealed class StreamHub
     /// (all connections are SSE now); the same bytes are enqueued to every subscriber.
     /// </summary>
     /// <remarks>
-    /// Static and shared, so the one message a connection builds for itself — the <c>me.patch</c> its
-    /// own authority re-check produces — is framed by the same code as every fanned-out one. Two
-    /// renderings of one wire format is a drift waiting to happen.
+    /// Static and shared, so a message a connection builds for itself is framed by the same code as
+    /// every fanned-out one. Two renderings of one wire format is a drift waiting to happen.
     /// </remarks>
     internal static byte[] BuildFrame(StreamMessage message, JsonSerializerOptions json) =>
         Encoding.UTF8.GetBytes("data: " + JsonSerializer.Serialize(message, json) + "\n\n");
@@ -120,37 +119,6 @@ public sealed class StreamHub
             if (!c.Receives(topic) || !c.Access.Allows(StreamProtocol.ServerReadAction)) continue;
 
             frame ??= BuildSseFrame(render(rows));
-            c.Enqueue(coalesceKey, frame.Value);
-        }
-    }
-
-    /// <summary>
-    /// Route <paramref name="message"/> only to the live connections authenticated as
-    /// <paramref name="accountId"/>, and only those of them subscribed to <paramref name="topic"/>.
-    /// </summary>
-    /// <remarks>
-    /// The audience is the account, not the session: somebody signed in on a laptop and a phone holds
-    /// two connections and a fact about their account is true on both. Matching is on the account id
-    /// rather than the token's handle, so a session established through a linked provider identity is
-    /// reached as readily as one established with a password. A connection that proves no account
-    /// here belongs to nobody and is never a recipient — <see cref="StreamConnection.BelongsTo"/>.
-    /// </remarks>
-    /// <summary>The accounts with at least one live connection subscribed to <paramref name="topic"/>.</summary>
-    public IReadOnlyCollection<string> AccountsSubscribedTo(string topic) =>
-        [.. _connections.Keys
-            .Where(c => c.AccountId is not null && c.IsSubscribed(topic))
-            .Select(c => c.AccountId!)
-            .Distinct(StringComparer.Ordinal)];
-
-    public void PublishToAccount(string accountId, string topic, string coalesceKey, StreamMessage message)
-    {
-        ReadOnlyMemory<byte>? frame = null;
-
-        foreach (StreamConnection c in _connections.Keys)
-        {
-            if (!c.BelongsTo(accountId) || !c.IsSubscribed(topic)) continue;
-
-            frame ??= BuildSseFrame(message);
             c.Enqueue(coalesceKey, frame.Value);
         }
     }

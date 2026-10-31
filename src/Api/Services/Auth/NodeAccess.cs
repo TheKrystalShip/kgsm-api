@@ -45,7 +45,7 @@ public sealed class NodeAccess(ApiOptions options, ManifestSources manifests, IL
     /// <summary>What the stream reader behind <paramref name="user"/> may see.</summary>
     public StreamAccess StreamAccessOf(ClaimsPrincipal user) => HeldBy(user) is not { } held
         ? StreamAccess.Unrestricted
-        : CallerId.Of(user) is { } caller ? StreamAccess.For(caller.Subject, held) : StreamAccess.Nobody;
+        : CallerId.Of(user) is { } caller ? StreamAccess.For(held) : StreamAccess.Nobody;
 
     /// <summary>Whether the caller behind <paramref name="user"/> holds <paramref name="action"/>.</summary>
     public bool Allows(ClaimsPrincipal user, string action) => HeldBy(user) is not { } held || held.Contains(action);

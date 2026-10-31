@@ -35,13 +35,6 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The cont
   REST hydrate: `{ id, metrics, diskBytes }`, the same two parts `Server` carries, so a merge is
   field-for-field. **A row may be half-null** — a stopped instance has no sample and a real footprint,
   which is the whole reason disk sits outside the metrics block. Never fill either half in.
-- **`me` is delivered by AUDIENCE, not by subscription alone.** Every other topic is host-wide: anyone
-  subscribed gets the frame. This one carries the *reader's own* standing (`me.patch` with the account's
-  `status`, `me.access` with the whole `GET /me/access` answer), so it goes only to the connections
-  authenticated as the account it is about — `StreamHub.PublishToAccount`, matched on the **account id**
-  so a session established through a linked provider identity is reached as readily as one established
-  with a password. A connection that proves no account belongs to nobody and is never a recipient.
-  Broadcasting it would hand every reader a directory of who holds what.
 - **One shared `MetricsMapping`** makes a stream tick byte-identical to the REST element it patches —
   REST and the stream must not drift. Map in one place.
 - **Honesty: monitor-down → metric topics go silent**, never a replayed stale frame. The
@@ -61,8 +54,7 @@ The per-host realtime stream — `GET /api/v1/stream`, fetch-based SSE. The cont
 frame** (`StreamProtocol.Gate`, `StreamAccess`): a host topic takes the action its REST companion does;
 one server's metrics or console takes `kgsm:server.read` / `kgsm:server.console.read` at that server; the
 server collections (`servers`, `servers/metrics`, `jobs`, `players`) are open to subscribe and each frame
-reaches only the readers of the server it is about (`Publish(..., serverId)`, `PublishRows`); `me` needs
-nothing, so somebody awaiting approval hears about their own account and nothing else; a topic this
+reaches only the readers of the server it is about (`Publish(..., serverId)`, `PublishRows`); a topic this
 build does not know is an Owner's alone. A topic the reader may not see **delivers nothing** — never a
 403 on the whole stream. The per-topic actions are `StreamProtocol.Gate`; the model is
 `../../../../kgsm-docs/systems/control-panel/realtime.md`.
@@ -87,5 +79,4 @@ so their streams end with the request alone.
 
 **Access is evaluated per frame, from the actions the token listed.** The connection keeps the topics
 the client asked for and asks on every frame whether its reader reaches them (`StreamAccess`, fixed for
-the connection's life). A frame about one person (`StreamHub.PublishToAccount`) reaches only the
-connections whose token subject is that person.
+the connection's life).
