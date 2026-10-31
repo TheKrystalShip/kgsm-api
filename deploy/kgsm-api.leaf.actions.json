@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "component": "api",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "actions": [
     {
       "id": "alerts.read",
@@ -123,33 +123,6 @@
       "title": "View this host's services",
       "effect": "read",
       "scope": "node"
-    }
-  ],
-  "requires": [
-    {
-      "action": "kgsm:engine.config.read",
-      "scope": "node",
-      "why": "Reads where the engine keeps its libraries and how much memory it may commit."
-    },
-    {
-      "action": "kgsm:library.read",
-      "scope": "node",
-      "why": "Keeps the installable-game catalog current."
-    },
-    {
-      "action": "kgsm:server.backups.read",
-      "scope": "instance",
-      "why": "Counts each server's backups for its card."
-    },
-    {
-      "action": "kgsm:server.console.read",
-      "scope": "instance",
-      "why": "Follows each console the realtime stream carries."
-    },
-    {
-      "action": "kgsm:server.read",
-      "scope": "instance",
-      "why": "Keeps the server roster, run state and players current for the panel and the realtime stream."
     }
   ]
 }

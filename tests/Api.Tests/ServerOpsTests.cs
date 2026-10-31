@@ -529,7 +529,7 @@ public sealed class ServerOpsTests
             return new KgsmResult(0);
         }
 
-        public KgsmResult SetMaintenanceWindows(string instanceName, string packedWindows, string? author, string? actor = null, string? origin = null) => throw new NotImplementedException();
+        public KgsmResult SetMaintenanceWindows(string instanceName, string packedWindows, string? author, string? actor = null, string? origin = null, string? authorName = null) => throw new NotImplementedException();
 
         // The note has its own surface (PUT/DELETE /servers/{id}/note); the config PATCH refuses its
         // keys outright, so this fake never sees a note write.

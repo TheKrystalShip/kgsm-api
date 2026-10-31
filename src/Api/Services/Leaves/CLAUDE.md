@@ -72,11 +72,8 @@ the built-in fallback for a leaf that has not shipped a descriptor, not the auth
   reports honestly instead of claiming success. It does **not** auto-revert: the change was asked for,
   and a silent revert would misreport what is running. Reset stays available and needs nothing from
   the leaf.
-- **A leaf serving its own surface is told who is asking.** `LeafSurfaceRelay` sends the caller's
-  account in `Kgsm-Acting-Account`, and the leaf records it as the author of any `automates` setting the
-  change switches on — the person that automation then runs as. Only the leaf keeps that record, so the
-  descriptor fallback refuses to set or reset an `automates` field with a **409**: written here, it
-  would keep the previous setter's name on a value they never chose.
+- **A leaf serving its own surface is asked on the person's own token.** `LeafSurfaceRelay` forwards the
+  person's `Authorization: Bearer`, so the leaf admits the person itself.
 
 **An anchor sharing this machine is not one of this node's services.** Leaf-or-anchor is a deployment
 choice, and only the descriptor a component installed here says which it is on this host. `AnchorDescriptorStore` scans `/var/lib/kgsm/anchors/`

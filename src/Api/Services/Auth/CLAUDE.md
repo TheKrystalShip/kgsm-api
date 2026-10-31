@@ -59,7 +59,8 @@ replicated here. The authority for the model is `../../../../../kgsm-docs/system
   forwards nothing.
 - **Windows are checked when saved.** `ServerSettingsController` refuses a maintenance-window save unless
   the saver's token lists every action `MaintenanceWindowActions` derives from the windows' tasks; the
-  scheduler then runs them as itself, attributed to the subject passed as the engine author.
+  scheduler then runs them as itself, attributed to the subject passed as the engine author and shown
+  under the token's display name passed beside it.
 - **Streams end with the token.** The SSE loop's cancellation is `KgsmPerson.UntilExpiry`; the client
   reconnects with a fresh token (`Realtime/CLAUDE.md`).
 - **`/.well-known/oauth-protected-resource` names the provider** (RFC 9728): `Sessions__Issuer` when it is a

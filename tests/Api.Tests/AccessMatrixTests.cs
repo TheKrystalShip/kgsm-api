@@ -9,7 +9,7 @@ namespace TheKrystalShip.Api.Tests;
 /// <summary>
 /// The authorization matrix: the caller holding an endpoint's action reaches it, the one without it is
 /// refused — proven in-process against the real JwtBearer pipeline and action gates, with each persona a
-/// real role in the replica. 401 (no/invalid bearer) vs 403 (authenticated, action not held) is the
+/// holding the actions its token lists. 401 (no/invalid bearer) vs 403 (authenticated, action not held) is the
 /// load-bearing split.
 /// </summary>
 public sealed class AccessMatrixTests(AuthTestFactory factory) : IClassFixture<AuthTestFactory>

@@ -75,10 +75,6 @@ KGSM_SOCK="${SMOKE_KGSM_SOCKET:-/tmp/kgsm-api-smoke-events.sock}"; rm -f "$KGSM_
 # so they exercise the domain contracts unchanged; the auth boundary itself gets its own ENABLED
 # instance + no-token sweep at the end (and the full access matrix lives in tests/Api.Tests).
 export Api__AuthDisabled=true
-# NEVER the machine's own files: the founded marker is this machine's real cluster. Every API the smoke
-# starts gets its own.
-SMOKE_STATE="$(mktemp -d /tmp/kgsm-api-smoke-state.XXXXXX)"
-export Cluster__FoundedPath="${SMOKE_STATE}/cluster-founded"
 # Auth is off for these checks, so nothing authenticates a caller. This names who the audit log
 # attributes the run to; the API refuses to start without it.
 export Api__DisabledAuthActor="local:claude"
@@ -113,7 +109,6 @@ cleanup() {
   for p in "${PIDS[@]:-}"; do kill "$p" 2>/dev/null; done
   for p in "${PIDS[@]:-}"; do wait "$p" 2>/dev/null; done
   rm -f "$STUB_SOCK" 2>/dev/null
-  rm -rf "${SMOKE_STATE:-/nonexistent}" 2>/dev/null
 }
 trap cleanup EXIT
 
@@ -1373,11 +1368,11 @@ req GET /auth/login
   && ok "/auth/* -> 404 (this node signs nobody in)" \
   || bad "/auth/* 404 (code=$CODE body=$BODY)"
 
-# Coverage note: the 401/403 access matrix against anchor-signed sessions and roles in the replica, the
-# ended-session deny-list, a symmetric or sid-less token refused, and the SSE stream's bearer-header auth
-# (incl. the regression test locking that a bare ?access_token= query param authenticates nothing) are
-# proven deterministically in tests/Api.Tests with the anchor stood in for by a signer.
-echo "  (note: the access matrix against anchor sessions is in tests/Api.Tests)"
+# Coverage note: the 401/403 access matrix against provider-signed tokens, a symmetric or wrongly
+# audienced token refused, and the SSE stream's bearer-header auth (incl. the regression test locking
+# that a bare ?access_token= query param authenticates nothing) are proven deterministically in
+# tests/Api.Tests with the provider stood in for by a test issuer.
+echo "  (note: the access matrix against provider tokens is in tests/Api.Tests)"
 
 stop_api
 

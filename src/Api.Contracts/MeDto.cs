@@ -10,13 +10,13 @@ namespace TheKrystalShip.Api.Contracts;
 /// <para>
 /// <b>Read-only.</b> Anything that must follow a person across devices is a preference, and preferences
 /// live at <c>/me/preferences</c>. So <c>/me</c> surfaces only what the bearer already carries plus what
-/// this node resolves about it: <c>display</c>/<c>username</c> are the snapshot the auth anchor stamped
-/// into the session when it was minted, never a guessed label and never a fresh fetch from a provider.
+/// this node resolves about it: <c>display</c>/<c>username</c> are the token's own claims, never a guessed label and never a fresh
+/// fetch from a provider.
 /// </para>
 /// <para>
 /// <b><c>recentLogins</c> is the one read that is not the bearer.</b> It comes from the merged audit
-/// feed, where the auth anchor's journal records each sign-in, so it answers "what happened recently",
-/// including sessions since ended. There is no <c>lastLogin</c> column and no user row anywhere.
+/// feed, so it answers "what happened recently". There is no <c>lastLogin</c> column and no user row
+/// anywhere.
 /// </para>
 /// <para>
 /// <b><c>status</c> tells apart two people who can do nothing.</b> Someone awaiting approval and someone
@@ -26,14 +26,14 @@ namespace TheKrystalShip.Api.Contracts;
 /// </remarks>
 /// <param name="Status">
 /// The state of the KGSM account behind the caller: <c>active</c>, <c>pending</c>, <c>disabled</c>, or
-/// <c>unknown</c> when this identity proves no account here or the replica cannot be read.
+/// <c>unknown</c> when this identity proves no account here or the account cannot be read.
 /// </param>
 public sealed record MeResponse(SessionUser User, IReadOnlyList<string> Scopes,
     IReadOnlyList<RecentLogin> RecentLogins, string Status);
 
 /// <summary>
 /// Who a session names — the provider-qualified handle, the username, the display name and the avatar
-/// the auth anchor stamped into it.
+/// the token carries.
 /// </summary>
 public sealed record SessionUser(
     string Id,

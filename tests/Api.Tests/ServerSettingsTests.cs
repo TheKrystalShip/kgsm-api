@@ -121,6 +121,8 @@ public sealed class ServerSettingsTests
 
         Assert.Equal("local:usr_windows_author",
             doc.RootElement.GetProperty("maintenanceWindowsAuthor").GetString());
+        Assert.Equal("Windows Author",
+            doc.RootElement.GetProperty("maintenanceWindowsAuthorName").GetString());
     }
 
     [Fact]
@@ -498,6 +500,7 @@ public sealed class ServerSettingsTests
                 Runtime = InstanceRuntime.Native,
                 MaintenanceWindows = "daily@05:00/backup;weekly.sun@04:00/backup,restart",
                 MaintenanceWindowsAuthor = "local:usr_windows_author",
+                MaintenanceWindowsAuthorName = "Windows Author",
                 Timezone = "Europe/Madrid",
                 BackupRetention = 10,
                 CrashRestart = true,
@@ -548,9 +551,9 @@ public sealed class ServerSettingsTests
         // Every caller here holds an account, so a write arriving without its author is the controller
         // failing to name the person the scheduler will run these windows as.
         public KgsmResult SetMaintenanceWindows(string instanceName, string packedWindows, string? author,
-            string? actor = null, string? origin = null) =>
-            string.IsNullOrEmpty(author)
-                ? new KgsmResult(1, "", "the windows arrived with no author")
+            string? actor = null, string? origin = null, string? authorName = null) =>
+            string.IsNullOrEmpty(author) || string.IsNullOrEmpty(authorName)
+                ? new KgsmResult(1, "", "the windows arrived with no author or author name")
                 : new KgsmResult(0);
 
         public Dictionary<string, Reading<InstanceRuntimeStatus>> GetAllStatuses(bool fast = false) => new();

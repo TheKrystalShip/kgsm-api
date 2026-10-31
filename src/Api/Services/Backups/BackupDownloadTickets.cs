@@ -51,8 +51,8 @@ public sealed record BackupRedemption(BackupDownloadTicket Ticket, bool First);
 /// first redemption, so one download is one row rather than one row per TCP hiccup.</para>
 ///
 /// <para><strong>Bound to who, what and where.</strong> A ticket names the account it was minted for,
-/// the action redeeming it performs and the server it reaches, and every redemption evaluates that account
-/// again from the replica: a ticket outlives nothing its account has since lost.</para>
+/// the action redeeming it performs and the server it reaches. It was minted for a caller who held the
+/// action, and its short life bounds what a role removed since can still do.</para>
 ///
 /// <para>Storage is deliberately in-memory: a ticket outliving the process that minted it has no value,
 /// since the whole point is a window measured in minutes. An API restart invalidates every outstanding

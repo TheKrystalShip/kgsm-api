@@ -242,7 +242,7 @@ public sealed class ServerSettingsController(
         // The whole window list is one key, replaced wholesale. The scheduler leaf re-reads kgsm config as
         // its source of truth, so persisting the key is the whole apply — nothing is pushed at the daemon.
         if (packedWindows is not null && !TryApplyWindows(
-                instances, id, packedWindows, CallerId.AuthorOf(User), actor, origin,
+                instances, id, packedWindows, CallerId.AuthorOf(User), CallerId.AuthorNameOf(User), actor, origin,
                 applied, out IActionResult? mwErr))
             return mwErr!;
 
@@ -356,7 +356,8 @@ public sealed class ServerSettingsController(
             instance.BackupRetention,
             instance.CrashRestart,
             instance.CrashMaxRestarts,
-            instance.MaintenanceWindowsAuthor);
+            instance.MaintenanceWindowsAuthor,
+            instance.MaintenanceWindowsAuthorName);
 
     /// <summary>
     /// Reads a submitted window list into the one packed value kgsm stores, or says why it will not.
@@ -454,15 +455,15 @@ public sealed class ServerSettingsController(
         return true;
     }
 
-    // Persist the window list with the caller as its author. The scheduler runs each window as that
-    // person, checking at every fire that they still hold what it does, so the engine records the
-    // author beside the list in the same write and nothing else can set it.
+    // Persist the window list with the caller as its author. The scheduler runs each window as itself,
+    // attributed to that person, so the engine records the author's subject and display name beside the
+    // list in the same write and nothing else can set them.
     [PerformedFor(ActionIds.ServerWindowsWrite)]
     private bool TryApplyWindows(
-        IInstanceService instances, string id, string packedWindows, string? author, string? actor, string origin,
+        IInstanceService instances, string id, string packedWindows, string? author, string? authorName, string? actor, string origin,
         List<string> applied, out IActionResult? error)
     {
-        KgsmResult result = instances.SetMaintenanceWindows(id, packedWindows, author, actor, origin);
+        KgsmResult result = instances.SetMaintenanceWindows(id, packedWindows, author, actor, origin, authorName);
         if (!result.IsSuccess)
         {
             error = Error(StatusCodes.Status400BadRequest, "bad_request",

@@ -87,10 +87,6 @@ public class AuthTestFactory : WebApplicationFactory<Program>
                 // disk — so an unpinned run would read the developer's own live daemons.
                 ["Api:LeafSurfaceRoot"] =
                     Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-surfaces-{Guid.NewGuid():N}"),
-                // Never the default either: /etc/kgsm/cluster-founded describes the machine running the
-                // suite.
-                ["Cluster:FoundedPath"] =
-                    Path.Combine(Path.GetTempPath(), $"kgsm-api-tests-founded-{Guid.NewGuid():N}"),
             });
         });
 

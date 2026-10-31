@@ -3,7 +3,7 @@
 > Living document. The staged road to **v1.0** of the per-host Control Panel
 > backend (`TheKrystalShip.Kgsm.Api`) — the aggregator that joins this host's
 > kgsm-lib (domain + supervision), kgsm-monitor (metrics) and the assistant
-> behind one surface for the React SPA, accepting the sessions the cluster's auth anchor mints.
+> behind one surface for the React SPA, accepting the access tokens the sign-in provider issues.
 >
 > **This is the first time the frontend, the backend, and the leaves are wired
 > together.** So the plan is deliberately incremental: each milestone is a small,
@@ -764,7 +764,7 @@ kgsm-api/
     Realtime/                 # [M2] BUILT — StreamProtocol (central topic/type vocabulary), StreamMessage (envelope), StreamHub (registry+fan-out), StreamConnection (coalescing duplex loops), MetricsPump + DomainPump (gated push pumps)
     Infrastructure/           # [M0] ApiExceptionHandler (IExceptionHandler→500 envelope), ApiErrors (envelope writer)
     Json/                     # [M0] ApiJson (shared options config) + Iso8601UtcConverter
-    Data/                     # [M0] AppDbContext (+ Probe de-risk) → [M5] AuditEntry; Migrations/ from M5. (No session table: sessions are the auth anchor's.)
+    Data/                     # [M0] AppDbContext (+ Probe de-risk) → [M5] AuditEntry; Migrations/ from M5. (No session table: sign-in is the provider's.)
     ApiOptions.cs             # [M1·a] config consolidation via IConfiguration (host id/label, monitor/watchdog sockets, assistant url; [M4] + auth: AUTH_DISABLED) — built
     Services/
       Leaves/                 # [M1·a] MonitorClient (cached scrape + /health) + AssistantClient (typed HttpClient; /health probe) · [M2] LeafHealthMonitor (always-on /health poller → §4·b capability truth + capabilities.patch flips; watchdog via kgsm-lib IsReadyAsync)

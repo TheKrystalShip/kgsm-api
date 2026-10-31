@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the cluster has no auth capability or founding; maintenance windows keep their author's name (2.3.0, Api.Contracts 6.0.0-dev.1, `Lib` 9.5.0-dev.4, `Cluster` 2.0.0, `ComponentConfig` 4.0.0, `ComponentSurface` 2.0.0)
+
+- **Maintenance windows record the saver's display name** beside the subject (`authorName` to the engine,
+  from the token's `name`). `ServerSettings` carries it as `maintenanceWindowsAuthorName`, null on windows
+  saved without one.
+- **`ComponentConfigField` loses `automates` and `automationAuthor`**, and the descriptor fallback no
+  longer refuses to change an automating field: no component declares one.
+- **A node founds no cluster claim.** `setup.sh` still seeds the cluster secret and no longer writes the
+  founded record or creates the account store directory; the `/var/lib/kgsm/auth` path leaves the
+  requirements file; `Cluster:FoundedPath` is gone.
+- **`tks-auth` is an optional dependency of the package**, not a hard one. The install message names the
+  issuer setting instead of an anchor's first-start password.
+- **The API's own required actions are no longer declared** (`[Requires]` is removed upstream); the
+  deploy template's manifest comment says the node serves it at `/.well-known/tks-actions.json`.
+
 ### Changed — a notification's buttons last a day (2.2.0)
 
 - **A tap is honoured only for a person seen with the action within `NotificationActors.ActionFreshness`

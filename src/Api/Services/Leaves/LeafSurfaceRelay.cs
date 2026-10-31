@@ -68,8 +68,7 @@ public sealed class LeafSurfaceRelay(ApiOptions options, ILogger<LeafSurfaceRela
     /// </summary>
     /// <param name="callerToken">
     /// The access token of the person this request is made for, sent as <c>Authorization: Bearer</c>. The
-    /// leaf admits the person on it as it would on any other request, and records the token's subject and
-    /// name as the author of an automation the change switches on. Null when the caller is not a person.
+    /// leaf admits the person on it as it would on any other request. Null when the caller is not a person.
     /// </param>
     public async Task<LeafSurfaceAnswer?> SendAsync(
         string leafId, HttpMethod method, string route, string? body, string? callerToken, CancellationToken ct)

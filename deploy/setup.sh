@@ -105,24 +105,22 @@ else
 fi
 
 # ── 2a. The shared cluster secret ─────────────────────────────────────────────
-# Every install is a cluster: this node accepts only sessions its cluster's auth anchor minted, so a
-# machine with no secret has nobody to sign it in. A host with no secret file therefore founds a
-# cluster of its own here — a generated secret, and the founded-here record beside it that says this
-# machine's own anchor is the one to hold the accounts. A host joining an existing
+# Every install is a cluster, at least a cluster of one: members authenticate to each other with the
+# cluster's secret, so a host with no secret file gets a generated one here. A host joining an existing
 # cluster is given that cluster's secret instead (kgsm-meta/NODE-PROVISIONING.md §10·a).
 #
 # Never overwritten: a re-run on a clustered host must not split it apart. Owned by the deploying user
 # so it can be edited without privilege; 0600 because it is a secret.
 if [[ ! -f "$SHARED_CLUSTER_FILE" ]]; then
     secret="$(openssl rand -hex 32)"
-    log "founding a cluster of one: seeding ${SHARED_CLUSTER_FILE} with a generated secret"
+    log "seeding ${SHARED_CLUSTER_FILE} with a generated secret"
     $SUDO install -d -m 0755 "$(dirname "$SHARED_CLUSTER_FILE")"
     $SUDO install -m 0600 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" /dev/null "$SHARED_CLUSTER_FILE"
     $SUDO tee "$SHARED_CLUSTER_FILE" >/dev/null <<SHARED_CLUSTER
 # ── KGSM cluster — read by every member on this host ──────────────────────────
 # The secret every member of a cluster carries. It is what proves membership: a member trusts any
-# caller bearing a service token signed with it. This one was generated when this machine founded
-# its own cluster; a machine joining another cluster takes that cluster's secret instead.
+# caller bearing a service token signed with it. This one was generated on this machine; a machine
+# joining another cluster takes that cluster's secret instead.
 #
 # Loaded by each member's unit BEFORE its own env file, so one member can override it deliberately —
 # but a member holding a different secret is a member the others cannot authenticate, and nothing
@@ -134,9 +132,6 @@ Cluster__Secret=${secret}
 Cluster__SecretPrevious=
 SHARED_CLUSTER
     $SUDO chown "${DEPLOY_USER}:${DEPLOY_GROUP}" "$SHARED_CLUSTER_FILE"
-    $SUDO install -d -m 0755 "$(dirname "$CLUSTER_FOUNDED_FILE")"
-    printf '%s\n' "$secret" | sha256sum | cut -d' ' -f1 \
-        | $SUDO tee "$CLUSTER_FOUNDED_FILE" >/dev/null
     unset secret
 fi
 
@@ -148,21 +143,6 @@ fi
 if [[ -n "${LEAF_DESCRIPTOR:-}" && -f "$LEAF_DESCRIPTOR" && ! -d "$LEAF_DESCRIPTOR_DIR" ]]; then
     log "creating ${LEAF_DESCRIPTOR_DIR} (owned by ${DEPLOY_USER}) — the leaf config descriptors"
     $SUDO install -d -m 0755 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" "$LEAF_DESCRIPTOR_DIR"
-fi
-
-# ── 2b·ii. The shared account store's directory ───────────────────────────────
-# Where this machine's copy of the cluster's accounts lives — the auth anchor's store when the anchor
-# runs here, the replica this API reads either way. Shared like the descriptor directory above and
-# created by whichever project's setup.sh runs first, owned by the deploying user so the services
-# write it with no privilege.
-#
-# 0700, and a directory rather than a bare file under /var/lib/kgsm, for two separate reasons. It
-# holds password hashes, which is the one thing on this host a local read is worth anything against;
-# and SQLite creates the -wal and -shm files BESIDE the database, so write permission on the file is
-# not enough — WAL needs the directory, and /var/lib/kgsm itself is root-owned.
-if [[ ! -d "$KGSM_AUTH_DIR" ]]; then
-    log "creating ${KGSM_AUTH_DIR} (owned by ${DEPLOY_USER}, 0700) — the KGSM account store"
-    $SUDO install -d -m 0700 -o "$DEPLOY_USER" -g "$DEPLOY_GROUP" "$KGSM_AUTH_DIR"
 fi
 
 # ── 2c. Serving the node's name ───────────────────────────────────────────────

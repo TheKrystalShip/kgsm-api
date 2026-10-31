@@ -43,7 +43,7 @@ Environment=ASPNETCORE_ENVIRONMENT=Production
 
 # Host overrides — Api__CorsOrigins, the public host, the leaf endpoints. See
 # deploy/kgsm-api.env.example. No sign-in secret is among them: this node signs nobody in, and every
-# session it accepts is verified against the key its cluster's auth anchor publishes.
+# access token it accepts is verified against the keys of the issuer in Sessions__Issuer.
 # The cluster secret every member on this host holds, before this unit's own file so a member could
 # override it deliberately — though a member on a different secret is one the others cannot reach.
 EnvironmentFile=-/etc/kgsm/kgsm-cluster.env

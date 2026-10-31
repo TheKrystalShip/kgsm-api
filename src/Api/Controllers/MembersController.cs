@@ -209,8 +209,8 @@ public sealed class MembersController(
     {
         // A capability belongs to the cluster and outlives the member holding it, so removing that
         // member leaves the cluster pointing at somebody who is gone — and nothing promotes itself to
-        // fill the gap, by design. For `auth` that is every sign-in in the cluster refused, with the
-        // only symptom a 503 on an anchor nobody was looking at.
+        // fill the gap, by design. For `dns` that is every name in the cluster unserved, with the
+        // only symptom a failed lookup on an anchor nobody was looking at.
         //
         // So the removal is refused and says which capability to move first. Reassigning does not
         // require the target to be reachable, precisely so this is always resolvable.

@@ -583,9 +583,9 @@ public sealed class ApiOptions
     public int ClusterReapMs { get; init; } = 300000;
 
     // --- Auth -------------------------------------------------------------------------------------
-    // This node signs nobody in. Every session it accepts was minted by the cluster's auth anchor and
-    // is verified against the key that member publishes; what a person may do is read from this
-    // node's replica of the cluster's accounts on every request.
+    // This node signs nobody in. Every access token it accepts was issued by the sign-in provider named
+    // by Sessions__Issuer and is verified against the keys that provider publishes; what a person may do
+    // is the actions the token lists.
 
     /// <summary>
     /// Dev escape hatch (<c>Api__AuthDisabled=true</c>). When set, every request is authenticated

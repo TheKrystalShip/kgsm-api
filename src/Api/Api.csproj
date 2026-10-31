@@ -14,7 +14,7 @@
          automatically by the SetSourceRevisionId target below, so the assembly's InformationalVersion becomes
          e.g. "0.1.0+ab12cd34ef56". The route version stays "v1" (ApiInfo.ApiVersion) — a separate axis. Bump
          this as real releases happen; v1.0 is the PLAN's milestone target, not yet reached. -->
-    <Version>2.2.0</Version>
+    <Version>2.3.0</Version>
 
     <!-- Standard JIT (no Native AOT) — deliberate trade for long-term maintainability:
          it unlocks the conventional MVC controllers + EF Core stack, which AOT forbids.
@@ -64,13 +64,13 @@
   <ItemGroup>
     <!-- Build-only: the attributes arrive as source and the generator as a tool, and the package
          declares no dependencies of its own. -->
-    <PackageReference Include="TheKrystalShip.KGSM.ComponentConfig" Version="3.2.0" PrivateAssets="all" />
+    <PackageReference Include="TheKrystalShip.KGSM.ComponentConfig" Version="4.0.0" PrivateAssets="all" />
 
     <!-- The descriptor's reader, shared with every component that serves its own surface. This API
          reads a leaf's descriptor for the one case the leaf cannot cover — a leaf that is DOWN, which
          is exactly when its configuration is wanted — and reads it through the same library the leaf
          serves it with, so the two answers about one file cannot come from two sets of rules. -->
-    <PackageReference Include="TheKrystalShip.KGSM.ComponentSurface" Version="1.0.0" />
+    <PackageReference Include="TheKrystalShip.KGSM.ComponentSurface" Version="2.0.0" />
   </ItemGroup>
 
   <!-- The wire contract, built here because this API is what produces it, and packed so a caller on
@@ -152,7 +152,7 @@
          ip:port / opaque session correlation token / disconnect reason). Consumed here by the new
          roster projection (Services/Players/PlayerRosterService.cs) + the audit meta extension
          (AuditMapping.PlayerMeta). -->
-    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="9.5.0-dev.2" />
+    <PackageReference Include="TheKrystalShip.KGSM.Lib" Version="9.5.0-dev.4" />
 
     <!-- Admits a person on the access token of the OpenID Connect provider named by Sessions__Issuer: the
          token is checked against the provider's published keys, and what the person may do is the
@@ -162,7 +162,7 @@
     <!-- Cluster membership and durable member-to-member messaging. The outbox, the inbox, the member
          service token and the member-to-member wire all live there, so this API takes part in a cluster
          as one member among several rather than being the thing a cluster is made of. -->
-    <PackageReference Include="TheKrystalShip.KGSM.Cluster" Version="1.0.0" />
+    <PackageReference Include="TheKrystalShip.KGSM.Cluster" Version="2.0.0" />
 
     <!-- This node's half of being named by the cluster's DNS anchor: telling it where the node is
          reached, and keeping what it answers. -->

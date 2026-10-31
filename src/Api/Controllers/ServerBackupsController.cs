@@ -455,8 +455,7 @@ public sealed class ServerBackupsController(
     /// Stream a backup's archive. Authenticated by the <c>?ticket=</c> alone — a browser navigation
     /// cannot set an Authorization header, and that is the entire reason the ticket exists.
     /// <list type="bullet">
-    /// <item><c>401</c> — missing, expired, or wrong-backup ticket, or one whose account may no longer
-    /// read this server's files (<c>invalid_ticket</c>).</item>
+    /// <item><c>401</c> — missing, expired, or wrong-backup ticket (<c>invalid_ticket</c>).</item>
     /// <item><c>404</c> — no such backup.</item>
     /// <item><c>409</c> — the backup is uncompressed.</item>
     /// <item><c>503</c> — the kgsm engine is not provisioned on this host.</item>

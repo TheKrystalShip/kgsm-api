@@ -341,9 +341,8 @@ pre-told its own address (§2 #13a-c).
   cluster assigned it and serves (`../kgsm-docs/systems/cluster/dns.md`), then the member-only gossip
   address, then what reflection learned (`SelfIdentityStore`). Learned candidates persist,
   so a restart keeps them.
-- **Panel origins come from the sign-in provider.** CORS admits the origins the cluster's
-  sign-in provider has registered clients at, read through the holder of `auth` — so a
-  panel served from somewhere that is not a node reaches every node without a per-node
+- **Panel origins are configured.** CORS admits the origins in `Api__CorsOrigins`, without
+  credentials, so a panel served from somewhere that is not a node reaches a node by that node's
   allowlist.
 - **Order independence is the acceptance test.** Introducing B from A and introducing A
   from B leave the identical cluster state, and simultaneous mutual introduction leaves one

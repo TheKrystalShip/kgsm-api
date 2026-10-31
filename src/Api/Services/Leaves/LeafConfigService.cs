@@ -93,18 +93,6 @@ public sealed class LeafConfigService(
                 return LeafConfigApplyResponse.BadRequest($"unknown config key '{key}'");
         }
 
-        // A setting that switches automated behaviour on runs as whoever set it, and only the leaf records
-        // who that is. Written from here, while the leaf is not answering, it would keep the last setter's
-        // name on a value they never chose — so it waits for the leaf.
-        string[] automations = [.. sets.Select(s => s.Field).Concat(resetKeys.Select(k => catalog.Field(leafId, k)!))
-            .Where(f => f.Automates).Select(f => f.Key)];
-        if (automations.Length > 0)
-        {
-            return LeafConfigApplyResponse.Conflict(
-                $"{string.Join(", ", automations)} switch automated behaviour on, and only {leafId} itself "
-                + "records who did; change them while it is running");
-        }
-
         await _applyGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -329,7 +317,7 @@ public sealed class LeafConfigService(
                     Set: overridden || floorHas, Fingerprint: overridden ? Fingerprint(row!.Value) : null,
                     Floor: null, Effective: null, Source: source,
                     Group: f.Group, Risk: f.Risk, Unit: f.Unit, Min: f.Min, Max: f.Max,
-                    PairedApiKey: f.PairedApiKey, DependsOn: f.DependsOn, Automates: f.Automates));
+                    PairedApiKey: f.PairedApiKey, DependsOn: f.DependsOn));
             }
             else
             {
@@ -340,7 +328,7 @@ public sealed class LeafConfigService(
                     Set: null, Fingerprint: null,
                     Floor: floorHas ? floorValue : null, Effective: effective, Source: source,
                     Group: f.Group, Risk: f.Risk, Unit: f.Unit, Min: f.Min, Max: f.Max,
-                    PairedApiKey: f.PairedApiKey, DependsOn: f.DependsOn, Automates: f.Automates));
+                    PairedApiKey: f.PairedApiKey, DependsOn: f.DependsOn));
             }
         }
 

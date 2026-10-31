@@ -10,15 +10,9 @@ post_install() {
 
     cat <<'MSG'
 
-  kgsm-api is enabled and starts on its own. It signs nobody in: people sign in at the cluster's
-  auth anchor, and every session this node accepts is one the anchor minted.
-
-  On a machine that founded its own cluster the anchor runs here, and its first start leaves the
-  administrator's one-time password, readable by nobody else, in:
-
-    /var/lib/tks-auth/initial-admin-password
-
-  A machine joining an existing cluster is signed into through that cluster's anchor instead.
+  kgsm-api is enabled and starts on its own. It signs nobody in: people present the access token of the
+  sign-in provider named by Sessions__Issuer in /etc/kgsm/kgsm-cluster.env. With no issuer set this node
+  answers requests from this machine only.
 
   Install kgsm-web for the Control Panel UI. Without it the API serves its endpoints and no page,
   which is a supported way to run a node.

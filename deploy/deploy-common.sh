@@ -189,22 +189,12 @@ PUBLISH_DIR="${REPO_DIR}/artifacts/publish"
 # the API holds no list of leaves, so a new leaf becomes configurable by landing a file here.
 LEAF_DESCRIPTOR_DIR="${KGSM_LEAF_DESCRIPTOR_DIR:-/var/lib/kgsm/leaves}"
 # The cluster secret every member on this host holds. One file rather than one copy per member: a
-# machine can run more than one member of a cluster — a node and an auth anchor — and they must all
+# machine can run more than one member of a cluster — a node and a DNS anchor — and they must all
 # hold the same secret or each concludes separately that it is not clustered. Each unit loads it
-# before its own env file; setup.sh founds a cluster of one when it finds none.
+# before its own env file; setup.sh seeds one when it finds none.
 SHARED_CLUSTER_FILE="${KGSM_SHARED_CLUSTER_FILE:-/etc/kgsm/kgsm-cluster.env}"
 
-# The record that this machine founded its cluster: the SHA-256 of the secret it generated. It is
-# what says this machine's own auth anchor is the one to hold the accounts — a machine given another
-# cluster's secret has none, or one that no longer matches, and its anchor stays off. Beside the secret
-# it describes, and written by whichever installer founded the cluster.
-CLUSTER_FOUNDED_FILE="${KGSM_CLUSTER_FOUNDED_FILE:-/etc/kgsm/cluster-founded}"
 
-# Where this host keeps its KGSM accounts — the store every surface on the box reads directly, so
-# one person is one account whichever door they come through. A directory of its own rather than a
-# file under /var/lib/kgsm: SQLite writes -wal/-shm BESIDE the database, so WAL needs write
-# permission on the DIRECTORY, and /var/lib/kgsm itself is root-owned.
-KGSM_AUTH_DIR="${KGSM_AUTH_DIR:-/var/lib/kgsm/auth}"
 
 # Privileged-call indirection, used by setup.sh ONLY. deploy.sh never calls this. An automated
 # run can set SUDO='sudo -A' + SUDO_ASKPASS=… to provision without an interactive prompt; no
@@ -341,8 +331,8 @@ PY
     fi
 
     # The action manifest the build writes beside the descriptor, installed under the same name in
-    # the actions/ directory beside it: what this node reports to the auth anchor as the actions this
-    # component performs, and what the catalog of grantable actions is built from.
+    # the actions/ directory beside it: what the node serves at /.well-known/tks-actions.json as the actions
+    # this component performs, and what the catalog of grantable actions is built from.
     local manifest="${LEAF_DESCRIPTOR%.json}.actions.json"
     if [[ -f "$manifest" ]]; then
         install -d -m 0755 "${LEAF_DESCRIPTOR_DIR}/actions"

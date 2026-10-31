@@ -21,8 +21,10 @@ namespace TheKrystalShip.Api.Contracts;
 /// <param name="CrashRestart">Whether the watchdog restarts this instance after a crash.</param>
 /// <param name="CrashMaxRestarts">How many consecutive crash-restarts it attempts before giving up.</param>
 /// <param name="MaintenanceWindowsAuthor">The account that wrote the windows, recorded by the engine with
-/// them. The scheduler runs every window as this person, so a window list with none runs nothing. Null
-/// when nobody is recorded.</param>
+/// them. The scheduler attributes every window it runs to this person, so a window list with none runs
+/// nothing. Null when nobody is recorded.</param>
+/// <param name="MaintenanceWindowsAuthorName">The display name the author had when they saved the windows.
+/// Null when none is recorded, as on windows saved before names were kept.</param>
 public sealed record ServerSettings(
     string ServerId,
     bool AutoUpdate,
@@ -34,7 +36,8 @@ public sealed record ServerSettings(
     int? BackupRetention,
     bool? CrashRestart,
     int? CrashMaxRestarts,
-    string? MaintenanceWindowsAuthor = null);
+    string? MaintenanceWindowsAuthor = null,
+    string? MaintenanceWindowsAuthorName = null);
 
 /// <summary>
 /// One maintenance window: an appointment plus the ordered set of tasks that run when it fires.

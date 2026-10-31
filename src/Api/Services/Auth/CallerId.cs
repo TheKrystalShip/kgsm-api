@@ -43,6 +43,12 @@ public sealed record CallerId(CallerKind Kind, string Subject, string DisplayNam
     /// </summary>
     public static string? AuthorOf(ClaimsPrincipal user) => Of(user) is { Kind: CallerKind.Person } c ? c.Subject : null;
 
+    /// <summary>
+    /// The display name stored beside <see cref="AuthorOf"/>: the token's <c>name</c> of a person, and
+    /// <see langword="null"/> for any other caller.
+    /// </summary>
+    public static string? AuthorNameOf(ClaimsPrincipal user) => Of(user) is { Kind: CallerKind.Person } c ? c.DisplayName : null;
+
     /// <summary>The audit actor: <c>local:&lt;name&gt;</c> for a person, <c>system:&lt;member&gt;</c> for a member.</summary>
     public string Actor => Kind switch
     {

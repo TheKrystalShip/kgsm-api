@@ -10,9 +10,8 @@ namespace TheKrystalShip.Api.Services.Cluster;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A member-to-member call names the account it acts for, and the node at the far end resolves that
-/// account's authority from its own replica. That header is an identity assertion, so it does not belong
-/// on a network in clear — which makes a plain-http listener on anything but loopback, and a plain-http
+/// A member-to-member call carries either the cluster's service token or the access token of the
+/// person it acts for. Both are bearer credentials, so neither belongs on a network in clear — which makes a plain-http listener on anything but loopback, and a plain-http
 /// address offered to other members, both worth saying out loud.
 /// </para>
 /// <para>

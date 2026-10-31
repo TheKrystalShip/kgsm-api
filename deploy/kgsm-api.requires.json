@@ -28,7 +28,7 @@
   },
   "paths": {
     "prefix": "/opt/kgsm-api",
-    "state": ["/var/lib/kgsm-api", "/var/lib/kgsm/auth"],
+    "state": ["/var/lib/kgsm-api"],
     "runtime": ["/run/kgsm-api"],
     "config": ["/etc/kgsm-api/kgsm-api.env"],
     "descriptorDir": "/var/lib/kgsm/leaves",

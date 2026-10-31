@@ -21,18 +21,3 @@ using TheKrystalShip.KGSM.ComponentConfig;
 [assembly: Action(ActionIds.MembersManage, "Manage the cluster's members", DeclaredEffect.Write, DeclaredScope.Cluster)]
 [assembly: Action(ActionIds.MembersRemove, "Remove members from the cluster", DeclaredEffect.Write, DeclaredScope.Cluster)]
 [assembly: Action(ActionIds.PushDevices, "Read your own notifications and register your push devices", DeclaredEffect.Write, DeclaredScope.Node, Self = true)]
-
-// What this API reads from the engine as itself, for everybody: the roster, run state and players behind
-// every page and the realtime stream, the library catalog, the engine's configuration, each console the
-// stream follows, and the backups the server cards count. What reaches a person is cut to what that
-// person may read, where it is served.
-[assembly: Requires(ActionIds.ServerRead, DeclaredScope.Instance,
-    "Keeps the server roster, run state and players current for the panel and the realtime stream.")]
-[assembly: Requires(ActionIds.LibraryRead, DeclaredScope.Node,
-    "Keeps the installable-game catalog current.")]
-[assembly: Requires(ActionIds.EngineConfigRead, DeclaredScope.Node,
-    "Reads where the engine keeps its libraries and how much memory it may commit.")]
-[assembly: Requires(ActionIds.ServerConsoleRead, DeclaredScope.Instance,
-    "Follows each console the realtime stream carries.")]
-[assembly: Requires(ActionIds.ServerBackupsRead, DeclaredScope.Instance,
-    "Counts each server's backups for its card.")]

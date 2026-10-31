@@ -633,12 +633,6 @@ public class Startup(IConfiguration configuration)
             // that it is not clustered.
             Secret = ClusterConfiguration.Secret(configuration),
             SecretPrevious = ClusterConfiguration.SecretPrevious(configuration),
-            // Whether this machine founded the cluster decides whether this node introduces itself to
-            // the anchor beside it. A deployment reads the one record kgsm-base writes; the key exists so
-            // a test reads its own.
-            FoundedPath = configuration["Cluster:FoundedPath"] is { Length: > 0 } founded
-                ? founded
-                : ClusterFounding.DefaultPath,
             // Beside this API's own database rather than inside it: the roster and the queues are
             // cluster state, and this API's database is operational state that is wiped whenever its
             // schema changes. Named FROM that database rather than fixed within its directory, so the
