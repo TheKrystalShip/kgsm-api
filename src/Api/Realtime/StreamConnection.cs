@@ -8,7 +8,7 @@ namespace TheKrystalShip.Api.Realtime;
 /// <summary>
 /// One live <c>/api/v1/stream</c> SSE connection. Owns the response body's write loop: drains a
 /// <strong>coalesce-to-latest</strong> outbound queue as <c>data: &lt;json&gt;\n\n</c> frames,
-/// with a keepalive comment every 20s. The pumps never touch the body — they
+/// with a keepalive comment every 10s. The pumps never touch the body — they
 /// <see cref="Enqueue"/> through the <c>StreamHub</c>; this class is the only thing that writes
 /// the wire.
 /// </summary>
